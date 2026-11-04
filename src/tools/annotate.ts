@@ -1,0 +1,292 @@
+// 3D dimension annotations: a dimension line with arrowheads, an optional
+// floating input (Total/Offset + value + pin), and the layer of pinned measurements.
+
+import { BufferGeometry, ConeGeometry, Group, Line, LineBasicMaterial, LineDashedMaterial, Mesh, MeshBasicMaterial, Vector3 } from "three";
+import type { PinDef, Vec3 } from "../doc/types";
+import { el } from "../ui/ui";
+import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
+import type { Viewport } from "../view/viewport";
+
+const COLOR = 0xdfe6f3;
+
+/** Dashed line a→b with screen-constant arrowheads at both ends. */
+class DimLine {
+  readonly group = new Group();
+  private line: Line;
+  private heads: Mesh[];
+  private a = new Vector3();
+  private b = new Vector3();
+
+  constructor(
+    private view: Viewport,
+    color = COLOR,
+    private solid = false,
+  ) {
+    const opts = { color, depthTest: false, transparent: true };
+    this.line = new Line(new BufferGeometry(), solid ? new LineBasicMaterial(opts) : new LineDashedMaterial({ ...opts, dashSize: 1, gapSize: 1 }));
+    this.line.renderOrder = 11;
+    const mat = new MeshBasicMaterial({ color, depthTest: false, transparent: true });
+    this.heads = [0, 1].map(() => {
+      const m = new Mesh(new ConeGeometry(0.35, 1, 12), mat);
+      m.renderOrder = 11;
+      return m;
+    });
+    this.group.add(this.line, ...this.heads);
+  }
+
+  set(a: Vec3, b: Vec3): void {
+    this.a.set(...a);
+    this.b.set(...b);
+    this.line.geometry.setFromPoints([this.a, this.b]);
+    this.layout();
+  }
+
+  layout(): void {
+    const wpp = this.view.cam.worldPerPixel(this.view.height);
+    if (!this.solid) {
+      const mat = this.line.material as LineDashedMaterial;
+      mat.dashSize = wpp * 6;
+      mat.gapSize = wpp * 4;
+      this.line.computeLineDistances();
+    }
+    const dir = this.b.clone().sub(this.a);
+    const len = dir.length();
+    const show = len > wpp * 20;
+    dir.normalize();
+    const s = wpp * 11;
+    for (const [i, h] of this.heads.entries()) {
+      h.visible = show;
+      h.scale.setScalar(s);
+      // Cone points +Y; tips sit on the ends, pointing outwards.
+      const out = i === 0 ? dir.clone().negate() : dir.clone();
+      h.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), out);
+      h.position.copy(i === 0 ? this.a : this.b).addScaledVector(out, -s / 2);
+    }
+  }
+
+  dispose(): void {
+    this.line.geometry.dispose();
+    this.heads.forEach((h) => h.geometry.dispose());
+  }
+}
+
+export interface DimWidgetOptions {
+  value: number;
+  modes?: { id: string; label: string }[];
+  mode?: string;
+  onMode?(id: string): void;
+  onInput?(v: number): void;
+  onCommit?(): void;
+  onPin?(): void;
+  /** Text to restore into the input (when another tool takes over while typing). */
+  typed?: string;
+  focus?: boolean;
+  /** Draw the dimension as a solid line of this colour (it *is* the geometry, e.g. a line being drawn). */
+  solidColor?: number;
+  /**
+   * Keep the value box off the geometry: "side" puts it beside the middle of
+   * the dimension, "beyond" past its end b (e.g. outside a fillet arc).
+   */
+  boxAt?: "middle" | "side" | "beyond";
+  /** Extra screen distance past the end for "beyond" (e.g. to clear a drag arrow there). */
+  boxGap?: number;
+  /** Which way "beyond" goes when the dimension has no length yet (e.g. the arrow's direction). */
+  dir?: Vec3;
+}
+
+/**
+ * A dimension in the viewport: dashed line with arrows and, at its middle,
+ * a small editable value with an optional mode dropdown and a pin button.
+ */
+export class DimWidget {
+  private line: DimLine;
+  private box = el("div", "dim-widget");
+  private input = document.createElement("input");
+  private mid = new Vector3();
+  private ends: [Vector3, Vector3] = [new Vector3(), new Vector3()];
+  private boxAt: "middle" | "side" | "beyond";
+  private boxGap: number;
+  private dir?: Vec3;
+  private hook = () => this.layout();
+
+  constructor(
+    private view: Viewport,
+    opts: DimWidgetOptions,
+  ) {
+    this.line = opts.solidColor !== undefined ? new DimLine(view, opts.solidColor, true) : new DimLine(view);
+    this.boxAt = opts.boxAt ?? "middle";
+    this.boxGap = opts.boxGap ?? 0;
+    this.dir = opts.dir;
+    view.overlay.add(this.line.group);
+    if (opts.modes) {
+      const sel = document.createElement("select");
+      for (const m of opts.modes) {
+        const o = document.createElement("option");
+        o.value = m.id;
+        o.textContent = m.label;
+        sel.append(o);
+      }
+      sel.value = opts.mode ?? opts.modes[0].id;
+      sel.addEventListener("change", () => opts.onMode?.(sel.value));
+      this.box.append(sel);
+    }
+    this.input.inputMode = "decimal";
+    this.input.spellcheck = false;
+    this.input.value = opts.typed ?? trim(toDisplay(opts.value), 3);
+    this.input.readOnly = !opts.onInput;
+    this.input.addEventListener("input", () => {
+      const v = evaluate(this.input.value, "length");
+      this.input.classList.toggle("invalid", v === null);
+      if (v !== null) opts.onInput?.(v);
+    });
+    this.input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") opts.onCommit?.();
+      if (e.key === "Escape") this.input.blur();
+    });
+    this.box.append(this.input, el("span", "dim-unit", UNIT_LABEL[units()]));
+    if (opts.onPin) {
+      const pin = el("button", "dim-pin", "📌");
+      pin.title = "Pin this measurement";
+      pin.addEventListener("click", () => opts.onPin!());
+      this.box.append(pin);
+    }
+    // Clicks on the widget must not reach the viewport.
+    this.box.addEventListener("pointerdown", (e) => e.stopPropagation());
+    document.body.append(this.box);
+    view.frameHooks.add(this.hook);
+    view.helpers.add(this);
+    if (opts.focus) {
+      setTimeout(() => {
+        this.input.focus();
+        const n = this.input.value.length;
+        this.input.setSelectionRange(n, n);
+      }, 0);
+    }
+  }
+
+  get text(): string {
+    return this.input.value;
+  }
+
+  set(a: Vec3, b: Vec3): void {
+    this.line.set(a, b);
+    this.ends[0].set(...a);
+    this.ends[1].set(...b);
+    this.mid.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+    this.layout();
+    this.view.requestRender();
+  }
+
+  setValue(v: number): void {
+    if (document.activeElement !== this.input) this.input.value = trim(toDisplay(v), 3);
+    this.box.classList.remove("typing", "invalid");
+  }
+
+  /** Start typing into the box with this first character (keys pressed elsewhere). */
+  focusWith(ch: string): void {
+    this.input.value = ch;
+    this.input.focus();
+    this.input.setSelectionRange(1, 1);
+    this.input.dispatchEvent(new Event("input"));
+  }
+
+  /** Mark the value as not usable (e.g. a fillet radius too big for the lines). */
+  markInvalid(bad: boolean): void {
+    this.box.classList.toggle("invalid", bad);
+  }
+
+  /** Text typed elsewhere (keys while drawing), shown in the box with a caret. */
+  setText(text: string, invalid = false): void {
+    if (document.activeElement === this.input) return;
+    this.input.value = text;
+    this.box.classList.add("typing");
+    this.box.classList.toggle("invalid", invalid);
+  }
+
+  private layout(): void {
+    this.line.layout();
+    let s = this.view.toScreen(this.mid);
+    const sa = this.view.toScreen(this.ends[0]);
+    const sb = this.view.toScreen(this.ends[1]);
+    if (s && sa && sb && this.boxAt !== "middle") {
+      let dx = sb[0] - sa[0];
+      let dy = sb[1] - sa[1];
+      // No length yet: use the given direction on screen.
+      if (Math.hypot(dx, dy) < 2 && this.dir) {
+        const e = this.view.toScreen(this.ends[1].clone().add(new Vector3(...this.dir).multiplyScalar(this.view.cam.worldPerPixel(this.view.height) * 50)));
+        if (e) [dx, dy] = [e[0] - sb[0], e[1] - sb[1]];
+      }
+      const l = Math.hypot(dx, dy) || 1;
+      const half = { w: this.box.offsetWidth / 2 + 10, h: this.box.offsetHeight / 2 + 10 };
+      if (this.boxAt === "beyond") {
+        // Past the end, far enough that the box's own size clears it.
+        const k = Math.abs((dx / l) * half.w) + Math.abs((dy / l) * half.h) + this.boxGap;
+        s = [sb[0] + (dx / l) * k, sb[1] + (dy / l) * k];
+      } else {
+        // Beside the middle, on the upper side of the line.
+        let n: [number, number] = [-dy / l, dx / l];
+        if (n[1] > 0) n = [-n[0], -n[1]];
+        const k = Math.abs(n[0] * half.w) + Math.abs(n[1] * half.h);
+        s = [s[0] + n[0] * k, s[1] + n[1] * k];
+      }
+    }
+    this.box.hidden = !s;
+    if (s) this.box.style.transform = `translate(${Math.round(s[0])}px, ${Math.round(s[1])}px) translate(-50%, -50%)`;
+  }
+
+  dispose(): void {
+    this.view.helpers.delete(this);
+    this.view.frameHooks.delete(this.hook);
+    this.view.overlay.remove(this.line.group);
+    this.line.dispose();
+    this.box.remove();
+    this.view.requestRender();
+  }
+}
+
+/** Pinned measurements: label + (optional) dimension line, always on top. */
+export class PinLayer {
+  private group = new Group();
+  private lines: DimLine[] = [];
+  private labels: HTMLElement[] = [];
+  private pins: PinDef[] = [];
+  private visible = true;
+  private host = document.getElementById("pins")!;
+
+  constructor(private view: Viewport) {
+    view.overlay.add(this.group);
+    view.frameHooks.add(() => this.layout());
+  }
+
+  set(pins: PinDef[], visible: boolean): void {
+    this.lines.forEach((l) => (this.group.remove(l.group), l.dispose()));
+    this.labels.forEach((l) => l.remove());
+    this.pins = pins;
+    this.visible = visible;
+    this.lines = [];
+    this.labels = pins.map((p) => {
+      if (p.a && p.b) {
+        const l = new DimLine(this.view, 0x8fb4ff);
+        l.set(p.a, p.b);
+        this.group.add(l.group);
+        this.lines.push(l);
+      }
+      const tag = el("div", "pin", p.text);
+      this.host.append(tag);
+      return tag;
+    });
+    this.group.visible = visible;
+    this.view.requestRender();
+  }
+
+  private layout(): void {
+    this.lines.forEach((l) => l.layout());
+    this.pins.forEach((p, i) => {
+      const s = this.view.toScreen(p.at);
+      const tag = this.labels[i];
+      tag.hidden = !this.visible || !s;
+      if (s) tag.style.transform = `translate(${Math.round(s[0])}px, ${Math.round(s[1])}px) translate(-50%, -50%)`;
+    });
+  }
+}

@@ -1,0 +1,631 @@
+import type { Feature } from "../doc/types";
+import type { FeatureError } from "../kernel/protocol";
+import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
+import { icons, type IconName } from "./icons";
+
+export interface ToolItem {
+  id: string;
+  label: string;
+  icon: IconName;
+  /** Small second line, e.g. the current variant ("Diagonal"). */
+  sub?: string;
+  shortcut?: string;
+  active?: boolean;
+  disabled?: boolean;
+  /** Reason shown when disabled. */
+  why?: string;
+  /** Opens a flyout with variants / sub-tools instead of running. */
+  children?: ToolItem[];
+  /** Show a colour circle instead of the icon (colour choices). */
+  swatch?: string;
+  run?(): void;
+}
+
+export type FieldKind = "length" | "angle" | "number" | "int";
+
+export type PanelItem =
+  | {
+      type: "number";
+      label: string;
+      value: number;
+      kind?: FieldKind;
+      min?: number;
+      onInput(v: number): void;
+      /** Expression currently driving the value (shown instead of the number). */
+      expr?: string;
+      /** Set when the field may hold an expression: called with it, or null for a plain number. */
+      onExpr?(expr: string | null): void;
+    }
+  | { type: "slot"; label: string; value: string; active: boolean; filled: boolean; onClick(): void }
+  | { type: "choice"; label?: string; options: { id: string; label: string }[]; value: string; onChange(id: string): void }
+  | { type: "toggle"; label: string; value: boolean; onChange(v: boolean): void }
+  | { type: "button"; label: string; icon?: IconName; onClick(): void };
+
+/** Kept for older call sites: a numeric field. */
+export interface ValueField {
+  label: string;
+  value: number;
+  unit?: string;
+  min?: number;
+  step?: number;
+  integer?: boolean;
+  kind?: FieldKind;
+  onInput(v: number): void;
+}
+
+export interface ValuePanel {
+  title: string;
+  fields?: ValueField[];
+  items?: PanelItem[];
+  onDone?(): void;
+  onCancel?(): void;
+  /** Extra buttons shown in the panel (e.g. Delete). */
+  actions?: ToolItem[];
+}
+
+export interface HistoryHandlers {
+  edit(id: string): void;
+  /** Pointer over a step (null: left it): show what it works on. */
+  hover?(id: string | null): void;
+  toggle(id: string): void;
+  remove(id: string): void;
+}
+
+const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
+
+/** All DOM chrome around the viewport. Deliberately framework-free and small. */
+export class UI {
+  private toolbar = $<HTMLElement>("#toolbar");
+  private bottomLeft = $<HTMLElement>("#bottom-left");
+  private flyout = $<HTMLElement>("#flyout");
+  private hint = $<HTMLElement>("#hint");
+  private panel = $<HTMLElement>("#panel");
+  private historyEl = $<HTMLElement>("#history");
+  private historyList = $<HTMLElement>("#history-list");
+  private toastEl = $<HTMLElement>("#toast");
+  private labelEl = $<HTMLElement>("#label");
+  private status = $<HTMLElement>("#status");
+  private rightCol = $<HTMLElement>("#right-col");
+  private popover = $<HTMLElement>("#popover");
+  readonly pins = $<HTMLElement>("#pins");
+  private toastTimer = 0;
+  private panelSpec: ValuePanel | null = null;
+  private flyoutOwner: string | null = null;
+  private popoverOwner: string | null = null;
+
+  constructor() {
+    $("#history-close").innerHTML = icons.close;
+    $("#history-close").addEventListener("click", () => this.toggleHistory(false));
+    document.addEventListener("pointerdown", (e) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest("#flyout, #toolbar, #bottom-left")) this.closeFlyout();
+    });
+    if (window.innerWidth >= 1000) this.toggleHistory(true);
+    window.addEventListener("resize", () => (this.fitToolbar(), this.fitPanel()));
+  }
+
+  toggleHistory(open?: boolean): void {
+    const on = this.historyEl.classList.toggle("open", open);
+    // Phones: one panel at a time (History or Items).
+    if (on && window.innerWidth <= 720) {
+      document.getElementById("items")?.classList.remove("open");
+      document.body.classList.remove("items-open");
+    }
+    // Everything on the right makes room for the docked History panel.
+    document.body.classList.toggle("history-open", on);
+    // Things placed beside the right-hand bar (panel, constraint column) re-fit.
+    window.dispatchEvent(new Event("resize"));
+  }
+
+  // ------------------------------------------------------------- left column
+
+  setTools(items: ToolItem[]): void {
+    this.closeFlyout();
+    this.toolItems = items;
+    renderTools(this.toolbar, items, (item, btn) => this.runAndOpen(item, btn, this.toolbar, () => this.toolItems));
+    this.fitToolbar();
+  }
+
+  setBottom(items: ToolItem[]): void {
+    this.bottomItems = items;
+    renderTools(this.bottomLeft, items, (item, btn) => this.runAndOpen(item, btn, this.bottomLeft, () => this.bottomItems));
+    this.fitToolbar();
+  }
+
+  private toolItems: ToolItem[] = [];
+  private bottomItems: ToolItem[] = [];
+
+  /**
+   * A tool with options (Spline: fit / control points…): a click starts it
+   * straight away with the option used last, and opens the options beside it.
+   */
+  private runAndOpen(item: ToolItem, btn: HTMLElement, host: HTMLElement, items: () => ToolItem[]): void {
+    if (!item.run || this.flyoutOwner === item.id) return this.openFlyout(item, btn);
+    const rect = btn.getBoundingClientRect();
+    item.run();
+    // Running it may have redrawn the column: open the options on the new button
+    // (or where the button was, if a tool took the column over).
+    const fresh = items().find((x) => x.id === item.id) ?? item;
+    const nb = host.querySelector<HTMLElement>(`[data-tool="${CSS.escape(item.id)}"]`) ?? ({ getBoundingClientRect: () => rect } as HTMLElement);
+    if (fresh.children?.length) this.openFlyout(fresh, nb);
+  }
+
+  /**
+   * The tool column is centred on the left edge; keep it clear of the top bar
+   * and of the buttons at the bottom-left, with a gap like the other panels.
+   */
+  /**
+   * The value panel is centred at the bottom: keep it between the left tool
+   * columns and the right column / History, wrapping onto more rows if needed.
+   */
+  fitPanel(): void {
+    if (window.innerWidth <= 720) return void (this.panel.style.maxWidth = "");
+    const GAP = 12;
+    const visible = (e: HTMLElement) => !e.hidden && e.childElementCount > 0 && getComputedStyle(e).display !== "none";
+    const left = Math.max(0, ...[this.toolbar, this.bottomLeft, document.getElementById("undo-dock")!].filter(visible).map((e) => e.getBoundingClientRect().right));
+    const rights = [this.rightCol, ...(this.historyEl.classList.contains("open") ? [this.historyEl] : [])].map((e) => e.getBoundingClientRect().left);
+    const right = window.innerWidth - Math.min(window.innerWidth, ...rights);
+    const reserve = Math.max(left, right) + GAP;
+    this.panel.style.maxWidth = `${Math.max(260, window.innerWidth - 2 * reserve)}px`;
+  }
+
+  fitToolbar(): void {
+    if (window.innerWidth <= 720) return void (this.toolbar.style.maxHeight = "");
+    const GAP = 14;
+    // Whatever is stacked at the bottom-left (section/measure buttons, the undo dock).
+    const stack = [this.bottomLeft, document.getElementById("undo-dock")!].filter((e) => e.childElementCount && getComputedStyle(e).display !== "none");
+    const below = stack.length ? window.innerHeight - Math.min(...stack.map((e) => e.getBoundingClientRect().top)) + GAP : 0;
+    const above = 52 + GAP;
+    this.toolbar.style.maxHeight = `${Math.max(160, window.innerHeight - 2 * Math.max(below, above))}px`;
+  }
+
+  /** Back-compat: the context list now lives in the main column. */
+  setContext(_items: ToolItem[]): void {}
+
+  private openFlyout(item: ToolItem, anchor: HTMLElement): void {
+    if (this.flyoutOwner === item.id) return this.closeFlyout();
+    this.flyoutOwner = item.id;
+    // Measure before re-rendering: a nested anchor lives inside this flyout.
+    const r = anchor.getBoundingClientRect();
+    this.flyout.innerHTML = "";
+    renderTools(this.flyout, item.children ?? [], (child, btn) => this.openFlyout(child, btn), () => this.closeFlyout());
+    // Colour choices show as a grid of circles.
+    this.flyout.classList.toggle("swatch-grid", !!item.children?.length && item.children.every((c) => c.swatch));
+    this.flyout.hidden = false;
+    const narrow = window.innerWidth <= 720;
+    if (narrow) {
+      // Above the bottom strip and the buttons stacked over it (undo, section…).
+      const stack = [this.bottomLeft, document.getElementById("undo-dock")!].filter((e) => e.childElementCount && getComputedStyle(e).display !== "none").map((e) => e.getBoundingClientRect().top);
+      const above = Math.min(r.top, ...stack.filter((t) => t < r.top));
+      this.flyout.style.left = "8px";
+      this.flyout.style.top = "";
+      this.flyout.style.bottom = `${window.innerHeight - above + 8}px`;
+    } else {
+      this.flyout.style.left = `${r.right + 6}px`;
+      this.flyout.style.bottom = "";
+      this.flyout.style.top = `${Math.min(r.top, window.innerHeight - this.flyout.offsetHeight - 12)}px`;
+    }
+  }
+
+  closeFlyout(): void {
+    this.flyout.hidden = true;
+    this.flyoutOwner = null;
+  }
+
+  // ------------------------------------------------------------ right column
+
+  addRight(id: string, icon: IconName, title: string, open: (host: HTMLElement) => void, label?: () => string): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.className = "right-btn";
+    b.title = title;
+    b.innerHTML = icons[icon];
+    if (label) {
+      const l = document.createElement("span");
+      l.className = "right-label";
+      b.append(l);
+      b.dataset.dynamic = "1";
+      (b as HTMLButtonElement & { refresh?: () => void }).refresh = () => (l.textContent = label());
+      (b as HTMLButtonElement & { refresh?: () => void }).refresh!();
+    }
+    b.addEventListener("click", () => {
+      // Popovers stay open until their button is clicked again.
+      if (this.popoverOwner === id) return this.closePopover();
+      this.popoverOwner = id;
+      this.popoverFill = () => {
+        this.popover.innerHTML = "";
+        open(this.popover);
+      };
+      this.popoverFill();
+      if (!this.popover.childElementCount) return this.closePopover();
+      this.popover.hidden = false;
+      const r = b.getBoundingClientRect();
+      this.popover.style.top = `${Math.max(8, Math.min(r.top, window.innerHeight - this.popover.offsetHeight - 8))}px`;
+      this.rightCol.querySelectorAll(".right-btn").forEach((x) => x.classList.toggle("pop-open", x === b));
+      // Things placed beside the right column (the constraint column) move over.
+      window.dispatchEvent(new Event("resize"));
+    });
+    this.rightCol.append(b);
+    return b;
+  }
+
+  refreshRight(): void {
+    this.rightCol.querySelectorAll<HTMLButtonElement & { refresh?: () => void }>("button").forEach((b) => b.refresh?.());
+  }
+
+  private popoverFill: (() => void) | null = null;
+
+  closePopover(): void {
+    if (this.popover.hidden) return;
+    this.popover.hidden = true;
+    this.popoverOwner = null;
+    this.popoverFill = null;
+    this.rightCol.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));
+    window.dispatchEvent(new Event("resize"));
+  }
+
+  /** Re-draw the open popover (after one of its choices changed). */
+  refreshPopover(): void {
+    this.popoverFill?.();
+  }
+
+  // ------------------------------------------------------- hint/status/toast
+
+  setHint(text: string | null): void {
+    this.hint.textContent = text ?? "";
+    this.hint.hidden = !text;
+  }
+
+  /** A small persistent note (e.g. "body not closed"), never blocking. */
+  setWarning(text: string | null): void {
+    const w = document.getElementById("warn")!;
+    w.textContent = text ?? "";
+    w.hidden = !text;
+  }
+
+  setStatus(text: string | null): void {
+    this.status.textContent = text ?? "";
+    this.status.hidden = !text;
+  }
+
+  toast(text: string, kind: "info" | "error" = "info"): void {
+    this.toastEl.textContent = text;
+    this.toastEl.className = `show ${kind}`;
+    clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => (this.toastEl.className = ""), 3600);
+  }
+
+  /** Floating label next to the pointer, e.g. live dimensions while drawing. */
+  setLabel(x: number, y: number, text: string | null): void {
+    if (!text) {
+      this.labelEl.hidden = true;
+      return;
+    }
+    this.labelEl.hidden = false;
+    // The value, plus a reminder that it can be typed (or how to apply what's typed).
+    // Callers mark typeable values with a trailing "· type a value".
+    const value = text.replace(/\s+· type a value$/, "");
+    const typeable = value !== text;
+    const typing = value.includes("▌");
+    const tip = typing ? "Enter ↵ apply · Esc cancel" : typeable ? "⌨ type a value · Enter ↵" : null;
+    this.labelEl.replaceChildren(el("span", "label-value", value), ...(tip ? [el("span", "label-tip", tip)] : []));
+    this.labelEl.classList.toggle("typing", typing);
+    this.labelEl.style.transform = `translate(${Math.round(x + 18)}px, ${Math.round(y + 14)}px)`;
+  }
+
+  /** Small modal form; resolves with the values, or null if cancelled. */
+  dialog(title: string, fields: { key: string; label: string; value: string; placeholder?: string }[], note?: string): Promise<Record<string, string> | null> {
+    return new Promise((resolve) => {
+      const back = el("div", "dialog-back");
+      const box = el("form", "dialog");
+      box.append(el("div", "panel-title", title));
+      if (note) box.append(el("div", "dialog-note", note));
+      const inputs = fields.map((f) => {
+        const l = el("label", "dialog-field");
+        l.append(el("span", "field-label", f.label));
+        const i = document.createElement("input");
+        i.value = f.value;
+        i.placeholder = f.placeholder ?? "";
+        i.autocomplete = "off";
+        i.spellcheck = false;
+        l.append(i);
+        box.append(l);
+        return i;
+      });
+      const row = el("div", "panel-buttons");
+      const close = (v: Record<string, string> | null) => {
+        back.remove();
+        resolve(v);
+      };
+      row.append(textButton("Cancel", "Esc", () => close(null)));
+      const ok = textButton("OK", "Enter", () => close(Object.fromEntries(fields.map((f, i) => [f.key, inputs[i].value]))), true);
+      row.append(ok);
+      box.append(row);
+      box.addEventListener("submit", (e) => (e.preventDefault(), ok.click()));
+      // Enter is OK (left to the browser it would "click" the first button: Cancel).
+      for (const b of row.querySelectorAll("button")) b.type = "button";
+      box.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") close(null);
+        if (e.key === "Enter") (e.preventDefault(), ok.click());
+        e.stopPropagation();
+      });
+      back.append(box);
+      document.body.append(back);
+      inputs[0]?.focus();
+    });
+  }
+
+  // ------------------------------------------------------------------- panel
+
+  get panelOpen(): boolean {
+    return this.panelSpec !== null;
+  }
+
+  showPanel(spec: ValuePanel | null): void {
+    this.panelSpec = spec;
+    this.panel.innerHTML = "";
+    this.panel.hidden = !spec;
+    if (!spec) return;
+    queueMicrotask(() => this.fitPanel());
+    this.panel.append(el("div", "panel-title", spec.title));
+    const row = el("div", "panel-fields");
+    const items: PanelItem[] = [
+      ...(spec.fields ?? []).map(
+        (f): PanelItem => ({ type: "number", label: f.label, value: f.value, kind: f.kind ?? (f.integer ? "int" : f.unit ? "length" : "number"), min: f.min, onInput: f.onInput }),
+      ),
+      ...(spec.items ?? []),
+    ];
+    let numberIndex = 0;
+    for (const it of items) {
+      if (it.type === "number") row.append(this.numberField(it, numberIndex++, spec));
+      else if (it.type === "slot") {
+        const b = el("button", `slot${it.active ? " active" : ""}${it.filled ? " filled" : ""}`);
+        b.append(el("span", "slot-label", it.label), el("span", "slot-value", it.value));
+        b.addEventListener("click", it.onClick);
+        row.append(b);
+      } else if (it.type === "choice") {
+        const g = el("div", "choice");
+        if (it.label) g.append(el("span", "field-label", it.label));
+        for (const o of it.options) {
+          const b = el("button", o.id === it.value ? "active" : "", o.label);
+          b.addEventListener("click", () => it.onChange(o.id));
+          g.append(b);
+        }
+        row.append(g);
+      } else if (it.type === "toggle") {
+        const b = el("button", `toggle${it.value ? " on" : ""}`, it.label);
+        b.addEventListener("click", () => it.onChange(!it.value));
+        row.append(b);
+      } else {
+        const b = el("button", "text-btn");
+        if (it.icon) b.innerHTML = icons[it.icon];
+        b.append(it.label);
+        b.addEventListener("click", it.onClick);
+        row.append(b);
+      }
+    }
+    this.panel.append(row);
+    const buttons = el("div", "panel-buttons");
+    for (const a of spec.actions ?? []) {
+      const b = toolButton(a, true);
+      b.addEventListener("click", () => a.run?.());
+      buttons.append(b);
+    }
+    if (spec.onCancel) buttons.append(textButton("Cancel", "Esc", spec.onCancel));
+    if (spec.onDone) buttons.append(textButton("Done", "Enter", spec.onDone, true));
+    this.panel.append(buttons);
+  }
+
+  private numberField(f: Extract<PanelItem, { type: "number" }>, index: number, spec: ValuePanel): HTMLElement {
+    const kind = f.kind ?? "length";
+    const label = el("label", "field");
+    label.append(el("span", "field-label", f.label));
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.value = f.expr ?? shown(f.value, kind);
+    input.dataset.index = String(index);
+    input.dataset.kind = kind;
+    if (f.expr) input.classList.add("has-expr");
+    const apply = () => {
+      const v = evaluate(input.value, kind === "length" ? "length" : kind === "angle" ? "angle" : "number");
+      const ok = v !== null && (f.min === undefined || v >= f.min);
+      input.classList.toggle("invalid", !ok);
+      if (!ok) return;
+      // Text with a variable name stays an expression (parametric); plain numbers don't.
+      const isExpr = isExpression(input.value);
+      input.classList.toggle("has-expr", isExpr);
+      f.onExpr?.(isExpr ? input.value.trim() : null);
+      f.onInput(kind === "int" ? Math.round(v!) : v!);
+    };
+    input.addEventListener("input", apply);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        apply();
+        spec.onDone?.();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        spec.onCancel?.();
+      } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const v = evaluate(input.value, kind === "length" ? "length" : "number") ?? 0;
+        const step = kind === "length" ? (e.shiftKey ? 10 : 1) : e.shiftKey ? 10 : 1;
+        const next = v + (e.key === "ArrowUp" ? step : -step) * (kind === "length" ? unitScale() : 1);
+        input.value = shown(next, kind);
+        apply();
+      }
+      e.stopPropagation();
+    });
+    label.append(input);
+    const unit = kind === "length" ? UNIT_LABEL[units()] : kind === "angle" ? "°" : "";
+    if (unit) label.append(el("span", "field-unit", unit));
+    if (f.onExpr && this.variableFactory) {
+      const fx = el("button", "fx-btn", "ƒx");
+      fx.title = "Make this value a named variable";
+      fx.addEventListener("click", async (e) => {
+        e.preventDefault();
+        const name = await this.variableFactory!(input.value);
+        if (!name) return;
+        input.value = name;
+        apply();
+      });
+      label.append(fx);
+    }
+    return label;
+  }
+
+  /** Creates a variable from a field's current text; returns its name (set by the app). */
+  variableFactory: ((current: string) => Promise<string | null>) | null = null;
+
+  /** Update displayed values without rebuilding (keeps focus while dragging). */
+  updatePanelValues(values: number[]): void {
+    this.panel.querySelectorAll<HTMLInputElement>("input[data-index]").forEach((input) => {
+      const v = values[Number(input.dataset.index)];
+      if (v !== undefined && document.activeElement !== input) input.value = shown(v, input.dataset.kind as FieldKind);
+    });
+  }
+
+  focusPanel(): void {
+    // Only focus with a keyboard; on touch it would pop the on-screen keyboard.
+    if (matchMedia("(pointer: fine)").matches) this.panel.querySelector<HTMLInputElement>("input")?.select();
+  }
+
+  // ----------------------------------------------------------------- history
+
+  renderHistory(features: readonly Feature[], errors: FeatureError[], activeId: string | null, h: HistoryHandlers, warnings: Map<string, string> = new Map()): void {
+    this.historyList.innerHTML = "";
+    if (features.length === 0) {
+      this.historyList.append(el("li", "history-empty", "Nothing yet. Start with Sketch."));
+      return;
+    }
+    for (const f of features) {
+      const li = el("li", "history-item");
+      const err = errors.find((e) => e.featureId === f.id);
+      if (err) li.classList.add("error");
+      if (f.suppressed) li.classList.add("suppressed");
+      if (f.id === activeId) li.classList.add("active");
+      const name = el("button", "history-name", f.name);
+      name.title = err ? err.message : "Edit";
+      // A step that works but leaves something to look at (e.g. a body that isn't closed).
+      const warn = warnings.get(f.id);
+      if (warn && !err) {
+        const mark = el("span", "history-warn", "!");
+        mark.title = warn;
+        name.prepend(mark);
+        name.title = warn;
+      }
+      name.addEventListener("click", () => h.edit(f.id));
+      li.addEventListener("pointerenter", () => h.hover?.(f.id));
+      li.addEventListener("pointerleave", () => h.hover?.(null));
+      const eye = iconButton(f.suppressed ? "eyeOff" : "eye", f.suppressed ? "Enable" : "Suppress", () => h.toggle(f.id));
+      const del = iconButton("trash", "Delete", () => h.remove(f.id));
+      li.append(name, eye, del);
+      if (err) li.append(el("div", "history-error", err.message));
+      this.historyList.append(li);
+      // What was done inside a sketch, step by step.
+      if (f.type === "sketch" && f.log?.length) {
+        const steps = f.log;
+        const shownSteps = steps.length > 12 ? steps.slice(-12) : steps;
+        const sub = el("li", "history-steps");
+        if (steps.length > shownSteps.length) sub.append(el("div", "history-step more", `… ${steps.length - shownSteps.length} earlier`));
+        for (const s of shownSteps) {
+          const row = el("button", "history-step", `${s.op}${s.n > 1 ? ` ×${s.n}` : ""}`);
+          row.title = "Open the sketch";
+          row.addEventListener("click", () => h.edit(f.id));
+          sub.append(row);
+        }
+        this.historyList.append(sub);
+      }
+    }
+  }
+}
+
+/** Does the text use a variable (a name that isn't a unit suffix)? */
+export function isExpression(text: string): boolean {
+  return /[a-z_]/i.test(text.replace(/(\d|\))\s*(mm|cm|m|in|ft)\b/gi, "$1"));
+}
+
+function unitScale(): number {
+  return { mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8 }[units()];
+}
+
+function shown(v: number, kind: FieldKind): string {
+  if (kind === "length") return trim(toDisplay(v), 4);
+  if (kind === "int") return String(Math.round(v));
+  return trim(v, 4);
+}
+
+function renderTools(host: HTMLElement, items: ToolItem[], onFlyout: (item: ToolItem, btn: HTMLElement) => void, after?: () => void): void {
+  host.innerHTML = "";
+  for (const item of items) {
+    if (item.id.startsWith("---")) {
+      host.append(el("div", "tool-sep"));
+      continue;
+    }
+    const b = toolButton(item, true);
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (item.disabled) return;
+      if (item.children?.length) onFlyout(item, b);
+      else {
+        item.run?.();
+        after?.();
+      }
+    });
+    host.append(b);
+  }
+}
+
+function toolButton(item: ToolItem, withLabel: boolean): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.className = "tool";
+  b.dataset.tool = item.id;
+  b.classList.toggle("active", !!item.active);
+  b.classList.toggle("has-children", !!item.children?.length);
+  b.classList.toggle("disabled", !!item.disabled);
+  b.title = item.disabled && item.why ? item.why : item.shortcut ? `${item.label} (${item.shortcut})` : item.label;
+  b.innerHTML = item.swatch ? `<span class="swatch" style="background:${item.swatch}"></span>` : icons[item.icon];
+  if (withLabel) {
+    const l = el("span", "tool-label");
+    const top = el("span", "tool-name", item.label);
+    if (item.shortcut) top.append(el("kbd", "", item.shortcut));
+    l.append(top);
+    if (item.sub) l.append(el("span", "tool-sub", item.sub));
+    b.append(l);
+  }
+  return b;
+}
+
+function iconButton(icon: IconName, title: string, run: () => void): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.className = "icon-btn";
+  b.title = title;
+  b.innerHTML = icons[icon];
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    run();
+  });
+  return b;
+}
+
+function textButton(label: string, kbd: string, run: () => void, primary = false): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.className = primary ? "text-btn primary" : "text-btn";
+  b.append(label);
+  if (matchMedia("(pointer: fine)").matches) b.append(el("kbd", "", kbd));
+  b.addEventListener("click", run);
+  return b;
+}
+
+export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text) e.textContent = text;
+  return e;
+}
+
+export function fmt(v: number): string {
+  return String(Math.round(v * 1000) / 1000);
+}

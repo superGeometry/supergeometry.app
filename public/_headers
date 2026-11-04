@@ -1,0 +1,18 @@
+# Cache rules for Cloudflare (copied into dist/ by the build).
+#
+# The page itself must always be fresh, so a push shows up right away.
+# Everything in /assets/ has a content hash in its file name: a new build
+# gets new names, so browsers may keep those files forever (fast repeat visits,
+# and the 23 MB geometry engine is downloaded once).
+
+/
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: no-cache
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -1,0 +1,11 @@
+// Cloudflare deployment: a static site (no server code). `npm run build`
+// writes the app to dist/, and `npx wrangler deploy` publishes that folder.
+{
+  "name": "supergeometry-app",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    // Any unknown path opens the app itself.
+    "not_found_handling": "single-page-application"
+  }
+}

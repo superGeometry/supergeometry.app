@@ -1,0 +1,1654 @@
+:root {
+  --bg: #2b2d31;
+  --chrome: rgba(31, 33, 37, 0.94);
+  --chrome-solid: #1f2125;
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #e8e9ec;
+  --muted: #9a9ea6;
+  --accent: #3d8bff;
+  --accent-soft: rgba(61, 139, 255, 0.18);
+  --ok: #4fd18b;
+  --danger: #ff6b5e;
+  --radius: 10px;
+  --tap: 40px;
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13.5px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+kbd {
+  font: 10.5px/1 ui-monospace, monospace;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin-left: 6px;
+}
+@media (pointer: coarse) {
+  kbd {
+    display: none;
+  }
+}
+
+#view {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* ---------------------------------------------------------------- top bar */
+
+#topbar {
+  position: fixed;
+  top: calc(8px + var(--safe-t));
+  left: calc(8px + var(--safe-l));
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* Above the tool column so the File menu is never covered. */
+  z-index: 35;
+}
+/* As wide as the Items panel below it (258 px), the name filling it. */
+.brand {
+  box-sizing: border-box;
+  width: 258px;
+  /* + the top bar's 4 px gap: the name box starts at 274 px, where the tool column sits beside Items. */
+  margin-right: 4px;
+  font-size: 24px;
+  line-height: 36px;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  color: #cfd6e4;
+  /* All lowercase: its letters centre on their x-height, ~4 px below the box middle.
+     Lift it so it lines up with the File / Items / More labels. */
+  position: relative;
+  top: -4px;
+}
+.brand-tld {
+  color: var(--accent);
+  font-weight: 600;
+}
+/* The project name reads as a tab; click it to type a new name. */
+.project-name {
+  width: 300px;
+  min-height: 36px;
+  padding: 0 12px;
+  margin-right: 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: var(--chrome);
+  color: var(--text);
+  font: inherit;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.project-name:hover {
+  border-color: var(--line);
+}
+.project-name:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  background: #2b2e34;
+}
+
+.text-btn {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--chrome);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.text-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.text-btn:hover:not(:disabled),
+.icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+.text-btn.primary {
+  background: var(--accent);
+  color: white;
+}
+.text-btn.primary:hover {
+  background: #5a9dff;
+}
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--chrome);
+  flex: none;
+}
+.icon-btn.small {
+  width: 26px;
+  height: 26px;
+  background: none;
+  margin-left: auto;
+}
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.menu-wrap {
+  position: relative;
+}
+.menu {
+  position: absolute;
+  top: 42px;
+  left: 0;
+  min-width: 210px;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+.menu button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  border-radius: 6px;
+}
+.menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.copy-toggle {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px 0 8px;
+  border-radius: 16px;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12.5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  z-index: 12;
+}
+.copy-toggle svg {
+  width: 17px;
+  height: 17px;
+}
+.copy-toggle.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.copy-toggle[hidden] {
+  display: none;
+}
+.swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  flex: none;
+}
+#flyout.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 44px);
+  gap: 4px;
+  padding: 8px;
+}
+#flyout.swatch-grid .tool {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  justify-content: center;
+}
+#flyout.swatch-grid .tool .swatch {
+  width: 28px;
+  height: 28px;
+}
+#flyout.swatch-grid .tool.active .swatch {
+  box-shadow: 0 0 0 2px var(--chrome-solid), 0 0 0 4px var(--accent);
+}
+#flyout.swatch-grid .tool-label,
+#flyout.swatch-grid .tool-key {
+  display: none;
+}
+.menu-soon {
+  font-size: 11px;
+  color: var(--muted);
+}
+.menu-note {
+  padding: 8px 10px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+/* Undo / redo dock: bottom-left corner, always; the section/measure buttons sit above it. */
+#undo-dock {
+  position: fixed;
+  left: calc(8px + var(--safe-l));
+  bottom: calc(10px + var(--safe-b));
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--chrome);
+  border-radius: var(--radius);
+  z-index: 10;
+}
+.dock-btn {
+  width: 52px;
+  height: 44px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+}
+.dock-btn svg {
+  width: 24px;
+  height: 24px;
+}
+.dock-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+.dock-btn:disabled {
+  opacity: 0.35;
+}
+body.items-open #undo-dock {
+  left: calc(274px + var(--safe-l));
+}
+.menu hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 4px 0;
+}
+
+/* ------------------------------------------------------------ tool column */
+
+#toolbar,
+#bottom-left,
+#flyout {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--chrome);
+  border-radius: var(--radius);
+  padding: 4px;
+  z-index: 10;
+}
+/* Vertically centred on the left edge. */
+#toolbar {
+  left: calc(8px + var(--safe-l));
+  top: 50%;
+  transform: translateY(-50%);
+  max-height: calc(100vh - 200px - var(--safe-t) - var(--safe-b));
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+#toolbar:empty,
+#bottom-left:empty {
+  display: none;
+}
+#bottom-left {
+  left: calc(8px + var(--safe-l));
+  /* Above the undo/redo dock (52 px tall) with a gap. */
+  bottom: calc(76px + var(--safe-b));
+}
+#flyout {
+  z-index: 25;
+  max-height: calc(100vh - 20px);
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+#flyout[hidden] {
+  display: none;
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: var(--tap);
+  padding: 0 12px 0 7px;
+  border-radius: 7px;
+  white-space: nowrap;
+  text-align: left;
+  position: relative;
+}
+.tool svg {
+  width: 21px;
+  height: 21px;
+  flex: none;
+}
+.tool:hover:not(.disabled) {
+  background: rgba(255, 255, 255, 0.07);
+}
+.tool.active {
+  background: var(--accent-soft);
+  color: #b9d4ff;
+}
+.tool.disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.tool.has-children::after {
+  content: "";
+  position: absolute;
+  left: 23px;
+  top: 25px;
+  border: 3px solid transparent;
+  border-left-color: currentColor;
+  border-bottom-color: currentColor;
+  transform: rotate(-90deg);
+  opacity: 0.7;
+}
+.tool-label {
+  display: flex;
+  flex-direction: column;
+}
+.tool-name {
+  display: flex;
+  align-items: center;
+}
+.tool-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+.tool-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 3px 4px;
+}
+
+/* ------------------------------------------------- right column + popover */
+
+#viewcube-host {
+  position: fixed;
+  top: calc(10px + var(--safe-t));
+  right: calc(60px + var(--safe-r));
+  z-index: 5;
+}
+#viewcube {
+  position: relative;
+  width: 110px;
+  height: 110px;
+}
+#viewcube canvas {
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+.vc-roll {
+  position: absolute;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 14px;
+  color: var(--muted);
+}
+.vc-roll.left {
+  left: 0;
+}
+.vc-roll.right {
+  right: 0;
+}
+.vc-roll:hover {
+  color: var(--text);
+  background: var(--chrome);
+}
+
+#right-col {
+  position: fixed;
+  top: calc(8px + var(--safe-t));
+  right: calc(8px + var(--safe-r));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--chrome);
+  border-radius: var(--radius);
+  padding: 4px;
+  z-index: 10;
+}
+.right-btn {
+  width: 40px;
+  min-height: 40px;
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+.right-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.right-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.right-btn.on {
+  background: var(--accent-soft);
+  color: #b9d4ff;
+}
+/* Buttons that only make sense while sketching. */
+.right-btn.sketch-only {
+  display: none;
+}
+body.sketching .right-btn.sketch-only {
+  display: flex;
+}
+.right-label {
+  font-size: 9.5px;
+  color: var(--muted);
+}
+#popover {
+  position: fixed;
+  right: calc(60px + var(--safe-r));
+  width: 270px;
+  max-height: calc(100vh - 20px);
+  overflow-y: auto;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  z-index: 30;
+}
+#popover[hidden] {
+  display: none;
+}
+.pop-heading {
+  font-weight: 600;
+  padding: 8px 8px 4px;
+}
+.pop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  min-height: 38px;
+  padding: 0 8px;
+  border-radius: 6px;
+}
+.pop-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.choice-row.active {
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: rgba(255, 255, 255, 0.05);
+}
+.switch {
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: #4a4e57;
+  position: relative;
+  flex: none;
+  transition: 0.15s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #cfd3da;
+  transition: 0.15s;
+}
+.toggle-row.on .switch {
+  background: var(--accent);
+}
+.toggle-row.on .switch::after {
+  left: 17px;
+  background: white;
+}
+.pop-note {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.pop-input {
+  width: 70px;
+  font: 13px ui-monospace, monospace;
+  color: var(--text);
+  background: #2b2e34;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.pop-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px 2px 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.pop-tabs button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.pop-tabs button.active {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ------------------------------------------------------ hint / status / label */
+
+/* Below the top bar, so it never covers File / Items / Undo. */
+#hint {
+  position: fixed;
+  top: calc(54px + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(560px, calc(100vw - 440px));
+  background: var(--chrome);
+  border-radius: 12px;
+  padding: 8px 16px;
+  color: #c6cad2;
+  text-align: center;
+  pointer-events: none;
+  z-index: 9;
+}
+#hint[hidden],
+#status[hidden],
+#panel[hidden],
+#label[hidden] {
+  display: none;
+}
+
+#status {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: fit-content;
+  height: fit-content;
+  max-width: calc(100vw - 32px);
+  background: var(--chrome-solid);
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  z-index: 40;
+}
+
+#label {
+  position: fixed;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  background: var(--chrome-solid);
+  border: 1px solid rgba(61, 139, 255, 0.55);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: 13px/1.25 ui-monospace, monospace;
+  white-space: nowrap;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.label-value {
+  font-weight: 600;
+}
+.label-tip {
+  font: 11px/1.2 system-ui, sans-serif;
+  color: #9fc3ff;
+}
+#label.typing {
+  border-color: var(--accent);
+  background: #1d2a40;
+}
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(96px + var(--safe-b));
+  transform: translate(-50%, 20px);
+  opacity: 0;
+  transition: 0.2s;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  pointer-events: none;
+  max-width: calc(100vw - 32px);
+  z-index: 45;
+}
+#toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+#toast.error {
+  border-color: rgba(255, 107, 94, 0.5);
+}
+
+.dim-widget {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  background: rgba(31, 33, 37, 0.95);
+  border: 1px solid rgba(61, 139, 255, 0.7);
+  border-radius: 8px;
+  z-index: 16;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.dim-widget[hidden] {
+  display: none;
+}
+.dim-widget select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: #2b2e34;
+  border: 0;
+  border-radius: 5px;
+  padding: 4px 2px;
+}
+.dim-widget input {
+  width: 64px;
+  font: 13px ui-monospace, monospace;
+  color: var(--text);
+  background: #2b2e34;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 4px 6px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.dim-widget input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.dim-widget input.invalid,
+.dim-widget.invalid input {
+  border-color: var(--danger);
+}
+/* Keys typed while drawing land here (the box isn't focused). */
+.dim-widget.typing input {
+  border-color: var(--accent);
+  background: #1d2a40;
+}
+.dim-unit {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.dim-pin {
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 5px;
+}
+.dim-pin:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Sketch constraints: column of buttons + badges next to the geometry. */
+/* Placed by the sketch tool: beside the right-hand bar, its top at the Constraints button. */
+#constraint-bar {
+  position: fixed;
+  right: calc(60px + var(--safe-r));
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--chrome);
+  border-radius: var(--radius);
+  padding: 4px;
+  z-index: 10;
+}
+
+#constraint-bar button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 7px;
+  text-align: left;
+  white-space: nowrap;
+}
+#constraint-bar button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+}
+#constraint-bar button.on {
+  background: var(--accent-soft);
+  color: #cfe0ff;
+}
+#constraint-bar button.on .cg::after {
+  content: " ✓";
+  font-size: 10px;
+}
+#constraint-bar hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 3px 2px;
+}
+.cbar-toggle .switch {
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: #3a3e46;
+  position: relative;
+  flex: none;
+}
+.cbar-toggle .switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c9ced8;
+  transition: left 0.12s;
+}
+.cbar-toggle.on .switch {
+  background: var(--accent);
+}
+.cbar-toggle.on .switch::after {
+  left: 14px;
+  background: white;
+}
+#constraint-bar .cg {
+  width: 22px;
+  text-align: center;
+  color: #9fd1ff;
+  font-weight: 600;
+}
+.cglyphs[hidden] {
+  display: none;
+}
+.cglyphs {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 7;
+}
+.cglyph {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 18px;
+  border-radius: 5px;
+  color: #cfe3ff;
+  background: rgba(40, 70, 120, 0.85);
+  border: 1px solid rgba(110, 160, 255, 0.6);
+}
+.cglyph.dim {
+  height: 22px;
+  line-height: 20px;
+  padding: 0 6px;
+  font: 12px ui-monospace, monospace;
+  color: #fff;
+  background: rgba(31, 33, 37, 0.92);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+.cglyph.expr {
+  color: #9fd1ff;
+}
+.cglyph.sel {
+  border-color: #ffd34d;
+  box-shadow: 0 0 0 2px rgba(255, 211, 77, 0.35);
+}
+.cglyph[hidden] {
+  display: none;
+}
+@media (max-width: 720px) {
+  #constraint-bar {
+    top: auto;
+    transform: none;
+    bottom: calc(120px + var(--safe-b));
+    right: calc(8px + var(--safe-r));
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+  #constraint-bar .cl {
+    display: none;
+  }
+}
+
+#warn {
+  position: fixed;
+  left: 50%;
+  bottom: calc(62px + var(--safe-b));
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #ffd2a8;
+  background: rgba(60, 38, 20, 0.85);
+  border: 1px solid rgba(255, 154, 61, 0.45);
+  pointer-events: none;
+  z-index: 9;
+}
+#warn[hidden] {
+  display: none;
+}
+
+#marquee {
+  position: fixed;
+  border: 1px solid var(--accent);
+  background: rgba(61, 139, 255, 0.12);
+  pointer-events: none;
+  z-index: 6;
+}
+#marquee[hidden] {
+  display: none;
+}
+
+#pins {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: rgba(31, 33, 37, 0.92);
+  border: 1px solid rgba(61, 139, 255, 0.6);
+  border-radius: 6px;
+  padding: 3px 7px;
+  font: 12px ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------- value panel */
+
+#panel {
+  position: fixed;
+  bottom: calc(10px + var(--safe-b));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px 8px 8px 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  max-width: min(980px, calc(100vw - 16px));
+  z-index: 15;
+}
+.panel-title {
+  font-weight: 600;
+}
+.panel-fields,
+.panel-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.field {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.field input,
+.text-input {
+  width: 92px;
+  min-height: 36px;
+  font: 14px ui-monospace, monospace;
+  color: var(--text);
+  background: #2b2e34;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.text-input {
+  width: 180px;
+  font-family: inherit;
+}
+.field input:focus,
+.text-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.field input.invalid {
+  outline: 2px solid var(--danger);
+}
+.field input.has-expr {
+  color: #9fd1ff;
+}
+.fx-btn {
+  font: italic 600 12px Georgia, serif;
+  color: var(--muted);
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.fx-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+.slot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-height: 38px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  text-align: left;
+}
+.slot.active {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+.slot.filled {
+  border-style: solid;
+}
+.slot-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #2b2e34;
+  border-radius: 8px;
+  padding: 2px;
+}
+.choice button {
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.choice button.active {
+  background: var(--accent);
+  color: white;
+}
+.toggle {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #2b2e34;
+  color: var(--muted);
+}
+.toggle.on {
+  background: var(--accent-soft);
+  color: #b9d4ff;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+#panel .tool {
+  min-height: 36px;
+  background: #2b2e34;
+}
+
+/* --------------------------------------------------------------- history */
+
+/* History docks at the right edge; the right column, cube and popovers slide left of it. */
+#history {
+  position: fixed;
+  top: calc(8px + var(--safe-t));
+  right: calc(8px + var(--safe-r));
+  bottom: calc(8px + var(--safe-b));
+  width: 250px;
+  display: none;
+  flex-direction: column;
+  background: var(--chrome);
+  border-radius: var(--radius);
+  overflow: hidden;
+  z-index: 8;
+}
+#history.open {
+  display: flex;
+}
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 4px 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+.history-head .icon-btn {
+  background: none;
+}
+#history-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+.history-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  border-radius: 8px;
+}
+.history-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.history-item.active {
+  background: var(--accent-soft);
+}
+.history-item.suppressed .history-name {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.history-name {
+  flex: 1;
+  text-align: left;
+  min-height: 36px;
+  padding: 0 10px;
+}
+.history-item .icon-btn {
+  background: none;
+  opacity: 0.55;
+  width: 32px;
+  height: 32px;
+}
+.history-item .icon-btn:hover {
+  opacity: 1;
+}
+.history-item.error .history-name {
+  color: var(--danger);
+}
+.history-warn {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+.history-error {
+  flex-basis: 100%;
+  padding: 0 10px 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+.history-empty {
+  color: var(--muted);
+  padding: 12px;
+}
+
+body.history-open #right-col {
+  right: calc(266px + var(--safe-r));
+}
+body.history-open #viewcube-host {
+  right: calc(318px + var(--safe-r));
+}
+body.history-open #popover,
+body.history-open .measure-card {
+  right: calc(318px + var(--safe-r));
+}
+/* Items docks at the left edge (like History on the right); the tools move right of it. */
+body.items-open #toolbar,
+body.items-open #bottom-left {
+  left: calc(274px + var(--safe-l));
+}
+
+/* ----------------------------------------------------------------- items */
+
+#items {
+  position: fixed;
+  top: calc(52px + var(--safe-t));
+  left: calc(8px + var(--safe-l));
+  bottom: calc(8px + var(--safe-b));
+  width: 258px;
+  display: none;
+  flex-direction: column;
+  background: var(--chrome);
+  border-radius: var(--radius);
+  overflow: hidden;
+  z-index: 8;
+}
+#items.open {
+  display: flex;
+}
+#items-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+.items-heading {
+  font-size: 11.5px;
+  color: var(--muted);
+  padding: 8px 8px 2px;
+}
+.items-empty {
+  color: var(--muted);
+  padding: 4px 10px 8px;
+}
+.items-row {
+  display: flex;
+  align-items: center;
+  border-radius: 7px;
+}
+.items-head-btns {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.text-btn.small {
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: 12.5px;
+  background: none;
+}
+.text-btn.small.on {
+  background: var(--accent-soft);
+  color: #cfe0ff;
+}
+.items-check {
+  margin: 0 2px 0 8px;
+  accent-color: var(--accent);
+}
+.items-row.checked {
+  background: var(--accent-soft);
+}
+.items-row.in-folder {
+  padding-left: 18px;
+}
+.folder-row .items-name {
+  font-weight: 600;
+}
+.items-count {
+  color: var(--muted);
+  font-weight: 400;
+}
+.items-caret {
+  color: var(--muted);
+}
+.items-groupbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 6px;
+  position: sticky;
+  bottom: 0;
+  background: var(--chrome-solid);
+  border-top: 1px solid var(--line);
+}
+.items-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.items-row .icon-btn {
+  background: none;
+  width: 32px;
+  height: 32px;
+  opacity: 0.6;
+}
+.items-row .icon-btn:hover {
+  opacity: 1;
+}
+.items-name {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.items-name svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  opacity: 0.8;
+}
+.hidden-item .items-name,
+.isolated-out .items-name {
+  opacity: 0.4;
+}
+
+/* --------------------------------------------------------------- measure */
+
+.measure-card {
+  position: fixed;
+  right: calc(60px + var(--safe-r));
+  bottom: calc(10px + var(--safe-b));
+  width: 280px;
+  max-height: 50vh;
+  overflow-y: auto;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+  z-index: 15;
+}
+.measure-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px 8px;
+  color: var(--muted);
+}
+.measure-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  padding: 6px;
+  border-radius: 6px;
+}
+.measure-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.measure-row .icon-btn {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  background: none;
+}
+.measure-value {
+  grid-column: 1;
+  font: 14px ui-monospace, monospace;
+}
+.measure-name {
+  grid-column: 1;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.measure-empty {
+  color: var(--muted);
+  padding: 6px;
+}
+
+/* ---------------------------------------------------------------- dialog */
+
+.dialog-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+}
+.dialog {
+  width: min(380px, calc(100vw - 24px));
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dialog-note {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+}
+.dialog-field input {
+  min-height: 38px;
+  font: 14px ui-monospace, monospace;
+  color: var(--text);
+  background: #2b2e34;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.dialog .panel-buttons {
+  justify-content: flex-end;
+}
+
+/* ---------------------------------------------------------- small screens */
+
+@media (max-width: 720px) {
+  .brand {
+    display: none;
+  }
+  /* Tool column becomes a scrollable strip along the bottom, labels hidden. */
+  #toolbar {
+    top: auto;
+    transform: none;
+    bottom: calc(8px + var(--safe-b));
+    left: calc(8px + var(--safe-l));
+    right: calc(8px + var(--safe-r));
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-height: none;
+  }
+  #toolbar .tool-label,
+  #bottom-left .tool-label {
+    display: none;
+  }
+  #bottom-left {
+    bottom: calc(64px + var(--safe-b));
+    /* Right of the undo dock, which keeps the corner. */
+    left: calc(128px + var(--safe-l));
+    flex-direction: row;
+  }
+  #undo-dock {
+    bottom: calc(64px + var(--safe-b));
+  }
+  .dock-btn {
+    width: 46px;
+    height: 40px;
+  }
+  .tool {
+    padding: 0 9px;
+  }
+  .tool.has-children::after {
+    left: 25px;
+  }
+  #panel {
+    bottom: calc(120px + var(--safe-b));
+  }
+  #hint {
+    top: auto;
+    bottom: calc(66px + var(--safe-b));
+    left: auto;
+    right: calc(8px + var(--safe-r));
+    transform: none;
+    max-width: calc(100vw - 140px);
+    font-size: 12px;
+    text-align: left;
+  }
+  #viewcube-host {
+    right: calc(56px + var(--safe-r));
+    transform: scale(0.8);
+    transform-origin: top right;
+  }
+  #history {
+    left: calc(8px + var(--safe-l));
+    right: calc(60px + var(--safe-r));
+    bottom: auto;
+    width: auto;
+    max-height: 45vh;
+  }
+  /* On phones History floats instead of docking. */
+  body.history-open #right-col {
+    right: calc(8px + var(--safe-r));
+  }
+  body.history-open #viewcube-host {
+    right: calc(56px + var(--safe-r));
+  }
+  body.history-open #popover,
+  body.history-open .measure-card {
+    right: calc(60px + var(--safe-r));
+  }
+  /* On phones Items floats over the view instead of docking. */
+  #items {
+    width: auto;
+    right: calc(60px + var(--safe-r));
+    bottom: auto;
+    max-height: 55vh;
+    z-index: 34;
+    background: var(--chrome-solid);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  }
+  body.items-open #toolbar,
+  body.items-open #bottom-left {
+    left: calc(128px + var(--safe-l));
+  }
+  body.items-open #undo-dock {
+    left: calc(8px + var(--safe-l));
+  }
+  .measure-card {
+    left: calc(8px + var(--safe-l));
+    width: auto;
+    bottom: calc(120px + var(--safe-b));
+  }
+}
+
+/* Steps done inside a sketch, under it in History. */
+.history-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 4px 22px;
+}
+.history-step {
+  text-align: left;
+  font-size: 12px;
+  color: var(--muted, #9aa3b5);
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  border-left: 1px solid var(--line);
+  cursor: pointer;
+}
+.history-step:hover {
+  color: var(--text, #e6ebf5);
+}
+.history-step.more {
+  cursor: default;
+  font-style: italic;
+}
+
+/* Orbit centre button, under the view cube. */
+.pivot-btn {
+  display: block;
+  margin: 2px auto 0;
+  width: 30px;
+  height: 30px;
+  padding: 5px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--chrome-solid);
+  color: var(--muted);
+  cursor: pointer;
+}
+.pivot-btn:hover {
+  color: var(--text);
+}
+.pivot-btn.on {
+  color: #fff;
+  background: #3d8bff;
+  border-color: #3d8bff;
+}
+.pivot-cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  color: #3d8bff;
+  pointer-events: none;
+  z-index: 40;
+}
+.pivot-cursor[hidden] {
+  display: none;
+}
+
+/* Pattern count + spacing box. */
+.pattern-box input:first-of-type {
+  width: 3.2em;
+}
+.pattern-box select {
+  margin: 0 4px;
+}
+
+/* Busy indicator: the geometry engine is working. */
+#busy {
+  position: fixed;
+  left: 50%;
+  top: calc(62px + var(--safe-t));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 13px;
+  z-index: 60;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+#busy[hidden] {
+  display: none;
+}
+#busy .spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #3d8bff;
+  animation: busy-spin 0.8s linear infinite;
+}
+@keyframes busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------------------------------------------------ phones: nothing overlaps */
+@media (max-width: 720px) {
+  /* The top bar stops before the right-hand column; the name shrinks to fit. */
+  #topbar {
+    right: calc(60px + var(--safe-r));
+  }
+  .project-name {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    margin-right: 2px;
+    padding: 0 8px;
+  }
+  #topbar .text-btn {
+    padding: 0 8px;
+  }
+  /* The view cube sits under the top bar, beside the column. */
+  #viewcube-host,
+  body.history-open #viewcube-host {
+    top: calc(50px + var(--safe-t));
+  }
+  #busy {
+    top: calc(96px + var(--safe-t));
+  }
+}
+/* Tablets in portrait: the brand gives way so the bar fits beside the column. */
+@media (min-width: 721px) and (max-width: 1100px) {
+  .brand {
+    width: auto;
+    font-size: 20px;
+  }
+  .project-name {
+    width: 220px;
+  }
+}
+@media (max-width: 720px) {
+  /* The hint goes under the top bar, left of the view cube (clear of the bottom buttons). */
+  #hint {
+    top: calc(52px + var(--safe-t));
+    bottom: auto;
+    left: calc(8px + var(--safe-l));
+    right: auto;
+    max-width: calc(100vw - 170px);
+  }
+  /* History / Items open under the top bar; the view cube steps aside meanwhile. */
+  #history,
+  #items {
+    top: calc(52px + var(--safe-t));
+  }
+  body.history-open #viewcube-host,
+  body.items-open #viewcube-host {
+    display: none;
+  }
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+  /* The bar ends before the view cube (which keeps its corner); the name shrinks. */
+  #topbar {
+    right: calc(178px + var(--safe-r));
+  }
+  body.history-open #topbar {
+    right: calc(436px + var(--safe-r));
+  }
+  body.history-open .brand {
+    display: none;
+  }
+  .project-name {
+    flex: 0 1 220px;
+    min-width: 80px;
+  }
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+  /* History docked leaves no room for the hint line: it steps aside until History closes. */
+  body.history-open #hint {
+    display: none;
+  }
+}
