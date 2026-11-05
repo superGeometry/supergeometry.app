@@ -1,4 +1,5 @@
 import type { Feature } from "../doc/types";
+import { screenClass, watchScreenClass } from "../device";
 import type { FeatureError } from "../kernel/protocol";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
 import { icons, type IconName } from "./icons";
@@ -100,6 +101,8 @@ export class UI {
   private popoverOwner: string | null = null;
 
   constructor() {
+    // Phone / tablet & small laptop / monitor & TV: <html data-screen> for the stylesheet.
+    watchScreenClass(() => (this.panelSide = -1));
     document.addEventListener(
       "pointerdown",
       (e) => {
@@ -724,6 +727,22 @@ export class UI {
     const p = this.panel;
     const box = [...document.querySelectorAll<HTMLElement>(".dim-widget.editable")].filter((e) => !e.hidden && e.offsetWidth).pop();
     p.classList.toggle("attached", !!box);
+    // Phones: one fixed place, right above the hint text (or the bottom
+    // buttons) — never chasing the model across a small screen.
+    if (screenClass() === "phone") {
+      const tops = ["#hint", "#bottom-left", "#undo-dock", "#toolbar"]
+        .map((q) => document.querySelector<HTMLElement>(q))
+        .filter((e): e is HTMLElement => !!e && !e.hidden && e.offsetHeight > 0 && getComputedStyle(e).display !== "none")
+        .map((e) => e.getBoundingClientRect())
+        // Only what sits along the bottom (not a side column).
+        .filter((r) => r.top > window.innerHeight * 0.55 && r.width > 120)
+        .map((r) => r.top);
+      const bottom = Math.min(window.innerHeight - 8, ...tops) - 8;
+      p.style.left = "8px";
+      p.style.top = `${Math.round(Math.max(52, bottom - p.offsetHeight))}px`;
+      this.panelSide = 0;
+      return;
+    }
     // Heading for the card (or typing in it): it holds still, so it can be clicked.
     if (this.panelSide >= 0 && p.style.left) {
       const cr = p.getBoundingClientRect();

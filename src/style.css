@@ -2417,3 +2417,12 @@ body #panel.as-list {
 #panel.as-list.attached [data-inbox] {
   display: none;
 }
+
+/* Phones: the tool's options sit in one fixed place, right above the hint
+   text, across the screen (placed from script). Short, scrolling if long. */
+html[data-screen="phone"] body #panel.as-list {
+  width: calc(100vw - 16px - var(--safe-l, 0px) - var(--safe-r, 0px));
+  max-width: 520px;
+  min-width: 0;
+  max-height: 38vh;
+}

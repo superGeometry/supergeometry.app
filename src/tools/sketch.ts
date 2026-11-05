@@ -6,7 +6,7 @@ import { isExpression } from "../ui/ui";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, buttonEnabled, CONSTRAINT_BUTTONS, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
 import { settings } from "../settings";
-import { isCoarse } from "../device";
+import { isCoarse, screenClass } from "../device";
 import { arcFrom3, entityCorners, entityPolylines } from "../sketch/curves";
 import {
   offsetChain,
@@ -3209,7 +3209,7 @@ export class SketchTool implements Tool {
 
 /** A phone-sized screen (where a trailing preview line only gets in the way). */
 function phoneScreen(): boolean {
-  return window.matchMedia("(max-width: 720px)").matches || window.matchMedia("(max-height: 500px)").matches;
+  return screenClass() === "phone";
 }
 
 function titleOf(k: string): string {
