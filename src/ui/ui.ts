@@ -457,7 +457,7 @@ export class UI {
   }
 
   /** A question with a few answers (buttons); resolves with the chosen id, or null (Esc / Cancel). */
-  ask(title: string, note: string, choices: { id: string; label: string; primary?: boolean }[]): Promise<string | null> {
+  ask(title: string, note: string, choices: { id: string; label: string; primary?: boolean; /** Runs inside the tap itself (for things a browser only allows on a tap, like sharing). */ run?: () => void }[]): Promise<string | null> {
     return new Promise((resolve) => {
       const back = el("div", "dialog-back");
       const box = el("div", "dialog");
@@ -472,7 +472,7 @@ export class UI {
       row.append(textButton("Cancel", "Esc", () => close(null)));
       let primary: HTMLButtonElement | null = null;
       for (const c of choices) {
-        const b = textButton(c.label, c.primary ? "Enter" : "", () => close(c.id), !!c.primary);
+        const b = textButton(c.label, c.primary ? "Enter" : "", () => (c.run?.(), close(c.id)), !!c.primary);
         if (c.primary) primary = b;
         row.append(b);
       }

@@ -722,15 +722,18 @@ export class App implements AppContext {
     item("m-3mf", () => void this.export3mf());
     item("m-dxf", () => this.exportDXF());
     // A share button at the right of each export (and Save): straight to the share sheet.
-    if (canShareFiles()) {
-      const shares: [string, () => void][] = [
-        ["m-save", () => this.save("share")],
-        ["m-stl", () => void this.export("stl", "share")],
-        ["m-step", () => void this.export("step", "share")],
-        ["m-3mf", () => void this.export3mf("share")],
-        ["m-dxf", () => this.exportDXF("share")],
+    // Only for the file types this browser will really share (Chrome on Android,
+    // for one, refuses 3D and CAD files: a button there would only download).
+    {
+      const shares: [string, string, () => void][] = [
+        ["m-save", "super", () => this.save("share")],
+        ["m-stl", "stl", () => void this.export("stl", "share")],
+        ["m-step", "step", () => void this.export("step", "share")],
+        ["m-3mf", "3mf", () => void this.export3mf("share")],
+        ["m-dxf", "dxf", () => this.exportDXF("share")],
       ];
-      for (const [id, run] of shares) {
+      for (const [id, ext, run] of shares) {
+        if (!canShareType(ext)) continue;
         const btn = document.getElementById(id)!;
         const sh = document.createElement("span");
         sh.className = "menu-share";
@@ -833,24 +836,39 @@ export class App implements AppContext {
    */
   private async deliver(blob: Blob, name: string, how: Delivery): Promise<void> {
     if (how === "download") return download(blob, name);
-    const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+    const ext = name.split(".").pop()!.toLowerCase();
+    const file = new File([blob], name, { type: MIME[ext] ?? (blob.type || "application/octet-stream") });
+    if (!canShare(file)) {
+      this.ui.toast(`This browser can't share .${ext} files — downloaded instead`, "error");
+      return download(blob, name);
+    }
     const share = () => navigator.share({ files: [file], title: name });
     try {
       await share();
     } catch (err) {
-      if ((err as Error).name === "AbortError") return; // closed the share sheet
+      const why = (err as Error).name;
+      if (why === "AbortError") return; // closed the share sheet
+      if (why !== "NotAllowedError") {
+        this.ui.toast("Sharing didn't work here — downloaded instead", "error");
+        return download(blob, name);
+      }
       // Making the file took a moment and the browser no longer counts this as a
       // tap: one more tap shares it.
-      const go = await this.ui.ask("Ready to share", name, [{ id: "share", label: "Share", primary: true }, { id: "dl", label: "Download instead" }]);
-      if (go === "share") {
+      // The share sheet is opened right in that tap (not after it), as iOS requires.
+      let again: Promise<void> | null = null;
+      const go = await this.ui.ask("Ready to share", name, [
+        { id: "share", label: "Share", primary: true, run: () => (again = share()) },
+        { id: "dl", label: "Download instead" },
+      ]);
+      if (go === "share" && again) {
         try {
-          await share();
-        } catch {
+          await again;
+        } catch (e) {
+          if ((e as Error).name === "AbortError") return;
           this.ui.toast("Sharing isn't available here — downloaded instead", "error");
           download(blob, name);
         }
-      }
-      else if (go === "dl") download(blob, name);
+      } else if (go === "dl") download(blob, name);
     }
   }
 
@@ -934,13 +952,26 @@ function chosenBodies(app: App): string[] {
 
 type Delivery = "download" | "share";
 
-/** Can this browser share files (the system share sheet)? */
-function canShareFiles(): boolean {
+/** The file types the exports are shared as (the share sheet picks apps by them). */
+const MIME: Record<string, string> = {
+  stl: "model/stl",
+  step: "model/step",
+  "3mf": "model/3mf",
+  dxf: "image/vnd.dxf",
+  super: "application/json",
+};
+
+function canShare(file: File): boolean {
   try {
-    return typeof navigator.share === "function" && !!navigator.canShare?.({ files: [new File(["x"], "x.txt", { type: "text/plain" })] });
+    return typeof navigator.share === "function" && !!navigator.canShare?.({ files: [file] });
   } catch {
     return false;
   }
+}
+
+/** Will this browser share a file of this kind (the system share sheet)? */
+function canShareType(ext: string): boolean {
+  return canShare(new File(["x"], `x.${ext}`, { type: MIME[ext] ?? "application/octet-stream" }));
 }
 
 function download(blob: Blob, name: string): void {
