@@ -277,16 +277,38 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
   }
 
   protected items(): PanelItem[] {
-    return [this.num(this.feature.type === "fillet" ? "Radius" : "Distance", "radius", "length", { min: 0.0001, onInput: (v) => this.setRadius(v) })];
+    return [this.num(this.feature.type === "fillet" ? "Radius" : "Distance", "radius", "length", { min: 0.0001, onInput: (v) => this.setRadius(v), inBox: true })];
   }
+
+  /** The size, typed right at the edge (past the dot). */
+  private dim: DimWidget | null = null;
 
   enter(): void {
     super.enter();
     this.app.setSelection(this.edgeSels());
+    this.dim = new DimWidget(this.app.view, {
+      boxAt: "beyond",
+      boxGap: 40,
+      dir: this.axis,
+      value: this.feature.radius,
+      onInput: (v) => v > 0 && this.setRadius(v),
+      onCommit: () => this.done(),
+      variables: this.app.store.doc.variables.map((v) => v.name),
+      onVariable: (name) => {
+        const v = evaluate(name, "length");
+        if (v === null || v <= 0) return;
+        this.feature.exprs = { ...(this.feature.exprs ?? {}), radius: name };
+        this.setRadius(v);
+        this.render();
+      },
+    });
+    this.onDraftChanged();
   }
 
   exit(): void {
     this.handle.dispose();
+    this.dim?.dispose();
+    this.dim = null;
     super.exit();
   }
 
@@ -379,11 +401,15 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
   private setRadius(r: number): void {
     this.feature.radius = r;
     this.app.ui.updatePanelValues([r]);
+    this.dim?.setValue(r);
     this.update();
   }
 
   protected onDraftChanged(): void {
-    this.handle.set(add(this.origin, scale(this.axis, this.signed())));
+    const tip = add(this.origin, scale(this.axis, this.signed()));
+    this.handle.set(tip);
+    this.dim?.set(this.origin, tip);
+    this.dim?.setValue(this.feature.radius);
   }
 }
 
@@ -580,7 +606,43 @@ export class ShellOp extends FeatureOp<ShellFeature> {
   }
 
   protected items(): PanelItem[] {
-    return [this.num("Thickness", "thickness", "length", { min: 0.0001 })];
+    return [this.num("Thickness", "thickness", "length", { min: 0.0001, onInput: (v) => this.setThickness(v), inBox: true })];
+  }
+
+  /** The wall thickness, typed on the (first) open face. */
+  private dim: DimWidget | null = null;
+
+  private setThickness(v: number): void {
+    if (!(v > 0)) return;
+    this.feature.thickness = v;
+    this.app.ui.updatePanelValues([v]);
+    this.dim?.setValue(v);
+    this.update();
+  }
+
+  protected onDraftChanged(): void {
+    const f = this.feature.faces[0];
+    if (!f) {
+      this.dim?.dispose();
+      this.dim = null;
+      return;
+    }
+    this.dim ??= new DimWidget(this.app.view, {
+      noLine: true,
+      value: this.feature.thickness,
+      onInput: (v) => this.setThickness(v),
+      onCommit: () => this.done(),
+    });
+    // Just inside the face: the wall goes inwards from it.
+    const a = add(f.center, scale(f.normal, -this.feature.thickness));
+    this.dim.set(a, f.center);
+    this.dim.setValue(this.feature.thickness);
+  }
+
+  exit(): void {
+    this.dim?.dispose();
+    this.dim = null;
+    super.exit();
   }
 }
 

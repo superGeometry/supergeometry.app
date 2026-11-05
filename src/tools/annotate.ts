@@ -279,8 +279,17 @@ export class DimWidget {
       }
     }
     this.box.hidden = !s;
-    if (s) this.box.style.transform = `translate(${Math.round(s[0])}px, ${Math.round(s[1])}px) translate(-50%, -50%)`;
+    if (s && this.input === document.activeElement && this.held) s = this.held;
+    if (s) {
+      // Always where you can reach it: on screen, clear of the side panels.
+      s = clampToFree(s, this.box.offsetWidth / 2, this.box.offsetHeight / 2);
+      this.held = s;
+      this.box.style.transform = `translate(${Math.round(s[0])}px, ${Math.round(s[1])}px) translate(-50%, -50%)`;
+    }
   }
+
+  /** Where the box was last put (it stays put while you type in it). */
+  private held: [number, number] | null = null;
 
   dispose(): void {
     this.view.helpers.delete(this);
@@ -290,6 +299,24 @@ export class DimWidget {
     this.box.remove();
     this.view.requestRender();
   }
+}
+
+/** A screen point moved (if needed) so a box of these half sizes is on screen and off the open side panels. */
+function clampToFree(s: [number, number], hw: number, hh: number): [number, number] {
+  let left = 8;
+  let right = window.innerWidth - 8;
+  for (const id of ["items", "history"]) {
+    const e = document.getElementById(id);
+    if (!e || e.hidden || !e.offsetWidth) continue;
+    const r = e.getBoundingClientRect();
+    if (r.width > window.innerWidth * 0.6) continue; // a phone sheet over everything: ignore
+    if (r.left < window.innerWidth / 2) left = Math.max(left, r.right + 8);
+    else right = Math.min(right, r.left - 8);
+  }
+  if (right - left < hw * 2) [left, right] = [8, window.innerWidth - 8];
+  const x = Math.max(left + hw, Math.min(right - hw, s[0]));
+  const y = Math.max(52 + hh, Math.min(window.innerHeight - 8 - hh, s[1]));
+  return [x, y];
 }
 
 /** Pinned measurements: label + (optional) dimension line, always on top. */

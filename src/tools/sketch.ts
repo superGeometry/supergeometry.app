@@ -105,7 +105,53 @@ interface Snap {
   guides?: [Vec2, Vec2][];
   /** Snapped onto an existing sketch point (drawing then adds a Coincident constraint). */
   ref?: PointRef;
+  /** On these curves (a point on a line/circle/arc: kept on it). */
+  on?: string[];
+  /** The middle of this line (kept there). */
+  mid?: string;
+  /** The line being drawn runs parallel / at right angles to this line. */
+  dir?: { type: "parallel" | "perpendicular"; curve: string };
 }
+
+/** Something the cursor can slide along: a line (through p, along d) or a circle. */
+type Locus =
+  | { kind: "line"; p: Vec2; d: Vec2; label: string; guide?: Vec2; seg?: [Vec2, Vec2]; on?: string; dir?: Snap["dir"]; show?: [Vec2, Vec2]; axis?: 0 | 1 }
+  | { kind: "circle"; c: Vec2; r: number; label: string; on?: string };
+
+function nearestOnLocus(L: Locus, q: Vec2): Vec2 {
+  if (L.kind === "circle") {
+    const dx = q[0] - L.c[0];
+    const dy = q[1] - L.c[1];
+    const l = Math.hypot(dx, dy) || 1;
+    return [L.c[0] + (dx / l) * L.r, L.c[1] + (dy / l) * L.r];
+  }
+  const t = (q[0] - L.p[0]) * L.d[0] + (q[1] - L.p[1]) * L.d[1];
+  return [L.p[0] + L.d[0] * t, L.p[1] + L.d[1] * t];
+}
+
+/** Where two loci cross, nearest to q (null: they don't). */
+function crossLoci(A: Locus, B: Locus, q: Vec2): Vec2 | null {
+  if (A.kind === "circle" && B.kind === "circle") return null;
+  if (A.kind === "line" && B.kind === "line") {
+    const den = A.d[0] * B.d[1] - A.d[1] * B.d[0];
+    if (Math.abs(den) < 1e-6) return null;
+    const t = ((B.p[0] - A.p[0]) * B.d[1] - (B.p[1] - A.p[1]) * B.d[0]) / den;
+    return [A.p[0] + A.d[0] * t, A.p[1] + A.d[1] * t];
+  }
+  const Ln = (A.kind === "line" ? A : B) as Extract<Locus, { kind: "line" }>;
+  const C = (A.kind === "circle" ? A : B) as Extract<Locus, { kind: "circle" }>;
+  const f: Vec2 = [Ln.p[0] - C.c[0], Ln.p[1] - C.c[1]];
+  const b = f[0] * Ln.d[0] + f[1] * Ln.d[1];
+  const disc = b * b - (f[0] * f[0] + f[1] * f[1] - C.r * C.r);
+  if (disc < 0) return null;
+  const pts = [-b - Math.sqrt(disc), -b + Math.sqrt(disc)].map((t) => [Ln.p[0] + Ln.d[0] * t, Ln.p[1] + Ln.d[1] * t] as Vec2);
+  return pts.sort((x, y) => Math.hypot(x[0] - q[0], x[1] - q[1]) - Math.hypot(y[0] - q[0], y[1] - q[1]))[0];
+}
+
+const unit2 = (v: Vec2): Vec2 => {
+  const l = Math.hypot(v[0], v[1]) || 1;
+  return [v[0] / l, v[1] / l];
+};
 
 /** A point being dragged and where it started. */
 interface DragRef {
@@ -179,6 +225,8 @@ export class SketchTool implements Tool {
   private pivotT: { line: string; t: number } | null = null;
   /** Where the current line chain started (for Coincident constraints). */
   private startRef: PointRef | null = null;
+  /** Where the shape's first point snapped (kept on that curve / middle). */
+  private startSnap: Snap | null = null;
 
   private get constraints(): SketchConstraint[] {
     return this.sketch?.constraints ?? [];
@@ -729,7 +777,8 @@ export class SketchTool implements Tool {
     switch (k) {
       case "line":
         // With the numpad, the length is typed in the box by the line itself.
-        if (this.pts.length && !settings.value.numpad) items.push(lock("len", "Length"));
+        // (Already in the box on the line: not repeated in the list beside it.)
+        if (this.pts.length && !settings.value.numpad) items.push({ ...lock("len", "Length"), inBox: true } as PanelItem);
         break;
       case "rect":
         if (this.pts.length === 1 && memory.rect !== "3pt") items.push(lock("w", "Width"), lock("h", "Height"));
@@ -1573,12 +1622,12 @@ export class SketchTool implements Tool {
     const screen = (uv: Vec2) => view.toScreen(sketchToWorld(plane, uv));
     const tol = p.tol * 1.4;
 
-    const cands: { p: Vec2; label: string; ref?: PointRef }[] = [{ p: [0, 0], label: "Origin" }];
+    const cands: { p: Vec2; label: string; ref?: PointRef; mid?: string }[] = [{ p: [0, 0], label: "Origin" }];
     if (s.guidePoints) {
       for (const e of this.entities) {
         // Named points first (they can be constrained), then midpoints etc.
         for (const q of pointsOf(e)) cands.push({ p: q.at, label: q.p === "c" ? "Center" : "Endpoint", ref: { e: e.id, p: q.p } });
-        for (const g of guidePoints(e)) if (g.kind === "mid") cands.push({ p: g.p, label: "Midpoint" });
+        for (const g of guidePoints(e)) if (g.kind === "mid") cands.push({ p: g.p, label: "Midpoint", mid: e.kind === "line" ? e.id : undefined });
       }
       for (const e of this.boundary) for (const g of guidePoints(e)) cands.push({ p: g.p, label: g.kind === "mid" ? "Midpoint" : "Edge point" });
       for (const q of this.pts) cands.push({ p: q, label: "Point" });
@@ -1593,45 +1642,144 @@ export class SketchTool implements Tool {
         }
       }
     }
-    let best: { p: Vec2; label: string; d: number; ref?: PointRef } | null = null;
+    let best: { p: Vec2; label: string; d: number; ref?: PointRef; mid?: string } | null = null;
     for (const c of cands) {
       const sc = screen(c.p);
       if (!sc) continue;
       const d = Math.hypot(sc[0] - p.x, sc[1] - p.y);
       if (d < tol && (!best || d < best.d)) best = { ...c, d };
     }
-    if (best) return { uv: [...best.p] as Vec2, label: best.label, ref: best.ref };
+    if (best) return { uv: [...best.p] as Vec2, label: best.label, ref: best.ref, mid: best.mid };
+
+    // Nothing to land on: lines and curves to slide along — straight across from
+    // a point, on a curve, a line's extension, parallel or square to a line. Near
+    // two of them: where they cross.
+    const wpp = view.cam.worldPerPixel(view.height);
+    const loci: Locus[] = [];
+    if (s.guideLines) {
+      for (const c of cands) {
+        loci.push({ kind: "line", p: c.p, d: [0, 1], label: "Vertical", guide: c.p, axis: 0 });
+        loci.push({ kind: "line", p: c.p, d: [1, 0], label: "Horizontal", guide: c.p, axis: 1 });
+      }
+    }
+    if (s.guidePoints) {
+      const own = new Set(this.entities.map((e) => e.id));
+      for (const e of [...this.entities, ...this.boundary]) {
+        const mine = own.has(e.id) ? e.id : undefined;
+        if (e.kind === "line") {
+          const d = unit2([e.b[0] - e.a[0], e.b[1] - e.a[1]]);
+          loci.push({ kind: "line", p: e.a, d, label: "On line", seg: [e.a, e.b], on: mine });
+        } else if (e.kind === "circle") loci.push({ kind: "circle", c: e.center, r: e.radius, label: "On circle", on: mine });
+        else if (e.kind === "arc") {
+          const a = arcFrom3(e.a, e.m, e.b);
+          if (a) loci.push({ kind: "circle", c: a.c, r: a.r, label: "On arc", on: mine });
+        } else {
+          // Sides of rectangles and polygons, and splines/ellipses piece by piece.
+          for (const poly of entityPolylines(e))
+            for (let i = 0; i + 1 < poly.length; i++) {
+              const a = poly[i];
+              const b = poly[i + 1];
+              if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-9) continue;
+              loci.push({ kind: "line", p: a, d: unit2([b[0] - a[0], b[1] - a[1]]), label: "On curve", seg: [a, b] });
+            }
+        }
+      }
+    }
+    // A line being drawn: parallel or square to another line.
+    const from = this.kind === "line" && this.pts.length ? this.pts[this.pts.length - 1] : null;
+    if (from && s.guideLines) {
+      const own = new Set(this.entities.map((e) => e.id));
+      for (const e of [...this.entities, ...this.boundary]) {
+        if (e.kind !== "line") continue;
+        const d = unit2([e.b[0] - e.a[0], e.b[1] - e.a[1]]);
+        // Level and upright are already there (straight across from the last point).
+        if (Math.abs(d[0]) < 1e-6 || Math.abs(d[1]) < 1e-6) continue;
+        const curve = own.has(e.id) ? e.id : "";
+        loci.push({ kind: "line", p: from, d, label: "Parallel", guide: from, show: [e.a, e.b], dir: curve ? { type: "parallel", curve } : undefined });
+        loci.push({ kind: "line", p: from, d: [-d[1], d[0]], label: "Perpendicular", guide: from, show: [e.a, e.b], dir: curve ? { type: "perpendicular", curve } : undefined });
+      }
+    }
+    // How far (in pixels) the cursor is from each; a line's own length counts as
+    // "on line", past its ends as "extension" (not too far out).
+    const lt = p.tol;
+    const near: { L: Locus; q: Vec2; d: number; label: string; ext?: Vec2 }[] = [];
+    for (const L of loci) {
+      const q = nearestOnLocus(L, raw);
+      const d = Math.hypot(q[0] - raw[0], q[1] - raw[1]) / wpp;
+      if (d >= lt) continue;
+      let label = L.label;
+      let ext: Vec2 | undefined;
+      if (L.kind === "line" && L.seg) {
+        const [a, b] = L.seg;
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const t = (q[0] - a[0]) * L.d[0] + (q[1] - a[1]) * L.d[1];
+        if (t < 0 || t > len) {
+          // Off the end: only real lines extend (and not halfway across the screen).
+          if (L.label !== "On line") continue;
+          const end = t < 0 ? a : b;
+          if (Math.hypot(q[0] - end[0], q[1] - end[1]) / wpp > 400) continue;
+          label = "Extension";
+          ext = end;
+        }
+      }
+      // A direction from the last point: only ahead of it, and not right on top of it.
+      if (L.kind === "line" && L.dir !== undefined && Math.hypot(q[0] - L.p[0], q[1] - L.p[1]) / wpp < 20) continue;
+      near.push({ L, q, d, label, ext });
+    }
+    // Curves and extensions win a tie over the straight-across guides (they're what you aimed at).
+    const rank = (n: (typeof near)[number]) => n.d - (n.L.kind === "circle" || (n.L.kind === "line" && n.L.seg) ? 2 : 0);
+    near.sort((a, b) => rank(a) - rank(b));
 
     const out: Snap = { uv: raw, guides: [] };
-    const wpp = view.cam.worldPerPixel(view.height);
-    if (s.guideLines) {
-      // Align horizontally/vertically with nearby guide points.
-      let bu: { v: number; from: Vec2 } | null = null;
-      let bv: { v: number; from: Vec2 } | null = null;
-      for (const c of cands) {
-        const du = Math.abs(raw[0] - c.p[0]) / wpp;
-        const dv = Math.abs(raw[1] - c.p[1]) / wpp;
-        if (du < tol && (!bu || du < Math.abs(raw[0] - bu.v) / wpp)) bu = { v: c.p[0], from: c.p };
-        if (dv < tol && (!bv || dv < Math.abs(raw[1] - bv.v) / wpp)) bv = { v: c.p[1], from: c.p };
+    const used: typeof near = [];
+    if (near.length) {
+      const A = near[0];
+      used.push(A);
+      out.uv = A.q;
+      // A second one close by: where the two cross.
+      let bestX: { n: (typeof near)[number]; x: Vec2; d: number } | null = null;
+      for (const n of near.slice(1)) {
+        if (n.L === A.L) continue;
+        const x = crossLoci(A.L, n.L, raw);
+        if (!x) continue;
+        const d = Math.hypot(x[0] - raw[0], x[1] - raw[1]) / wpp;
+        if (d < lt * 1.3 && (!bestX || d < bestX.d)) bestX = { n, x, d };
       }
-      if (bu) out.uv = [bu.v, out.uv[1]];
-      if (bv) out.uv = [out.uv[0], bv.v];
-      if (bu || bv) out.label = bu && bv ? "Aligned" : bu ? "Vertical" : "Horizontal";
-      // Grid-snap only the coordinates that aren't aligned to a guide.
-      if (s.grid) {
-        const step = view.grid.step;
-        out.uv = [bu ? out.uv[0] : Math.round(out.uv[0] / step) * step, bv ? out.uv[1] : Math.round(out.uv[1] / step) * step];
+      if (bestX) {
+        used.push(bestX.n);
+        out.uv = bestX.x;
       }
-      // Guides run from the reference point straight to the final point.
-      if (bu) out.guides!.push([bu.from, out.uv]);
-      if (bv) out.guides!.push([bv.from, out.uv]);
-      return out;
     }
-    if (s.grid) {
+    // Grid along a straight-across guide (and everywhere when there's none).
+    if (s.grid && used.length < 2) {
       const step = view.grid.step;
-      out.uv = [Math.round(out.uv[0] / step) * step, Math.round(out.uv[1] / step) * step];
+      const g = (v: number) => Math.round(v / step) * step;
+      const only = used[0]?.L;
+      if (!only) out.uv = [g(out.uv[0]), g(out.uv[1])];
+      else if (only.kind === "line" && only.axis === 0) out.uv = [out.uv[0], g(out.uv[1])];
+      else if (only.kind === "line" && only.axis === 1) out.uv = [g(out.uv[0]), out.uv[1]];
+    }
+    if (!used.length) return out;
+    const labels = used.map((n) => n.label);
+    out.label = labels.includes("Vertical") && labels.includes("Horizontal") ? "Aligned" : [...new Set(labels)].join(" · ");
+    out.on = used.map((n) => n.L.on).filter((x): x is string => !!x);
+    for (const n of used) {
+      const L = n.L;
+      if (L.kind === "line" && L.guide) out.guides!.push([L.guide, out.uv]);
+      if (n.ext) out.guides!.push([n.ext, out.uv]);
+      if (L.kind === "line" && L.show) out.guides!.push(L.show);
+      if (L.kind === "line" && L.dir) out.dir = L.dir;
     }
     return out;
+  }
+
+  /** Constraints that keep a drawn point where it snapped (on a curve, a line's middle). */
+  private snapKeeps(s: Snap | null | undefined, at: PointRef): SketchConstraint[] {
+    if (!s || !settings.value.autoConstrain) return [];
+    const cs: SketchConstraint[] = [];
+    if (s.mid) cs.push({ id: uid(), type: "midpoint", pts: [at], curves: [s.mid] });
+    for (const c of s.on ?? []) cs.push({ id: uid(), type: "coincident", pts: [at], curves: [c] });
+    return cs;
   }
 
   // -------------------------------------------------------------- drawing
@@ -1757,6 +1905,7 @@ export class SketchTool implements Tool {
     // A typed size moves the point off whatever it snapped to.
     const snapRef = locked ? undefined : this.cursor?.ref;
     if (!this.pts.length) this.startRef = snapRef ?? null;
+    if (!this.pts.length) this.startSnap = locked ? null : this.cursor;
     if (k === "line") {
       if (count >= 2 || (this.pts.length && samePt(pt, this.pts[this.pts.length - 1]))) return this.resetDrawing();
       if (this.pts.length) {
@@ -1769,11 +1918,14 @@ export class SketchTool implements Tool {
         const auto = settings.value.autoConstrain;
         if (this.lastLineId) cs.push(co({ e: this.lastLineId, p: "b" }, { e: id, p: "a" }));
         else if (this.startRef && auto) cs.push(co(this.startRef, { e: id, p: "a" }));
+        else if (this.pts.length === 1) cs.push(...this.snapKeeps(this.startSnap, { e: id, p: "a" }));
         const closes = this.pts.length > 1 && samePt(pt, start) && this.chainFirstId;
         if (closes) cs.push(co({ e: id, p: "b" }, { e: this.chainFirstId!, p: "a" }));
         else if (snapRef && auto) cs.push(co({ e: id, p: "b" }, snapRef));
+        else if (!locked) cs.push(...this.snapKeeps(this.cursor, { e: id, p: "b" }));
         if (auto && Math.abs(pt[1] - a[1]) < 1e-9) cs.push({ id: uid(), type: "horizontal", curves: [id] });
         else if (auto && Math.abs(pt[0] - a[0]) < 1e-9) cs.push({ id: uid(), type: "vertical", curves: [id] });
+        else if (auto && !locked && this.cursor?.dir) cs.push({ id: uid(), type: this.cursor.dir.type, curves: [id, this.cursor.dir.curve] });
         // Typed values become driving dimensions.
         if (this.locks.len !== undefined) cs.push({ id: uid(), type: "dim", curves: [id], prop: "length", value: this.locks.len });
         if (this.locks.ang !== undefined && !cs.some((x) => x.type === "horizontal" || x.type === "vertical")) cs.push({ id: uid(), type: "dim", curves: [id], prop: "angle", value: this.locks.ang });
@@ -1817,7 +1969,7 @@ export class SketchTool implements Tool {
           // A centre placed on an existing point stays on it.
           if (settings.value.autoConstrain && (e.kind === "circle" || e.kind === "polygon" || e.kind === "ellipse" || (e.kind === "rect" && memory.rect === "center")) && this.startRef) {
             cs.push({ id: uid(), type: "coincident", pts: [{ e: e.id, p: "c" }, this.startRef] });
-          }
+          } else if (e.kind === "circle" || e.kind === "polygon" || e.kind === "ellipse") cs.push(...this.snapKeeps(this.startSnap, { e: e.id, p: "c" }));
         }
         this.pts = [];
         this.locks = {};
@@ -1955,6 +2107,7 @@ export class SketchTool implements Tool {
     this.lastLineId = null;
     this.chainFirstId = null;
     this.startRef = null;
+    this.startSnap = null;
     this.typedThisShape = false;
     this.lockIndex = 0;
     this.typing.reset();

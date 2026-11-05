@@ -909,6 +909,23 @@ export class Viewport {
       const g = data.faceGroups.find((g) => tri >= g.start && tri < g.start + g.count);
       if (g) return { kind: "face", body, face: g.face, point: faceHit.point.toArray() as Vec3 };
     }
+    // Nothing right under the tap: a corner, edge or curve just beside it is what
+    // was meant (a finger, or a quick click, is rarely exactly on a thin line).
+    if (!faceHit && edgeTolPx > 0) {
+      const wide = Math.min(28, edgeTolPx * 1.6);
+      if (bodies && vertices) {
+        const v = this.pickVertex(x, y, wide * 0.8, Infinity);
+        if (v) return v;
+      }
+      if (curves) {
+        const c = this.pickCurve(x, y, wide, typeof curves === "string" ? curves : undefined);
+        if (c) return c;
+      }
+      if (bodies && edges) {
+        const e = this.pickEdge(x, y, wide, Infinity);
+        if (e) return e;
+      }
+    }
     if (opts.images !== false) {
       const hit = this.raycaster.intersectObjects(this.imageMeshes, false)[0];
       if (hit && hit.distance <= faceDist) return { kind: "image", id: hit.object.userData.image, point: hit.point.toArray() as Vec3 };
