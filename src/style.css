@@ -2599,3 +2599,37 @@ html[data-screen="phone"] .numpad .np-grip {
   height: 16px;
   margin-top: -2px;
 }
+
+/* Phones upright, sketching: the tools are a column on the left, so the row
+   of buttons along the bottom drops into the strip's place (no empty band),
+   the hint with it. */
+@media (max-width: 720px) and (orientation: portrait) {
+  html body.sketching #undo-dock,
+  html body.sketching #bottom-left {
+    bottom: calc(8px + var(--safe-b));
+  }
+  html body.sketching #hint {
+    bottom: calc(66px + var(--safe-b));
+  }
+  html body.sketching #toolbar {
+    bottom: calc(62px + var(--safe-b));
+    max-height: calc(100vh - 134px - var(--safe-t) - var(--safe-b));
+  }
+  html body.sketching:has(#hint:not([hidden])) #toolbar {
+    max-height: calc(100vh - 194px - var(--safe-t) - var(--safe-b));
+  }
+}
+/* Full screen on phones: the browser's bars are gone, so the edges come in —
+   a little margin left for rounded screen corners, and at the top for the
+   camera (that's what the top inset is). */
+html[data-screen="phone"] body.is-fullscreen {
+  --safe-b: 4px;
+  --safe-t: max(0px, calc(env(safe-area-inset-top, 0px) - 14px));
+}
+/* "Use the whole screen?": one short line with its two buttons. */
+.fs-banner {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+}

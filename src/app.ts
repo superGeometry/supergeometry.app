@@ -20,7 +20,7 @@ import { SketchTool } from "./tools/sketch";
 import { bodiesOf, edgeRefOf, faceRefOf, sameSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tools/tool";
 import { setupRightColumn } from "./ui/panels";
 import type { ToolItem } from "./ui/ui";
-import { UI } from "./ui/ui";
+import { el, UI } from "./ui/ui";
 import { setUnits, setVariables } from "./units";
 import { InputRouter } from "./view/input";
 import { ViewCube } from "./view/viewcube";
@@ -690,13 +690,34 @@ export class App implements AppContext {
     };
     document.addEventListener("fullscreenchange", paint);
     document.addEventListener("webkitfullscreenchange", paint);
-    moreItem("m-fullscreen", () => {
-      if (isFull()) return void (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.());
+    const goFull = () => {
       if (root.requestFullscreen) void root.requestFullscreen().catch(() => this.ui.toast("This browser won't go fullscreen here"));
       else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
       // iPhone Safari has no fullscreen for pages: the Home Screen app is.
       else this.ui.toast("Tip: Share → Add to Home Screen opens supergeometry.app full screen");
+    };
+    moreItem("m-fullscreen", () => {
+      if (isFull()) return void (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.());
+      goFull();
     });
+    // On opening, on every device: offer full screen (a browser only allows it
+    // from a tap, so it has to be asked). Not where it can't be done, or already is.
+    const canFull = !!(root.requestFullscreen || root.webkitRequestFullscreen) && (document.fullscreenEnabled ?? true);
+    const already = () => isFull() || matchMedia("(display-mode: fullscreen)").matches || matchMedia("(display-mode: standalone)").matches;
+    if (canFull && !already()) {
+      const banner = el("div", "update-banner fs-banner");
+      banner.addEventListener("pointerdown", (e) => e.stopPropagation());
+      const yes = el("button", "text-btn primary", "Full screen");
+      const no = el("button", "text-btn", "Not now");
+      const away = () => banner.remove();
+      yes.addEventListener("click", () => (away(), goFull()));
+      no.addEventListener("click", away);
+      banner.append(el("span", "", "Use the whole screen?"), yes, no);
+      setTimeout(() => !already() && document.body.append(banner), 800);
+      // Unanswered: it goes away by itself (More → Fullscreen is always there).
+      setTimeout(away, 15_000);
+      document.addEventListener("fullscreenchange", () => isFull() && away());
+    }
     // Help and Tutorial: placeholders for now.
     // A newer build out? A notice offers to update; More → Reset cache does it now.
     this.updates = new Updates(() => this.store.flush());
