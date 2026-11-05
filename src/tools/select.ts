@@ -1,4 +1,4 @@
-import { BODY_COLORS } from "../doc/types";
+import { BODY_COLORS, BODY_OPACITY, bodyColor } from "../doc/types";
 import type { DeleteGeomFeature, FreeformFeature, EdgeRef, ExtrudeSource, FaceRef, ImageFeature, PlaneDef, SketchFeature, Vec3 } from "../doc/types";
 import { arrangement } from "../sketch/regions";
 import { projectPolyline } from "../sketch/edit";
@@ -506,19 +506,39 @@ export class SelectTool implements Tool {
         id: "color",
         label: "Color",
         icon: "color",
-        sub: BODY_COLORS.find((c) => c.hex === (app.store.doc.colors ?? {})[bodies[0]])?.name ?? "Grey",
+        sub: BODY_COLORS.find((c) => c.hex === bodyColor((app.store.doc.colors ?? {})[bodies[0]]))?.name ?? "Grey",
         children: BODY_COLORS.map((c, i) => ({
           id: `color-${i}`,
           label: c.name,
           icon: "color",
           swatch: c.hex,
-          active: ((app.store.doc.colors ?? {})[bodies[0]] ?? BODY_COLORS[0].hex) === c.hex,
+          active: (bodyColor((app.store.doc.colors ?? {})[bodies[0]]) ?? BODY_COLORS[0].hex) === c.hex,
           run: () =>
             app.store.commit((d) => {
               const colors = { ...(d.colors ?? {}) };
               for (const b of bodies) if (i === 0) delete colors[b];
               else colors[b] = c.hex;
               d.colors = colors;
+            }),
+        })),
+      },
+      {
+        // Next to Color: how see-through the body is.
+        id: "opacity",
+        label: "Transparency",
+        icon: "color",
+        sub: BODY_OPACITY.find((o) => o.value === ((app.store.doc.opacity ?? {})[bodies[0]] ?? 1))?.name ?? "Solid",
+        children: BODY_OPACITY.map((o, i) => ({
+          id: `opacity-${i}`,
+          label: o.name,
+          icon: "color",
+          active: ((app.store.doc.opacity ?? {})[bodies[0]] ?? 1) === o.value,
+          run: () =>
+            app.store.commit((d) => {
+              const op = { ...(d.opacity ?? {}) };
+              for (const b of bodies) if (o.value >= 1) delete op[b];
+              else op[b] = o.value;
+              d.opacity = op;
             }),
         })),
       },

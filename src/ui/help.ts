@@ -54,7 +54,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "fillet", name: "Edge", text: "Drag the dot outward for a rounded Fillet, inward for a Chamfer; or move the edge (the faces tilt)." },
       { icon: "move", name: "Body", text: "The gimbal moves (arrows), slides (squares) and turns (rings) it. With Copy on, a drag makes a copy; the panel stays when you let go so you can type exact values. A copy is its own body; switch Link on to keep a freeform copy shaped like its original." },
       { icon: "copy", name: "Sketch → Copy to Plane", text: "Tap a sketch region, then Copy to Plane: drag the blue arrow to a parallel plane (or red/green to slide it), or type the distance. Turn Copy off to move the sketch instead." },
-      { icon: "color", name: "Colour", text: "Pick a colour for the selected bodies." },
+      { icon: "color", name: "Colour / Transparency", text: "Pick a colour for the selected bodies, and how see-through they are (Solid, 75%, 50%, 25%)." },
     ],
   },
   {

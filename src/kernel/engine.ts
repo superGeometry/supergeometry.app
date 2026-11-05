@@ -1270,13 +1270,17 @@ function nameOf(features: Feature[], bodyId: string): string {
   const f = features.find((x) => x.id === baseId(bodyId));
   if (!f) return "Body";
   if (f.type === "import") return f.fileName;
+  // A freeform made as an open surface (no thickness yet) is a surface, not a solid body.
+  const isSurface = (x: Feature | undefined) => x?.type === "freeform" && !!x.surface && !x.thickness;
+  // A copy of a surface is a surface too (its id holds the original's).
+  const kind = isSurface(f) || bodyId.split(":").some((part) => isSurface(features.find((x) => x.id === part))) ? "Surface" : "Body";
   // A copy's id ends in its number (a copy of a copy has the first copy's id inside).
   const parts = bodyId.split(":");
   const k = parts.length > 1 ? Number(parts[parts.length - 1]) : NaN;
-  if (!Number.isFinite(k)) return `Body (${f.name})`;
+  if (!Number.isFinite(k)) return `${kind} (${f.name})`;
   // One copy: just the step's name; patterns count from #2 (the original is #1).
   const t = f.type === "transform" ? f.op.kind : "";
-  return t === "linear" || t === "circular" ? `Body (${f.name} #${k + 2})` : `Body (${f.name})`;
+  return t === "linear" || t === "circular" ? `${kind} (${f.name} #${k + 2})` : `${kind} (${f.name})`;
 }
 
 export function errorText(err: unknown): string {

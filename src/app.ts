@@ -259,7 +259,7 @@ export class App implements AppContext {
     setVariables(this.store.doc.variables);
     this.ui.refreshRight();
     this.showPins();
-    this.view.setBodyColors(this.store.doc.colors ?? {});
+    this.view.setBodyColors(this.store.doc.colors ?? {}, this.store.doc.opacity ?? {});
     void this.regenerate();
   }
 

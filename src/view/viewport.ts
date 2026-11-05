@@ -42,6 +42,7 @@ import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import type { ImageFeature, PlaneDef, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
+import { bodyColor } from "../doc/types";
 import { FRONT, GROUND, RIGHT, planeY } from "../geom";
 import type { BodyMesh, ConstructionInfo, EdgeInfo, FaceInfo } from "../kernel/protocol";
 import { settings } from "../settings";
@@ -248,10 +249,13 @@ export class Viewport {
     this.cam.setOrtho(s.ortho);
     const xray = s.shader === "xray";
     for (const m of this.allBodyMats()) {
-      m.transparent = xray;
-      m.opacity = xray ? 0.35 : 1;
-      m.depthWrite = !xray;
-      m.side = xray ? DoubleSide : FrontSide;
+      // A see-through body (Transparency) is seen through in every view.
+      const o = (m.userData.opacity as number | undefined) ?? 1;
+      const see = xray || o < 1;
+      m.transparent = see;
+      m.opacity = (xray ? 0.35 : 1) * o;
+      m.depthWrite = !see;
+      m.side = see ? DoubleSide : FrontSide;
       m.needsUpdate = true;
     }
     this.applyHidden();
@@ -264,19 +268,23 @@ export class Viewport {
   /** Body colour → its surface and section-cap materials (copies of the shared ones). */
   private colorMats = new Map<string, { body: MeshStandardMaterial; cap: MeshBasicMaterial }>();
   private bodyColors: Record<string, string> = {};
+  private bodyOpacity: Record<string, number> = {};
 
   private matsFor(id: string): { body: MeshStandardMaterial; cap: MeshBasicMaterial } {
-    const hex = this.bodyColors[id];
-    if (!hex) return { body: this.bodyMat, cap: this.capMat };
-    let m = this.colorMats.get(hex);
+    const hex = bodyColor(this.bodyColors[id]);
+    const o = this.bodyOpacity[id] ?? 1;
+    if (!hex && o >= 1) return { body: this.bodyMat, cap: this.capMat };
+    const key = `${hex ?? "base"}|${o}`;
+    let m = this.colorMats.get(key);
     if (!m) {
       const body = this.bodyMat.clone();
-      body.color.set(hex);
+      if (hex) body.color.set(hex);
+      body.userData.opacity = o;
       // The cut face is the body's colour, a little darker, so it reads as the same part.
       const cap = hatched(this.capMat.clone());
-      cap.color.set(hex).multiplyScalar(0.72);
+      if (hex) cap.color.set(hex).multiplyScalar(0.72);
       m = { body, cap };
-      this.colorMats.set(hex, m);
+      this.colorMats.set(key, m);
     }
     return m;
   }
@@ -286,8 +294,9 @@ export class Viewport {
     return [this.bodyMat, ...[...this.colorMats.values()].map((m) => m.body)];
   }
 
-  setBodyColors(colors: Record<string, string>): void {
+  setBodyColors(colors: Record<string, string>, opacity: Record<string, number> = {}): void {
     this.bodyColors = { ...colors };
+    this.bodyOpacity = { ...opacity };
     for (const [id, b] of this.bodies) {
       const m = this.matsFor(id);
       b.mesh.material = m.body;

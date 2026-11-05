@@ -386,20 +386,49 @@ export interface ProjectDoc {
   folders?: ItemFolder[];
   /** Body colours (by body id), "#rrggbb"; missing = the default grey. */
   colors?: Record<string, string>;
+  /** See-through bodies: opacity 0–1 by body id (missing: solid). */
+  opacity?: Record<string, number>;
 }
 
 /** The body colours offered by the Color tool (first = default). */
 export const BODY_COLORS: { name: string; hex: string }[] = [
+  // Soft, muted tones (easy on the eyes, still easy to tell apart).
   { name: "Grey", hex: "#b9bec7" },
-  { name: "Red", hex: "#e05a4f" },
-  { name: "Orange", hex: "#f08c3a" },
-  { name: "Yellow", hex: "#e8c547" },
-  { name: "Green", hex: "#5fbf5a" },
-  { name: "Teal", hex: "#3fb6a8" },
-  { name: "Blue", hex: "#4f8ce0" },
-  { name: "Violet", hex: "#8a6be0" },
-  { name: "Pink", hex: "#e06bb5" },
-  { name: "Brown", hex: "#9a7454" },
+  { name: "Red", hex: "#b9726b" },
+  { name: "Orange", hex: "#c29069" },
+  { name: "Yellow", hex: "#c4b277" },
+  { name: "Green", hex: "#83a67f" },
+  { name: "Teal", hex: "#71a39c" },
+  { name: "Blue", hex: "#7c98c2" },
+  { name: "Violet", hex: "#9a8bc0" },
+  { name: "Pink", hex: "#bb8aa9" },
+  { name: "Brown", hex: "#93806e" },
+];
+
+/** The first, brighter palette → its softer version (projects saved before keep their choice). */
+const OLD_COLORS: Record<string, string> = {
+  "#e05a4f": "#b9726b",
+  "#f08c3a": "#c29069",
+  "#e8c547": "#c4b277",
+  "#5fbf5a": "#83a67f",
+  "#3fb6a8": "#71a39c",
+  "#4f8ce0": "#7c98c2",
+  "#8a6be0": "#9a8bc0",
+  "#e06bb5": "#bb8aa9",
+  "#9a7454": "#93806e",
+};
+
+/** A saved body colour as it is shown now. */
+export function bodyColor(hex: string | undefined): string | undefined {
+  return hex && (OLD_COLORS[hex.toLowerCase()] ?? hex);
+}
+
+/** The see-through levels offered next to Color (1 = solid). */
+export const BODY_OPACITY: { name: string; value: number }[] = [
+  { name: "Solid", value: 1 },
+  { name: "75%", value: 0.75 },
+  { name: "50%", value: 0.5 },
+  { name: "25%", value: 0.25 },
 ];
 
 export interface ItemFolder {
