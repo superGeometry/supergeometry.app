@@ -89,4 +89,28 @@ await check("edge next to it (front top) up 3", [{ id: "me", name: "me", type: "
   }
 }
 
+// A concave face (zigzag top) with an edge moved down: it is cut into valid
+// pieces (no self-crossing face), the volume adds up.
+{
+  const L = (id: string, a: number[], b: number[]) => ({ id, kind: "line", a, b });
+  const ents = [L("1", [0, 0], [0, 50]), L("2", [0, 50], [20, 50]), L("3", [20, 50], [10, 40]), L("4", [10, 40], [20, 30]), L("5", [20, 30], [10, 20]), L("6", [10, 20], [20, 10]), L("7", [20, 10], [20, 0]), L("8", [20, 0], [0, 0])];
+  const feats = [
+    { id: "zs", name: "zs", type: "sketch", plane: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, entities: ents },
+    { id: "ze", name: "ze", type: "extrude", source: { kind: "profile", sketch: "zs", regions: arrangement(ents as never).regions.map(regionRef) }, distance: 43, mode: "auto" },
+    { id: "zm", name: "zm", type: "moveFace", edge: { body: "ze", mid: [10, 0, 43], dir: [-1, 0, 0], length: 20 }, translate: [0, 0, -19] },
+  ] as Feature[];
+  const r = await regenerate(feats);
+  const b = r.bodies[0];
+  let vol = 0;
+  const P = (i: number) => [b.positions[3 * i], b.positions[3 * i + 1], b.positions[3 * i + 2]];
+  for (let i = 0; i < b.indices.length; i += 3) {
+    const [a, c, d] = [P(b.indices[i]), P(b.indices[i + 1]), P(b.indices[i + 2])];
+    vol += (a[0] * (c[1] * d[2] - c[2] * d[1]) - a[1] * (c[0] * d[2] - c[2] * d[0]) + a[2] * (c[0] * d[1] - c[1] * d[0])) / 6;
+  }
+  const top = b.faces.filter((f) => f.normal[2] > 0.999).reduce((s, f) => s + f.area, 0);
+  const ok = !r.errors.length && b.openEdges.length === 0 && Math.abs(vol - 30600) < 1 && Math.abs(top - 300) < 0.5;
+  if (!ok) failed++;
+  console.log(ok ? "ok  " : "FAIL", `zigzag edge move: volume ${vol.toFixed(1)}, flat top ${top.toFixed(1)}`);
+}
+
 process.exit(failed ? 1 : 0);

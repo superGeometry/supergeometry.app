@@ -4,7 +4,7 @@
 
 import { cast, getOC, measureVolume, type Shape3D } from "replicad";
 import { cubicKnots, interpolateGrid } from "../freeform/bspline";
-import { isClosed, subdivide, type Cage } from "../freeform/cage";
+import { isClosed, limitPoints, subdivide, type Cage } from "../freeform/cage";
 
 export interface Thicken {
   thickness: number;
@@ -15,6 +15,8 @@ export function cageToShape(cage: Cage, levels = 3, thicken?: Thicken): Shape3D 
   if (!cage.faces.length) throw new Error("The freeform has no faces");
   const oc = getOC();
   const s = subdivide(cage, levels);
+  // Fitted through points on the smooth surface itself (see limitPoints).
+  s.points = limitPoints(s);
   const N = s.n + 1;
   const tol = Math.max(1e-4, sizeOf(s.points) * 1e-5);
   const sewing = new oc.BRepBuilderAPI_Sewing(tol, true, true, true, false);

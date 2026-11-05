@@ -671,26 +671,11 @@ function movePolyhedronPoints(body: Shape3D, moves: [Vec3, Vec3][]): Shape3D | n
       polys.push(moved);
       continue;
     }
-    const n = loop.length;
-    const rest = loop.filter((_, k) => !isMoved[k]);
-    if (rest.length < 3) {
-      // Hardly anything stays: the moved face as a fan of triangles.
-      for (let k = 1; k + 1 < n; k++) polys.push([moved[0], moved[k], moved[k + 1]]);
-      continue;
-    }
-    polys.push(rest);
-    // Each run of moved corners: from the corner before it to the corner after it.
-    for (let k = 0; k < n; k++) {
-      if (isMoved[k] || !isMoved[(k + 1) % n]) continue;
-      const run: Vec3[] = [loop[k]];
-      let j = (k + 1) % n;
-      while (isMoved[j]) {
-        run.push(moved[j]);
-        j = (j + 1) % n;
-      }
-      run.push(loop[j]);
-      for (let q = 1; q + 1 < run.length; q++) polys.push([run[0], run[q], run[q + 1]]);
-    }
+    // Cut triangles off at the moved corners (ear clipping in the face's own
+    // plane, so concave faces stay valid); what's left never moved and stays flat.
+    const { tris, rest } = clipMovedCorners(loop, isMoved);
+    if (rest.length >= 3) polys.push(rest.map((k) => loop[k]));
+    for (const t of tris) polys.push(t.map((k) => moved[k]));
   }
   if (!touched) throw new Error("That corner is no longer there");
   try {
@@ -703,10 +688,74 @@ function movePolyhedronPoints(body: Shape3D, moves: [Vec3, Vec3][]): Shape3D | n
       v = measureVolume(solid);
     }
     if (!Number.isFinite(v) || v < 1e-9 * size ** 3 || solid.faces.length < 4) return null;
+    // Faces folding through each other: not a usable solid.
+    if (!shapeValid(solid)) return null;
     return solid;
   } catch {
     return null;
   }
+}
+
+/**
+ * Ear clipping of a flat face's loop that removes the moved corners first:
+ * triangles holding a moved corner, plus the untouched rest as one polygon.
+ */
+/** OpenCascade's own check (self-crossing faces, bad edges…). */
+export function shapeValid(shape: Shape3D): boolean {
+  try {
+    const oc = getOC();
+    const check = new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false);
+    const ok = (check as unknown as { IsValid(): boolean }).IsValid();
+    check.delete();
+    return ok;
+  } catch {
+    return true;
+  }
+}
+
+function clipMovedCorners(loop: Vec3[], isMoved: boolean[]): { tris: number[][]; rest: number[] } {
+  const n = norm(polyNormal(loop));
+  const x = norm(sub(loop[1], loop[0]));
+  const y = cross(n, x);
+  const P = loop.map((p) => [dot(sub(p, loop[0]), x), dot(sub(p, loop[0]), y)] as [number, number]);
+  const area2 = (a: number, b: number, c: number) => (P[b][0] - P[a][0]) * (P[c][1] - P[a][1]) - (P[b][1] - P[a][1]) * (P[c][0] - P[a][0]);
+  const idx = loop.map((_, k) => k);
+  const tris: number[][] = [];
+  const isEar = (i: number): boolean => {
+    const m = idx.length;
+    const a = idx[(i + m - 1) % m];
+    const b = idx[i];
+    const c = idx[(i + 1) % m];
+    if (area2(a, b, c) <= 1e-12) return false;
+    for (const k of idx) {
+      if (k === a || k === b || k === c) continue;
+      if (area2(a, b, k) >= -1e-12 && area2(b, c, k) >= -1e-12 && area2(c, a, k) >= -1e-12) return false;
+    }
+    return true;
+  };
+  const clip = (i: number) => {
+    const m = idx.length;
+    tris.push([idx[(i + m - 1) % m], idx[i], idx[(i + 1) % m]]);
+    idx.splice(i, 1);
+  };
+  let guard = loop.length * 4;
+  while (idx.length > 3 && idx.some((k) => isMoved[k]) && guard-- > 0) {
+    const m = idx.length;
+    const order = idx.map((_, i) => i);
+    // Ears at a moved corner first, then ears next to one, then any ear.
+    const rank = (i: number) => (isMoved[idx[i]] ? 0 : isMoved[idx[(i + 1) % m]] || isMoved[idx[(i + m - 1) % m]] ? 1 : 2);
+    order.sort((p, q) => rank(p) - rank(q));
+    const ear = order.find(isEar);
+    if (ear === undefined) break;
+    clip(ear);
+  }
+  if (idx.some((k) => isMoved[k])) {
+    // Down to a triangle (or clipping got stuck): all of it moves.
+    if (idx.length === 3) tris.push([...idx]);
+    else for (let q = 1; q + 1 < idx.length; q++) tris.push([idx[0], idx[q], idx[q + 1]]);
+    return { tris, rest: [] };
+  }
+  return { tris, rest: idx };
 }
 
 function moveVertexByPlanes(body: Shape3D, at: Vec3, to: Vec3): Shape3D {
@@ -1221,8 +1270,13 @@ function nameOf(features: Feature[], bodyId: string): string {
   const f = features.find((x) => x.id === baseId(bodyId));
   if (!f) return "Body";
   if (f.type === "import") return f.fileName;
-  const k = bodyId.split(":")[2];
-  return k ? `Body (${f.name} #${Number(k) + 2})` : `Body (${f.name})`;
+  // A copy's id ends in its number (a copy of a copy has the first copy's id inside).
+  const parts = bodyId.split(":");
+  const k = parts.length > 1 ? Number(parts[parts.length - 1]) : NaN;
+  if (!Number.isFinite(k)) return `Body (${f.name})`;
+  // One copy: just the step's name; patterns count from #2 (the original is #1).
+  const t = f.type === "transform" ? f.op.kind : "";
+  return t === "linear" || t === "circular" ? `Body (${f.name} #${k + 2})` : `Body (${f.name})`;
 }
 
 export function errorText(err: unknown): string {

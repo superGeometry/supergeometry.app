@@ -733,7 +733,7 @@ export class SketchTool implements Tool {
             items: [
               { type: "number", label: "Size", value: memory.textSize, kind: "length", min: 0.001, onInput: (v) => ((memory.textSize = v), this.refreshPreview()) },
               // The font: the bundled ones and any imported.
-              { type: "choice", options: FONTS.map((f) => ({ id: f.id, label: f.name })), value: memory.textFont, onChange: (id) => ((memory.textFont = id), this.refreshPreview()) },
+              { type: "choice", label: "Font", list: true, options: FONTS.map((f) => ({ id: f.id, label: f.name })), value: memory.textFont, onChange: (id) => ((memory.textFont = id), this.refreshPreview()) },
               { type: "button", label: "Import font…", icon: "insert", onClick: () => void this.importFontFile() },
             ],
             onDone: () => this.commitText(),
@@ -2543,6 +2543,7 @@ export class SketchTool implements Tool {
       value: memory.fillet,
       boxAt: "beyond",
       focus: true,
+      live: true,
       onInput: (v) => v > 0 && this.applyFillet(v),
       onCommit: () => this.finishFillet(),
     });

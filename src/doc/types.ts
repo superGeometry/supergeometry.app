@@ -203,6 +203,12 @@ export interface TransformFeature extends FeatureBase {
   type: "transform";
   bodies: string[];
   copy: boolean;
+  /**
+   * A copy that stays connected to its original: a freeform copy keeps being
+   * built from the original's cage, so shaping one shapes both. Unlinked
+   * freeform copies become freeforms of their own.
+   */
+  link?: boolean;
   op:
     | { kind: "move"; translate: Vec3; rotate?: { origin: Vec3; axis: Vec3; angle: number } }
     | { kind: "scale"; center: Vec3; factor: number }

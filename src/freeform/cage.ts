@@ -219,6 +219,55 @@ export function subdivide(cage: Cage, levels = 3): Subdivided {
   return { points, grids, n };
 }
 
+/**
+ * Each subdivided point moved onto the smooth (limit) surface itself: the
+ * surface the patches are fitted through. Fitting through these instead of
+ * the control points keeps neighbouring patches meeting smoothly (no faint
+ * creases along their borders) and puts the surface where the shape really is.
+ *
+ * Inside: (n²·p + 4·Σ edge neighbours + Σ diagonal neighbours) / (n(n+5)).
+ * Along an open border: (prev + 4·p + next) / 6. Corners of a sheet stay.
+ */
+export function limitPoints(s: Subdivided): Vec3[] {
+  const P = s.points;
+  const quads: number[][] = [];
+  for (const g of s.grids) for (let i = 0; i < s.n; i++) for (let j = 0; j < s.n; j++) quads.push([g[i][j], g[i + 1][j], g[i + 1][j + 1], g[i][j + 1]]);
+  const ekey = (a: number, b: number) => (a < b ? `${a},${b}` : `${b},${a}`);
+  const edgeCount = new Map<string, number>();
+  for (const q of quads) for (let k = 0; k < 4; k++) edgeCount.set(ekey(q[k], q[(k + 1) % 4]), (edgeCount.get(ekey(q[k], q[(k + 1) % 4])) ?? 0) + 1);
+  const nbE = P.map(() => new Set<number>());
+  const nbF = P.map(() => [] as number[]);
+  const border = P.map(() => [] as number[]);
+  const faces = P.map(() => 0);
+  for (const q of quads)
+    for (let k = 0; k < 4; k++) {
+      const v = q[k];
+      const a = q[(k + 1) % 4];
+      const b = q[(k + 3) % 4];
+      nbE[v].add(a).add(b);
+      nbF[v].push(q[(k + 2) % 4]);
+      faces[v]++;
+      if (edgeCount.get(ekey(v, a)) === 1) border[v].push(a);
+      if (edgeCount.get(ekey(v, b)) === 1) border[v].push(b);
+    }
+  return P.map((p, v) => {
+    if (!faces[v]) return p;
+    const bd = [...new Set(border[v])];
+    if (bd.length) {
+      // On an open border: a corner (one face) stays; otherwise the border curve's point.
+      if (faces[v] === 1 || bd.length !== 2) return p;
+      return [0, 1, 2].map((k) => (P[bd[0]][k] + 4 * p[k] + P[bd[1]][k]) / 6) as Vec3;
+    }
+    const n = nbE[v].size;
+    if (n !== faces[v]) return p; // not a simple fan (shouldn't happen)
+    const out: Vec3 = [p[0] * n * n, p[1] * n * n, p[2] * n * n];
+    for (const e of nbE[v]) for (let k = 0; k < 3; k++) out[k] += 4 * P[e][k];
+    for (const f of nbF[v]) for (let k = 0; k < 3; k++) out[k] += P[f][k];
+    const d = n * (n + 5);
+    return [out[0] / d, out[1] / d, out[2] / d];
+  });
+}
+
 /** Triangles of the subdivided surface (for the live preview). */
 export function previewMesh(s: Subdivided): { positions: Float32Array; normals: Float32Array; indices: Uint32Array } {
   const positions = new Float32Array(s.points.flat());
@@ -342,6 +391,39 @@ export function fillLoop(cage: Cage, loop: number[]): Cage | null {
   const faces = [...cage.faces];
   for (let k = 0; k < n; k += 2) faces.push([ci, loop[k], loop[(k + 1) % n], loop[(k + 2) % n]]);
   return { verts: [...cage.verts, c], faces };
+}
+
+/**
+ * The same smooth shape with a cage twice as fine (one Catmull–Clark step:
+ * the subdivision surface doesn't change). Old points keep their indices.
+ */
+export function refineCage(cage: Cage): Cage {
+  const s = subdivide(cage, 1);
+  const faces: Cage["faces"] = [];
+  for (const g of s.grids) for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) faces.push([g[i][j], g[i + 1][j], g[i + 1][j + 1], g[i][j + 1]]);
+  return compact({ verts: s.points, faces });
+}
+
+/**
+ * Fill a hole with any number of edges. An odd hole can't be closed with
+ * quads alone (every quad adds an even number of edge ends), so the cage is
+ * first made twice as fine — same shape, and the hole then has twice as many
+ * edges. Returns the new cage and whether it had to be refined.
+ */
+export function fillHole(cage: Cage, loop: number[]): { cage: Cage; refined: boolean } | null {
+  if (loop.length >= 4 && loop.length % 2 === 0) {
+    const c = fillLoop(cage, loop);
+    return c && { cage: c, refined: false };
+  }
+  if (loop.length < 3) return null;
+  const fine = refineCage(cage);
+  // Old points keep their numbers (compact keeps the order): find the hole again by one of its points.
+  const rim = boundaryEdges(fine);
+  const loops = holeLoops(fine, new Set(rim.map(([a, b]) => ekey(a, b))));
+  const ring = loops.find((l) => l.includes(loop[0]) && l.includes(loop[1]));
+  if (!ring) return null;
+  const c = fillLoop(fine, ring);
+  return c && { cage: c, refined: true };
 }
 
 /**

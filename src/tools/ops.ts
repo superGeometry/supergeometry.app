@@ -35,7 +35,8 @@ import { faceIndexOf, oppositeFace, sourceFrame, targetOf, type AppContext, type
 import { DimWidget } from "./annotate";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
 import { DragTyping } from "./dragTyping";
-import { CopyToggle } from "./copyToggle";
+import { CopyToggle, linkMode } from "./copyToggle";
+import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 
 type Mode = "auto" | "new" | "join" | "cut";
 const MODES = [
@@ -642,10 +643,11 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     if (kind === "circular" || kind === "rotate")
       this.slots = [axisSlot(app, "Axis", () => this.axis, (a) => ((this.axis = a), this.applyAxis()))];
     this.center = o.kind === "move" && o.rotate ? o.rotate.origin : center;
+    if (copy && !existing && linkMode.on) this.feature.link = true;
     if (kind === "move") {
       this.gimbal = new Gimbal(app.view);
       const g = this.gimbal;
-      this.copyToggle = new CopyToggle(app.view, () => g.origin, (on) => ((this.feature.copy = on), this.render(), this.update()));
+      this.copyToggle = new CopyToggle(app.view, () => g.origin, (on) => ((this.feature.copy = on), (this.feature.link = on && linkMode.on ? true : undefined), this.render(), this.update()));
     }
   }
 
@@ -664,9 +666,30 @@ export class TransformOp extends FeatureOp<TransformFeature> {
   /** A finished copy is selected, gimbal and all, so the next drag copies it again. */
   protected done(): void {
     const f = this.feature;
-    const copied = this.kind === "move" && f.copy && this.ready() && !this.existing;
-    super.done();
-    if (copied) this.app.setSelection(f.bodies.map((b) => ({ kind: "body" as const, body: `${f.id}:${b}:0` })));
+    const copied = f.copy && this.ready() && !this.existing && (this.kind === "move" || this.kind === "rotate" || this.kind === "translate" || this.kind === "mirror" || this.kind === "scale");
+    if (!copied) return super.done();
+    if (f.link) f.link = true;
+    else delete f.link;
+    // Unlinked copies of freeforms: freeforms of their own (editing one leaves the other alone).
+    let doc = { ...this.app.store.doc, features: [...this.app.store.features, f] };
+    const ids = new Map<string, string>();
+    if (!f.link) {
+      const tracked = freeformBodies(doc.features);
+      for (const b of f.bodies) {
+        const body = `${f.id}:${b}:0`;
+        if (!tracked.has(body)) continue;
+        const out = detachFreeformCopy(doc, body, this.app.store.newIdentity("freeform").id + ids.size);
+        if (out) ((doc = out.doc), ids.set(body, out.id));
+      }
+    }
+    this.app.store.commit((d) => {
+      d.features = doc.features;
+      d.names = doc.names;
+      d.hidden = doc.hidden;
+      if (doc.colors) d.colors = doc.colors;
+    });
+    this.app.setTool(null);
+    this.app.setSelection(f.bodies.map((b) => ({ kind: "body" as const, body: ids.get(`${f.id}:${b}:0`) ?? `${f.id}:${b}:0` })));
   }
 
   protected hint(): string {
@@ -697,24 +720,37 @@ export class TransformOp extends FeatureOp<TransformFeature> {
   protected items(): PanelItem[] {
     const o = this.feature.op;
     const up = () => this.update();
-    const copy: PanelItem = { type: "toggle", label: "Copy", value: this.feature.copy, onChange: (v) => ((this.feature.copy = v), this.render(), up()) };
+    const copyToggle: PanelItem = { type: "toggle", label: "Copy", value: this.feature.copy, onChange: (v) => ((this.feature.copy = v), this.render(), up()) };
+    // With Copy on: Link keeps the copy connected to its original (a freeform
+    // copy then changes when either is shaped); off, it is a body of its own.
+    const link: PanelItem = {
+      type: "toggle",
+      label: "Link",
+      value: !!this.feature.link,
+      onChange: (v) => {
+        linkMode.on = v;
+        this.feature.link = v;
+        this.render();
+      },
+    };
+    const copy: PanelItem[] = this.feature.copy && !this.existing ? [copyToggle, link] : [copyToggle];
     switch (o.kind) {
       case "scaleXYZ":
         return [];
       case "move":
-        if (this.kind === "translate") return [...(["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `op.translate.${i}`, "length")), copy];
-        if (this.kind === "rotate") return [{ type: "number", label: "Angle", value: o.rotate?.angle ?? 0, kind: "angle", onInput: (v) => ((o.rotate = { ...(o.rotate ?? { origin: [0, 0, 0], axis: [0, 0, 1] }), angle: v }), up()) }, copy];
+        if (this.kind === "translate") return [...(["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `op.translate.${i}`, "length")), ...copy];
+        if (this.kind === "rotate") return [{ type: "number", label: "Angle", value: o.rotate?.angle ?? 0, kind: "angle", onInput: (v) => ((o.rotate = { ...(o.rotate ?? { origin: [0, 0, 0], axis: [0, 0, 1] }), angle: v }), up()) }, ...copy];
         return [
           ...(["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `op.translate.${i}`, "length")),
           o.rotate
             ? this.num(`Rotate ${axisName(o.rotate.axis)}`, "op.rotate.angle", "angle")
             : { type: "number", label: "Rotate Z", value: 0, kind: "angle", onInput: (v) => ((o.rotate = { origin: this.center, axis: [0, 0, 1], angle: v }), up()) },
-          copy,
+          ...copy,
         ];
       case "scale":
-        return [this.num("Factor", "op.factor", "number", { min: 0.0001 }), copy];
+        return [this.num("Factor", "op.factor", "number", { min: 0.0001 }), ...copy];
       case "mirror":
-        return [copy];
+        return [...copy];
       case "linear":
         return [
           this.num("Count", "op.count", "int", { min: 2 }),
@@ -813,9 +849,9 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     this.typing.reset();
     this.app.ui.setLabel(0, 0, null);
     this.gimbal?.setHot(null);
-    // Copy on: letting go makes the copy (and selects it), so the next drag copies again.
-    if (dragged && this.kind === "move" && this.feature.copy && !this.existing && this.ready()) return this.done();
-    // The rotate field's label names the axis just used.
+    // Letting go keeps the tool and its panel: change the values (Copy, Link…),
+    // drag again, or tap empty space / Done to finish.
+    void dragged;
     this.render();
   }
 

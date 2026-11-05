@@ -2,6 +2,7 @@ import { DocStore, parseProject } from "./doc/store";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
 import { createVariable, editVariables, insertFile, insertImage } from "./io/insert";
+import { freeformBodies } from "./doc/freeformCopies";
 import { KernelClient } from "./kernel/client";
 import type { ExportFormat, RegenResult } from "./kernel/protocol";
 import { settings } from "./settings";
@@ -26,6 +27,7 @@ import { PivotButton } from "./ui/pivot";
 import { HelpPanel } from "./ui/help";
 import { icons } from "./ui/icons";
 import { Updates } from "./ui/update";
+import { Install } from "./ui/install";
 import { exportThreeMF } from "./io/threemf";
 import { sketchToDXF } from "./io/dxf";
 import { isHeadset } from "./device";
@@ -62,8 +64,9 @@ export class App implements AppContext {
     const busy = document.createElement("div");
     busy.id = "busy";
     busy.hidden = true;
-    busy.innerHTML = `<span class="spinner"></span><span>Working…</span>`;
+    busy.innerHTML = `<span class="spinner"></span><span>Working…</span><button type="button" class="busy-stop" title="Stop — takes back the last change">Stop</button>`;
     document.body.append(busy);
+    busy.querySelector(".busy-stop")!.addEventListener("click", () => this.stopWork());
     let busyTimer = 0;
     this.kernel.onBusy = (on) => {
       clearTimeout(busyTimer);
@@ -79,6 +82,7 @@ export class App implements AppContext {
     this.pinLayer = new PinLayer(this.view);
     // ƒx buttons on number fields create named variables.
     this.ui.variableFactory = (current) => createVariable(this, current);
+    this.ui.variableNames = () => this.store.doc.variables.map((v) => v.name);
     settings.onChange(() => this.showPins());
     this.items = new ItemsPanel(this.store, {
       selectBody: (id) => (this.setTool(null), this.setSelection([{ kind: "body", body: id }])),
@@ -229,6 +233,21 @@ export class App implements AppContext {
     return [...(this.store.find<SketchFeature>(id)?.entities ?? []), ...(this.result?.sketchBoundaries[id] ?? [])];
   }
 
+  /**
+   * The Stop button by the spinner: the engine drops what it's doing and the
+   * change that started it is taken back (a live preview is cancelled; a
+   * committed change is undone).
+   */
+  private stopWork(): void {
+    const running = this.kernel.running;
+    const committed = !running || running === this.store.doc.features;
+    this.kernel.stop();
+    if (this.tool !== this.selectTool && !(this.tool instanceof SketchTool)) this.setTool(null);
+    if (committed && this.store.canUndo) this.store.undo();
+    else void this.regenerate();
+    this.ui.toast("Stopped — the last change was taken back");
+  }
+
   async preview(features: Feature[]): Promise<RegenResult | null> {
     const r = await this.kernel.regenerate(features);
     if (r) this.apply(r, features);
@@ -331,8 +350,10 @@ export class App implements AppContext {
   private openBodies(r: RegenResult | null) {
     return (r?.bodies ?? []).filter((b) => {
       if (!b.openEdges?.length) return false;
-      const f = this.store.find(b.id.split(":")[0]);
-      return !(f?.type === "freeform" && f.surface && !f.thickness);
+      // A surface on purpose (or a copy of one) isn't meant to be closed.
+      const f = this.store.find(b.id);
+      const ff = f?.type === "freeform" ? f : freeformBodies(this.store.features).get(b.id)?.feature;
+      return !(ff?.surface && !ff.thickness);
     });
   }
 
@@ -473,8 +494,17 @@ export class App implements AppContext {
         label: "Insert",
         icon: "insert",
         children: [
-          { id: "var", label: "Create Variable", icon: "variable", run: () => void createVariable(this) },
-          { id: "vars", label: "Variables", icon: "variable", sub: `${this.store.doc.variables.length} defined`, run: () => void editVariables(this) },
+          {
+            // One entry: make a new one, or see and change the ones there are.
+            id: "variables",
+            label: "Variables",
+            icon: "variable",
+            sub: `${this.store.doc.variables.length} defined`,
+            children: [
+              { id: "var", label: "New Variable", icon: "variable", run: () => void createVariable(this) },
+              { id: "vars", label: "Edit Variables", icon: "variable", sub: `${this.store.doc.variables.length} defined`, run: () => void editVariables(this) },
+            ],
+          },
           { id: "image", label: "Image", icon: "image", run: () => void insertImage(this) },
           { id: "file", label: "File", icon: "file", sub: "STEP, STL, OBJ, DXF, SVG", run: () => void insertFile(this) },
           { id: "project", label: "Project", icon: "file", sub: ".super", run: () => void insertFile(this) },
@@ -662,6 +692,11 @@ export class App implements AppContext {
     // A newer build out? A notice offers to update; More → Reset cache does it now.
     this.updates = new Updates(() => this.store.flush());
     moreItem("m-update", () => void this.confirmReset());
+    // Phones and tablets: an offer to add the app to the home screen (More → Install app too).
+    const install = new Install((t) => this.ui.toast(t));
+    const inst = document.getElementById("m-install")!;
+    document.getElementById("more-btn")!.addEventListener("click", () => (inst.hidden = !install.available));
+    moreItem("m-install", () => install.offer(true));
     // Help: a panel explaining every button (toggle it from More → Help).
     const help = new HelpPanel();
     moreItem("m-help", () => help.toggle());

@@ -43,7 +43,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "transform", name: "Transform", text: "Move/Rotate, Scale, Translate (from a point to a point), Mirror, Rotate Around Axis and Patterns (copies in a row or around a centre)." },
       { icon: "union", name: "Union / Subtract / Intersect", text: "Combine bodies, cut one from another, or keep only where they overlap. Union needs the bodies to touch." },
       { icon: "construct", name: "Construct", text: "Helper planes (offset, midplane) and axes to sketch or mirror on." },
-      { icon: "insert", name: "Insert", text: "Variables (named sizes used in any field), images to trace over, STEP/STL/SVG/DXF files." },
+      { icon: "insert", name: "Insert", text: "Variables (New Variable, or Edit Variables to see and change them), images to trace over, STEP/STL/SVG/DXF files." },
     ],
   },
   {
@@ -52,7 +52,8 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     items: [
       { icon: "offsetFace", name: "Face", text: "Drag the arrow to push/pull it (its neighbours follow), Move/Rotate it, Scale it, Replace it with another face's plane, sketch on it, or delete it." },
       { icon: "fillet", name: "Edge", text: "Drag the dot outward for a rounded Fillet, inward for a Chamfer; or move the edge (the faces tilt)." },
-      { icon: "move", name: "Body", text: "The gimbal moves (arrows), slides (squares) and turns (rings) it. The Copy switch makes copies as you drag." },
+      { icon: "move", name: "Body", text: "The gimbal moves (arrows), slides (squares) and turns (rings) it. With Copy on, a drag makes a copy; the panel stays when you let go so you can type exact values. A copy is its own body; switch Link on to keep a freeform copy shaped like its original." },
+      { icon: "copy", name: "Sketch → Copy to Plane", text: "Tap a sketch region, then Copy to Plane: drag the blue arrow to a parallel plane (or red/green to slide it), or type the distance. Turn Copy off to move the sketch instead." },
       { icon: "color", name: "Colour", text: "Pick a colour for the selected bodies." },
     ],
   },

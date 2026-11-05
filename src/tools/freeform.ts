@@ -2,14 +2,15 @@
 // edges or faces (Shift adds), then drag the gimbal — or type a value while
 // dragging. The smooth surface updates live; Done turns it into a body.
 
-import { BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2 } from "three";
+import { BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
 import type { Feature, FreeformFeature, TransformFeature, Vec3 } from "../doc/types";
-import { boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, fillLoop, holeLoops, isClosed, previewMesh, primitiveCage, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
+import { boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, fillHole, holeLoops, isClosed, limitPoints, previewMesh, primitiveCage, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
 import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
 import { dotMaterial } from "../view/viewport";
+import { isCoarse } from "../device";
 import { DragTyping } from "./dragTyping";
 import { Gimbal, GIMBAL_AXES, type GimbalPart } from "./gimbal";
 import { axisDrag } from "./handles";
@@ -41,11 +42,11 @@ export class FreeformTool implements Tool {
   // Scene objects.
   private surface = new Mesh(new BufferGeometry(), new MeshStandardMaterial({ color: 0xb9c6dc, roughness: 0.5, metalness: 0.05, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
   private lines = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x5f8fe8, transparent: true, opacity: 0.85, depthTest: false }));
-  private dots = new Points(new BufferGeometry(), dotMaterial({ color: 0xffffff, size: 8 }));
+  private dots = new Points(new BufferGeometry(), dotMaterial({ color: 0xffffff, size: isCoarse ? 13 : 9 }));
   private marks = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: SEL, depthTest: false, linewidth: 2 }));
-  private markDots = new Points(new BufferGeometry(), dotMaterial({ color: SEL, size: 12 }));
+  private markDots = new Points(new BufferGeometry(), dotMaterial({ color: SEL, size: isCoarse ? 16 : 12 }));
   private hoverMarks = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: HOVER, depthTest: false }));
-  private hoverDots = new Points(new BufferGeometry(), dotMaterial({ color: HOVER, size: 12 }));
+  private hoverDots = new Points(new BufferGeometry(), dotMaterial({ color: HOVER, size: isCoarse ? 16 : 12 }));
 
   constructor(
     private app: AppContext,
@@ -64,9 +65,11 @@ export class FreeformTool implements Tool {
       this.surfaceSheet = from.primitive === "plane";
     }
     this.typing = new DragTyping(app);
-    this.lines.renderOrder = 11;
-    this.dots.renderOrder = 12;
-    for (const o of [this.marks, this.markDots, this.hoverMarks, this.hoverDots]) o.renderOrder = 13;
+    // The cage on top of everything (planes, other bodies, the gimbal).
+    this.lines.renderOrder = 68;
+    this.dots.renderOrder = 70;
+    for (const o of [this.marks, this.hoverMarks]) o.renderOrder = 69;
+    for (const o of [this.markDots, this.hoverDots]) o.renderOrder = 71;
   }
 
   get editingId(): string | undefined {
@@ -210,8 +213,14 @@ export class FreeformTool implements Tool {
   }
 
   private fillHoles(loops: number[][]): void {
-    const next = loops.length === 2 ? bridgeLoops(this.cage, loops[0], loops[1]) : fillLoop(this.cage, loops[0]);
-    if (!next) return this.app.ui.toast(loops.length === 2 ? "Bridging needs two holes with the same number of edges" : "Fill needs a hole with an even number of edges");
+    let next: Cage | null;
+    if (loops.length === 2) next = bridgeLoops(this.cage, loops[0], loops[1]);
+    else {
+      const filled = fillHole(this.cage, loops[0]);
+      next = filled?.cage ?? null;
+      if (filled?.refined) this.app.ui.toast("The cage got twice as fine so this hole could be closed — the shape stays the same");
+    }
+    if (!next) return this.app.ui.toast(loops.length === 2 ? "Bridging needs two holes with the same number of edges" : "That hole can't be filled");
     this.cage = next;
     this.picks = [];
     this.rebuild();
@@ -239,6 +248,18 @@ export class FreeformTool implements Tool {
   }
   private ray = new Raycaster();
 
+  /** Is a cage point well behind the smooth surface, seen from the eye? */
+  private hiddenPoint(q: Vec3, eye: Vec3): boolean {
+    const d = sub(q, eye);
+    const L = len(d);
+    if (L < 1e-9) return false;
+    this.ray.set(new Vector3(...eye), new Vector3(d[0] / L, d[1] / L, d[2] / L));
+    const hit = this.ray.intersectObject(this.surface, false)[0]?.distance ?? Infinity;
+    const g = this.surface.geometry.boundingSphere;
+    const margin = (g?.radius ?? 10) * 0.15;
+    return hit < L - margin;
+  }
+
   /**
    * Nearest cage point, else edge, else the frontmost face under the pointer.
    * Points and edges behind the smooth surface (the far side) don't count.
@@ -246,15 +267,20 @@ export class FreeformTool implements Tool {
   private pickAt(p: ToolPointer): Pick | null {
     const view = this.app.view;
     const scr = this.cage.verts.map((v) => view.toScreen(v));
-    const tol = Math.max(10, p.tol * 1.3);
+    // Points are drawn on top of everything, and are picked that way too: a
+    // generous reach, and one hidden behind the surface still counts (a point
+    // in plain view nearby wins over it).
+    const tol = Math.max(16, p.tol * 1.8);
     const eye = view.cam.camera.position.toArray() as Vec3;
     const wall = this.surfaceDepth(p);
     const visible = (q: Vec3) => len(sub(q, eye)) < wall + 1e-6;
     let best: { d: number; i: number } | null = null;
     scr.forEach((s, i) => {
-      if (!s || !visible(this.cage.verts[i])) return;
+      if (!s) return;
       const d = Math.hypot(s[0] - p.x, s[1] - p.y);
-      if (d < tol && (!best || d < best.d)) best = { d, i };
+      if (d >= tol) return;
+      const score = d + (this.hiddenPoint(this.cage.verts[i], eye) ? tol : 0);
+      if (!best || score < best.d) best = { d: score, i };
     });
     if (best) return { kind: "vert", i: (best as { i: number }).i };
     let bestE: { d: number; e: [number, number] } | null = null;
@@ -289,8 +315,18 @@ export class FreeformTool implements Tool {
   }
 
   tap(p: ToolPointer, count = 1): void {
-    // Double-tap: finish and select the whole body (e.g. to move or colour it).
+    // Double-tap on empty space: finish and select the whole body (e.g. to move
+    // or colour it). On a point, edge or face it's just quick tapping: keep it picked.
     if (count >= 2) {
+      const again = this.pickAt(p);
+      if (again) {
+        if (!this.picks.some((x) => JSON.stringify(x) === JSON.stringify(again))) {
+          if (p.shift || p.add) this.picks.push(again);
+          else this.picks = [again];
+          this.selectionChanged();
+        }
+        return;
+      }
       const id = this.done();
       if (id) this.app.setSelection([{ kind: "body", body: id }]);
       return;
@@ -343,6 +379,16 @@ export class FreeformTool implements Tool {
   down(p: ToolPointer): boolean {
     const part = this.gimbal?.hit(p);
     if (!part || !this.gimbal) return false;
+    // Another cage point right under the pointer: that's a tap on it, not a drag
+    // of the gimbal's middle (arrows and rings still drag).
+    if (part.kind === "center" || part.kind === "plane") {
+      const hit = this.pickAt(p);
+      const sel = new Set(this.selectedVerts());
+      if (hit?.kind === "vert" && !sel.has(hit.i)) {
+        const s = this.app.view.toScreen(this.cage.verts[hit.i]);
+        if (s && Math.hypot(s[0] - p.x, s[1] - p.y) < Math.max(10, p.tol)) return false;
+      }
+    }
     // One point turned about itself wouldn't move: it turns about the shape's centre instead.
     const ids = this.selectedVerts();
     const center = part.kind === "ring" && ids.length === 1 ? this.centroid(this.cage.verts.map((_, i) => i)) : this.gimbal.origin;
@@ -459,7 +505,9 @@ export class FreeformTool implements Tool {
   // --------------------------------------------------------------- drawing
 
   private rebuild(): void {
-    const m = previewMesh(subdivide(this.cage, 3));
+    // The same smooth surface the body will have (points on the limit surface).
+    const sub3 = subdivide(this.cage, 3);
+    const m = previewMesh({ ...sub3, points: limitPoints(sub3) });
     const g = this.surface.geometry;
     g.setAttribute("position", new BufferAttribute(m.positions, 3));
     g.setAttribute("normal", new BufferAttribute(m.normals, 3));

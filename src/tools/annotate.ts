@@ -98,6 +98,8 @@ export interface DimWidgetOptions {
   angle?: boolean;
   /** No dimension line (just the box, e.g. at the corner between two lines). */
   noLine?: boolean;
+  /** The value shows as it's typed, before ↵ (a preview that is safe to redo on every key). */
+  live?: boolean;
   /** Variables to choose from (a ƒx menu before the pin): the value becomes that variable. */
   variables?: string[];
   onVariable?(name: string): void;
@@ -141,6 +143,8 @@ export class DimWidget {
     }
     this.input.inputMode = "decimal";
     numpadInput(this.input);
+    // Typing on the numpad previews the value as it goes (↵ still applies it).
+    if (opts.live) this.input.dataset.live = "1";
     this.input.spellcheck = false;
     this.angle = !!opts.angle;
     this.line.group.visible = !opts.noLine;

@@ -180,7 +180,9 @@ revolve, sweep or loft. Overlapping shapes split into separate regions.
   curved ones included; fillets next to it are kept. Move/Rotate, Scale,
   Replace (onto another face's plane) or Delete a face.
 - **Edges and corners** — move them; the faces around them tilt to follow.
-- **Transform** — Move/Rotate (gimbal, with a Copy switch), Scale (uniform,
+- **Transform** — Move/Rotate (gimbal, with a Copy switch: after a drag the
+  panel stays for exact values; copies are independent bodies, **Link** keeps a
+  freeform copy following its original), Scale (uniform,
   or X/Y/Z on freeform bodies), Translate (from a point to a point), Mirror,
   Rotate Around Axis, Patterns.
 - **Union / Subtract / Intersect** — combine bodies (they need to touch to
@@ -188,7 +190,11 @@ revolve, sweep or loft. Overlapping shapes split into separate regions.
 - **Freeform** — organic shapes: start from a box, sphere, cylinder or plane
   and pull its cage points, edges and faces. Delete faces to open it up; tap
   an edge of a hole → **Fill hole** to close it again, or **Thickness…** to
-  turn the open shape into a solid wall.
+  turn the open shape into a solid wall. A hole with an odd number of edges
+  is closed by making the cage twice as fine first (the shape doesn't change).
+- **Copy a sketch to another plane** — tap a region of a finished sketch →
+  **Copy to Plane**: drag the blue arrow to a parallel plane, or type the
+  distance (Copy off moves it instead).
 - **Construct** — helper planes (offset — drag its arrow — and midplane)
   and axes.
 - **Section View** — cut the view (not the part) to look inside.
@@ -201,7 +207,7 @@ revolve, sweep or loft. Overlapping shapes split into separate regions.
 - While dragging or drawing, **just type a number** — it goes into the value
   box. Enter confirms. Units come from **Units & grid** (mm, cm, m, in, ft);
   you can also type units (`2in`, `5cm`) and maths (`40/3 + 2`).
-- **Variables** (Insert → Create Variable) are named sizes like `wall = 3`.
+- **Variables** (Insert → Variables → New Variable / Edit Variables) are named sizes like `wall = 3`.
   Type them into any field (`wall * 2`) or pick them from the **ƒx** menu
   next to a value. Change the variable later and everything using it updates.
 - The **on-screen numpad** (the keypad button in the right column — tap it
@@ -245,8 +251,9 @@ change, it's marked and the reason is shown.
 
 - Tools show as icons: press and hold one to see its name.
 - With a pen, fingers are ignored while the pen touches the screen.
-- iPad / Android: **More → Fullscreen** gives the whole screen. On iPhone,
-  *Share → Add to Home Screen* opens it like an app.
+- iPad / Android: **More → Fullscreen** gives the whole screen. On phones and
+  tablets the app offers to be **installed on the home screen** (or More →
+  Install app); on iPhone/iPad it's *Share → Add to Home Screen*.
 - Meta Quest: open the site in the Quest browser; buttons and pick distances
   are bigger, and the numpad is on.
 
@@ -270,7 +277,8 @@ change, it's marked and the reason is shown.
 - **Something is hidden**: check the eyes in **Items**, and whether
   **Isolate** is on.
 - **A "Working…" spinner**: the geometry engine is busy; complex steps can
-  take a moment.
+  take a moment. **Stop** next to it drops the work and takes back the change
+  that started it (like an undo).
 - **A change you expected isn't there yet**: when a newer version is out, a
   notice offers to update. **More → Reset cache & update** loads the newest
   version right away (your project is kept).

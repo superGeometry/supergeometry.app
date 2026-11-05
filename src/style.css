@@ -1024,6 +1024,20 @@ body.sketching .right-btn.sketch-only {
   border-radius: 8px;
   padding: 2px;
 }
+.choice-list select {
+  max-width: 180px;
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #2b2e34;
+  color: var(--text);
+  font: inherit;
+}
+.choice {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
 .choice button {
   padding: 7px 10px;
   border-radius: 6px;
@@ -1558,6 +1572,21 @@ body.items-open #bottom-left {
   z-index: 60;
   pointer-events: none;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+#busy .busy-stop {
+  margin-left: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 90, 90, 0.55);
+  background: rgba(255, 70, 70, 0.16);
+  color: #ffb3b3;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+#busy .busy-stop:hover {
+  background: rgba(255, 70, 70, 0.3);
 }
 #busy[hidden] {
   display: none;

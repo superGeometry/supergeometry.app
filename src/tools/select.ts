@@ -10,8 +10,10 @@ import { DimWidget } from "./annotate";
 import { Gimbal, IN_PLANE } from "./gimbal";
 import { Handle } from "./handles";
 import { CopyToggle, copyMode } from "./copyToggle";
+import { SketchMoveOp } from "./sketchMove";
 import { FreeformTool } from "./freeform";
 import { isClosed } from "../freeform/cage";
+import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
@@ -226,7 +228,7 @@ export class SelectTool implements Tool {
     } else if (first.kind === "vertex" && sel.length === 1) {
       const v = this.app.view.vertexOf(first.body, first.vertex);
       // A freeform's points are moved in Edit Freeform, so no gimbal here.
-      if (v && this.app.store.find<FreeformFeature>(first.body)?.type !== "freeform") {
+      if (v && !this.freeformOf(first.body)) {
         this.gimbal = new Gimbal(this.app.view);
         this.gimbal.setCenter(v);
       }
@@ -257,8 +259,11 @@ export class SelectTool implements Tool {
     const head: ToolItem[] = [{ id: "deselect", label: "Deselect All", icon: "deselect", shortcut: "Esc", sub: `${sel.length} ${label(sel[0], sel.length)}`, run: () => this.app.setSelection([]) }];
     // A freeform body (or a face/edge/point of one): open its cage, picking the spot that was tapped.
     const first = sel[0];
-    const ff = "body" in first ? this.app.store.find<FreeformFeature>(first.body) : undefined;
-    if (ff?.type === "freeform") head.push({ id: "editFreeform", label: "Edit Freeform", icon: "freeform", shortcut: "F2", run: () => this.editFreeform(ff) });
+    const ffBody = "body" in first ? first.body : "";
+    const ff = ffBody ? this.freeformOf(ffBody) : undefined;
+    // Editing a copy: it becomes its own freeform first (unless it is linked).
+    const own = () => this.ownFreeform(ffBody) ?? ff!;
+    if (ff?.type === "freeform") head.push({ id: "editFreeform", label: "Edit Freeform", icon: "freeform", shortcut: "F2", run: () => this.editFreeform(own()) });
     // An open freeform (faces deleted, or a surface): close a hole, or give it a thickness.
     if (ff?.type === "freeform" && !isClosed(ff.cage)) {
       if (first.kind === "edge") {
@@ -268,14 +273,14 @@ export class SelectTool implements Tool {
           label: "Fill hole",
           icon: "fill",
           run: () => {
-            const tool = new FreeformTool(this.app, { feature: ff });
+            const tool = new FreeformTool(this.app, { feature: own() });
             this.app.setTool(tool);
             if (!tool.fillHoleAt(at)) this.app.ui.toast("No hole there to fill");
             else this.app.ui.toast("Hole filled — Done keeps it");
           },
         });
       }
-      head.push({ id: "thicken", label: "Thickness…", icon: "shell", run: () => this.app.setTool(new FreeformTool(this.app, { feature: ff })) });
+      head.push({ id: "thicken", label: "Thickness…", icon: "shell", run: () => this.app.setTool(new FreeformTool(this.app, { feature: own() })) });
     }
     switch (sel[0].kind) {
       case "profile":
@@ -330,6 +335,8 @@ export class SelectTool implements Tool {
     return [
       { id: "sketch", label: "Sketch", icon: "sketch", run: inSketch("line") },
       { id: "move", label: "Move/Rotate", icon: "move", shortcut: "M", run: inSketch("move") },
+      // The whole sketch to a parallel plane (or slid in its own), as a copy or moved.
+      { id: "copySketch", label: "Copy to Plane", icon: "copy", sub: "Gimbal: parallel plane", run: () => frame && app.setTool(new SketchMoveOp(app, sketchId, frame.base, true)) },
       { id: "scale", label: "Scale Sketch", icon: "scale", run: inSketch("scale") },
       { id: "patl", label: "Pattern – Linear", icon: "patternLinear", run: inSketch("patternLinear") },
       { id: "patc", label: "Pattern – Circular", icon: "patternCircular", run: inSketch("patternCircular") },
@@ -710,6 +717,32 @@ export class SelectTool implements Tool {
 
   private lastTap: ToolPointer | null = null;
 
+  /** The freeform a body is made from (its own, or the one a copy was made of). */
+  private freeformOf(body: string): FreeformFeature | undefined {
+    const f = this.app.store.find<FreeformFeature>(body);
+    if (f?.type === "freeform") return f;
+    return freeformBodies(this.app.store.features).get(body)?.feature;
+  }
+
+  /**
+   * The freeform to edit for a body. A copy that isn't linked to its original
+   * becomes its own freeform first, so editing it leaves the original alone.
+   */
+  private ownFreeform(body: string): FreeformFeature | undefined {
+    const f = this.app.store.find<FreeformFeature>(body);
+    if (f?.type === "freeform") return f;
+    const id = this.app.store.newIdentity("freeform").id;
+    const out = detachFreeformCopy(this.app.store.doc, body, id);
+    if (!out) return freeformBodies(this.app.store.features).get(body)?.feature;
+    this.app.store.commit((d) => {
+      d.features = out.doc.features;
+      d.hidden = out.doc.hidden;
+      d.names = out.doc.names;
+      if (out.doc.colors) d.colors = out.doc.colors;
+    });
+    return this.app.store.find<FreeformFeature>(id);
+  }
+
   private editFreeform(ff: FreeformFeature): void {
     const at = this.lastTap;
     const tool = new FreeformTool(this.app, { feature: ff });
@@ -720,8 +753,8 @@ export class SelectTool implements Tool {
   /** Delete faces/edges/vertices of one body; tells the user when it can't heal. */
   private deleteGeom(body: string, what: { faces?: FaceRef[]; edges?: EdgeRef[]; vertices?: Vec3[] }): void {
     // A freeform body: the cage loses the faces there, and stays open for a thickness.
-    const ff = this.app.store.find<FreeformFeature>(body);
-    if (ff?.type === "freeform") {
+    const ff = this.freeformOf(body) && this.ownFreeform(body);
+    if (ff) {
       const tool = new FreeformTool(this.app, { feature: ff });
       this.app.setTool(tool);
       if (what.faces?.length) tool.deleteAt(what.faces.map((f) => f.center), "face");

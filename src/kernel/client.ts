@@ -3,16 +3,22 @@ import type { Envelope, ExportFormat, RegenResult, Request, Response } from "./p
 
 /** Promise-based wrapper around the kernel worker. */
 export class KernelClient {
-  private worker: Worker;
+  private worker!: Worker;
   private nextId = 1;
   private pending = new Map<number, (r: Response) => void>();
-  readonly ready: Promise<void>;
+  ready!: Promise<void>;
+  /** The features the running regeneration is for (null when idle). */
+  running: Feature[] | null = null;
 
   // Coalesce regenerations: while one runs, only the most recent request waits.
   private regenRunning = false;
   private regenQueued: { features: Feature[]; resolve: (r: RegenResult | null) => void } | null = null;
 
   constructor() {
+    this.start();
+  }
+
+  private start(): void {
     this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.worker.onmessage = (e: MessageEvent<Envelope<Response>>) => {
       const cb = this.pending.get(e.data.id);
@@ -22,6 +28,23 @@ export class KernelClient {
     this.ready = this.call({ type: "init" }).then((r) => {
       if (r.type === "error") throw new Error(r.message);
     });
+  }
+
+  /**
+   * Stop whatever the engine is working on (it can't be interrupted mid-way:
+   * the worker is thrown away and a fresh one started). Waiting calls end empty.
+   */
+  stop(): void {
+    this.worker.terminate();
+    const waiting = [...this.pending.values()];
+    this.pending.clear();
+    this.regenQueued?.resolve(null);
+    this.regenQueued = null;
+    for (const cb of waiting) cb({ type: "error", message: "Stopped" } as Response);
+    this.regenRunning = false;
+    this.running = null;
+    this.start();
+    this.onBusy?.(false);
   }
 
   /** Told when the kernel starts and stops being busy (to show a busy indicator). */
@@ -57,7 +80,12 @@ export class KernelClient {
   private async runRegen(features: Feature[], resolve: (r: RegenResult | null) => void) {
     this.regenRunning = true;
     await this.ready;
+    this.running = features;
+    const worker = this.worker;
     const r = await this.call({ type: "regenerate", features });
+    // Stopped meanwhile: the fresh worker has its own queue.
+    if (worker !== this.worker) return resolve(null);
+    this.running = null;
     resolve(r.type === "regenerated" ? r.result : null);
     if (r.type === "error") console.error(r.message);
     this.regenRunning = false;

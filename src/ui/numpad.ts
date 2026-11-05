@@ -5,7 +5,7 @@
 // It doesn't rely on keyboard focus (iPad Safari moves focus away from the
 // box as soon as a button is tapped): it keeps its own target and caret,
 // answers on the key's release, and only closes on ↵, or a tap elsewhere.
-// Nothing is applied while typing: the box hears the value on ↵.
+// Nothing is applied while typing: ↵ applies it (tool panel boxes preview as you type).
 
 import { settings } from "../settings";
 
@@ -160,6 +160,9 @@ class Numpad {
     this.selStart = s;
     this.selEnd = e;
     this.showSelection();
+    // Tool panel boxes (fillet radius, extrude distance…) show the result while
+    // typing — a preview only: ↵ is what applies it. Boxes on the sketch wait for ↵.
+    if (t.closest("#panel") || t.dataset.live === "1") t.dispatchEvent(new Event("input", { bubbles: true }));
   }
 }
 

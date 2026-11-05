@@ -2,9 +2,11 @@
 import assert from "node:assert/strict";
 import opencascade from "replicad-opencascadejs";
 import { measureVolume, setOC, type Shape3D } from "replicad";
-import { boundaryEdges, boxCage, bridgeLoops, cageEdgeKey, cageEdges, cylinderCage, deleteFaces, fillLoop, holeLoops, isClosed, planeCage, sphereCage, subdivide } from "../src/freeform/cage";
+import { fillHole, refineCage, boundaryEdges, boxCage, bridgeLoops, cageEdgeKey, cageEdges, cylinderCage, deleteFaces, fillLoop, holeLoops, isClosed, planeCage, sphereCage, subdivide } from "../src/freeform/cage";
 import { cageToShape } from "../src/kernel/freeform";
 import { evalSurface, interpolateGrid } from "../src/freeform/bspline";
+import { detachFreeformCopy, freeformBodies } from "../src/doc/freeformCopies";
+import { emptyDoc, type Feature } from "../src/doc/types";
 
 setOC(await (opencascade as unknown as () => Promise<any>)());
 
@@ -109,6 +111,62 @@ const checks: [string, () => string][] = [
     const sheet = cageToShape(planeCage([60, 60], 4)) as Shape3D;
     assert.equal(sheet.faces.length, 16);
     return `${sheet.faces.length} faces, ${cageEdges(planeCage()).length} cage edges`;
+  }],
+  ["a copy of a freeform becomes its own freeform (and a copy of that copy follows)", () => {
+    const cage = planeCage([60, 60], 4);
+    const doc = {
+      ...emptyDoc(),
+      features: [
+        { id: "ff", name: "Freeform", type: "freeform", cage, surface: true },
+        { id: "c1", name: "Copy 01", type: "transform", bodies: ["ff"], copy: true, op: { kind: "move", translate: [0, 0, 40], rotate: { origin: [0, 0, 0], axis: [0, 0, 1], angle: 90 } } },
+        { id: "c2", name: "Copy 02", type: "transform", bodies: ["c1:ff:0"], copy: true, op: { kind: "move", translate: [0, 0, 50] } },
+      ] as Feature[],
+      names: { "c1:ff:0": "Lid", "c2:c1:ff:0:0": "Top" },
+    };
+    const before = freeformBodies(doc.features);
+    const out = detachFreeformCopy(doc, "c1:ff:0", "ff2")!;
+    assert.ok(out);
+    const f = out.doc.features;
+    assert.deepEqual(f.map((x) => x.id), ["ff", "ff2", "c2"]);
+    const own = f[1] as Extract<Feature, { type: "freeform" }>;
+    // The new cage sits where the copy was (turned 90° about z, 40 up).
+    const p = own.cage.verts[0];
+    const q = cage.verts[0];
+    assert.ok(Math.hypot(p[0] + q[1], p[1] - q[0], p[2] - 40) < 1e-9, JSON.stringify([p, q]));
+    // The original is untouched; the second copy now copies the new freeform.
+    assert.deepEqual((f[0] as typeof own).cage.verts, cage.verts);
+    assert.deepEqual((f[2] as Extract<Feature, { type: "transform" }>).bodies, ["ff2"]);
+    assert.equal(out.doc.names["ff2"], "Lid");
+    assert.equal(out.doc.names["c2:ff2:0"], "Top");
+    // Same shapes as before: the top copy lands where it did.
+    const after = freeformBodies(f);
+    const top0 = before.get("c2:c1:ff:0:0")!;
+    const top1 = after.get("c2:ff2:0")!;
+    const at = (t: typeof top0, v: number[]) => [0, 1, 2].map((r) => t.m[r * 4] * v[0] + t.m[r * 4 + 1] * v[1] + t.m[r * 4 + 2] * v[2] + t.m[r * 4 + 3]);
+    const a = at(top0, top0.feature.cage.verts[5]);
+    const b = at(top1, top1.feature.cage.verts[5]);
+    assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-9);
+    // Linked copies stay copies.
+    const linked = { ...doc, features: doc.features.map((x) => (x.id === "c1" ? { ...x, link: true } : x)) as Feature[] };
+    assert.equal(detachFreeformCopy(linked, "c1:ff:0", "ff3"), null);
+    return `${f.length} steps, copy cage ${own.cage.verts.length} pts`;
+  }],
+  ["refining a cage keeps the shape; an odd hole is filled after refining", () => {
+    const box = boxCage([40, 40, 40], 2);
+    const fine = refineCage(box);
+    assert.equal(fine.faces.length, box.faces.length * 4);
+    const v0 = measureVolume(cageToShape(box));
+    const v1 = measureVolume(cageToShape(fine));
+    assert.ok(Math.abs(v1 - v0) / v0 < 0.01, `volume ${v0} → ${v1}`);
+    // A 3-edge hole (a corner of a box-like cage cut by hand): faces around a corner gone,
+    // rim walked as 3 cage points (the even-hole rule refuses it).
+    const holed = deleteFaces(box, [0]);
+    const loop = holeLoops(holed, new Set(boundaryEdges(holed).map(([a, b]) => cageEdgeKey(a, b))))[0];
+    const tri = [loop[0], loop[1], loop[2]];
+    assert.equal(fillLoop(holed, tri), null);
+    const even = fillHole(holed, loop)!;
+    assert.ok(isClosed(even.cage) && !even.refined);
+    return `${fine.faces.length} faces, volume ${v0.toFixed(0)} → ${v1.toFixed(0)}`;
   }],
 ];
 

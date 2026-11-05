@@ -8,6 +8,8 @@ import type { Viewport } from "../view/viewport";
 
 /** Shared by bodies, sketches and images: the switch stays as you left it. */
 export const copyMode = { on: false };
+/** Copies stay linked to their original (shaping one shapes both). Off: independent copies. */
+export const linkMode = { on: false };
 
 export class CopyToggle {
   private btn = document.createElement("button");
@@ -20,7 +22,7 @@ export class CopyToggle {
     private onChange?: (on: boolean) => void,
   ) {
     this.btn.className = "copy-toggle";
-    this.btn.title = "Copy: drag to make copies (each Enter or release makes one, then keep dragging)";
+    this.btn.title = "Copy: drag to make a copy, then set the values or Link it in the panel; tap empty space when done";
     this.btn.innerHTML = `${icons.copy}<span>Copy</span>`;
     // Never let the press reach the viewport (it would start a drag or deselect).
     this.btn.addEventListener("pointerdown", (e) => e.stopPropagation());

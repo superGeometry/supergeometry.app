@@ -40,7 +40,7 @@ export type PanelItem =
       onExpr?(expr: string | null): void;
     }
   | { type: "slot"; label: string; value: string; active: boolean; filled: boolean; onClick(): void }
-  | { type: "choice"; label?: string; options: { id: string; label: string }[]; value: string; onChange(id: string): void }
+  | { type: "choice"; label?: string; options: { id: string; label: string }[]; value: string; onChange(id: string): void; /** Always a drop-down. */ list?: boolean }
   | { type: "toggle"; label: string; value: boolean; onChange(v: boolean): void }
   | { type: "button"; label: string; icon?: IconName; onClick(): void };
 
@@ -519,6 +519,22 @@ export class UI {
         b.append(el("span", "slot-label", it.label), el("span", "slot-value", it.value));
         b.addEventListener("click", it.onClick);
         row.append(b);
+      } else if (it.type === "choice" && (it.options.length > 4 || it.list)) {
+        // Many options (e.g. fonts, more with every imported one): a drop-down that stays in the panel.
+        const g = el("label", "field choice-list");
+        if (it.label) g.append(el("span", "field-label", it.label));
+        const sel = document.createElement("select");
+        for (const o of it.options) {
+          const opt = document.createElement("option");
+          opt.value = o.id;
+          opt.textContent = o.label;
+          sel.append(opt);
+        }
+        sel.value = it.value;
+        sel.addEventListener("change", () => it.onChange(sel.value));
+        sel.addEventListener("pointerdown", (e) => e.stopPropagation());
+        g.append(sel);
+        row.append(g);
       } else if (it.type === "choice") {
         const g = el("div", "choice");
         if (it.label) g.append(el("span", "field-label", it.label));
@@ -601,10 +617,20 @@ export class UI {
     if (unit) label.append(el("span", "field-unit", unit));
     if (f.onExpr && this.variableFactory) {
       const fx = el("button", "fx-btn", "ƒx");
-      fx.title = "Make this value a named variable";
+      fx.title = "Variables: use one here, or make a new one from this value";
       fx.addEventListener("click", async (e) => {
         e.preventDefault();
-        const name = await this.variableFactory!(input.value);
+        // One button, two ways: an existing variable, or a new one.
+        const names = this.variableNames();
+        let name: string | null = null;
+        if (names.length) {
+          const pick = await this.ask("Variables", "Use a variable for this value, or make a new one from it.", [
+            ...names.slice(0, 8).map((n) => ({ id: `v:${n}`, label: n })),
+            { id: "new", label: "New variable", primary: true },
+          ]);
+          if (!pick) return;
+          name = pick === "new" ? await this.variableFactory!(input.value) : pick.slice(2);
+        } else name = await this.variableFactory!(input.value);
         if (!name) return;
         input.value = name;
         apply();
@@ -616,6 +642,8 @@ export class UI {
 
   /** Creates a variable from a field's current text; returns its name (set by the app). */
   variableFactory: ((current: string) => Promise<string | null>) | null = null;
+  /** The project's variable names (set by the app). */
+  variableNames: () => string[] = () => [];
 
   /** Update displayed values without rebuilding (keeps focus while dragging). */
   updatePanelValues(values: number[]): void {
