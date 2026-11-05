@@ -76,6 +76,19 @@ const checks: [string, () => string][] = [
     if (!near(measureVolume(r), expect, 2e-3)) throw new Error(`vol ${measureVolume(r)} vs ${expect}`);
     return `vol ${measureVolume(r).toFixed(1)}, ${r.faces.length} faces`;
   }],
+  ["zigzag (inward corners): top offset ±3 and moved up 4 keep the whole outline", () => {
+    const L = (id: string, a: number[], b: number[]) => ({ id, kind: "line", a, b });
+    const es: any[] = [L("1", [0, 0], [0, 50]), L("2", [0, 50], [20, 50]), L("3", [20, 50], [10, 40]), L("4", [10, 40], [20, 30]), L("5", [20, 30], [10, 20]), L("6", [10, 20], [20, 10]), L("7", [20, 10], [20, 0]), L("8", [20, 0], [0, 0])];
+    const f = regionFaces(es, XY, arrangement(es).regions.map(regionRef))[0];
+    const z = basicFaceExtrusion(f, new Vector([0, 0, 43])) as Shape3D;
+    const top = () => faceWith(z, (n) => n[2] > 0.9);
+    const up = offsetFace(z, top(), 3);
+    const down = offsetFace(z, top(), -3);
+    const moved = replaceFacePlane(z, top(), { origin: [0, 0, 47], xDir: [1, 0, 0], normal: [0, 0, 1] });
+    const v = [up, down, moved].map((x) => measureVolume(x));
+    if (!near(v[0], 800 * 46) || !near(v[1], 800 * 40) || !near(v[2], 800 * 47)) throw new Error(`volumes ${v.map((x) => x.toFixed(0))}`);
+    return `volumes ${v.map((x) => x.toFixed(0)).join(" / ")}`;
+  }],
 ];
 
 let failed = 0;

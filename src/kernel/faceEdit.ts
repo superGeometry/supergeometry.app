@@ -167,6 +167,19 @@ export function replaceFacePlane(body: Shape3D, F: Face, to: PlaneDef): Shape3D 
       // Couldn't rebuild the fillets: fall back to editing straight through them.
     }
   }
+  // A face with inward corners moved straight along its normal: edge by edge
+  // (the half-space trick would clip it to its convex part).
+  const old = planeOf(F);
+  const nn = norm(to.normal);
+  if (Math.abs(dot(nn, old.normal)) > 1 - 1e-9 && !convexFace(F)) {
+    const d = dot(sub(to.origin, old.origin), old.normal);
+    if (Math.abs(d) < 1e-12) return body;
+    try {
+      return offsetByContinuation(body, F, d);
+    } catch {
+      // fall back below
+    }
+  }
   return replacePlaneDirect(body, F, to);
 }
 
@@ -262,6 +275,40 @@ function replacePlaneDirect(body: Shape3D, F: Face, to: PlaneDef): Shape3D {
   const shrink = E.intersect(behind(old)).intersect(front(neu));
   if (!isEmpty(shrink)) out = out.cut(shrink);
   return sanity(body, out);
+}
+
+/** Does a flat face's outline turn the same way at every corner (no inward corners, no holes)? */
+export function convexFace(F: Face): boolean {
+  if (F.clone().innerWires().length) return false;
+  const n = planeOf(F).normal;
+  const edges = F.clone().outerWire().edges;
+  if (edges.length < 3) return true;
+  // The outline as points in order (curved edges sampled), walked end to end.
+  const tol = 1e-6 * (1 + len(tup(F.center)) + Math.sqrt(measureArea(F)));
+  const pts: Vec3[] = [];
+  const used = new Set<number>();
+  let at = tup(edges[0].startPoint);
+  for (let step = 0; step < edges.length; step++) {
+    const k = edges.findIndex((e, i) => !used.has(i) && (dist(tup(e.startPoint), at) < tol || dist(tup(e.endPoint), at) < tol));
+    if (k < 0) return false;
+    used.add(k);
+    const e = edges[k];
+    const rev = dist(tup(e.startPoint), at) >= tol;
+    const m = e.geomType === "LINE" ? 1 : 8;
+    for (let j = 0; j < m; j++) pts.push(tup(e.pointAt(rev ? 1 - j / m : j / m)));
+    at = tup(rev ? e.startPoint : e.endPoint);
+  }
+  let sign = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const c = pts[(i + 2) % pts.length];
+    const t = dot(cross(sub(b, a), sub(c, b)), n);
+    if (Math.abs(t) < tol * tol) continue;
+    if (sign && Math.sign(t) !== sign) return false;
+    sign = Math.sign(t);
+  }
+  return true;
 }
 
 /**
@@ -377,7 +424,10 @@ function offsetByContinuation(body: Shape3D, F: Face, d: number): Shape3D {
 
 /** Offset a face along its normal: flat faces move, cylinders change radius. */
 export function offsetFace(body: Shape3D, F: Face, d: number): Shape3D {
-  if (F.geomType === "PLANE" && needsContinuation(body, F)) {
+  // Curved neighbours, or a face with inward corners (a zigzag, an L): the
+  // half-space trick would clip it to its convex part, so each edge carries on
+  // along its own neighbour instead.
+  if (F.geomType === "PLANE" && (needsContinuation(body, F) || !convexFace(F))) {
     try {
       return offsetByContinuation(body, F, d);
     } catch {
