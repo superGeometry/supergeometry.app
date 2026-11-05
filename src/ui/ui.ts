@@ -43,7 +43,7 @@ export type PanelItem =
   | { type: "slot"; label: string; value: string; active: boolean; filled: boolean; onClick(): void }
   | { type: "choice"; label?: string; options: { id: string; label: string }[]; value: string; onChange(id: string): void; /** Always a drop-down. */ list?: boolean }
   | { type: "toggle"; label: string; value: boolean; onChange(v: boolean): void }
-  | { type: "button"; label: string; icon?: IconName; onClick(): void };
+  | { type: "button"; label: string; icon?: IconName; onClick(): void; /** Blue: the step to take next (Apply). */ primary?: boolean };
 
 /** Kept for older call sites: a numeric field. */
 export interface ValueField {
@@ -565,7 +565,7 @@ export class UI {
         b.addEventListener("click", () => it.onChange(!it.value));
         row.append(b);
       } else {
-        const b = el("button", "text-btn");
+        const b = el("button", it.primary ? "text-btn primary" : "text-btn");
         if (it.icon) b.innerHTML = icons[it.icon];
         b.append(it.label);
         b.addEventListener("click", it.onClick);

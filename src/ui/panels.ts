@@ -56,18 +56,24 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
     () => UNIT_LABEL[units()],
   );
 
-  // Views: a small toggle at the view cube's bottom right (the orbit centre is at its bottom left).
+  // Appearance (camera, projection, grid, axes): back in the right-hand column.
+  ui.addRight("appearance", "eye", "Appearance", (host) => {
+    const s = settings.value;
+    host.append(
+      heading("Appearance"),
+      toggleRow("Animate camera", s.animateCamera, (v) => settings.set("animateCamera", v)),
+      toggleRow("Orthographic", s.ortho, (v) => settings.set("ortho", v)),
+      toggleRow("Show grid", s.showGrid, (v) => settings.set("showGrid", v)),
+      toggleRow("Show world axes", s.showAxes, (v) => settings.set("showAxes", v)),
+    );
+  });
+
+  // Views (standard and saved): the button at the view cube's bottom right.
   const cube = document.getElementById("viewcube")!;
-  ui.addRight("views", "views", "Views & appearance (tap to open / close)", (host) => {
-    const tabs = el("div", "pop-tabs");
-    const views = el("button", "", "Views");
-    const appearance = el("button", "active", "Appearance");
-    tabs.append(appearance, views);
+  ui.addRight("views", "views", "Views (tap to open / close)", (host) => {
     const body = el("div", "");
-    host.append(tabs, body);
+    host.append(heading("Views"), body);
     const showViews = () => {
-      views.className = "active";
-      appearance.className = "";
       body.innerHTML = "";
       const go = (label: string, n: Vec3, x?: Vec3) => choiceRow(label, false, () => view.cam.lookAlong(n, x));
       body.append(choiceRow("⌂ Default view", false, () => (view.cam.iso(), view.cam.fit(view.bounds()))));
@@ -94,21 +100,7 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
         }),
       );
     };
-    const showAppearance = () => {
-      views.className = "";
-      appearance.className = "active";
-      body.innerHTML = "";
-      const s = settings.value;
-      body.append(
-        toggleRow("Animate camera", s.animateCamera, (v) => settings.set("animateCamera", v)),
-        toggleRow("Orthographic", s.ortho, (v) => settings.set("ortho", v)),
-        toggleRow("Show grid", s.showGrid, (v) => settings.set("showGrid", v)),
-        toggleRow("Show world axes", s.showAxes, (v) => settings.set("showAxes", v)),
-      );
-    };
-    views.addEventListener("click", showViews);
-    appearance.addEventListener("click", showAppearance);
-    showAppearance();
+    showViews();
   }, undefined, { host: cube, className: "vc-roll bottom right vc-views" });
 
   ui.addRight("display", "display", "Display modes", (host) => {

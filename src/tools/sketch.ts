@@ -312,7 +312,10 @@ export class SketchTool implements Tool {
     const pop = document.getElementById("popover")!;
     const left = pop.hidden ? col.left : Math.min(col.left, pop.getBoundingClientRect().left);
     bar.style.right = `${window.innerWidth - left + GAP}px`;
-    const top = btn ? btn.top : col.top;
+    // Beside the column like the other windows, growing upwards from its button
+    // (its bottom lines up with the button's) — so it stays clear of the panel below.
+    const bottom = btn ? btn.bottom : col.bottom;
+    const top = bottom - bar.offsetHeight;
     // Keep it on screen when the window is short.
     bar.style.top = `${Math.max(8, Math.min(top, window.innerHeight - bar.offsetHeight - 8))}px`;
   };
@@ -722,7 +725,7 @@ export class SketchTool implements Tool {
       },
     });
     const selCount = this.selected.size;
-    const apply = (label: string, fn: () => void): PanelItem => ({ type: "button", label, icon: "check", onClick: fn });
+    const apply = (label: string, fn: () => void): PanelItem => ({ type: "button", label, icon: "check", onClick: fn, primary: true });
     switch (k) {
       case "line":
         // With the numpad, the length is typed in the box by the line itself.
@@ -1151,8 +1154,9 @@ export class SketchTool implements Tool {
     if (dr.kind === "points") {
       const uv = this.uvAt(p);
       if (!uv) return;
-      this.moveRefs(dr.refs, (q) => [q[0] + uv[0] - dr.from[0], q[1] + uv[1] - dr.from[1]]);
-      this.app.ui.setLabel(p.x, p.y, `${fmtLen(Math.hypot(uv[0] - dr.from[0], uv[1] - dr.from[1]))}`);
+      const d = this.snapDrop(dr.refs, [uv[0] - dr.from[0], uv[1] - dr.from[1]], p);
+      this.moveRefs(dr.refs, (q) => [q[0] + d[0], q[1] + d[1]]);
+      this.app.ui.setLabel(p.x, p.y, this.dropOn ? "Joins here" : `${fmtLen(Math.hypot(...d))}`);
       return;
     }
     if (this.typing.active) return;
@@ -1177,9 +1181,9 @@ export class SketchTool implements Tool {
     if (!a || !b) return;
     let d: Vec2 = [b[0] - a[0], b[1] - a[1]];
     if (dr.part.kind === "axis") d = dr.part.i === 0 ? [snap(d[0]), 0] : [0, snap(d[1])];
-    else d = [snap(d[0]), snap(d[1])];
+    else d = this.snapDrop(dr.refs, [snap(d[0]), snap(d[1])], p);
     this.applyGimbal(d, 0);
-    this.app.ui.setLabel(p.x, p.y, `${fmtLen(Math.hypot(...d))}  · type a value`);
+    this.app.ui.setLabel(p.x, p.y, this.dropOn ? "Joins here" : `${fmtLen(Math.hypot(...d))}  · type a value`);
   }
 
   /** Move the gimbal's selection by d (sketch units) and/or rotate it about its centre. */
@@ -1218,6 +1222,36 @@ export class SketchTool implements Tool {
 
   private dragBase: SketchEntity[] | null = null;
 
+  /** A single point being dragged onto another point: where it would join (Coincident on release). */
+  private dropOn: PointRef | null = null;
+
+  /**
+   * One point dragged near another curve's point: it snaps exactly onto it
+   * (and joins it when let go). Returns the drag offset to use.
+   */
+  private snapDrop(refs: DragRef[], d: Vec2, p: ToolPointer): Vec2 {
+    this.dropOn = null;
+    if (refs.length !== 1 || !this.plane) return d;
+    const r0 = refs[0];
+    const base = this.dragBase ?? this.entities;
+    const tol = Math.max(12, p.tol);
+    let best: { q: Vec2; ref: PointRef; dist: number } | null = null;
+    for (const e of base) {
+      if (e.id === r0.ref.e) continue;
+      for (const q of pointsOf(e)) {
+        // Already on it (joined before the drag): not a new place to drop.
+        if (Math.hypot(q.at[0] - r0.at[0], q.at[1] - r0.at[1]) < 1e-9) continue;
+        const sc = this.app.view.toScreen(sketchToWorld(this.plane, q.at));
+        if (!sc) continue;
+        const dist = Math.hypot(sc[0] - p.x, sc[1] - p.y);
+        if (dist < tol && (!best || dist < best.dist)) best = { q: q.at, ref: { e: e.id, p: q.p }, dist };
+      }
+    }
+    if (!best) return d;
+    this.dropOn = best.ref;
+    return [best.q[0] - r0.at[0], best.q[1] - r0.at[1]];
+  }
+
   private endGeometryDrag(): void {
     // Copy on: the moved curves become copies; the originals go back where they were.
     if (this.sdrag?.kind === "gimbal" && copyMode.on && this.dragBase) {
@@ -1241,12 +1275,23 @@ export class SketchTool implements Tool {
       this.gimbal?.setHot(null);
       return this.refreshGimbal();
     }
+    const moved = this.sdrag && (this.sdrag.kind === "points" || this.sdrag.kind === "gimbal") ? this.sdrag.refs : [];
+    const drop = this.dropOn;
+    this.dropOn = null;
     this.sdrag = null;
     this.dragBase = null;
     this.typing.reset();
     this.app.ui.setLabel(0, 0, null);
+    // Dropped onto another point: they're joined (Coincident) — if the constraints allow it.
+    if (drop && moved.length === 1) {
+      const c: SketchConstraint = { id: uid(), type: "coincident", pts: [moved[0].ref, drop] };
+      const res = addStrict(this.entities, this.constraints, [c]);
+      if (res.ok) {
+        this.commit(res.result.entities, res.constraints);
+        this.app.ui.toast("Joined (coincident)");
+      } else this.commit(this.entities);
+    } else this.commit(this.entities);
     // One undo step for the whole drag.
-    this.commit(this.entities);
     this.gimbal?.setHot(null);
     this.refreshGimbal();
   }
@@ -2059,7 +2104,7 @@ export class SketchTool implements Tool {
           this.drawGhosts([{ id: "arc-preview", kind: "arc", a, m, b }], 0xffc23d, true);
         }
         label = dimLabel(e, pts);
-      } else if (e?.kind === "line" && this.kind === "line" && isCoarse && !this.dragging && this.pts.length >= 1) {
+      } else if (e?.kind === "line" && this.kind === "line" && phoneScreen() && !this.dragging && this.pts.length >= 1) {
         // Touch, a line just placed and its length being typed: no next segment
         // trailing to where the finger was (it only gets in the way) — the next tap places it.
         this.hideLineDim();
@@ -2536,7 +2581,7 @@ export class SketchTool implements Tool {
         const e = this.entities.find((x) => x.id === hit.entity);
         const q = e && pointOf(e, hit.p);
         const sc = q && this.app.view.toScreen(sketchToWorld(this.plane!, q));
-        return !sc || Math.hypot(sc[0] - p.x, sc[1] - p.y) < Math.max(7, p.tol * 0.45) || !this.curveAt(p);
+        return !sc || Math.hypot(sc[0] - p.x, sc[1] - p.y) < Math.max(10, p.tol * 0.7) || !this.curveAt(p);
       })();
       if (hit?.kind === "point" && hit.sketch === this.sketchId && onPoint) {
         const r = { e: hit.entity, p: hit.p };
@@ -3007,6 +3052,11 @@ export class SketchTool implements Tool {
   }
 
   private angleDim: DimWidget | null = null;
+}
+
+/** A phone-sized screen (where a trailing preview line only gets in the way). */
+function phoneScreen(): boolean {
+  return window.matchMedia("(max-width: 720px)").matches || window.matchMedia("(max-height: 500px)").matches;
 }
 
 function titleOf(k: string): string {

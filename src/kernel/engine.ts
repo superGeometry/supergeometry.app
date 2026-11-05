@@ -82,21 +82,23 @@ let cache: CacheEntry[] = [];
 // ------------------------------------------------------------------ public API
 
 export async function exportBodies(features: Feature[], format: ExportFormat, only?: string[]): Promise<Blob> {
-  const { ctx } = await run(features);
+  const { ctx, numbers } = await run(features);
   const shapes = [...ctx.bodies.entries()].filter(([id]) => !only || only.includes(id));
   if (shapes.length === 0) throw new Error("Nothing to export");
+  const names = bodyNames(features, [...ctx.bodies.keys()], numbers);
   return format === "step"
-    ? exportSTEP(shapes.map(([id, shape]) => ({ shape, name: nameOf(features, id) })))
+    ? exportSTEP(shapes.map(([id, shape]) => ({ shape, name: names.get(id)! })))
     : await makeCompound(shapes.map(([, s]) => s.clone())).blobSTL({ binary: true, tolerance: 0.02, angularTolerance: 0.1 });
 }
 
 export async function regenerate(features: Feature[]): Promise<RegenResult> {
   const t0 = performance.now();
-  const { ctx, errors } = await run(features);
+  const { ctx, errors, numbers } = await run(features);
+  const names = bodyNames(features, [...ctx.bodies.keys()], numbers);
   const meshes: BodyMesh[] = [];
   for (const [id, shape] of ctx.bodies) {
     try {
-      meshes.push(meshBody(id, nameOf(features, id), shape));
+      meshes.push(meshBody(id, names.get(id)!, shape));
     } catch (err) {
       errors.push({ featureId: baseId(id), message: `Could not display body: ${errorText(err)}` });
     }
@@ -148,7 +150,11 @@ async function run(features: Feature[]) {
     next.push(entry);
   }
   cache = next;
-  return { ctx, errors };
+  // Bodies are numbered in the order they first appeared (a body that's
+  // deleted later keeps its number used, so the others don't change names).
+  const numbers = new Map<string, number>();
+  for (const e of next) for (const id of e.ctx.bodies.keys()) if (!numbers.has(id)) numbers.set(id, numbers.size + 1);
+  return { ctx, errors, numbers };
 }
 
 async function apply(f: Feature, ctx: Ctx): Promise<void> {
@@ -678,22 +684,26 @@ function movePolyhedronPoints(body: Shape3D, moves: [Vec3, Vec3][]): Shape3D | n
     for (const t of tris) polys.push(t.map((k) => moved[k]));
   }
   if (!touched) throw new Error("That corner is no longer there");
+  // A body of flat faces: this is the way to move its corners. If the result
+  // folds through itself, say so — another method would only give a mangled
+  // shape (and dragging would jump between the two).
+  const folded = "That would fold the faces through each other — move it less far, or another way";
+  let solid: Shape3D;
+  let v: number;
   try {
     const build = (list: Vec3[][]) => unify(makeSolid(list.map((pl) => makePolygon(pl))) as unknown as Shape3D);
-    let solid = build(polys);
-    let v = measureVolume(solid);
+    solid = build(polys);
+    v = measureVolume(solid);
     // Inside out: wind every face the other way.
     if (v < 0) {
       solid = build(polys.map((pl) => [...pl].reverse()));
       v = measureVolume(solid);
     }
-    if (!Number.isFinite(v) || v < 1e-9 * size ** 3 || solid.faces.length < 4) return null;
-    // Faces folding through each other: not a usable solid.
-    if (!shapeValid(solid)) return null;
-    return solid;
   } catch {
-    return null;
+    throw new Error(folded);
   }
+  if (!Number.isFinite(v) || v < 1e-9 * size ** 3 || solid.faces.length < 4 || !shapeValid(solid)) throw new Error(folded);
+  return solid;
 }
 
 /**
@@ -1266,21 +1276,27 @@ function baseId(bodyId: string): string {
   return bodyId.split(":")[0];
 }
 
-function nameOf(features: Feature[], bodyId: string): string {
-  const f = features.find((x) => x.id === baseId(bodyId));
-  if (!f) return "Body";
-  if (f.type === "import") return f.fileName;
-  // A freeform made as an open surface (no thickness yet) is a surface, not a solid body.
+/**
+ * Plain names: Body 1, Body 2… (Surface 1… for open surfaces), numbered in the
+ * order the bodies were made; imported files keep their file name.
+ */
+function bodyNames(features: Feature[], ids: string[], numbers: Map<string, number>): Map<string, string> {
   const isSurface = (x: Feature | undefined) => x?.type === "freeform" && !!x.surface && !x.thickness;
-  // A copy of a surface is a surface too (its id holds the original's).
-  const kind = isSurface(f) || bodyId.split(":").some((part) => isSurface(features.find((x) => x.id === part))) ? "Surface" : "Body";
-  // A copy's id ends in its number (a copy of a copy has the first copy's id inside).
-  const parts = bodyId.split(":");
-  const k = parts.length > 1 ? Number(parts[parts.length - 1]) : NaN;
-  if (!Number.isFinite(k)) return `${kind} (${f.name})`;
-  // One copy: just the step's name; patterns count from #2 (the original is #1).
-  const t = f.type === "transform" ? f.op.kind : "";
-  return t === "linear" || t === "circular" ? `${kind} (${f.name} #${k + 2})` : `${kind} (${f.name})`;
+  const order = [...ids].sort((a, b) => (numbers.get(a) ?? 0) - (numbers.get(b) ?? 0));
+  const out = new Map<string, string>();
+  let bodies = 0;
+  let surfaces = 0;
+  for (const id of order) {
+    const f = features.find((x) => x.id === baseId(id));
+    if (f?.type === "import") {
+      out.set(id, f.fileName);
+      continue;
+    }
+    // A copy of a surface is a surface too (its id holds the original's).
+    const surface = id.split(":").some((part) => isSurface(features.find((x) => x.id === part)));
+    out.set(id, surface ? `Surface ${++surfaces}` : `Body ${++bodies}`);
+  }
+  return out;
 }
 
 export function errorText(err: unknown): string {

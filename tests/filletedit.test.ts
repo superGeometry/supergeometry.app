@@ -113,4 +113,13 @@ await check("edge next to it (front top) up 3", [{ id: "me", name: "me", type: "
   console.log(ok ? "ok  " : "FAIL", `zigzag edge move: volume ${vol.toFixed(1)}, flat top ${top.toFixed(1)}`);
 }
 
+// A corner moved through the opposite face: a clear error, not a mangled body.
+{
+  const r = await regenerate([...base.slice(0, 2), { id: "fold", name: "fold", type: "moveFace", vertex: { body: "b", at: [20, 15, 20] }, translate: [0, 0, -25] } as Feature]);
+  const err = r.errors.find((e) => e.featureId === "fold")?.message ?? "";
+  const ok = /fold/.test(err);
+  if (!ok) failed++;
+  console.log(ok ? "ok  " : "FAIL", `corner moved through the body: ${err || "no error"}`);
+}
+
 process.exit(failed ? 1 : 0);

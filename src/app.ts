@@ -1,3 +1,4 @@
+import { CurvePointPlaneOp, EdgeAnglePlaneOp, FacePointPlaneOp, ThreePointPlaneOp } from "./tools/planeOps";
 import { DocStore, parseProject } from "./doc/store";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
@@ -522,8 +523,11 @@ export class App implements AppContext {
             children: [
               { id: "offset", label: "Offset Plane", icon: "plane", run: () => this.setTool(new PlaneOp(this, null, undefined)) },
               { id: "mid", label: "Midplane", icon: "plane", run: () => this.setTool(new MidplaneOp(this)) },
-              { id: "3pt", label: "Plane Through 3 Points", icon: "plane", disabled: true, why: SOON },
-              { id: "curve", label: "Plane on Curve at Point", icon: "plane", disabled: true, why: SOON },
+              { id: "3pt", label: "Through 3 Points", icon: "plane", run: () => this.setTool(new ThreePointPlaneOp(this)) },
+              { id: "curve", label: "On Curve at Point", icon: "plane", run: () => this.setTool(new CurvePointPlaneOp(this, false)) },
+              { id: "perp", label: "Perpendicular to Edge at Point", icon: "plane", run: () => this.setTool(new CurvePointPlaneOp(this, true)) },
+              { id: "angle", label: "Through Edge at Angle", icon: "plane", run: () => this.setTool(new EdgeAnglePlaneOp(this)) },
+              { id: "parallel", label: "Parallel to Face at Point", icon: "plane", run: () => this.setTool(new FacePointPlaneOp(this)) },
             ],
           },
           {
