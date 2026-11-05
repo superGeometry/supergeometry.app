@@ -318,7 +318,13 @@ function clampToFree(s: [number, number], hw: number, hh: number): [number, numb
   }
   if (right - left < hw * 2) [left, right] = [8, window.innerWidth - 8];
   const x = Math.max(left + hw, Math.min(right - hw, s[0]));
-  const y = Math.max(52 + hh, Math.min(window.innerHeight - 8 - hh, s[1]));
+  let y = Math.max(52 + hh, Math.min(window.innerHeight - 8 - hh, s[1]));
+  // Phones: the tool's options card sits fixed along the bottom — the box stays above it.
+  const panel = document.getElementById("panel");
+  if (document.documentElement.dataset.screen === "phone" && panel && !panel.hidden && panel.offsetHeight) {
+    const r = panel.getBoundingClientRect();
+    if (x + hw > r.left - 6 && x - hw < r.right + 6 && y + hh > r.top - 6) y = Math.max(52 + hh, r.top - 8 - hh);
+  }
   return [x, y];
 }
 

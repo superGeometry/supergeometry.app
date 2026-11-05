@@ -740,6 +740,53 @@ export class UI {
   /** Which side the card went last time (kept while it's still clear: no jumping about). */
   private panelSide = -1;
 
+  /**
+   * Phones (upright or sideways): the card goes in one fixed place along the
+   * bottom — the widest clear gap between what's already there (the Items
+   * panel, undo/redo, the tool strip, the view column), as low as it fits; if
+   * the bottom row is too full, just above it (over the hint text). As wide as
+   * its contents, never wider than the gap.
+   */
+  private placeOnPhone(p: HTMLElement): void {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const M = 8;
+    const obstacles = ["#items", "#history", "#toolbar", "#undo-dock", "#bottom-left", "#right-col", "#hint"]
+      .map((q) => document.querySelector<HTMLElement>(q))
+      .filter((e): e is HTMLElement => !!e && !e.hidden && e.offsetHeight > 0 && e.offsetWidth > 0 && getComputedStyle(e).display !== "none")
+      .map((e) => e.getBoundingClientRect());
+    p.style.maxWidth = "";
+    const natural = Math.min(p.offsetWidth, W - 2 * M);
+    const need = Math.min(natural, 240);
+    // Free stretches of a horizontal band [y0, y1].
+    const gaps = (y0: number, y1: number): [number, number][] => {
+      const blocked = obstacles.filter((r) => r.bottom > y0 && r.top < y1).map((r) => [r.left - M, r.right + M] as [number, number]).sort((a, b) => a[0] - b[0]);
+      const out: [number, number][] = [];
+      let x = M;
+      for (const [a, b] of blocked) {
+        if (a > x) out.push([x, a]);
+        x = Math.max(x, b);
+      }
+      if (W - M > x) out.push([x, W - M]);
+      return out;
+    };
+    // Bottom edges to try: the screen's, then just above each thing along the bottom.
+    const edges = [H - M, ...obstacles.filter((r) => r.top > H * 0.4).map((r) => r.top - M)].sort((a, b) => b - a);
+    for (const y1 of edges) {
+      const h = p.offsetHeight;
+      const g = gaps(y1 - h, y1).sort((a, b) => b[1] - b[0] - (a[1] - a[0]))[0];
+      if (!g || g[1] - g[0] < need) continue;
+      p.style.maxWidth = `${Math.floor(g[1] - g[0])}px`;
+      const h2 = p.offsetHeight;
+      p.style.left = `${Math.round(g[0])}px`;
+      p.style.top = `${Math.round(Math.max(52, y1 - h2))}px`;
+      return;
+    }
+    // Nowhere clear: the bottom left, over whatever is there.
+    p.style.left = `${M}px`;
+    p.style.top = `${Math.round(Math.max(52, H - M - p.offsetHeight))}px`;
+  }
+
   private placePanel(): void {
     const p = this.panel;
     const box = [...document.querySelectorAll<HTMLElement>(".dim-widget.editable")].filter((e) => !e.hidden && e.offsetWidth).pop();
@@ -747,20 +794,7 @@ export class UI {
     // Phones: one fixed place, right above the hint text (or the bottom
     // buttons) — never chasing the model across a small screen.
     if (screenClass() === "phone") {
-      const tops = ["#hint", "#bottom-left", "#undo-dock", "#toolbar"]
-        .map((q) => document.querySelector<HTMLElement>(q))
-        .filter((e): e is HTMLElement => !!e && !e.hidden && e.offsetHeight > 0 && getComputedStyle(e).display !== "none")
-        .map((e) => e.getBoundingClientRect())
-        // Only what sits along the bottom (not a side column).
-        .filter((r) => r.top > window.innerHeight * 0.55 && r.width > 120)
-        .map((r) => r.top);
-      const bottom = Math.min(window.innerHeight - 8, ...tops) - 8;
-      // Narrower than the screen where the view column on the right comes down this far.
-      p.style.maxWidth = "";
-      const col = document.getElementById("right-col")?.getBoundingClientRect();
-      if (col && col.height && col.bottom > bottom - p.offsetHeight - 4) p.style.maxWidth = `${Math.max(200, col.left - 16)}px`;
-      p.style.left = "8px";
-      p.style.top = `${Math.round(Math.max(52, bottom - p.offsetHeight))}px`;
+      this.placeOnPhone(p);
       this.panelSide = 0;
       return;
     }
