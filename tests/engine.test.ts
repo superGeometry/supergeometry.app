@@ -87,6 +87,12 @@ const tests: [string, Feature[], (r: Awaited<ReturnType<typeof regenerate>>) => 
     if (r.bodies.length !== 2) throw new Error(`${r.bodies.length} bodies`);
     return "2 bodies";
   }],
+  ["union of bodies that touch is one body", [...base, sketch("near", XY, [{ id: "nr", kind: "rect", center: [25, 0], w: 10, h: 10, rotation: 0 }]),
+    { id: "ne", name: "Extrude", type: "extrude", source: { kind: "profile", sketch: "near", regions: regions([{ id: "nr", kind: "rect", center: [25, 0], w: 10, h: 10, rotation: 0 }]) }, distance: 10, mode: "new" },
+    { id: "un", name: "Union", type: "boolean", op: "union", target: "e1", tools: ["ne"] }], (r) => {
+    if (r.errors.length || r.bodies.length !== 1) throw new Error(`${r.bodies.length} bodies, ${r.errors.map((e) => e.message)}`);
+    return "1 body";
+  }],
   ["delete fillet edge's face", [...base,
     { id: "fi", name: "Fillet", type: "fillet", edges: [{ body: "e1", mid: [20, 0, 10], dir: [0, 1, 0], length: 20 }], radius: 2 },
     { id: "dg", name: "Delete", type: "deleteGeom", body: "e1", faces: [], edges: [{ body: "e1", mid: [20, 0, 8], dir: [0, 1, 0], length: 20 }], vertices: [] }], (r) => {
@@ -177,6 +183,16 @@ for (const [name, features, describe] of tests) {
   const ok = r.errors.length === 1 && /freeform/.test(r.errors[0].message) && r.bodies.length === 1;
   if (!ok) failed++;
   console.log(ok ? "ok  " : "FAIL", "XYZ scale on a regular body explains why not:", r.errors.map((e) => e.message).join());
+}
+
+// Union of bodies that don't touch: refused with a clear message.
+{
+  const r = await regenerate([...base, sketch("far", XY, [{ id: "fr", kind: "rect", center: [100, 0], w: 10, h: 10, rotation: 0 }]),
+    { id: "fe", name: "Extrude", type: "extrude", source: { kind: "profile", sketch: "far", regions: regions([{ id: "fr", kind: "rect", center: [100, 0], w: 10, h: 10, rotation: 0 }]) }, distance: 10, mode: "new" },
+    { id: "un", name: "Union", type: "boolean", op: "union", target: "e1", tools: ["fe"] }]);
+  const ok = r.errors.some((e) => e.featureId === "un" && /don't touch/.test(e.message));
+  if (!ok) failed++;
+  console.log(ok ? "ok  " : "FAIL", "union of bodies that don't touch is refused");
 }
 
 // Closed solids report no open edges.

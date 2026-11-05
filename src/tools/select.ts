@@ -428,8 +428,18 @@ export class SelectTool implements Tool {
     const bodies = bodiesOf(app.selection);
     const multi = bodies.length >= 2;
     const boolean = (op: "union" | "subtract" | "intersect") => () => {
-      app.store.add({ ...app.store.newIdentity("boolean", cap(op)), type: "boolean", op, target: bodies[0], tools: bodies.slice(1) });
-      app.setSelection([{ kind: "body", body: bodies[0] }]);
+      const f = { ...app.store.newIdentity("boolean", cap(op)), type: "boolean" as const, op, target: bodies[0], tools: bodies.slice(1) };
+      // Tried first: one that can't be done (e.g. Union of bodies that don't touch) says why and isn't added.
+      void app.preview([...app.store.features, f]).then((r) => {
+        const err = r?.errors.find((e) => e.featureId === f.id);
+        if (err) {
+          app.ui.toast(err.message);
+          void app.preview([...app.store.features]);
+          return;
+        }
+        app.store.add(f);
+        app.setSelection([{ kind: "body", body: bodies[0] }]);
+      });
     };
     return [
       { id: "move", label: "Move/Rotate", icon: "move", shortcut: "M", active: true, run: () => app.setTool(new TransformOp(app, "move", bodies)) },

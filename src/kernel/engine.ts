@@ -14,6 +14,7 @@ import {
   importSTL,
   loft,
   makeCompound,
+  iterTopo,
   makeBSplineApproximation,
   isShape3D,
   makeFace,
@@ -293,7 +294,11 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       let target = need(bodies, f.target);
       for (const t of f.tools) {
         const tool = need(bodies, t);
+        const solids = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;
+        const before = f.op === "union" ? solids(target) + solids(tool) : 0;
         target = f.op === "union" ? target.fuse(tool) : f.op === "subtract" ? target.cut(tool) : target.intersect(tool);
+        // A union joins: a body that doesn't touch would only be grouped with it, not joined.
+        if (f.op === "union" && solids(target) >= before) throw new Error("These bodies don't touch — Union needs them to overlap or touch (move one onto the other first)");
         bodies.delete(t);
       }
       if (isEmpty(target)) throw new Error("The result is empty");

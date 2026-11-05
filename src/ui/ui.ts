@@ -101,7 +101,82 @@ export class UI {
       if (!t.closest("#flyout, #toolbar, #bottom-left")) this.closeFlyout();
     });
     if (window.innerWidth >= 1000) this.toggleHistory(true);
+    this.holdLabels();
     window.addEventListener("resize", () => (this.fitToolbar(), this.fitPanel()));
+  }
+
+  /**
+   * Touch screens show tools as icons only: press and hold one to see its name
+   * in the middle of the screen. Let go on it to use it; slide off it to not.
+   */
+  private holdLabels(): void {
+    const ghost = el("div", "tool-ghost");
+    ghost.hidden = true;
+    document.body.append(ghost);
+    let held: { btn: HTMLElement; id: number; timer: number; off: boolean } | null = null;
+    let swallow: HTMLElement | null = null;
+    const end = () => {
+      if (!held) return;
+      clearTimeout(held.timer);
+      ghost.hidden = true;
+      if (held.off) swallow = held.btn;
+      held = null;
+    };
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (e.pointerType === "mouse") return;
+        const btn = (e.target as HTMLElement).closest<HTMLElement>("#toolbar .tool, #bottom-left .tool, #flyout .tool");
+        if (!btn) return;
+        swallow = null;
+        held = {
+          btn,
+          id: e.pointerId,
+          off: false,
+          timer: window.setTimeout(() => {
+            ghost.textContent = btn.dataset.label ?? btn.title;
+            ghost.hidden = false;
+          }, 220),
+        };
+      },
+      true,
+    );
+    document.addEventListener(
+      "pointermove",
+      (e) => {
+        if (!held || e.pointerId !== held.id) return;
+        const r = held.btn.getBoundingClientRect();
+        const out = e.clientX < r.left - 6 || e.clientX > r.right + 6 || e.clientY < r.top - 6 || e.clientY > r.bottom + 6;
+        if (out && !held.off) {
+          // Slid off: it won't be used.
+          held.off = true;
+          ghost.hidden = true;
+          clearTimeout(held.timer);
+        }
+      },
+      true,
+    );
+    document.addEventListener("pointerup", (e) => held && e.pointerId === held.id && end(), true);
+    document.addEventListener("pointercancel", (e) => {
+      if (held && e.pointerId === held.id) {
+        held.off = true;
+        end();
+      }
+    }, true);
+    // A press that slid off the button doesn't count as a tap on it.
+    document.addEventListener(
+      "click",
+      (e) => {
+        if (swallow && (e.target as HTMLElement).closest(".tool") === swallow) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        }
+        swallow = null;
+      },
+      true,
+    );
+    // The long press shouldn't open the browser's own menu.
+    document.addEventListener("contextmenu", (e) => (e.target as HTMLElement).closest?.(".tool") && e.preventDefault());
   }
 
   toggleHistory(open?: boolean): void {
@@ -201,7 +276,9 @@ export class UI {
       this.flyout.style.top = "";
       this.flyout.style.bottom = `${window.innerHeight - above + 8}px`;
     } else {
-      this.flyout.style.left = `${r.right + 6}px`;
+      // Clear of the whole column (it can be wider than its buttons, with a scrollbar).
+      const col = anchor.closest?.("#toolbar, #bottom-left")?.getBoundingClientRect();
+      this.flyout.style.left = `${Math.max(r.right, col?.right ?? 0) + 6}px`;
       this.flyout.style.bottom = "";
       this.flyout.style.top = `${Math.min(r.top, window.innerHeight - this.flyout.offsetHeight - 12)}px`;
     }
@@ -582,6 +659,7 @@ function toolButton(item: ToolItem, withLabel: boolean): HTMLButtonElement {
   const b = document.createElement("button");
   b.className = "tool";
   b.dataset.tool = item.id;
+  b.dataset.label = item.label;
   b.classList.toggle("active", !!item.active);
   b.classList.toggle("has-children", !!item.children?.length);
   b.classList.toggle("disabled", !!item.disabled);
