@@ -3,7 +3,7 @@
 // dragging. The smooth surface updates live; Done turns it into a body.
 
 import { BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
-import type { Feature, FreeformFeature, TransformFeature, Vec3 } from "../doc/types";
+import type { Feature, FreeformFeature, PlaneDef, TransformFeature, Vec3 } from "../doc/types";
 import { borderChains, bridgeChains, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, fillHole, holeLoops, isClosed, limitPoints, previewMesh, primitiveCage, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
 import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
@@ -14,7 +14,7 @@ import { isCoarse } from "../device";
 import { DragTyping } from "./dragTyping";
 import { Gimbal, GIMBAL_AXES, type GimbalPart } from "./gimbal";
 import { axisDrag } from "./handles";
-import type { AppContext, Tool } from "./tool";
+import type { AppContext, Sel, Tool } from "./tool";
 
 type Pick = { kind: "vert"; i: number } | { kind: "edge"; e: [number, number] } | { kind: "face"; f: number };
 
@@ -38,6 +38,8 @@ export class FreeformTool implements Tool {
   private thickSide: "up" | "down" | "both" = "up";
   /** A new shape that spawned inside another body: first moved into place as a whole. */
   private placing = false;
+  /** A new surface waiting for the plane it goes on. */
+  private choosingPlane = false;
 
   // Scene objects.
   private surface = new Mesh(new BufferGeometry(), new MeshStandardMaterial({ color: 0xb9c6dc, roughness: 0.5, metalness: 0.05, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
@@ -63,6 +65,8 @@ export class FreeformTool implements Tool {
     } else {
       this.cage = primitiveCage(from.primitive);
       this.surfaceSheet = from.primitive === "plane";
+      // A new surface: first pick the plane (or flat face) it lies on, like a new sketch.
+      this.choosingPlane = from.primitive === "plane";
     }
     this.typing = new DragTyping(app);
     // The cage on top of everything (planes, other bodies, the gimbal).
@@ -84,6 +88,19 @@ export class FreeformTool implements Tool {
     this.app.setSelection([]);
     this.app.ui.setTools([{ id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: () => this.cancel() }]);
     this.app.ui.setBottom([]);
+    if (this.choosingPlane) {
+      // Nothing shown yet: the origin planes (and flat faces) to put it on.
+      for (const o of [this.surface, this.lines, this.dots]) o.visible = false;
+      view.setOriginPlanesVisible(true);
+      this.app.ui.setHint("Select a plane or a flat face to place the surface on.");
+      this.app.ui.showPanel({ title: "Freeform surface", items: [], onCancel: () => this.cancel() });
+      return;
+    }
+    this.startEditing();
+  }
+
+  /** Show the cage and the shape, ready to edit. */
+  private startEditing(): void {
     this.rebuild();
     // A new shape inside another body (or a flat surface, which you'll want to place first): move it as a whole first.
     if (!this.existing && (this.surfaceSheet || this.overlapsBodies())) {
@@ -119,6 +136,7 @@ export class FreeformTool implements Tool {
 
   exit(): void {
     const view = this.app.view;
+    view.setOriginPlanesVisible(false);
     for (const o of [this.surface, this.lines, this.dots, this.marks, this.markDots, this.hoverMarks, this.hoverDots]) {
       view.overlay.remove(o);
       o.geometry.dispose();
@@ -148,12 +166,13 @@ export class FreeformTool implements Tool {
     const faces = this.picks.filter((p) => p.kind === "face").length;
     if (faces) items.push({ type: "button", label: `Delete face${faces > 1 ? "s" : ""}`, icon: "trash", onClick: () => this.deleteSelectedFaces() });
     // Rim edges of holes picked: one hole → Fill, two facing holes → Bridge.
-    const loops = this.pickedLoops();
+    // (Not while the whole shape is being placed: then every point is picked.)
+    const loops = this.placing ? [] : this.pickedLoops();
     if (loops.length === 1) items.push({ type: "button", label: "Fill hole", icon: "fill", onClick: () => this.fillHoles(loops) });
     if (loops.length === 2) items.push({ type: "button", label: "Bridge holes", icon: "loft", onClick: () => this.fillHoles(loops) });
     // Two runs of border edges (two edges, two rows): a strip of faces between them.
     else {
-      const runs = this.pickedRuns();
+      const runs = this.placing ? [] : this.pickedRuns();
       if (runs.length === 2 && !runs.every((r) => r.closed)) items.push({ type: "button", label: "Connect edges", icon: "loft", onClick: () => this.connectRuns(runs) });
     }
     // An open shape can be given a thickness to become a solid.
@@ -332,7 +351,26 @@ export class FreeformTool implements Tool {
     return bestF ? { kind: "face", f: (bestF as { f: number }).f } : null;
   }
 
+  /** Which plane / flat face is under the pointer (choosing where a new surface goes). */
+  private planeAt(p: ToolPointer): { plane: PlaneDef; at: Vec3; sel: Sel } | null {
+    const hit = this.app.view.pick(p.x, p.y, { edges: false, vertices: false, planes: true, planesFirst: true, profiles: false, edgeTolPx: 0 });
+    if (hit?.kind === "plane") {
+      const plane = this.app.view.planeOf(hit.id);
+      return plane ? { plane, at: plane.origin, sel: { kind: "plane", id: hit.id } } : null;
+    }
+    if (hit?.kind === "face") {
+      const info = this.app.view.body(hit.body)?.faces[hit.face];
+      // On a face: centred on it.
+      if (info?.plane) return { plane: info.plane, at: info.center, sel: { kind: "face", body: hit.body, face: hit.face } };
+    }
+    return null;
+  }
+
   hover(p: ToolPointer | null): void {
+    if (this.choosingPlane) {
+      this.app.setHover(p ? (this.planeAt(p)?.sel ?? null) : null);
+      return;
+    }
     if (this.dragging) return;
     const g = p && this.gimbal?.hit(p);
     this.gimbal?.setHot(g ?? null);
@@ -342,6 +380,21 @@ export class FreeformTool implements Tool {
   }
 
   tap(p: ToolPointer, count = 1): void {
+    if (this.choosingPlane) {
+      const at = this.planeAt(p);
+      if (!at) return this.app.ui.toast("Select a plane or a flat face");
+      // The flat sheet (made on XY at the origin) laid onto that plane.
+      const x = norm(at.plane.xDir);
+      const n = norm(at.plane.normal);
+      const y = cross(n, x);
+      this.cage = { faces: this.cage.faces, verts: this.cage.verts.map((v) => add(at.at, add(add(scale(x, v[0]), scale(y, v[1])), scale(n, v[2])))) };
+      this.choosingPlane = false;
+      this.app.setHover(null);
+      this.app.view.setOriginPlanesVisible(false);
+      for (const o of [this.surface, this.lines, this.dots]) o.visible = true;
+      this.startEditing();
+      return;
+    }
     // Double-tap on empty space: finish and select the whole body (e.g. to move
     // or colour it). On a point, edge or face it's just quick tapping: keep it picked.
     if (count >= 2) {
@@ -404,6 +457,7 @@ export class FreeformTool implements Tool {
   // ------------------------------------------------------------ dragging
 
   down(p: ToolPointer): boolean {
+    if (this.choosingPlane) return false;
     const part = this.gimbal?.hit(p);
     if (!part || !this.gimbal) return false;
     // Another cage point right under the pointer: that's a tap on it, not a drag
@@ -574,6 +628,8 @@ export class FreeformTool implements Tool {
       else this.cancel();
       return true;
     }
+    // Still choosing where it goes: nothing to finish yet.
+    if (e.key === "Enter" && this.choosingPlane) return true;
     if (e.key === "Enter") return (this.done(), true);
     if ((e.key === "Delete" || e.key === "Backspace") && this.picks.some((p) => p.kind === "face")) return (this.deleteSelectedFaces(), true);
     if (e.key.toLowerCase() === "a" && (e.ctrlKey || e.metaKey)) {
