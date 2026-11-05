@@ -2688,3 +2688,24 @@ html[data-screen="phone"] body.is-fullscreen {
     box-sizing: content-box;
   }
 }
+
+/* Constraint marks (H, V, ∥, ⟂, ●…): just the symbol, small and faint, in the
+   background — they never cover or catch a tap meant for the drawing (the
+   sketch picks one when a tap finds nothing else). Dimensions keep their box. */
+.cglyph:not(.dim) {
+  pointer-events: none;
+  min-width: 0;
+  height: 14px;
+  padding: 0 1px;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  color: rgba(150, 190, 255, 0.55);
+  background: none;
+  border: 0;
+  text-shadow: 0 0 3px rgba(20, 22, 26, 0.9);
+}
+.cglyph.sel:not(.dim) {
+  color: #ffd34d;
+  box-shadow: none;
+}

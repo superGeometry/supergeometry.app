@@ -1485,6 +1485,11 @@ export class SketchTool implements Tool {
       // Done with it: nothing left selected, so the next empty tap doesn't do it again.
       return this.clearSelection();
     }
+    // A constraint mark, with nothing of the drawing under the tap: select that constraint.
+    if (this.kind === "select" && !this.curveAt(p)) {
+      const c = this.glyphs?.hitAt(p.x, p.y);
+      if (c) return this.selectConstraint(c);
+    }
     switch (this.kind) {
       case "select":
       case "move":

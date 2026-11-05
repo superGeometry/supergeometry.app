@@ -203,6 +203,21 @@ export class ConstraintGlyphs {
     this.layout();
   }
 
+  /**
+   * The constraint mark (not a dimension) at a screen point, if any. Marks
+   * don't catch taps themselves — the drawing under them always comes first;
+   * the sketch asks here when a tap found nothing else.
+   */
+  hitAt(x: number, y: number): string | null {
+    if (this.host.hidden) return null;
+    for (const [id, chip] of this.chips) {
+      if (chip.hidden || chip.classList.contains("dim")) continue;
+      const r = chip.getBoundingClientRect();
+      if (x > r.left - 4 && x < r.right + 4 && y > r.top - 4 && y < r.bottom + 4) return id;
+    }
+    return null;
+  }
+
   /** Show or hide all the badges (the "Show constraints" switch). */
   setVisible(on: boolean): void {
     this.host.hidden = !on;
