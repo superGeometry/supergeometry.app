@@ -36,10 +36,18 @@ class Numpad {
     });
   }
 
+  /** Just opened on a box: the first key typed replaces what's in it. */
+  private fresh = false;
+
   private open(input: HTMLInputElement): void {
     this.target = input;
+    this.fresh = true;
     this.el.hidden = false;
     this.place();
+    // All of it selected, so typing overrides it (after anything that moves the caret on focus).
+    const all = () => this.target === input && input.setSelectionRange(0, input.value.length);
+    all();
+    setTimeout(all, 0);
   }
 
   private close(): void {
@@ -63,6 +71,9 @@ class Numpad {
   private press(k: string): void {
     const t = this.target;
     if (!t) return;
+    // First key after opening: a digit, point or ⌫ starts the value over.
+    if (this.fresh && (k === "⌫" || k === "." || /^\d$/.test(k))) t.setSelectionRange(0, t.value.length);
+    if (k !== "↵") this.fresh = false;
     const v = t.value;
     const s = t.selectionStart ?? v.length;
     const e = t.selectionEnd ?? v.length;
