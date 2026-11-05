@@ -1652,3 +1652,11 @@ body.items-open #bottom-left {
     display: none;
   }
 }
+
+/* Fullscreen on a tablet (touch, wide): Safari's close button sits at the top
+   left, so the top bar starts a little to the right of it. */
+@media (pointer: coarse) and (min-width: 721px) {
+  body.is-fullscreen #topbar {
+    left: calc(64px + var(--safe-l));
+  }
+}

@@ -186,8 +186,13 @@ export class App implements AppContext {
     this.pinLayer.set(this.pins, settings.value.showPinned);
   }
 
+  /** Bodies and features seen at the last rebuild: anything new while isolating joins the isolated set. */
+  private known: Set<string> | null = null;
+
   isolate(bodies: string[] | null): void {
-    this.isolated = bodies?.length ? bodies : null;
+    this.isolated = bodies?.length ? [...bodies] : null;
+    // What exists now; anything made from here on joins the isolated set.
+    this.known = new Set([...(this.result?.bodies ?? []).map((b) => b.id), ...this.store.doc.features.map((f) => f.id)]);
     this.applyVisibility();
     // Isolated bodies are all there is: sketches, planes, axes and images step out too.
     this.refreshConstruction();
@@ -238,8 +243,14 @@ export class App implements AppContext {
 
   private apply(r: RegenResult, features: readonly Feature[]): void {
     this.result = r;
-    if (this.isolated) this.isolated = this.isolated.filter((id) => r.bodies.some((b) => b.id === id));
-    if (!this.isolated?.length) this.isolated = null;
+    const now = new Set([...r.bodies.map((b) => b.id), ...features.map((f) => f.id)]);
+    if (this.isolated) {
+      // Made while isolating (a copy, a new sketch or plane): it belongs with what's shown.
+      if (this.known) for (const id of now) if (!this.known.has(id)) this.isolated.push(id);
+      this.isolated = this.isolated.filter((id) => now.has(id));
+      if (!this.isolated.some((id) => r.bodies.some((b) => b.id === id))) this.isolated = null;
+    }
+    this.known = now;
     this.view.setBodies(r.bodies);
     this.applyVisibility();
     this.refreshConstruction(features);
@@ -280,15 +291,16 @@ export class App implements AppContext {
     const r = this.result;
     if (!r) return;
     const hidden = new Set(this.store.doc.hidden);
-    const iso = !!this.isolated;
-    this.view.setConstruction(iso ? [] : r.planes.filter((p) => !hidden.has(p.id)), iso ? [] : r.axes.filter((a) => !hidden.has(a.id)));
-    this.view.setImages(iso ? [] : features.filter((f): f is ImageFeature => f.type === "image" && !f.suppressed && !hidden.has(f.id)));
+    // Isolating: only what's isolated (or was made since) shows.
+    const shown = (id: string) => !hidden.has(id) && (!this.isolated || this.isolated.includes(id));
+    this.view.setConstruction(r.planes.filter((p) => shown(p.id)), r.axes.filter((a) => shown(a.id)));
+    this.view.setImages(features.filter((f): f is ImageFeature => f.type === "image" && !f.suppressed && shown(f.id)));
   }
 
   private refreshSketches(features: readonly Feature[] = this.store.doc.features): void {
     const hidden = new Set(this.store.doc.hidden);
     const sketches = features
-      .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && ((!hidden.has(f.id) && !this.isolated) || f.id === this.tool.activeSketch))
+      .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && ((!hidden.has(f.id) && (!this.isolated || this.isolated.includes(f.id))) || f.id === this.tool.activeSketch))
       .map((s) => ({ ...s, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }));
     this.view.setSketches(sketches, this.tool.activeSketch);
   }
@@ -617,7 +629,11 @@ export class App implements AppContext {
     const doc = document as Document & { webkitFullscreenElement?: Element; webkitExitFullscreen?: () => void };
     const root = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
     const isFull = () => !!(document.fullscreenElement ?? doc.webkitFullscreenElement);
-    const paint = () => (fs.firstChild!.textContent = isFull() ? "Exit fullscreen" : "Fullscreen");
+    const paint = () => {
+      fs.firstChild!.textContent = isFull() ? "Exit fullscreen" : "Fullscreen";
+      // Tablets draw their own close button at the top left in fullscreen: the top bar makes room.
+      document.body.classList.toggle("is-fullscreen", isFull());
+    };
     document.addEventListener("fullscreenchange", paint);
     document.addEventListener("webkitfullscreenchange", paint);
     moreItem("m-fullscreen", () => {
@@ -712,7 +728,7 @@ export class App implements AppContext {
   private async export(format: ExportFormat): Promise<void> {
     // Selected bodies win; otherwise what's isolated; otherwise everything.
     const picked = bodiesOf(this.selection);
-    const bodies = picked.length ? picked : (this.isolated ?? []);
+    const bodies = picked.length ? picked : (this.isolated ?? []).filter((id) => this.result?.bodies.some((b) => b.id === id));
     try {
       this.ui.setStatus(`Exporting ${bodies.length ? `${bodies.length} bod${bodies.length > 1 ? "ies" : "y"} as ` : ""}${format.toUpperCase()}…`);
       const blob = await this.kernel.export(this.store.doc.features, format, bodies.length ? bodies : undefined);

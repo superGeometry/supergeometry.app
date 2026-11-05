@@ -100,8 +100,9 @@ export class ItemsPanel {
     const of = <T extends Feature["type"]>(t: T) => feats.filter((f) => f.type === t);
     const rows: Record<string, Row[]> = {
       Bodies: bodies.map((b) => ({ id: b.id, name: names[b.id] ?? b.name, icon: "body" as IconName, open: () => this.h.selectBody(b.id), remove: () => this.h.deleteBody(b.id), extra: iso && !iso.includes(b.id) ? " isolated-out" : "", isBody: true })),
-      Sketches: of("sketch").map((s) => ({ id: s.id, name: s.name, icon: "sketch" as IconName, open: () => this.h.editSketch(s.id), remove: () => this.h.deleteFeature(s.id) })),
-      "Planes & axes": [...of("plane"), ...of("axis")].map((c) => ({ id: c.id, name: c.name, icon: (c.type === "plane" ? "plane" : "axis") as IconName, open: () => this.h.selectPlane(c.id), remove: () => this.h.deleteFeature(c.id) })),
+      // Greyed while something else is isolated (they're hidden until Isolate is off).
+      Sketches: of("sketch").map((s) => ({ id: s.id, name: s.name, icon: "sketch" as IconName, open: () => this.h.editSketch(s.id), remove: () => this.h.deleteFeature(s.id), extra: iso && !iso.includes(s.id) ? " isolated-out" : "" })),
+      "Planes & axes": [...of("plane"), ...of("axis")].map((c) => ({ id: c.id, name: c.name, icon: (c.type === "plane" ? "plane" : "axis") as IconName, open: () => this.h.selectPlane(c.id), remove: () => this.h.deleteFeature(c.id), extra: iso && !iso.includes(c.id) ? " isolated-out" : "" })),
       Images: of("image").map((i) => ({ id: i.id, name: i.name, icon: "image" as IconName, open: () => this.h.selectImage(i.id), remove: () => this.h.deleteFeature(i.id) })),
     };
     const byId = new Map(Object.values(rows).flat().map((r) => [r.id, r]));
