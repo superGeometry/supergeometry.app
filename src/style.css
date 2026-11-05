@@ -675,6 +675,10 @@ body.sketching .right-btn.sketch-only {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+#toast.top {
+  bottom: auto;
+  top: calc(100px + var(--safe-t));
+}
 #toast.error {
   border-color: rgba(255, 107, 94, 0.5);
 }
@@ -690,7 +694,8 @@ body.sketching .right-btn.sketch-only {
   background: rgba(31, 33, 37, 0.95);
   border: 1px solid rgba(61, 139, 255, 0.7);
   border-radius: 8px;
-  z-index: 16;
+  /* Above the constraint labels, toasts and popovers: it's what you're typing into. */
+  z-index: 46;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 .dim-widget[hidden] {
@@ -2266,4 +2271,67 @@ body.history-open #topbar {
 .menu-share svg {
   width: 17px;
   height: 17px;
+}
+
+/* Phones upright: the guide text at the bottom, above undo/redo, across the
+   whole width (not over the panels at the top). */
+@media (max-width: 720px) and (orientation: portrait) {
+  body #hint {
+    top: auto;
+    bottom: calc(122px + var(--safe-b));
+    left: calc(8px + var(--safe-l, 0px));
+    right: calc(8px + var(--safe-r));
+    transform: none;
+    max-width: none;
+    width: auto;
+    font-size: 12px;
+    text-align: center;
+    z-index: 9;
+  }
+  /* The tool panel moves up to make room for it. */
+  body:has(#hint:not([hidden])) #panel {
+    bottom: calc(170px + var(--safe-b));
+  }
+}
+
+/* Phones upright, sketching: the sketch tools as a column on the left (like
+   the other tool lists), with their names until one is picked — then icons only. */
+@media (max-width: 720px) and (orientation: portrait) {
+  body.sketching #toolbar {
+    flex-direction: column;
+    top: calc(64px + var(--safe-t));
+    bottom: calc(118px + var(--safe-b));
+    left: calc(8px + var(--safe-l));
+    right: auto;
+    transform: none;
+    max-height: none;
+    height: fit-content;
+    max-height: calc(100vh - 190px - var(--safe-t) - var(--safe-b));
+    overflow-x: hidden;
+    overflow-y: auto;
+    z-index: 26;
+  }
+  body.sketching #toolbar .tool-label {
+    display: flex;
+  }
+  body.sketching.sketch-compact #toolbar .tool-label {
+    display: none;
+  }
+  /* Clear of the guide text when it's showing. */
+  body.sketching:has(#hint:not([hidden])) #toolbar {
+    max-height: calc(100vh - 250px - var(--safe-t) - var(--safe-b));
+  }
+}
+
+/* More → Boost / Donate / Support: the ways, indented under it. */
+.menu-sub {
+  display: flex;
+  flex-direction: column;
+  padding-left: 12px;
+}
+.menu-sub[hidden] {
+  display: none;
+}
+.menu button.disabled {
+  opacity: 0.55;
 }

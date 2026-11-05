@@ -38,6 +38,8 @@ export interface Settings {
   degrees: "decimal" | "fractional";
   /** Value boxes use the on-screen numpad instead of the system keyboard. */
   numpad: boolean;
+  /** The guide text (what to tap next) — switched in More. */
+  showHints: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -60,6 +62,7 @@ const DEFAULTS: Settings = {
   showConstraintGlyphs: true,
   // On by default on touch screens (phones, tablets, headsets).
   numpad: isTouchDevice,
+  showHints: true,
   version: 3,
 };
 

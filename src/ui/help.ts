@@ -67,7 +67,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "trim", name: "Trim / Join", text: "Cut away the piece of a curve between crossings — or join two lines on the same axis." },
       { icon: "alignLine", name: "Align", text: "Move a line onto another line's axis; lines joined to it stretch along." },
       { icon: "extend", name: "Extend", text: "Carry a line or arc on until it meets another curve." },
-      { icon: "constraints", name: "Constraints", text: "Rules that keep the drawing in shape: horizontal, parallel, equal, a fixed distance… A new rule replaces one it contradicts." },
+      { icon: "constraints", name: "Constraints", text: "Rules that keep the drawing in shape: horizontal, parallel, equal, a fixed distance… A rule that contradicts the ones already there isn't added — remove the old one first (or switch Auto constrain off)." },
       { icon: "lineDashed", name: "Construction", text: "Helper lines that guide the drawing but don't make faces. Tap to switch the selection or new lines." },
     ],
   },

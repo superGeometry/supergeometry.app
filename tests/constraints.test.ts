@@ -110,5 +110,18 @@ for (const [name, fn] of checks) {
   if (!r2.result.ok || r2.removed.length || r2.constraints.length !== 2) throw new Error("a length should sit alongside horizontal");
   console.log("ok   contradicting constraint replaces, agreeing one adds");
 }
+{
+  // Strict (what the sketch uses): a contradicting constraint is refused, nothing is taken away.
+  const { addStrict } = await import("../src/sketch/constraints");
+  const l1 = L("l1", [0, 0], [10, 1]);
+  const h: SketchConstraint = { id: "h", type: "horizontal", curves: ["l1"] };
+  const v: SketchConstraint = { id: "v", type: "vertical", curves: ["l1"] };
+  const r = addStrict([l1], [h], [v]);
+  if (r.ok || r.constraints.length !== 1 || r.constraints[0].id !== "h") throw new Error("vertical on a horizontal line should be refused");
+  const len: SketchConstraint = { id: "len", type: "dim", curves: ["l1"], prop: "length", value: 12 };
+  const r2 = addStrict([l1], [h], [len]);
+  if (!r2.ok || r2.constraints.length !== 2) throw new Error("a length should sit alongside horizontal");
+  console.log("ok   strict: contradicting constraint refused, agreeing one adds");
+}
 
 process.exit(failed ? 1 : 0);

@@ -183,8 +183,7 @@ export function splinePoints(pts: Vec2[], closed: boolean, mode: "fit" | "contro
     }
   }
   if (closed) out.push(out[0]);
-  else out.push(mode === "fit" ? pts[n - 1] : bspline(get(n - 3), get(n - 2), get(n - 1), get(n - 1), 1));
-  if (!closed && mode === "control") out[0] = bspline(get(-1), get(0), get(1), get(2), 0);
+  else out.push(pts[n - 1]);
   return out;
 }
 
@@ -201,14 +200,16 @@ export function splineSpans(d: SplineDef): number {
 
 /**
  * Point i of a spline's list, past the ends too: closed splines wrap; an open
- * fit-point spline gets a mirrored point beyond each end, so it leaves its end
- * heading towards its neighbour (a repeated end point would leave it at a
- * tangent of its own making — e.g. along a revolve axis, which can't revolve).
+ * spline gets a mirrored point beyond each end, so it starts and ends exactly
+ * on its first and last point (control-point splines too — no gap at the
+ * ends) and leaves them heading towards the neighbour (a repeated end point
+ * would leave it at a tangent of its own making — e.g. along a revolve axis,
+ * which can't revolve).
  */
-function pointAt(pts: Vec2[], i: number, closed: boolean, mode: "fit" | "control"): Vec2 {
+function pointAt(pts: Vec2[], i: number, closed: boolean, _mode: "fit" | "control"): Vec2 {
   const n = pts.length;
   if (closed) return pts[((i % n) + n) % n];
-  if (mode === "fit" && n >= 2) {
+  if (n >= 2) {
     if (i < 0) return [2 * pts[0][0] - pts[1][0], 2 * pts[0][1] - pts[1][1]];
     if (i > n - 1) return [2 * pts[n - 1][0] - pts[n - 2][0], 2 * pts[n - 1][1] - pts[n - 2][1]];
   }

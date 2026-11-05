@@ -3,6 +3,7 @@ import type { FeatureError } from "../kernel/protocol";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
 import { icons, type IconName } from "./icons";
 import { numpadInput } from "./numpad";
+import { settings } from "../settings";
 
 export interface ToolItem {
   id: string;
@@ -374,7 +375,15 @@ export class UI {
 
   setHint(text: string | null): void {
     this.hint.textContent = text ?? "";
-    this.hint.hidden = !text;
+    this.hintText = text;
+    this.hint.hidden = !text || !settings.value.showHints;
+  }
+
+  private hintText: string | null = null;
+
+  /** More → Guide text switched: show (or hide) what's there now. */
+  refreshHint(): void {
+    this.setHint(this.hintText);
   }
 
   /** A small persistent note (e.g. "body not closed"), never blocking. */
@@ -392,6 +401,13 @@ export class UI {
   toast(text: string, kind: "info" | "error" = "info"): void {
     this.toastEl.textContent = text;
     this.toastEl.className = `show ${kind}`;
+    // Never over what's being typed into (a value box, the numpad, the tool panel): then it shows up top.
+    const t = this.toastEl.getBoundingClientRect();
+    const hit = [...document.querySelectorAll<HTMLElement>(".numpad:not([hidden]), .dim-widget, #panel:not([hidden])")].some((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.left < t.right && r.right > t.left && r.top < t.bottom && r.bottom > t.top;
+    });
+    if (hit) this.toastEl.classList.add("top");
     clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => (this.toastEl.className = ""), 3600);
   }

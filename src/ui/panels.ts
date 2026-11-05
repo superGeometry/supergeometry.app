@@ -137,7 +137,7 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
   const pad = ui.addRight("numpad", "numpad", "On-screen numpad for typing values (tap to switch on / off)", () => {
     settings.set("numpad", !settings.value.numpad);
     ui.toast(settings.value.numpad ? "On-screen numpad on" : "On-screen numpad off");
-  }, () => (settings.value.numpad ? "Pad on" : "Pad"));
+  }, () => "NumPad");
   const markPad = () => pad.classList.toggle("on", settings.value.numpad);
   settings.onChange(() => (markPad(), ui.refreshRight()));
   markPad();

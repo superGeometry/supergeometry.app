@@ -1,3 +1,4 @@
+import { icons } from "../ui/icons";
 import {
   AmbientLight,
   BoxGeometry,
@@ -98,6 +99,9 @@ export class ViewCube {
     const rollR = button("⟳", "Rotate view 90° right", () => view.cam.rollBy(-Math.PI / 2));
     rollL.className = "vc-roll left";
     rollR.className = "vc-roll right";
+    // Drawn icons, the same size and weight as the orbit-centre and views buttons below the cube.
+    rollL.innerHTML = icons.undo;
+    rollR.innerHTML = icons.redo;
     this.el.append(rollL, rollR);
     this.wire();
     view.frameHooks.add(() => this.render());

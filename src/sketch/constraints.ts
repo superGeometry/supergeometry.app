@@ -459,6 +459,26 @@ export function applicable(type: ConstraintType, pts: PointRef[], curves: Sketch
 }
 
 /**
+ * Add constraints strictly: they go in only if everything still works out
+ * together. A new constraint that contradicts existing ones is refused
+ * (nothing already there is taken away).
+ */
+export function addStrict(
+  entities: SketchEntity[],
+  existing: SketchConstraint[],
+  added: SketchConstraint[],
+  opts: SolveOptions = {},
+): { ok: boolean; constraints: SketchConstraint[]; result: SolveResult } {
+  const all = [...existing, ...added];
+  const size = (e: SketchEntity) => (e.kind === "line" ? Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) : e.kind === "circle" ? e.radius : e.kind === "arc" ? Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) : 1);
+  const scale = Math.max(1e-9, ...entities.map(size));
+  const r = solve(entities, all, opts);
+  // "Met" by shrinking a curve to nothing doesn't count.
+  const ok = r.ok && r.entities.every((e, i) => size(e) > scale * 1e-6 || size(entities[i]) <= scale * 1e-6);
+  return ok ? { ok, constraints: all, result: r } : { ok, constraints: existing, result: r };
+}
+
+/**
  * Add constraints without being strict about it: if the new ones contradict
  * existing ones, the existing ones they clash with give way (newest first,
  * as few as possible). Ones that agree stay alongside.

@@ -1,12 +1,13 @@
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
 import { dot, GROUND, niceStep as niceStepOf, planeY, toPlane } from "../geom";
-import { addResolving, pointOf, pointsOf, refsOf, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
+import { addStrict, pointOf, pointsOf, refsOf, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, buttonEnabled, CONSTRAINT_BUTTONS, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
 import { settings } from "../settings";
-import { arcFrom3, entityPolylines } from "../sketch/curves";
+import { isCoarse } from "../device";
+import { arcFrom3, entityCorners, entityPolylines } from "../sketch/curves";
 import {
   offsetChain,
   connectedChain,
@@ -17,7 +18,7 @@ import {
   joinCollinear,
   extend,
   joinEnds,
-  splitEntity,
+  splitAny,
   filletConstraints,
   filletEnds,
   filletCorner,
@@ -73,7 +74,7 @@ type Kind =
 const HINTS: Record<Kind, string> = {
   select: "Tap curves to select them and edit their size. Double-tap selects a whole shape.",
   line: "Tap points to draw lines. Tap the first point to close; double-tap or Enter to stop.",
-  arc: "Tap the arc's two endpoints, then a third point to bend it.",
+  arc: isCoarse ? "Drag from one end of the arc to the other, then drag anywhere to bend it (or tap where it should pass)." : "Tap the arc's two endpoints, then a third point to bend it (or drag to bend).",
   spline: "Tap points the curve passes through. Tap the first point to close; double-tap or Enter to finish.",
   rect: "Tap (or drag) two opposite corners.",
   circle: "Tap the center, then the radius.",
@@ -218,6 +219,7 @@ export class SketchTool implements Tool {
   // ------------------------------------------------------------ lifecycle
 
   enter(): void {
+    document.body.classList.remove("sketch-compact");
     this.prevOrtho = this.app.view.cam.ortho;
     // Already looking straight at the model along an axis (Top, Front, Right, …):
     // sketch on that origin plane, facing the camera, without asking.
@@ -250,6 +252,8 @@ export class SketchTool implements Tool {
     this.clearOverlays();
     this.gimbal?.dispose();
     this.gimbal = null;
+    this.scaleGimbal?.dispose();
+    this.scaleGimbal = null;
     this.patGimbal?.dispose();
     this.patGimbal = null;
     this.patBox?.dispose();
@@ -272,7 +276,7 @@ export class SketchTool implements Tool {
     this.distDim = null;
     settings.offChange(this.onSettings);
     this.listening = false;
-    document.body.classList.remove("sketching");
+    document.body.classList.remove("sketching", "sketch-compact");
     this.app.view.setOriginPlanesVisible(false);
     this.app.view.grid.setPlane(GROUND);
     this.app.view.cam.setOrtho(this.prevOrtho);
@@ -389,16 +393,19 @@ export class SketchTool implements Tool {
     const swap = (p: string) => (p === "a" ? "b" : p === "b" ? "a" : p);
     const remap = (c: SketchConstraint): SketchConstraint => (c.pts ? { ...c, pts: c.pts.map((q) => (r.swapped.includes(q.e) ? { ...q, p: swap(q.p) } : q)) } : c);
     const same = (c: SketchConstraint) => c.type === "dim" && c.prop === "angle" && c.curves?.length === 2 && c.curves.includes(id1) && c.curves.includes(id2);
-    const res = addResolving(r.entities, this.constraints.filter((c) => !same(c)).map(remap), [{ id: uid(), type: "dim" as const, curves: [id1, id2], prop: "angle", value: deg }], { fixed: new Set([id1]) });
-    this.commit(res.result.ok ? res.result.entities : r.entities, res.constraints);
-    this.toastReplaced(res.removed);
+    const res = addStrict(r.entities, this.constraints.filter((c) => !same(c)).map(remap), [{ id: uid(), type: "dim" as const, curves: [id1, id2], prop: "angle", value: deg }], { fixed: new Set([id1]) });
+    if (!res.ok) return this.refused();
+    this.commit(res.result.entities, res.constraints);
   }
 
-  /** Say which constraints a new one replaced. */
-  private toastReplaced(removed: SketchConstraint[]): void {
-    if (!removed.length) return;
-    const names = [...new Set(removed.map((c) => (c.type === "dim" ? `${c.prop ?? "size"} dimension` : c.type)))].join(", ");
-    this.app.ui.toast(`Replaced ${removed.length === 1 ? "a" : removed.length} constraint${removed.length > 1 ? "s" : ""} it contradicted (${names})`);
+  private refusedAt = 0;
+
+  /** A new constraint (or size) that the ones already there don't allow: nothing changes. */
+  private refused(): void {
+    // Typing a value digit by digit: say it once, not on every key.
+    if (performance.now() - this.refusedAt < 2000) return;
+    this.refusedAt = performance.now();
+    this.app.ui.toast("That contradicts constraints already on the sketch — remove one first (Constraints → tap it → Delete)", "error");
   }
 
   private removeConstraints(list: SketchConstraint[]): void {
@@ -461,16 +468,23 @@ export class SketchTool implements Tool {
     const old = new Set(existingConstraints("distance", this.constraints, pts, curves).map((c) => c.id));
     const c: SketchConstraint = { id: uid(), type: "distance", pts, ...(curves.length ? { curves: curves.map((e) => e.id) } : {}), value };
     const first = this.firstPicked();
-    const res = addResolving(this.entities, this.constraints.filter((x) => !old.has(x.id)), [c], first ? { fixed: new Set([first]) } : {});
-    this.commit(res.result.ok ? res.result.entities : this.entities, res.constraints);
-    this.toastReplaced(res.removed);
+    const res = addStrict(this.entities, this.constraints.filter((x) => !old.has(x.id)), [c], first ? { fixed: new Set([first]) } : {});
+    if (!res.ok) return this.refused();
+    this.commit(res.result.entities, res.constraints);
     if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
     this.refreshDistanceDim();
   }
 
-  /** Selected curves in the order they were picked. */
+  /**
+   * Selected curves in the order they were picked (the first one is the
+   * reference: it stays put; the others adapt to it) — by the pick order kept
+   * for each tap, not by how the selection happens to be stored.
+   */
   private pickedCurves(): SketchEntity[] {
-    return [...this.selected].flatMap((id) => this.entities.filter((e) => e.id === id));
+    const ids = [...this.selected];
+    const at = new Map(ids.map((id, i) => [id, this.pickSeq.get(id) ?? -1e9 + i]));
+    ids.sort((a, b) => at.get(a)! - at.get(b)!);
+    return ids.flatMap((id) => this.entities.filter((e) => e.id === id));
   }
 
   private addConstraint(type: (typeof CONSTRAINT_BUTTONS)[number]["type"]): void {
@@ -484,10 +498,10 @@ export class SketchTool implements Tool {
     // Equal: a size dimension on the curves picked after the first would fight it — drop those.
     const others = new Set(curves.slice(1).map((e) => e.id));
     const kept = type === "equal" ? this.constraints.filter((c) => !(c.type === "dim" && c.curves?.length === 1 && others.has(c.curves[0]) && ["length", "radius", "diameter"].includes(c.prop ?? ""))) : this.constraints;
-    // A new constraint wins over ones it contradicts (they're replaced); others stay.
-    const res = addResolving(this.entities, kept, cs, first && type !== "fix" ? { fixed: new Set([first]) } : {});
-    this.commit(res.result.ok ? res.result.entities : this.entities, res.constraints);
-    this.toastReplaced(res.removed);
+    // Strict: a constraint that contradicts the ones already there isn't added.
+    const res = addStrict(this.entities, kept, cs, first && type !== "fix" ? { fixed: new Set([first]) } : {});
+    if (!res.ok) return this.refused();
+    this.commit(res.result.entities, res.constraints);
     if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
     this.clearSelection();
   }
@@ -646,6 +660,8 @@ export class SketchTool implements Tool {
   }
 
   setKind(kind: Kind): void {
+    // Phones: once a tool is picked the column shows just icons (names are back on the next sketch).
+    document.body.classList.add("sketch-compact");
     this.kind = kind;
     this.pts = [];
     this.locks = {};
@@ -825,24 +841,6 @@ export class SketchTool implements Tool {
         }
         break;
     }
-    // Select and the edit tools show the step just done; tapping it selects what it made.
-    const lastLog = this.sketch?.log?.at(-1);
-    const drawing = ["line", "arc", "spline", "rect", "circle", "ellipse", "polygon", "text"].includes(k);
-    const made = this.lastMade.filter((id) => this.entities.some((e) => e.id === id));
-    if (lastLog && !drawing) {
-      items.push({
-        type: "button",
-        label: `Select last: ${lastLog.op}${lastLog.n > 1 ? ` ×${lastLog.n}` : ""}`,
-        icon: "pointer",
-        onClick: () => {
-          if (!made.length) return this.app.ui.toast("Nothing from that step to select");
-          if (this.kind !== "select" && !this.isSelectionTool()) this.setKind("select");
-          this.selected = new Set(made);
-          this.selPts = [];
-          this.selectionChanged();
-        },
-      });
-    }
     ui.showPanel(items.length ? { title: titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined } : null);
   }
 
@@ -931,6 +929,15 @@ export class SketchTool implements Tool {
     if (this.kind === "patternLinear" && this.startPatternDrag(p)) return true;
     // Only the gimbal grabs right away; geometry drags start once the pointer moves (dragStart).
     if (this.kind === "select") return this.startGimbalDrag(p);
+    if (this.kind === "move" && this.startGimbalDrag(p)) return true;
+    if (this.kind === "scale" && this.startScaleDrag(p)) return true;
+    // Arc with both ends placed: a drag anywhere bends it (no need to hit a spot).
+    if (this.kind === "arc" && this.pts.length === 2 && this.arcM) {
+      const uv = this.uvAt(p);
+      if (!uv) return false;
+      this.arcBend = { from: uv, m0: this.arcM, x: p.x, y: p.y, moved: false };
+      return true;
+    }
     if (!["line", "rect", "circle", "polygon", "ellipse", "arc"].includes(this.kind) || this.pts.length) return false;
     const s = this.snap(p);
     if (!s) return false;
@@ -943,6 +950,14 @@ export class SketchTool implements Tool {
 
   drag(p: ToolPointer): void {
     if (this.patDrag) return this.dragPattern(p);
+    if (this.scaleDrag) return this.dragScale(p);
+    if (this.arcBend) {
+      if (Math.hypot(p.x - this.arcBend.x, p.y - this.arcBend.y) > 8) this.arcBend.moved = true;
+      if (!this.arcBend.moved) return;
+      const uv = this.uvAt(p);
+      if (uv) this.arcM = [this.arcBend.m0[0] + uv[0] - this.arcBend.from[0], this.arcBend.m0[1] + uv[1] - this.arcBend.from[1]];
+      return this.refreshPreview();
+    }
     this.typing.track(p);
     if (this.sdrag) return this.dragGeometry(p);
     this.cursor = this.snap(p);
@@ -1019,6 +1034,27 @@ export class SketchTool implements Tool {
 
   up(p: ToolPointer): void {
     if (this.patDrag) return this.endPatternDrag();
+    if (this.scaleDrag) {
+      // The factor stays in the panel: Apply (or an empty tap) scales.
+      this.scaleDrag = null;
+      this.app.ui.setLabel(0, 0, null);
+      this.refreshGimbal();
+      return;
+    }
+    if (this.arcBend) {
+      // Let go after a drag: the arc is placed with that bend. A tap (no drag):
+      // it passes through the point tapped.
+      const moved = this.arcBend.moved;
+      this.arcBend = null;
+      const s = moved ? null : this.snap(p);
+      const m = moved ? this.arcM : (s?.uv ?? null);
+      if (m) {
+        this.locks = {};
+        this.cursor = { uv: m };
+        this.addPoint(m, 1);
+      }
+      return;
+    }
     if (this.sdrag) return this.endGeometryDrag();
     this.dragging = false;
     this.typing.reset();
@@ -1216,8 +1252,58 @@ export class SketchTool implements Tool {
   }
 
   /** The sketch gimbal sits at the centre of the selection (Select tool only). */
+  private scaleGimbal: Gimbal | null = null;
+  private scaleDrag: { from: ToolPointer; part: GimbalPart; f0: number; center: Vec2; size: number } | null = null;
+
+  /** Scale tool: cube handles on the selection — drag one out or in to scale (or type the factor). */
+  private refreshScaleGimbal(): void {
+    const sel = this.entities.filter((e) => this.selected.has(e.id));
+    const show = this.kind === "scale" && this.phase === "draw" && sel.length > 0 && !this.scaleDrag;
+    if (!show) {
+      if (!this.scaleDrag) {
+        this.scaleGimbal?.dispose();
+        this.scaleGimbal = null;
+      }
+      return;
+    }
+    const plane = this.plane!;
+    this.scaleGimbal ??= new Gimbal(this.app.view, { axes: [plane.xDir, planeY(plane), plane.normal], parts: (q) => q.kind === "center" || (q.kind === "axis" && q.i < 2), cubes: true });
+    this.scaleGimbal.setCenter(sketchToWorld(plane, centroidOf(sel)).toArray() as Vec3);
+  }
+
+  private startScaleDrag(p: ToolPointer): boolean {
+    const part = this.scaleGimbal?.hit(p);
+    if (!part || !this.scaleGimbal || !this.plane) return false;
+    const sel = this.entities.filter((e) => this.selected.has(e.id));
+    const c = centroidOf(sel);
+    // How big the selection is (from its centre): the drag is measured against it.
+    const size = Math.max(1e-6, ...sel.flatMap((e) => entityPolylines(e).flat()).map((q) => Math.hypot(q[0] - c[0], q[1] - c[1])));
+    this.scaleDrag = { from: p, part, f0: this.edit.factor, center: c, size };
+    this.scaleGimbal.setHot(part);
+    return true;
+  }
+
+  private dragScale(p: ToolPointer): void {
+    const dr = this.scaleDrag!;
+    const view = this.app.view;
+    const plane = this.plane!;
+    let d: number;
+    if (dr.part.kind === "axis") {
+      const dir = dr.part.i === 0 ? plane.xDir : planeY(plane);
+      d = axisDrag(view, sketchToWorld(plane, dr.center).toArray() as Vec3, dir, dr.from, p);
+    } else d = (dr.from.y - p.y) * view.cam.worldPerPixel(view.height); // centre: up grows, down shrinks
+    let f = Math.max(0.01, dr.f0 * (1 + d / dr.size));
+    if (!p.shift) f = Math.max(0.01, Math.round(f * 100) / 100);
+    this.edit.factor = f;
+    this.app.ui.updatePanelValues([f]);
+    this.app.ui.setLabel(p.x, p.y, `×${f}`);
+    this.refreshPreview();
+  }
+
   private refreshGimbal(): void {
-    const show = this.kind === "select" && this.phase === "draw" && (this.selected.size > 0 || this.selPts.length > 0) && !this.sdrag;
+    this.refreshScaleGimbal();
+    // Select and Move/Rotate: a gimbal on the selection (drag to move or turn it).
+    const show = (this.kind === "select" || this.kind === "move") && this.phase === "draw" && (this.selected.size > 0 || this.selPts.length > 0) && !this.sdrag;
     if (!show) {
       this.gimbal?.dispose();
       this.gimbal = null;
@@ -1260,14 +1346,26 @@ export class SketchTool implements Tool {
       this.selected.clear();
       this.selPts = [];
     }
-    for (const id of picked) this.selected.add(id);
+    for (const id of picked) if (!this.selected.has(id)) (this.selected.add(id), this.pickSeq.set(id, ++this.seq));
     this.selectionChanged();
   }
 
   /** Right-click: end the current chain/shape (and keep what's drawn). */
-  context(): void {
+  context(p?: ToolPointer): void {
     if (this.kind === "spline" && this.pts.length >= 2) return this.finishSpline(false);
     if (this.pts.length) return this.resetDrawing();
+    // Right-click on empty space, in any tool: let go of everything picked
+    // (selection, a half-done Offset / Extend / Fillet / Align, a Pattern centre).
+    if (!p || !this.curveAt(p)) {
+      if (this.filletEdit) this.cancelFillet();
+      this.edit.offsetOf = this.edit.extendFrom = this.edit.alignFrom = this.edit.filletFrom = undefined;
+      this.edit.pivot = undefined;
+      this.edit.picking = undefined;
+      if (this.selConstraint) this.deselectConstraint();
+      this.clearSelection();
+      this.setHint();
+      return;
+    }
     if (this.selected.size || this.selPts.length) this.clearSelection();
   }
 
@@ -1652,7 +1750,10 @@ export class SketchTool implements Tool {
     } else if (k === "text") {
       this.pts = [pt];
     } else {
+      // Arc, third point: through where it was tapped (or the bend dragged to).
       this.pts.push(pt);
+      if (k === "arc" && this.pts.length === 2) this.arcM = this.defaultArcMid(this.pts[0], this.pts[1]);
+      if (k === "arc" && this.pts.length !== 2) this.arcM = null;
       const need = k === "arc" || k === "ellipse" || (k === "rect" && memory.rect === "3pt") ? 3 : 2;
       if (this.pts.length >= need) {
         const e = this.buildShape(this.pts);
@@ -1696,6 +1797,59 @@ export class SketchTool implements Tool {
   private finishSpline(closed: boolean): void {
     if (this.pts.length >= 2) this.commitAdd([{ id: uid(), kind: "spline", points: this.pts, closed: closed && this.pts.length >= 3, mode: memory.spline }]);
     this.resetDrawing();
+  }
+
+  /** Arc being drawn: its middle point so far (both ends placed). */
+  private arcM: Vec2 | null = null;
+  /** Arc being bent by a drag: where the drag began, and the middle then. */
+  private arcBend: { from: Vec2; m0: Vec2; x: number; y: number; moved: boolean } | null = null;
+
+  /**
+   * A first guess at the arc's bend from a to b: carrying on smoothly from
+   * the line or arc it starts on (tangent), else a gentle bow to the left.
+   */
+  private defaultArcMid(a: Vec2, b: Vec2): Vec2 {
+    const c: Vec2 = [b[0] - a[0], b[1] - a[1]];
+    const L = Math.hypot(...c);
+    const bow: Vec2 = [(a[0] + b[0]) / 2 - c[1] * 0.3, (a[1] + b[1]) / 2 + c[0] * 0.3];
+    if (L < 1e-12) return bow;
+    // The direction a curve ending at a arrives in.
+    let t: Vec2 | null = null;
+    for (const e of this.entities) {
+      if (e.kind === "line") {
+        if (samePt(e.b, a)) t = [e.b[0] - e.a[0], e.b[1] - e.a[1]];
+        else if (samePt(e.a, a)) t = [e.a[0] - e.b[0], e.a[1] - e.b[1]];
+      } else if (e.kind === "arc") {
+        const k = arcFrom3(e.a, e.m, e.b);
+        if (!k) continue;
+        const end = samePt(e.b, a) ? e.b : samePt(e.a, a) ? e.a : null;
+        if (!end) continue;
+        // Tangent at that end, pointing out of the arc.
+        const r: Vec2 = [end[0] - k.c[0], end[1] - k.c[1]];
+        // (Pointing away from the arc's own middle.)
+        let tt: Vec2 = [-r[1], r[0]];
+        if ((e.m[0] - end[0]) * tt[0] + (e.m[1] - end[1]) * tt[1] > 0) tt = [-tt[0], -tt[1]];
+        t = tt;
+      }
+      if (t) break;
+    }
+    if (!t) return bow;
+    const tl = Math.hypot(...t);
+    if (tl < 1e-12) return bow;
+    const u: Vec2 = [t[0] / tl, t[1] / tl];
+    // Circle through a and b, tangent to u at a: its centre is on the normal at a.
+    const n: Vec2 = [-u[1], u[0]];
+    const nc = n[0] * c[0] + n[1] * c[1];
+    if (Math.abs(nc) < 1e-9 * L) return bow; // straight on: no arc does that
+    const rad = (L * L) / (2 * nc);
+    const ctr: Vec2 = [a[0] + n[0] * rad, a[1] + n[1] * rad];
+    const R = Math.abs(rad);
+    const mid: Vec2 = [(a[0] + b[0]) / 2 - ctr[0], (a[1] + b[1]) / 2 - ctr[1]];
+    const ml = Math.hypot(...mid);
+    // Going on along u first: the short way round if u leans towards b, else the long way.
+    const sign = u[0] * c[0] + u[1] * c[1] >= 0 ? 1 : -1;
+    if (ml < 1e-9 * L) return [ctr[0] + u[0] * R, ctr[1] + u[1] * R];
+    return [ctr[0] + (sign * mid[0] * R) / ml, ctr[1] + (sign * mid[1] * R) / ml];
   }
 
   /** The entity the current points describe (also used for the preview). */
@@ -1750,6 +1904,8 @@ export class SketchTool implements Tool {
 
   private resetDrawing(): void {
     this.pts = [];
+    this.arcM = null;
+    this.arcBend = null;
     this.locks = {};
     this.lastLineId = null;
     this.chainFirstId = null;
@@ -1890,8 +2046,12 @@ export class SketchTool implements Tool {
     if (["line", "arc", "rect", "circle", "polygon", "ellipse", "spline"].includes(this.kind) && this.pts.length && c) {
       const pts = this.kind === "line" ? [this.pts[this.pts.length - 1], c] : [...this.pts, c];
       const e = this.buildShape(pts);
-      // Arc, first end placed: a dashed arc to the pointer shows what's coming (the bend comes with the third tap).
-      if (this.kind === "arc" && this.pts.length === 1 && e?.kind === "line") {
+      // Arc, both ends placed and nothing to aim with (touch, or being bent): the bend so far.
+      if (this.kind === "arc" && this.pts.length === 2 && this.arcM && (isCoarse || this.arcBend)) {
+        const [a, b] = this.pts;
+        if (arcFrom3(a, this.arcM, b)) ghosts.push({ id: "arc-preview", kind: "arc", a, m: this.arcM, b });
+      } else if (this.kind === "arc" && this.pts.length === 1 && e?.kind === "line") {
+        // Arc, first end placed: a dashed arc to the pointer shows what's coming (the bend comes with the third tap).
         const [a, b] = [e.a, e.b];
         const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
         if (L > 1e-9) {
@@ -1899,6 +2059,10 @@ export class SketchTool implements Tool {
           this.drawGhosts([{ id: "arc-preview", kind: "arc", a, m, b }], 0xffc23d, true);
         }
         label = dimLabel(e, pts);
+      } else if (e?.kind === "line" && this.kind === "line" && isCoarse && !this.dragging && this.pts.length >= 1) {
+        // Touch, a line just placed and its length being typed: no next segment
+        // trailing to where the finger was (it only gets in the way) — the next tap places it.
+        this.hideLineDim();
       } else if (e?.kind === "line") this.showLineDim(e.a, e.b);
       else {
         if (e) ghosts.push(e);
@@ -1915,6 +2079,20 @@ export class SketchTool implements Tool {
     if (this.kind === "offset" && this.edit.offsetOf) ghosts.push(...this.offsetResult());
     if (this.isSelectionTool() && this.selected.size) ghosts.push(...this.transformed(true));
     this.drawGhosts(ghosts);
+    // Mirror: the axis (picked, or the line under the pointer) with a mirror mark on it.
+    if (this.kind === "mirror" && this.selected.size) {
+      let axis = this.edit.mirrorLine ?? null;
+      if (!axis && p) {
+        const c = this.curveAt(p);
+        const e = c && [...this.entities, ...this.boundary].find((x) => x.id === c.id);
+        if (e?.kind === "line") {
+          axis = [e.a, e.b];
+          // What it would make, mirrored over that line.
+          this.drawGhosts(this.entities.filter((y) => this.selected.has(y.id)).map((x: SketchEntity) => transformEntity(x, mirrorXf(e.a, e.b), false)));
+        }
+      }
+      if (axis) this.drawMirrorAxis(axis);
+    }
     // Midpoints of lines and sides: snap targets, shown so you can aim for them.
     if (settings.value.showGuidePoints) {
       const mids = [...this.entities, ...this.boundary].flatMap((e) => guidePoints(e).filter((g) => g.kind === "mid").map((g) => sketchToWorld(this.plane!, g.p, 0.01)));
@@ -1991,6 +2169,30 @@ export class SketchTool implements Tool {
     this.typing.reset();
     if (this.cursor) this.addPoint(this.cursor.uv, 1);
     this.setHint();
+  }
+
+  /** The mirror axis: a long dash-dot line, and a pair of arrowheads facing it at the middle. */
+  private drawMirrorAxis([a, b]: [Vec2, Vec2]): void {
+    const d: Vec2 = [b[0] - a[0], b[1] - a[1]];
+    const L = Math.hypot(...d);
+    if (L < 1e-12) return;
+    const u: Vec2 = [d[0] / L, d[1] / L];
+    const n: Vec2 = [-u[1], u[0]];
+    const wpp = this.app.view.cam.worldPerPixel(this.app.view.height);
+    const ext = Math.max(L * 0.25, wpp * 40);
+    const m: Vec2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const s = wpp * 14;
+    const P = (x: number, y: number): Vec2 => [m[0] + u[0] * x + n[0] * y, m[1] + u[1] * x + n[1] * y];
+    const COLOR = 0xc77dff;
+    this.drawGhosts([{ id: "mirror-axis", kind: "line", a: [a[0] - u[0] * ext, a[1] - u[1] * ext], b: [b[0] + u[0] * ext, b[1] + u[1] * ext] }], COLOR, true);
+    // ▶|◀ : two triangles pointing at the axis from either side.
+    this.drawGhosts(
+      [
+        { id: "mirror-l", kind: "polyline", closed: true, points: [P(-s * 0.6, s * 1.6), P(s * 0.6, s * 1.6), P(0, s * 0.35)] },
+        { id: "mirror-r", kind: "polyline", closed: true, points: [P(-s * 0.6, -s * 1.6), P(s * 0.6, -s * 1.6), P(0, -s * 0.35)] },
+      ],
+      COLOR,
+    );
   }
 
   private drawGhosts(es: SketchEntity[], color = 0xffc23d, dashed = false): void {
@@ -2294,18 +2496,30 @@ export class SketchTool implements Tool {
 
   /** Split: cut a line/arc at its midpoint (Shift: where tapped). The pieces stay joined. */
   private tapSplit(id: string, uv: Vec2, atTap: boolean): void {
-    const newId = uid();
-    const next = splitEntity(this.entities, id, newId, atTap ? uv : undefined);
-    if (!next) return this.app.ui.toast("Split works on lines and arcs");
+    // Curves split where the grid crosses them (nearest the tap); lines and the
+    // sides of shapes in half (Shift: right where tapped).
+    const view = this.app.view;
+    const step = settings.value.gridLocked ? settings.value.gridStep : niceStepOf(view.cam.worldPerPixel(view.height) * 4);
+    const out = splitAny(this.entities, id, uv, step, atTap, uid);
+    if (!out) return this.app.ui.toast("Tap a curve to split it");
+    const second = out.parts[out.parts.length - 1];
     const cs = this.constraints.flatMap((c): SketchConstraint[] => {
+      // A shape taken apart (or a curve turned into another kind): its old sizes and point refs no longer fit.
+      if (out.exploded && (c.curves?.includes(id) || c.pts?.some((r) => r.e === id))) return [];
       // A length dimension no longer fits half a line.
       if (c.type === "dim" && c.curves?.[0] === id && c.prop === "length") return [];
       // The far end now belongs to the second piece.
-      const pts = c.pts?.map((r) => (r.e === id && r.p === "b" ? { e: newId, p: "b" } : r));
+      const pts = c.pts?.map((r) => (r.e === id && r.p === "b" && second !== id ? { e: second, p: "b" } : r));
       return [{ ...c, ...(pts ? { pts } : {}) }];
     });
-    cs.push({ id: uid(), type: "coincident", pts: [{ e: id, p: "b" }, { e: newId, p: "a" }] });
-    this.commit(next, cs);
+    // The pieces stay joined end to end.
+    const made = out.entities.filter((e) => out.parts.includes(e.id));
+    for (const x of made)
+      for (const y of made) {
+        if (x === y || !(x.kind === "line" || x.kind === "arc") || !(y.kind === "line" || y.kind === "arc")) continue;
+        if (samePt(x.b, y.a)) cs.push({ id: uid(), type: "coincident", pts: [{ e: x.id, p: "b" }, { e: y.id, p: "a" }] });
+      }
+    this.commit(out.entities, cs);
   }
 
   private tapSelect(p: ToolPointer, count = 1): void {
@@ -2314,7 +2528,17 @@ export class SketchTool implements Tool {
     // double tap is always "the whole shape", even when it lands near a corner.
     if (this.kind === "select" && count < 2) {
       const hit = this.app.view.pick(p.x, p.y, { curves: this.sketchId ?? true, profiles: false, bodies: false, planes: false, axes: false, images: false, edgeTolPx: p.tol });
-      if (hit?.kind === "point" && hit.sketch === this.sketchId) {
+      // A finger lands roughly: a point near the end of a line only counts when
+      // the tap is right on it (else it's the line — picking two lines to set
+      // their angle shouldn't turn into picking their shared corner).
+      const onPoint = (() => {
+        if (hit?.kind !== "point") return false;
+        const e = this.entities.find((x) => x.id === hit.entity);
+        const q = e && pointOf(e, hit.p);
+        const sc = q && this.app.view.toScreen(sketchToWorld(this.plane!, q));
+        return !sc || Math.hypot(sc[0] - p.x, sc[1] - p.y) < Math.max(7, p.tol * 0.45) || !this.curveAt(p);
+      })();
+      if (hit?.kind === "point" && hit.sketch === this.sketchId && onPoint) {
         const r = { e: hit.entity, p: hit.p };
         const i = this.selPts.findIndex((x) => refKey(x) === refKey(r));
         if (i >= 0) this.selPts.splice(i, 1);
@@ -2512,10 +2736,13 @@ export class SketchTool implements Tool {
     if (!this.edit.filletFrom) {
       // Right on a corner (two curve ends meet there): round it directly.
       const ends = base.flatMap(guidePoints).filter((g) => g.kind === "end");
-      const corner = ends.reduce<{ p: Vec2; d: number } | null>((best, g) => {
-        const d = Math.hypot(g.p[0] - uv[0], g.p[1] - uv[1]);
-        const meets = ends.filter((h) => Math.hypot(h.p[0] - g.p[0], h.p[1] - g.p[1]) < 1e-6).length >= 2;
-        return meets && d < tol && (!best || d < best.d) ? { p: g.p, d } : best;
+      // Corners: where two curve ends meet, and every corner of a rectangle,
+      // polygon or outline (one shape, so no ends meeting there).
+      const shapeCorners = base.flatMap((e) => (e.kind === "rect" || e.kind === "polygon" || e.kind === "polyline" ? entityCorners(e) : []));
+      const cands = [...ends.filter((g) => ends.filter((h) => Math.hypot(h.p[0] - g.p[0], h.p[1] - g.p[1]) < 1e-6).length >= 2).map((g) => g.p), ...shapeCorners];
+      const corner = cands.reduce<{ p: Vec2; d: number } | null>((best, q) => {
+        const d = Math.hypot(q[0] - uv[0], q[1] - uv[1]);
+        return d < tol && (!best || d < best.d) ? { p: q, d } : best;
       }, null);
       if (corner) return this.startFillet((r) => filletCorner(base, corner.p, r, tol * 0.01 + 1e-6));
       const c = this.curveAt(p);
@@ -2587,8 +2814,19 @@ export class SketchTool implements Tool {
     if (!fe) return;
     this.filletEdit = null;
     fe.widget.dispose();
+    // A rectangle / polygon rounded at a corner came apart into lines: its own
+    // constraints go, and its sides stay joined where they meet.
+    const now = new Set(this.entities.map((e) => e.id));
+    const gone = new Set([...fe.baseIds].filter((id) => !now.has(id)));
+    let cs = this.constraints.filter((c) => !(c.curves?.some((id) => gone.has(id)) || c.pts?.some((r) => gone.has(r.e))));
+    if (gone.size) {
+      const sides = this.entities.filter((e): e is Extract<SketchEntity, { kind: "line" }> => e.kind === "line" && !fe.baseIds.has(e.id));
+      for (const x of sides)
+        for (const y of sides)
+          if (x !== y && samePt(x.b, y.a)) cs = [...cs, { id: uid(), type: "coincident", pts: [{ e: x.id, p: "b" }, { e: y.id, p: "a" }] }];
+    }
     // One undo step for the whole fillet; the arc stays tangent and joined to its lines.
-    this.commit(this.entities, filletConstraints(this.entities, this.constraints, fe.baseIds));
+    this.commit(this.entities, filletConstraints(this.entities, cs, fe.baseIds));
     this.setHint();
   }
 
@@ -2671,12 +2909,12 @@ export class SketchTool implements Tool {
           // A diameter replaces a radius dimension (and axis lengths the half-axes), never both.
           const replaced: Record<string, string> = { diameter: "radius", dx: "rx", dy: "ry" };
           const base = this.constraints.filter((c) => !(c.type === "dim" && c.curves?.[0] === id && c.curves.length === 1 && c.prop === replaced[prop]));
-          // A size that contradicts other constraints replaces them.
+          // Strict: a size the other constraints don't allow isn't taken.
           const next = setDim(base, id, prop, v, expr);
           const added = next.filter((c) => !base.includes(c));
-          const res = addResolving(this.entities, next.filter((c) => base.includes(c)), added);
+          const res = addStrict(this.entities, next.filter((c) => base.includes(c)), added);
+          if (!res.ok) return this.refused();
           this.commit(this.entities, res.constraints);
-          this.toastReplaced(res.removed);
           if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
         },
       };

@@ -420,6 +420,117 @@ export function splitEntity(entities: SketchEntity[], id: string, newId: string,
 }
 
 /**
+ * Where the grid (lines every `step`) crosses curve `e`, nearest to `at`; or
+ * simply the curve's point nearest `at` if no grid line crosses it.
+ */
+export function gridPointOn(e: SketchEntity, at: Vec2, step: number): Vec2 {
+  let best: { p: Vec2; d: number } | null = null;
+  const consider = (p: Vec2) => {
+    const d = Math.hypot(p[0] - at[0], p[1] - at[1]);
+    if (!best || d < best.d) best = { p, d };
+  };
+  for (const prim of entityPrims(e)) {
+    const n = Math.max(primSegments(prim), 1) * 4;
+    const poly = Array.from({ length: n + 1 }, (_, i) => evalPrim(prim, i / n));
+    for (let i = 0; i < n; i++) {
+      const [a, b] = [poly[i], poly[i + 1]];
+      for (const k of [0, 1] as const) {
+        if (Math.abs(b[k] - a[k]) < 1e-12) continue;
+        const lo = Math.min(a[k], b[k]);
+        const hi = Math.max(a[k], b[k]);
+        for (let g = Math.ceil(lo / step) * step; g <= hi; g += step) {
+          // Onto the curve itself (not the straight piece between samples): halve the step until it sits on the grid line.
+          let t0 = i / n;
+          let t1 = (i + 1) / n;
+          const f = (t: number) => evalPrim(prim, t)[k] - g;
+          let f0 = f(t0);
+          for (let it = 0; it < 50; it++) {
+            const tm = (t0 + t1) / 2;
+            const fm = f(tm);
+            if (Math.sign(fm) === Math.sign(f0)) ((t0 = tm), (f0 = fm));
+            else t1 = tm;
+          }
+          consider(evalPrim(prim, (t0 + t1) / 2));
+        }
+      }
+    }
+  }
+  if (best) return (best as { p: Vec2 }).p;
+  const prim = entityPrims(e)[0];
+  return prim ? closestOnPrim(prim, at).pt : at;
+}
+
+/**
+ * Split any curve where it's tapped. Lines: in half (or right at `at` with
+ * `exact`). Straight-sided shapes (rectangle, polygon, outline): they come
+ * apart into lines and the tapped side is split in half. Curves (arcs,
+ * circles, ellipses, splines): where the grid crosses them, nearest the tap.
+ * Returns the new list and the ids of the pieces.
+ */
+export function splitAny(entities: SketchEntity[], id: string, at: Vec2, step: number, exact: boolean, newId: () => string): { entities: SketchEntity[]; parts: string[]; exploded: boolean } | null {
+  const e = entities.find((x) => x.id === id);
+  if (!e) return null;
+  if (e.kind === "line") {
+    const n = newId();
+    const out = splitEntity(entities, id, n, exact ? at : undefined);
+    return out && { entities: out, parts: [id, n], exploded: false };
+  }
+  if (e.kind === "rect" || e.kind === "polygon" || e.kind === "polyline") {
+    const sides = explode(e);
+    const side = sides.reduce((m, x) => (closestOnPrim(entityPrims(x)[0], at).d < closestOnPrim(entityPrims(m)[0], at).d ? x : m));
+    const list = entities.flatMap((x) => (x.id === id ? sides : [x]));
+    const n = newId();
+    const out = splitEntity(list, side.id, n, exact ? at : undefined);
+    return out && { entities: out, parts: [...sides.map((x) => x.id), n], exploded: true };
+  }
+  const P = exact ? closestOnPrim(entityPrims(e)[0], at).pt : gridPointOn(e, at, step);
+  if (e.kind === "arc") {
+    const n = newId();
+    const out = splitEntity(entities, id, n, P);
+    return out && { entities: out, parts: [id, n], exploded: false };
+  }
+  if (e.kind === "circle") {
+    // A whole circle: two half circles, meeting at the split point and opposite it.
+    const t = Math.atan2(P[1] - e.center[1], P[0] - e.center[0]);
+    const pt = (a: number): Vec2 => [e.center[0] + e.radius * Math.cos(a), e.center[1] + e.radius * Math.sin(a)];
+    const n = newId();
+    const a1: SketchEntity = { id, kind: "arc", a: pt(t), m: pt(t + Math.PI / 2), b: pt(t + Math.PI), construction: e.construction };
+    const a2: SketchEntity = { id: n, kind: "arc", a: pt(t + Math.PI), m: pt(t + (3 * Math.PI) / 2), b: pt(t), construction: e.construction };
+    return { entities: entities.flatMap((x) => (x.id === id ? [a1, a2] : [x])), parts: [id, n], exploded: true };
+  }
+  if (e.kind === "ellipse" || e.kind === "spline") {
+    // An ellipse becomes a smooth closed spline through 12 of its points first.
+    const prim = entityPrims(e)[0];
+    let pts: Vec2[];
+    let closed: boolean;
+    let mode: "fit" | "control" = "fit";
+    if (e.kind === "spline") {
+      pts = e.points;
+      closed = e.closed;
+      mode = e.mode;
+    } else {
+      pts = Array.from({ length: 12 }, (_, i) => evalPrim(prim, i / 12));
+      closed = true;
+    }
+    // The span the point is on (spans run between consecutive points).
+    const T = closestOnPrim(prim, P).t;
+    const spans = closed ? pts.length : pts.length - 1;
+    const s = Math.max(0, Math.min(spans - 1, Math.floor(T * spans + 1e-9)));
+    if (closed) {
+      // A closed loop opens up at that point (one piece, both ends there).
+      const ring = [...pts.slice(s + 1), ...pts.slice(0, s + 1)];
+      const open: SketchEntity = { id, kind: "spline", points: [P, ...ring, P], closed: false, mode, construction: e.construction };
+      return { entities: entities.map((x) => (x.id === id ? open : x)), parts: [id], exploded: true };
+    }
+    const n = newId();
+    const first: SketchEntity = { id, kind: "spline", points: [...pts.slice(0, s + 1), P], closed: false, mode, construction: e.construction };
+    const second: SketchEntity = { id: n, kind: "spline", points: [P, ...pts.slice(s + 1)], closed: false, mode, construction: e.construction };
+    return { entities: entities.flatMap((x) => (x.id === id ? [first, second] : [x])), parts: [id, n], exploded: false };
+  }
+  return null;
+}
+
+/**
  * Fillet two lines picked by their halves: first they're extended/trimmed to
  * meet (like `joinEnds`), then the corner is rounded with radius `r`.
  */

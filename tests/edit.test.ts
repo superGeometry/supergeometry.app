@@ -1,8 +1,9 @@
 // Run: npx tsx tests/edit.test.ts
 import assert from "node:assert/strict";
 import type { SketchEntity } from "../src/doc/types";
-import { connectedChain, extend, filletCorner, filletEnds, joinEnds, offsetChain, splitEntity, mirrorXf, offsetEntity, transformEntity, trim } from "../src/sketch/edit";
+import { splitAny, connectedChain, extend, filletCorner, filletEnds, joinEnds, offsetChain, splitEntity, mirrorXf, offsetEntity, transformEntity, trim } from "../src/sketch/edit";
 import { arrangement } from "../src/sketch/regions";
+import { splinePoints } from "../src/sketch/curves";
 
 const kinds = (es: SketchEntity[]) => es.map((e) => e.kind).sort().join(",");
 const checks: [string, () => void][] = [
@@ -111,6 +112,40 @@ const checks: [string, () => void][] = [
     assert.ok(Math.abs(m.center[0] + 10) < 1e-9 && Math.abs(m.w - 4) < 1e-9);
   }],
 ];
+
+let n = 0;
+const nid = () => `n${++n}`;
+checks.push(
+  ["split a rectangle side: it comes apart into lines, that side in two", () => {
+    const es: SketchEntity[] = [{ id: "r", kind: "rect", center: [0, 0], w: 20, h: 10, rotation: 0 }];
+    const out = splitAny(es, "r", [3, 5.2], 1, false, nid)!;
+    assert.equal(kinds(out.entities), "line,line,line,line,line");
+    assert.equal(arrangement(out.entities).regions.length, 1);
+  }],
+  ["split a circle where the grid crosses it: two half circles", () => {
+    const es: SketchEntity[] = [{ id: "c", kind: "circle", center: [0.3, 0.2], radius: 5 }];
+    const out = splitAny(es, "c", [5.1, 1.4], 1, false, nid)!;
+    assert.equal(kinds(out.entities), "arc,arc");
+    const a = out.entities[0] as any;
+    // On a grid line (x or y a whole number).
+    assert.ok([a.a[0], a.a[1]].some((v: number) => Math.abs(v - Math.round(v)) < 1e-6), JSON.stringify(a.a));
+    assert.equal(arrangement(out.entities).regions.length, 1);
+  }],
+  ["split an open spline and open a closed one", () => {
+    const open: SketchEntity = { id: "s", kind: "spline", points: [[0, 0], [10, 5], [20, 0], [30, 5]], closed: false, mode: "fit" };
+    const o = splitAny([open], "s", [14.8, 3], 1, false, nid)!;
+    assert.equal(o.entities.length, 2);
+    const ring: SketchEntity = { id: "k", kind: "spline", points: [[0, 0], [10, 0], [10, 10], [0, 10]], closed: true, mode: "fit" };
+    const k = splitAny([ring], "k", [5, -0.4], 1, false, nid)!;
+    assert.equal(k.entities.length, 1);
+    assert.equal((k.entities[0] as any).closed, false);
+  }],
+  ["control-point spline starts and ends on its first and last points", () => {
+    const pts = splinePoints([[0, 0], [10, 10], [20, -5], [30, 0]], false, "control");
+    assert.deepEqual(pts[0], [0, 0]);
+    assert.deepEqual(pts[pts.length - 1], [30, 0]);
+  }],
+);
 
 let failed = 0;
 for (const [name, fn] of checks) {

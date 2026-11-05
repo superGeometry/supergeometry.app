@@ -664,7 +664,12 @@ export class App implements AppContext {
     const menu = document.getElementById("file-menu")!;
     const more = document.getElementById("more-menu")!;
     // Phones: one thing open at a time at the left — a menu closes Items.
-    const phoneItemsAway = () => window.innerWidth <= 720 && document.getElementById("items")!.classList.contains("open") && this.items.toggle(false);
+    // Phones: one thing open at a time — a menu takes the place of Items and of History.
+    const phoneItemsAway = () => {
+      if (window.innerWidth > 720) return;
+      if (document.getElementById("items")!.classList.contains("open")) this.items.toggle(false);
+      if (document.body.classList.contains("history-open")) this.ui.toggleHistory(false);
+    };
     on("file-btn", () => ((more.hidden = true), menu.toggleAttribute("hidden"), !menu.hidden && phoneItemsAway()));
     on("more-btn", () => ((menu.hidden = true), more.toggleAttribute("hidden"), !more.hidden && phoneItemsAway()));
     document.getElementById("m-version")!.textContent = `Version ${__APP_VERSION__}`;
@@ -700,11 +705,34 @@ export class App implements AppContext {
     // Help: a panel explaining every button (toggle it from More → Help).
     const help = new HelpPanel();
     moreItem("m-help", () => help.toggle());
+    // The guide text (what to tap next): on or off.
+    const hintsState = document.getElementById("m-hints-state")!;
+    const paintHints = () => (hintsState.textContent = settings.value.showHints ? "On" : "Off");
+    paintHints();
+    moreItem("m-hints", () => {
+      settings.set("showHints", !settings.value.showHints);
+      paintHints();
+      this.ui.refreshHint();
+    });
     moreItem("m-tutorial", () => {});
     // About → the project on GitHub; support → MakerWorld (new tab, no access back to this page).
     const openTab = (url: string) => window.open(url, "_blank", "noopener");
     moreItem("m-about", () => openTab("https://github.com/superGeometry/supergeometry.app"));
-    moreItem("m-donate", () => openTab("https://makerworld.com/en/@supergeometry/upload"));
+    // Support: a short list of ways (each opens in a new tab). One without a link yet says so.
+    const donateList = document.getElementById("m-donate-list")!;
+    on("m-donate", () => {
+      donateList.hidden = !donateList.hidden;
+      document.getElementById("m-donate-arrow")!.textContent = donateList.hidden ? "▸" : "▾";
+    });
+    for (const [id, url] of Object.entries(SUPPORT_LINKS)) {
+      const b = document.getElementById(`m-support-${id}`);
+      if (!b) continue;
+      if (!url) {
+        b.querySelector(".menu-soon")!.textContent = "soon";
+        b.classList.add("disabled");
+      }
+      moreItem(`m-support-${id}`, () => (url ? openTab(url) : this.ui.toast("Coming soon")));
+    }
     document.addEventListener("pointerdown", (e) => {
       if (!(e.target as HTMLElement).closest("#file-menu, #file-btn")) menu.hidden = true;
       if (!(e.target as HTMLElement).closest("#more-menu, #more-btn")) more.hidden = true;
@@ -732,8 +760,10 @@ export class App implements AppContext {
         ["m-3mf", "3mf", () => void this.export3mf("share")],
         ["m-dxf", "dxf", () => this.exportDXF("share")],
       ];
+      // Android's share sheet turns these files away or mangles them: downloads only there.
+      const android = /Android/i.test(navigator.userAgent);
       for (const [id, ext, run] of shares) {
-        if (!canShareType(ext)) continue;
+        if (android || !canShareType(ext)) continue;
         const btn = document.getElementById(id)!;
         const sh = document.createElement("span");
         sh.className = "menu-share";
@@ -951,6 +981,13 @@ function chosenBodies(app: App): string[] {
 }
 
 type Delivery = "download" | "share";
+
+/** Where Boost / Donate / Support goes (an empty link shows as "soon"). */
+const SUPPORT_LINKS: Record<string, string> = {
+  makerworld: "https://makerworld.com/en/@supergeometry/upload",
+  bmc: "",
+  stripe: "",
+};
 
 /** The file types the exports are shared as (the share sheet picks apps by them). */
 const MIME: Record<string, string> = {

@@ -156,8 +156,10 @@ lines).
 
 **Constraints** keep a drawing in shape: horizontal, vertical, parallel,
 perpendicular, tangent, equal, coincident, lock, distance, angle and size
-dimensions. Select one or two things, then tap a constraint. A new constraint
-replaces any it contradicts; ones that agree stay. Toggle the column with the
+dimensions. Select one or two things, then tap a constraint (the first thing
+picked stays put, the others adapt to it). Constraints are strict: one that
+contradicts those already there isn't added — remove the old one first, or
+switch **Auto constrain** off. Toggle the column with the
 **Constraints** button on the right.
 
 Any closed shape becomes a **region** (blue when selected) you can extrude,
