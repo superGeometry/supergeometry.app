@@ -23,7 +23,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
   {
     title: "Top bar",
     items: [
-      { icon: "file", name: "File", text: "New, open and save projects (.super); export STL or 3MF for 3D printing, STEP for other CAD programs." },
+      { icon: "file", name: "File", text: "New, open and save projects (.super); export STL or 3MF for 3D printing, STEP for other CAD programs, DXF of a sketch (tap it in Items first) for laser cutters and CNC." },
       { icon: "body", name: "Items", text: "Every body, sketch, plane and image, with an eye to hide or show it. Group things into folders." },
       { icon: "more", name: "More", text: "Fullscreen, Reset cache & update (loads the newest version), this Help, About, and support links." },
     ],

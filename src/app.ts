@@ -26,6 +26,7 @@ import { PivotButton } from "./ui/pivot";
 import { HelpPanel } from "./ui/help";
 import { Updates } from "./ui/update";
 import { exportThreeMF } from "./io/threemf";
+import { sketchToDXF } from "./io/dxf";
 import { isHeadset } from "./device";
 import { Viewport } from "./view/viewport";
 
@@ -676,6 +677,7 @@ export class App implements AppContext {
     item("m-stl", () => void this.export("stl"));
     item("m-step", () => void this.export("step"));
     item("m-3mf", () => void this.export3mf());
+    item("m-dxf", () => this.exportDXF());
     on("undo-btn", () => this.store.undo());
     on("redo-btn", () => this.store.redo());
     this.store.onChange(() => this.updateUndo());
@@ -757,6 +759,24 @@ export class App implements AppContext {
       }
     };
     input.click();
+  }
+
+  /**
+   * DXF of a sketch: the one open (e.g. picked in Items), or the one whose
+   * curves or regions are selected. Without one, say how to pick it.
+   */
+  private exportDXF(): void {
+    const fromSel = this.selection.flatMap((s) => (s.kind === "curve" || s.kind === "point" || s.kind === "profile" ? [s.sketch] : []))[0];
+    const id = this.tool.activeSketch ?? fromSel;
+    const sk = id ? this.store.find<SketchFeature>(id) : undefined;
+    if (!sk || sk.type !== "sketch") {
+      this.ui.toast("Select a sketch first: open Items, tap the sketch, then File → Export DXF.");
+      if (!document.getElementById("items")?.classList.contains("open")) this.items.toggle(true);
+      return;
+    }
+    if (!sk.entities.length) return this.ui.toast("That sketch is empty");
+    download(new Blob([sketchToDXF(sk.entities)], { type: "application/dxf" }), `${this.store.doc.name} - ${sk.name}.dxf`);
+    this.ui.toast(`Exported “${sk.name}” as DXF`);
   }
 
   /** 3MF for slicers: the meshes, with the exact STEP model packed inside. */

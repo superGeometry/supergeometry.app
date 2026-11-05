@@ -224,6 +224,9 @@ change, it's marked and the reason is shown.
 - **File → Export STL** or **Export 3MF** for 3D printing (3MF keeps body
   names and colours), **Export STEP** for other CAD programs. With bodies
   selected (or isolated), only those are exported.
+- **File → Export DXF (sketch)** saves a sketch's curves as a 2D drawing for
+  laser cutters, CNC and drawing programs: open **Items**, tap the sketch, then
+  File → Export DXF. Construction lines go on their own layer.
 - **File → New project** asks whether to save the open project first or
   discard it.
 - **Insert** brings in STEP, STL, SVG and DXF files, and images to trace over.
