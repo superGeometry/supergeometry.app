@@ -1,5 +1,11 @@
 // On-screen numpad for value boxes (phones, tablets, headsets): no system
-// keyboard covering half the screen. Turned on in Units & grid.
+// keyboard covering half the screen. Switched on/off with the keypad button
+// in the right column.
+//
+// It doesn't rely on keyboard focus (iPad Safari moves focus away from the
+// box as soon as a button is tapped): it keeps its own target and caret,
+// answers on the key's release, and only closes on ↵, or a tap elsewhere.
+// Nothing is applied while typing: the box hears the value on ↵.
 
 import { settings } from "../settings";
 
@@ -8,6 +14,11 @@ const KEYS = ["7", "8", "9", "⌫", "4", "5", "6", "−", "1", "2", "3", "↵", 
 class Numpad {
   private el = document.createElement("div");
   private target: HTMLInputElement | null = null;
+  /** The caret / selection inside the box, kept here (the box may not have focus). */
+  private selStart = 0;
+  private selEnd = 0;
+  /** Just opened on a box: the first key typed replaces what's in it. */
+  private fresh = false;
 
   constructor() {
     this.el.className = "numpad";
@@ -15,49 +26,84 @@ class Numpad {
     for (const k of KEYS) {
       const b = document.createElement("button");
       b.type = "button";
+      b.tabIndex = -1;
       b.textContent = k;
-      b.className = k === "↵" ? "np-enter" : k === "✕" ? "np-close" : "";
-      // Keep the focus (and the caret) in the value box.
-      b.addEventListener("pointerdown", (e) => e.preventDefault());
-      b.addEventListener("click", (e) => {
+      b.className = k === "↵" ? "np-enter" : "";
+      let downId: number | null = null;
+      // Keep the focus where it is (and stop iOS from zooming, selecting or
+      // sending the tap anywhere else).
+      b.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
         e.stopPropagation();
+        downId = e.pointerId;
+        b.classList.add("down");
+      });
+      b.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
+      b.addEventListener("pointerup", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        b.classList.remove("down");
+        if (downId !== e.pointerId) return;
+        downId = null;
         this.press(k);
       });
+      b.addEventListener("pointercancel", () => ((downId = null), b.classList.remove("down")));
+      b.addEventListener("pointerleave", () => ((downId = null), b.classList.remove("down")));
+      // Taps arrive as pointer events; a click after them must not do it twice.
+      b.addEventListener("click", (e) => (e.preventDefault(), e.stopPropagation()));
       this.el.append(b);
     }
-    this.el.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.el.addEventListener("pointerdown", (e) => (e.preventDefault(), e.stopPropagation()));
+    this.el.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
     document.body.append(this.el);
+    // Opening: focusing a numpad box, or tapping one (focus can be unreliable on touch).
     document.addEventListener("focusin", (e) => {
       const t = e.target as HTMLElement;
-      if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad) this.open(t);
+      if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad && t !== this.target) this.open(t);
     });
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        const t = e.target as HTMLElement;
+        if (this.el.contains(t)) return;
+        if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad) {
+          if (t !== this.target) this.open(t);
+          return;
+        }
+        // A tap anywhere else puts the numpad away.
+        if (this.target) this.close();
+      },
+      true,
+    );
     // Switched on/off: boxes already on screen follow (system keyboard back when off).
     settings.onChange((v) => {
       for (const i of document.querySelectorAll<HTMLInputElement>("input[data-numpad='1']")) i.inputMode = v.numpad ? "none" : "decimal";
       if (!v.numpad) this.close();
     });
-    document.addEventListener("focusout", (e) => {
-      if (e.target === this.target) setTimeout(() => document.activeElement !== this.target && this.close(), 0);
-    });
   }
 
-  /** Just opened on a box: the first key typed replaces what's in it. */
-  private fresh = false;
-
-  private open(input: HTMLInputElement): void {
+  open(input: HTMLInputElement): void {
     this.target = input;
     this.fresh = true;
+    // All of it selected, so typing overrides it.
+    this.selStart = 0;
+    this.selEnd = input.value.length;
+    this.showSelection();
     this.el.hidden = false;
     this.place();
-    // All of it selected, so typing overrides it (after anything that moves the caret on focus).
-    const all = () => this.target === input && input.setSelectionRange(0, input.value.length);
-    all();
-    setTimeout(all, 0);
   }
 
   private close(): void {
     this.el.hidden = true;
     this.target = null;
+  }
+
+  private showSelection(): void {
+    try {
+      this.target?.setSelectionRange(this.selStart, this.selEnd);
+    } catch {
+      // not a text box
+    }
   }
 
   /** Below the box (or above it near the bottom), kept on screen. */
@@ -75,44 +121,45 @@ class Numpad {
 
   private press(k: string): void {
     const t = this.target;
-    if (!t) return;
+    // The box went away (its tool finished): nothing to type into.
+    if (!t || !t.isConnected) return this.close();
+    let v = t.value;
+    let s = Math.min(this.selStart, v.length);
+    let e = Math.min(this.selEnd, v.length);
     // First key after opening: a digit, point or ⌫ starts the value over.
-    if (this.fresh && (k === "⌫" || k === "." || /^\d$/.test(k))) t.setSelectionRange(0, t.value.length);
+    if (this.fresh && (k === "⌫" || k === "." || /^\d$/.test(k))) [s, e] = [0, v.length];
     if (k !== "↵") this.fresh = false;
-    const v = t.value;
-    const s = t.selectionStart ?? v.length;
-    const e = t.selectionEnd ?? v.length;
     const put = (text: string) => {
-      t.value = v.slice(0, s) + text + v.slice(e);
-      const at = s + text.length;
-      t.setSelectionRange(at, at);
+      v = v.slice(0, s) + text + v.slice(e);
+      s = e = s + text.length;
     };
     if (k === "⌫") {
       if (s !== e) put("");
       else if (s > 0) {
-        t.value = v.slice(0, s - 1) + v.slice(s);
-        t.setSelectionRange(s - 1, s - 1);
+        v = v.slice(0, s - 1) + v.slice(s);
+        s = e = s - 1;
       }
     } else if (k === "−") {
       // Flip the sign of the whole value.
-      t.value = v.startsWith("-") ? v.slice(1) : `-${v}`;
+      v = v.startsWith("-") ? v.slice(1) : `-${v}`;
+      s = e = v.length;
     } else if (k === "↵") {
       // Only now does the value count: the box hears it, then Enter.
       t.dispatchEvent(new Event("input", { bubbles: true }));
       t.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       t.dispatchEvent(new Event("change", { bubbles: true }));
-      return;
-    } else if (k === "✕") {
-      t.blur();
       return this.close();
     } else if (k === "ƒx") {
       // Variables are typed by name: bring the system keyboard for that.
+      this.close();
       t.inputMode = "text";
-      t.blur();
-      setTimeout(() => t.focus(), 0);
-      return this.close();
+      t.focus();
+      return;
     } else put(k);
-    // Typing only edits the text: nothing is applied until ↵.
+    t.value = v;
+    this.selStart = s;
+    this.selEnd = e;
+    this.showSelection();
   }
 }
 
@@ -120,10 +167,17 @@ let pad: Numpad | null = null;
 
 /**
  * Let a numeric input use the on-screen numpad (when it's on): the system
- * keyboard stays away and the numpad opens under the box on focus.
+ * keyboard stays away and the numpad opens under the box when it's tapped.
  */
 export function numpadInput(input: HTMLInputElement): void {
   pad ??= new Numpad();
   input.dataset.numpad = "1";
   if (settings.value.numpad) input.inputMode = "none";
+}
+
+/** Open the numpad on a box right away (a box that appears ready for typing). */
+export function openNumpad(input: HTMLInputElement): void {
+  if (!settings.value.numpad) return;
+  pad ??= new Numpad();
+  pad.open(input);
 }

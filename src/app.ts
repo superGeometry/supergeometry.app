@@ -653,7 +653,7 @@ export class App implements AppContext {
     // Help and Tutorial: placeholders for now.
     // A newer build out? A notice offers to update; More → Reset cache does it now.
     this.updates = new Updates(() => this.store.flush());
-    moreItem("m-update", () => void this.updates.reset());
+    moreItem("m-update", () => void this.confirmReset());
     // Help: a panel explaining every button (toggle it from More → Help).
     const help = new HelpPanel();
     moreItem("m-help", () => help.toggle());
@@ -711,6 +711,25 @@ export class App implements AppContext {
   }
 
   private updates!: Updates;
+
+  /** More → Reset cache & update: asked first (it reloads the app), with the option to save a copy. */
+  private async confirmReset(): Promise<void> {
+    const choice = await this.ui.ask(
+      "Reset cache & update?",
+      "The app reloads with its newest version. Your project stays on this device — you can also save a copy to a file first.",
+      [
+        { id: "reset", label: "Yes, reset" },
+        { id: "save", label: "Save a copy & reset", primary: true },
+      ],
+    );
+    if (!choice) return;
+    if (choice === "save") {
+      this.save();
+      // Give the download a moment to start before the page reloads.
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    await this.updates.reset();
+  }
 
   /**
    * New project: the current one can be saved (downloaded) or discarded

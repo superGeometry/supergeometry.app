@@ -4,7 +4,8 @@
 import { BufferGeometry, ConeGeometry, Group, Line, LineBasicMaterial, LineDashedMaterial, Mesh, MeshBasicMaterial, Vector3 } from "three";
 import type { PinDef, Vec3 } from "../doc/types";
 import { el } from "../ui/ui";
-import { numpadInput } from "../ui/numpad";
+import { numpadInput, openNumpad } from "../ui/numpad";
+import { settings } from "../settings";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
 import type { Viewport } from "../view/viewport";
 
@@ -183,6 +184,8 @@ export class DimWidget {
     view.helpers.add(this);
     if (opts.focus) {
       setTimeout(() => {
+        // The numpad opens on it straight away (on touch screens focus alone may not happen).
+        if (settings.value.numpad) return openNumpad(this.input);
         this.input.focus();
         const n = this.input.value.length;
         this.input.setSelectionRange(n, n);

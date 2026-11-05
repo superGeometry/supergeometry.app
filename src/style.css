@@ -2079,3 +2079,11 @@ body:has(#flyout:not([hidden])) #warn {
 .update-banner[hidden] {
   display: none;
 }
+.numpad button.down {
+  background: #3d8bff;
+}
+.numpad {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
