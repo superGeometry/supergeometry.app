@@ -783,6 +783,7 @@ export class UI {
       const g = gaps(y1 - h, y1).sort((a, b) => b[1] - b[0] - (a[1] - a[0]))[0];
       if (!g || g[1] - g[0] < need) continue;
       p.style.maxWidth = `${Math.floor(g[1] - g[0])}px`;
+      this.hugContents(p);
       const h2 = p.offsetHeight;
       p.style.left = `${Math.round(g[0])}px`;
       p.style.top = `${Math.round(Math.max(52, y1 - h2))}px`;
@@ -791,6 +792,26 @@ export class UI {
     // Nowhere clear: the bottom left, over whatever is there.
     p.style.left = `${M}px`;
     p.style.top = `${Math.round(Math.max(52, H - M - p.offsetHeight))}px`;
+  }
+
+  /**
+   * A card whose contents wrap onto more rows keeps the width of the widest
+   * row (a browser doesn't shrink it): trim it to what's really in it.
+   */
+  private hugContents(p: HTMLElement): void {
+    p.style.width = "";
+    const left = p.getBoundingClientRect().left;
+    let right = left;
+    // (Done is pushed to the row's end: measure where the others end, plus its own width.)
+    let tail = 0;
+    for (const row of p.querySelectorAll<HTMLElement>(":scope > .panel-fields > *, :scope > .panel-buttons > *")) {
+      if (!row.offsetWidth) continue;
+      if (row.parentElement?.classList.contains("panel-buttons")) tail += row.offsetWidth + 6;
+      else right = Math.max(right, row.getBoundingClientRect().right);
+    }
+    right += tail;
+    const pad = parseFloat(getComputedStyle(p).paddingRight) || 0;
+    if (right > left) p.style.width = `${Math.ceil(right - left + pad + 1)}px`;
   }
 
   /** Where the card was dragged to, per kind of screen (it stays there). */
@@ -870,7 +891,10 @@ export class UI {
     if (this.panelDragging) return;
     const spot = this.panelSpot();
     if (spot) {
-      if (screenClass() === "phone") p.style.maxWidth = `${window.innerWidth - 16}px`;
+      if (screenClass() === "phone") {
+        p.style.maxWidth = `${window.innerWidth - 16}px`;
+        this.hugContents(p);
+      }
       this.putPanel(spot.x, spot.y);
       this.panelSide = 0;
       return;

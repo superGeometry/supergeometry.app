@@ -2754,3 +2754,85 @@ html[data-screen="phone"] body.is-fullscreen {
 .history-item.checked {
   background: var(--accent-soft);
 }
+
+/* Phones: value fields side by side and small — name, a short box, the
+   unit — so three of them (ΔX ΔY ΔZ) and Done fit on one or two rows. */
+html[data-screen="phone"] #panel.as-list .field {
+  flex: 0 0 auto;
+  gap: 3px;
+  padding: 0 2px;
+}
+html[data-screen="phone"] #panel.as-list .field input {
+  width: 58px;
+  height: 34px;
+  padding: 0 6px;
+  font-size: 15px;
+}
+html[data-screen="phone"] #panel.as-list .field-label {
+  font-size: 12px;
+}
+html[data-screen="phone"] #panel.as-list .field-unit {
+  font-size: 11px;
+  margin-left: -1px;
+}
+html[data-screen="phone"] #panel.as-list .fx-btn {
+  min-width: 0;
+  width: 20px;
+  padding: 0;
+  font-size: 12px;
+}
+html[data-screen="phone"] #panel.as-list .panel-buttons .tool,
+html[data-screen="phone"] #panel.as-list .panel-buttons .text-btn {
+  min-height: 34px;
+}
+/* Phones: nothing in the card wider than it needs. The unit is the one in
+   the right column (mm…), ƒx is on the numpad — so a value is its name and box. */
+html[data-screen="phone"] #panel.as-list .field-unit,
+html[data-screen="phone"] #panel.as-list .fx-btn {
+  display: none;
+}
+/* Picks (From point, To point…) as small chips: the name, and what's picked
+   only once it's picked — what to tap is in the hint text under the card. */
+html[data-screen="phone"] #panel.as-list .slot {
+  width: auto !important;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 2px 8px;
+  justify-content: center;
+}
+html[data-screen="phone"] #panel.as-list .slot:not(.filled) .slot-value {
+  display: none;
+}
+html[data-screen="phone"] #panel.as-list .slot-label {
+  font-size: 12px;
+  color: var(--text);
+}
+html[data-screen="phone"] #panel.as-list .slot.filled .slot-label {
+  font-size: 10px;
+  color: var(--muted);
+}
+html[data-screen="phone"] #panel.as-list .slot-value {
+  font-size: 12px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-screen="phone"] #panel.as-list .toggle,
+html[data-screen="phone"] #panel.as-list .panel-fields > .text-btn {
+  width: auto !important;
+  flex: 0 0 auto;
+  min-height: 34px;
+}
+html[data-screen="phone"] body #panel.as-list .panel-fields {
+  flex: 0 1 auto;
+}
+/* Phones: fields and buttons flow together, so Done sits at the end of the
+   last row instead of a row of its own. */
+html[data-screen="phone"] body #panel.as-list .panel-fields,
+html[data-screen="phone"] body #panel.as-list .panel-buttons {
+  display: contents;
+}
+html[data-screen="phone"] body #panel.as-list .panel-buttons > :first-child {
+  margin-left: auto;
+}
