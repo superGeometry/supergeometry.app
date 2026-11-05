@@ -110,6 +110,7 @@ export class UI {
     document.addEventListener(
       "pointermove",
       (e) => {
+        this.pointerAt = { x: e.clientX, y: e.clientY };
         if ((e.target as HTMLElement).tagName === "CANVAS") this.lastPointer = { x: e.clientX, y: e.clientY };
       },
       true,
@@ -540,7 +541,8 @@ export class UI {
     this.panelSpec = spec;
     this.panel.innerHTML = "";
     this.panel.hidden = !spec;
-    if (!spec) return;
+    // Closed: next time it's placed afresh.
+    if (!spec) return void (this.panelSide = -1);
     // A short list, like a right-click menu: each value with its box after the
     // name. It hangs under the tool's value box on the model (or by the pointer).
     this.panel.classList.add("as-list");
@@ -640,6 +642,8 @@ export class UI {
       f.onInput(kind === "int" ? Math.round(v!) : v!);
     };
     input.addEventListener("input", apply);
+    // Clicking a value selects it: typing replaces it (no "020").
+    input.addEventListener("focus", () => requestAnimationFrame(() => document.activeElement === input && input.select()));
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -711,6 +715,8 @@ export class UI {
 
   /** Where the pointer is over the model (the card keeps out of its way). */
   private lastPointer: { x: number; y: number } | null = null;
+  /** Where the pointer is anywhere on the page. */
+  private pointerAt: { x: number; y: number } | null = null;
   /** Which side the card went last time (kept while it's still clear: no jumping about). */
   private panelSide = -1;
 
@@ -718,6 +724,13 @@ export class UI {
     const p = this.panel;
     const box = [...document.querySelectorAll<HTMLElement>(".dim-widget.editable")].filter((e) => !e.hidden && e.offsetWidth).pop();
     p.classList.toggle("attached", !!box);
+    // Heading for the card (or typing in it): it holds still, so it can be clicked.
+    if (this.panelSide >= 0 && p.style.left) {
+      const cr = p.getBoundingClientRect();
+      const q = this.pointerAt;
+      const near = q && q.x > cr.left - 60 && q.x < cr.right + 60 && q.y > cr.top - 60 && q.y < cr.bottom + 60;
+      if (near || p.contains(document.activeElement) || p.matches(":hover")) return;
+    }
     const w = p.offsetWidth;
     const h = p.offsetHeight;
     const M = 8;
@@ -753,7 +766,7 @@ export class UI {
     const clampX = (x: number) => Math.max(M, Math.min(W - w - M, x));
     const clampY = (y: number) => Math.max(52, Math.min(H - h - M, y));
     // How badly a spot is in the way: off screen (moved back on), over the line, over the pointer.
-    const cost = ([x0, y0]: [number, number]): number => {
+    const cost = ([x0, y0]: [number, number], withPointer: boolean): number => {
       const x = clampX(x0);
       const y = clampY(y0);
       let c = Math.abs(x - x0) + Math.abs(y - y0) > 1 ? 1 : 0;
@@ -761,7 +774,7 @@ export class UI {
       const inside = (px: number, py: number) => px > x - pad && px < x + w + pad && py > y - pad && py < y + h + pad;
       for (const a of avoid) {
         if (a.length === 1) {
-          if (inside(a[0][0], a[0][1])) c += 2;
+          if (withPointer && inside(a[0][0], a[0][1])) c += 2;
           continue;
         }
         for (let k = 0; k <= 24; k++) {
@@ -774,11 +787,12 @@ export class UI {
       }
       return c;
     };
-    let pick = this.panelSide >= 0 && this.panelSide < spots.length && cost(spots[this.panelSide]) === 0 ? this.panelSide : -1;
+    // Where it is stays as long as it's clear of the line (the pointer only steers where it goes next).
+    let pick = this.panelSide >= 0 && this.panelSide < spots.length && cost(spots[this.panelSide], false) === 0 ? this.panelSide : -1;
     if (pick < 0) {
       let best = Infinity;
       spots.forEach((sp, i) => {
-        const c = cost(sp);
+        const c = cost(sp, true);
         if (c < best) [best, pick] = [c, i];
       });
     }
