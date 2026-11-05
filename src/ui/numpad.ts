@@ -91,6 +91,13 @@ class Numpad {
     this.showSelection();
     this.el.hidden = false;
     this.place();
+    // Its box goes away (the tool finished, or another one took over): so does the numpad.
+    const watch = () => {
+      if (!this.target) return;
+      if (!this.target.isConnected) return this.close();
+      requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
   }
 
   private close(): void {

@@ -15,7 +15,7 @@ import { FreeformTool } from "./freeform";
 import { isClosed } from "../freeform/cage";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 import { connectEdges } from "../doc/freeformConnect";
-import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
+import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, lastExtrude, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
 
@@ -179,6 +179,16 @@ export class SelectTool implements Tool {
       this.pending = null;
       this.app.setSelection([]);
       return true;
+    }
+    // A sketch region selected: just type the height — the extrude starts with it.
+    const sel = this.app.selection;
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9.\-]$/.test(e.key) && sel.length && sel.every((x) => x.kind === "profile")) {
+      const src = sourcesOf(this.app, sel)[0];
+      if (src) {
+        const v = Number(e.key);
+        this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { distance: Number.isFinite(v) ? v : 0, typed: e.key }));
+        return true;
+      }
     }
     if (e.ctrlKey || e.metaKey) return false;
     const want = k === "delete" || k === "backspace" ? "DEL" : k.toUpperCase();
@@ -351,7 +361,8 @@ export class SelectTool implements Tool {
       { id: "scale", label: "Scale Sketch", icon: "scale", run: inSketch("scale") },
       { id: "patl", label: "Pattern – Linear", icon: "patternLinear", run: inSketch("patternLinear") },
       { id: "patc", label: "Pattern – Circular", icon: "patternCircular", run: inSketch("patternCircular") },
-      { id: "extrude", label: "Extrude", icon: "extrude", shortcut: "E", active: true, run: () => src && app.setTool(new ExtrudeOp(app, src)) },
+      // Starts at the last distance used (the preview shows at once: Enter keeps it).
+      { id: "extrude", label: "Extrude", icon: "extrude", shortcut: "E", active: true, run: () => src && app.setTool(new ExtrudeOp(app, src, undefined, "auto", { distance: lastExtrude.distance })) },
       { id: "axis", label: "Axis – Perp. to Face", icon: "axis", run: () => frame && app.setTool(new AxisOp(app, frame.base, frame.normal)) },
       { id: "plane", label: "Plane – Offset", icon: "plane", run: () => plane && app.setTool(new PlaneOp(app, plane, undefined)) },
       { id: "text", label: "Text", icon: "text", run: inSketch("text") },

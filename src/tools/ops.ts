@@ -67,6 +67,9 @@ export interface ExtrudeOptions {
  * the dimension next to it; for faces choose Total (thickness to the opposite
  * face) or Offset (how far the face moves). Negative offsets cut.
  */
+/** The last extrude distance used: a new one from the Extrude button starts there. */
+export const lastExtrude = { distance: 10 };
+
 export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
   readonly id = "extrude";
   private handle: Handle;
@@ -103,6 +106,8 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
 
   enter(): void {
     super.enter();
+    // From a sketch: the new solid is see-through while you size it, so the profile stays in view.
+    if (this.feature.source.kind === "profile") this.app.view.setGhost(true);
     this.dim = new DimWidget(this.app.view, {
       // Past the tip of the drag arrow (at the far end of the dimension).
       boxAt: "beyond",
@@ -165,6 +170,7 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
   exit(): void {
     this.handle.dispose();
     this.dim?.dispose();
+    this.app.view.setGhost(false);
     super.exit();
   }
 
@@ -228,8 +234,10 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
 
   protected done(): void {
     if (this.feature.distance === 0) return this.app.setTool(null);
+    if (!this.existing && this.feature.source.kind === "profile") lastExtrude.distance = this.feature.distance;
     super.done();
   }
+
 }
 
 // ---------------------------------------------------------- fillet/chamfer

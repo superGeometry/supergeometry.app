@@ -194,8 +194,9 @@ export class DimWidget {
     view.helpers.add(this);
     if (opts.focus) {
       setTimeout(() => {
-        // The numpad opens on it straight away (on touch screens focus alone may not happen).
-        if (settings.value.numpad) return openNumpad(this.input);
+        // The numpad opens on it straight away (on touch screens focus alone may not happen) —
+        // unless it opened because keys were typed: then the keyboard carries on in it.
+        if (settings.value.numpad && opts.typed === undefined) return openNumpad(this.input);
         this.input.focus();
         const n = this.input.value.length;
         this.input.setSelectionRange(n, n);

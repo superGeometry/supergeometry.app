@@ -249,8 +249,9 @@ export class Viewport {
     this.cam.setOrtho(s.ortho);
     const xray = s.shader === "xray";
     for (const m of this.allBodyMats()) {
-      // A see-through body (Transparency) is seen through in every view.
-      const o = (m.userData.opacity as number | undefined) ?? 1;
+      // A see-through body (Transparency) is seen through in every view; while a
+      // new solid is being sized from a sketch, everything is a little see-through.
+      const o = ((m.userData.opacity as number | undefined) ?? 1) * (this.ghost ? 0.62 : 1);
       const see = xray || o < 1;
       m.transparent = see;
       m.opacity = (xray ? 0.35 : 1) * o;
@@ -292,6 +293,16 @@ export class Viewport {
   /** Every body surface material (shared + coloured), for settings that apply to all. */
   private allBodyMats(): MeshStandardMaterial[] {
     return [this.bodyMat, ...[...this.colorMats.values()].map((m) => m.body)];
+  }
+
+  private ghost = false;
+
+  /** Bodies a little see-through (while sizing a new solid, so its sketch shows through). */
+  setGhost(on: boolean): void {
+    if (this.ghost === on) return;
+    this.ghost = on;
+    this.applySettings();
+    this.requestRender();
   }
 
   setBodyColors(colors: Record<string, string>, opacity: Record<string, number> = {}): void {

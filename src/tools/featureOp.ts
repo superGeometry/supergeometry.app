@@ -42,6 +42,17 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     protected existing?: F,
   ) {
     this.feature = existing ? structuredClone(existing) : draft;
+    this.startSelection = [...app.selection];
+  }
+
+  /** What was selected when the tool started (Esc / Cancel goes back to it). */
+  private startSelection: Sel[];
+
+  /** Esc / Cancel: one step back — the tool goes, what was selected before is selected again. */
+  protected cancel(): void {
+    const back = this.startSelection;
+    this.app.setTool(null);
+    if (back.length) this.app.setSelection(back);
   }
 
   get editingId(): string {
@@ -62,7 +73,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
   }
 
   enter(): void {
-    this.app.ui.setTools([{ id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: () => this.app.setTool(null) }]);
+    this.app.ui.setTools([{ id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: () => this.cancel() }]);
     this.app.ui.setBottom([]);
     this.active = this.slots.findIndex((s) => !s.filled());
     this.render();
@@ -129,7 +140,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
 
   key(e: KeyboardEvent): boolean {
     if (e.key === "Enter") this.done();
-    else if (e.key === "Escape") this.app.setTool(null);
+    else if (e.key === "Escape") this.cancel();
     else return false;
     return true;
   }
@@ -147,7 +158,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
       items: [...slotItems, ...this.items()],
       actions: this.actions(),
       onDone: () => this.done(),
-      onCancel: () => this.app.setTool(null),
+      onCancel: () => this.cancel(),
     });
     this.showSlotHighlights();
     this.setHint();
