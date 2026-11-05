@@ -332,7 +332,6 @@ body.items-open #undo-dock {
   transform: translateY(-50%);
   max-height: calc(100vh - 200px - var(--safe-t) - var(--safe-b));
   overflow-y: auto;
-  scrollbar-width: thin;
 }
 #toolbar:empty,
 #bottom-left:empty {
@@ -2654,4 +2653,38 @@ html[data-screen="phone"] body.is-fullscreen {
 }
 #panel .panel-grip:active {
   cursor: grabbing;
+}
+
+/* No scroll bars inside the windows: a thin one shows outside the window's
+   edge while it scrolls (ui/scrollbars.ts), then fades. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+.outer-scroll {
+  position: fixed;
+  z-index: 95;
+  border-radius: 3px;
+  background: rgba(200, 210, 230, 0.55);
+  opacity: 0;
+  transition: opacity 0.25s;
+  touch-action: none;
+}
+.outer-scroll[hidden] {
+  display: none;
+}
+.outer-scroll.on {
+  opacity: 1;
+}
+/* Easier to grab with a mouse. */
+@media (pointer: fine) {
+  .outer-scroll.v {
+    margin-left: -2px;
+    border-left: 2px solid transparent;
+    border-right: 2px solid transparent;
+    background-clip: padding-box;
+    box-sizing: content-box;
+  }
 }
