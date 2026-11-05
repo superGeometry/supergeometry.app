@@ -200,7 +200,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
    * A number field bound to a path in the feature (e.g. "distance",
    * "op.translate.2") that can also hold a variable expression.
    */
-  protected num(label: string, path: string, kind: FieldKind, opts: { min?: number; onInput?: (v: number) => void } = {}): PanelItem {
+  protected num(label: string, path: string, kind: FieldKind, opts: { min?: number; onInput?: (v: number) => void; inBox?: boolean } = {}): PanelItem {
     const f = this.feature as Feature;
     return {
       type: "number",
@@ -209,6 +209,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
       kind,
       min: opts.min,
       expr: f.exprs?.[path],
+      inBox: opts.inBox,
       onExpr: (expr) => {
         const exprs = { ...(f.exprs ?? {}) };
         if (expr) exprs[path] = expr;

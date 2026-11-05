@@ -150,6 +150,8 @@ export class DimWidget {
     this.line.group.visible = !opts.noLine;
     this.input.value = opts.typed ?? this.show(opts.value);
     this.input.readOnly = !opts.onInput;
+    // A box you type into (the tool's other values attach under it as a list).
+    this.box.classList.toggle("editable", !!opts.onInput);
     this.input.addEventListener("input", () => {
       const v = evaluate(this.input.value, this.angle ? "angle" : "length");
       this.input.classList.toggle("invalid", v === null);

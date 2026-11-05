@@ -39,6 +39,8 @@ export type PanelItem =
       expr?: string;
       /** Set when the field may hold an expression: called with it, or null for a plain number. */
       onExpr?(expr: string | null): void;
+      /** The same value as the value box on the model: left out of the list attached to it. */
+      inBox?: boolean;
     }
   | { type: "slot"; label: string; value: string; active: boolean; filled: boolean; onClick(): void }
   | { type: "choice"; label?: string; options: { id: string; label: string }[]; value: string; onChange(id: string): void; /** Always a drop-down. */ list?: boolean }
@@ -98,6 +100,13 @@ export class UI {
   private popoverOwner: string | null = null;
 
   constructor() {
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        if ((e.target as HTMLElement).tagName === "CANVAS") this.lastPress = { x: e.clientX, y: e.clientY };
+      },
+      true,
+    );
     $("#history-close").innerHTML = icons.close;
     $("#history-close").addEventListener("click", () => this.toggleHistory(false));
     document.addEventListener("pointerdown", (e) => {
@@ -239,6 +248,8 @@ export class UI {
    * columns and the right column / History, wrapping onto more rows if needed.
    */
   fitPanel(): void {
+    // The list sizes itself (and is placed by placePanel).
+    if (this.panel.classList.contains("as-list")) return void (this.panel.style.maxWidth = "");
     if (window.innerWidth <= 720) return void (this.panel.style.maxWidth = "");
     const GAP = 12;
     const visible = (e: HTMLElement) => !e.hidden && e.childElementCount > 0 && getComputedStyle(e).display !== "none";
@@ -418,13 +429,18 @@ export class UI {
       this.labelEl.hidden = true;
       return;
     }
-    this.labelEl.hidden = false;
-    // The value, plus a reminder that it can be typed (or how to apply what's typed).
-    // Callers mark typeable values with a trailing "· type a value".
+    // Callers mark typeable values with a trailing "· type a value". The value is
+    // already in a box on screen (the value box or the tool's list): no second label.
     const value = text.replace(/\s+· type a value$/, "");
     const typeable = value !== text;
     const typing = value.includes("▌");
-    const tip = typing ? "Enter ↵ apply · Esc cancel" : typeable ? "⌨ type a value · Enter ↵" : null;
+    const shownElsewhere = !this.panel.hidden || !!document.querySelector(".dim-widget.editable:not([hidden])");
+    if (typeable && !typing && shownElsewhere) {
+      this.labelEl.hidden = true;
+      return;
+    }
+    this.labelEl.hidden = false;
+    const tip = typing ? "Enter ↵ apply · Esc cancel" : null;
     this.labelEl.replaceChildren(el("span", "label-value", value), ...(tip ? [el("span", "label-tip", tip)] : []));
     this.labelEl.classList.toggle("typing", typing);
     this.labelEl.style.transform = `translate(${Math.round(x + 18)}px, ${Math.round(y + 14)}px)`;
@@ -518,7 +534,10 @@ export class UI {
     this.panel.innerHTML = "";
     this.panel.hidden = !spec;
     if (!spec) return;
-    queueMicrotask(() => this.fitPanel());
+    // A short list, like a right-click menu: each value with its box after the
+    // name. It hangs under the tool's value box on the model (or by the pointer).
+    this.panel.classList.add("as-list");
+    this.followPanel();
     this.panel.append(el("div", "panel-title", spec.title));
     const row = el("div", "panel-fields");
     const items: PanelItem[] = [
@@ -529,7 +548,11 @@ export class UI {
     ];
     let numberIndex = 0;
     for (const it of items) {
-      if (it.type === "number") row.append(this.numberField(it, numberIndex++, spec));
+      if (it.type === "number") {
+        const f = this.numberField(it, numberIndex++, spec);
+        if (it.inBox) f.dataset.inbox = "1";
+        row.append(f);
+      }
       else if (it.type === "slot") {
         const b = el("button", `slot${it.active ? " active" : ""}${it.filled ? " filled" : ""}`);
         b.append(el("span", "slot-label", it.label), el("span", "slot-value", it.value));
@@ -654,6 +677,64 @@ export class UI {
       label.append(fx);
     }
     return label;
+  }
+
+  /** Where the pointer last pressed on the model (the list goes near it when there's no value box). */
+  private lastPress: { x: number; y: number } | null = null;
+  private following = false;
+
+  /**
+   * Keep the tool's list beside what you're working on, every frame: under the
+   * value box on the model if there is one (it moves with the view), else just
+   * past where you last pressed, and always on screen.
+   */
+  private followPanel(): void {
+    if (this.following) return;
+    this.following = true;
+    const step = () => {
+      if (this.panel.hidden) {
+        this.following = false;
+        return;
+      }
+      this.placePanel();
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  private placePanel(): void {
+    const p = this.panel;
+    const box = [...document.querySelectorAll<HTMLElement>(".dim-widget.editable")].filter((e) => !e.hidden && e.offsetWidth).pop();
+    p.classList.toggle("attached", !!box);
+    const w = p.offsetWidth;
+    const h = p.offsetHeight;
+    const M = 8;
+    let x: number;
+    let y: number;
+    if (box) {
+      // Beside the value box (to its right, its top lined up) — below it would
+      // sit on the drag arrow and the dimension line. No room: to its left.
+      const r = box.getBoundingClientRect();
+      x = r.right + 4;
+      y = r.top;
+      if (x + w > window.innerWidth - M) x = r.left - 4 - w;
+      if (x < M) {
+        x = r.left;
+        y = r.bottom + 4;
+      }
+    } else if (this.lastPress) {
+      x = this.lastPress.x + 28;
+      y = this.lastPress.y + 20;
+      if (x + w > window.innerWidth - M) x = this.lastPress.x - 28 - w;
+      if (y + h > window.innerHeight - M) y = this.lastPress.y - 20 - h;
+    } else {
+      x = (window.innerWidth - w) / 2;
+      y = window.innerHeight - h - 70;
+    }
+    x = Math.max(M, Math.min(window.innerWidth - w - M, x));
+    y = Math.max(52, Math.min(window.innerHeight - h - M, y));
+    p.style.left = `${Math.round(x)}px`;
+    p.style.top = `${Math.round(y)}px`;
   }
 
   /** Creates a variable from a field's current text; returns its name (set by the app). */

@@ -158,7 +158,7 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
 
   protected items(): PanelItem[] {
     return [
-      this.num("Distance", "distance", "length", { onInput: (v) => this.setDistance(v) }),
+      this.num("Distance", "distance", "length", { onInput: (v) => this.setDistance(v), inBox: true }),
       modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render()),
     ];
   }
@@ -426,7 +426,7 @@ export class RevolveOp extends FeatureOp<RevolveFeature> {
   protected items(): PanelItem[] {
     return [
       this.num("Angle", "angle", "angle"),
-      this.num("Travel", "travel", "length", { onInput: (v) => this.setTravel(v) }),
+      this.num("Travel", "travel", "length", { onInput: (v) => this.setTravel(v), inBox: true }),
       modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render()),
     ];
   }
@@ -1455,7 +1455,7 @@ export class PlaneOp extends FeatureOp<PlaneFeature> {
   }
 
   protected items(): PanelItem[] {
-    return [this.num("Offset", "offset", "length", { onInput: (v) => this.setOffset(v) })];
+    return [this.num("Offset", "offset", "length", { onInput: (v) => this.setOffset(v), inBox: true })];
   }
 
   enter(): void {

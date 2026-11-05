@@ -2335,3 +2335,83 @@ body.history-open #topbar {
 .menu button.disabled {
   opacity: 0.55;
 }
+
+/* ------------------------------------------------------------------------
+   A tool's values as a short list (like a right-click menu), each name with
+   its box after it — hung under the value box on the model, or by the
+   pointer. Placed from script (left/top); never the wide bar at the bottom. */
+body #panel.as-list {
+  left: 0;
+  top: 0;
+  bottom: auto;
+  right: auto;
+  transform: none;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  width: max-content;
+  min-width: 210px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 70px);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(61, 139, 255, 0.45);
+  background: rgba(31, 33, 37, 0.97);
+  z-index: 45;
+}
+#panel.as-list .panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 2px 6px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#panel.as-list .panel-fields,
+#panel.as-list .panel-buttons {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 2px;
+}
+#panel.as-list .field {
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 4px 2px 6px;
+  border-radius: 6px;
+}
+#panel.as-list .field:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+#panel.as-list .field input {
+  width: 84px;
+}
+#panel.as-list .choice,
+#panel.as-list .slot,
+#panel.as-list .toggle,
+#panel.as-list .panel-fields > .text-btn,
+#panel.as-list .panel-buttons .tool {
+  width: 100%;
+  justify-content: flex-start;
+}
+#panel.as-list .choice {
+  flex-wrap: wrap;
+}
+#panel.as-list .choice .field-label {
+  width: 100%;
+  padding: 2px 4px;
+}
+#panel.as-list .panel-buttons {
+  flex-direction: row;
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+/* Attached to a value box: that value is in the box, not again in the list. */
+#panel.as-list.attached [data-inbox] {
+  display: none;
+}
