@@ -222,6 +222,19 @@ export class UI {
   setTools(items: ToolItem[]): void {
     this.closeFlyout();
     this.toolItems = items;
+    // During a tool the strip only holds its ✕: on phones that goes next to
+    // undo/redo (one row of buttons instead of a near-empty bar).
+    const onlyCancel = items.length === 1 && items[0].id === "cancel";
+    document.body.classList.toggle("tool-cancel-dock", onlyCancel);
+    let x = document.getElementById("cancel-dock-btn");
+    if (!x) {
+      x = el("button", "dock-btn");
+      x.id = "cancel-dock-btn";
+      x.title = "Cancel (Esc)";
+      x.innerHTML = icons.close;
+      x.addEventListener("click", () => this.toolItems.find((t) => t.id === "cancel")?.run?.());
+      document.getElementById("undo-dock")?.append(x);
+    }
     renderTools(this.toolbar, items, (item, btn) => this.runAndOpen(item, btn, this.toolbar, () => this.toolItems));
     this.fitToolbar();
   }
@@ -614,7 +627,11 @@ export class UI {
       b.addEventListener("click", () => a.run?.());
       buttons.append(b);
     }
-    if (spec.onCancel) buttons.append(textButton("Cancel", "Esc", spec.onCancel));
+    if (spec.onCancel) {
+      const c = textButton("Cancel", "Esc", spec.onCancel);
+      c.classList.add("panel-cancel");
+      buttons.append(c);
+    }
     if (spec.onDone) buttons.append(textButton("Done", "Enter", spec.onDone, true));
     this.panel.append(buttons);
   }
@@ -738,6 +755,10 @@ export class UI {
         .filter((r) => r.top > window.innerHeight * 0.55 && r.width > 120)
         .map((r) => r.top);
       const bottom = Math.min(window.innerHeight - 8, ...tops) - 8;
+      // Narrower than the screen where the view column on the right comes down this far.
+      p.style.maxWidth = "";
+      const col = document.getElementById("right-col")?.getBoundingClientRect();
+      if (col && col.height && col.bottom > bottom - p.offsetHeight - 4) p.style.maxWidth = `${Math.max(200, col.left - 16)}px`;
       p.style.left = "8px";
       p.style.top = `${Math.round(Math.max(52, bottom - p.offsetHeight))}px`;
       this.panelSide = 0;

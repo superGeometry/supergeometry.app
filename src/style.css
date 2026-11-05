@@ -2426,3 +2426,57 @@ html[data-screen="phone"] body #panel.as-list {
   min-width: 0;
   max-height: 38vh;
 }
+
+/* The tool's ✕ next to undo/redo (phones, while a tool is on). */
+#cancel-dock-btn {
+  display: none;
+}
+html[data-screen="phone"] body.tool-cancel-dock #cancel-dock-btn {
+  display: flex;
+}
+html[data-screen="phone"] body.tool-cancel-dock #toolbar {
+  display: none;
+}
+/* No strip under it any more: the buttons go down to the bottom, the hint with them. */
+html[data-screen="phone"] body.tool-cancel-dock #undo-dock {
+  bottom: calc(8px + var(--safe-b));
+}
+@media (max-width: 720px) and (orientation: portrait) {
+  html[data-screen="phone"] body.tool-cancel-dock #hint {
+    bottom: calc(66px + var(--safe-b));
+  }
+}
+
+/* Phones: the options and Done on one row (✕ beside undo cancels), no title —
+   the hint under it says what the tool does. Wraps if it can't fit. */
+html[data-screen="phone"] body #panel.as-list {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+}
+html[data-screen="phone"] #panel.as-list .panel-title,
+html[data-screen="phone"] #panel.as-list .panel-cancel {
+  display: none;
+}
+html[data-screen="phone"] #panel.as-list .panel-fields {
+  flex: 1 1 auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+html[data-screen="phone"] #panel.as-list .choice {
+  width: auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+html[data-screen="phone"] #panel.as-list .panel-buttons {
+  flex-direction: row;
+  border-top: none;
+  padding-top: 0;
+  margin: 0 0 0 auto;
+}
+html[data-screen="phone"] #panel.as-list .panel-buttons:empty {
+  display: none;
+}
