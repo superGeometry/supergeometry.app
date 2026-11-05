@@ -2480,3 +2480,82 @@ html[data-screen="phone"] #panel.as-list .panel-buttons {
 html[data-screen="phone"] #panel.as-list .panel-buttons:empty {
   display: none;
 }
+
+/* ---------- The top bar is one group — app name (or icon), project name, File,
+   Items, More — always centred at the top, on every screen. It never runs
+   under the view cube: the space it may use is the same on both sides. */
+html body #topbar,
+html body.history-open #topbar,
+html body.items-open #topbar {
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%) !important;
+  width: max-content !important;
+  max-width: calc(100vw - 2 * 190px) !important;
+}
+/* The name box: a good width, giving way first when space is short. */
+html body #topbar .project-name {
+  flex: 0 1 auto;
+  width: 320px;
+  min-width: 90px;
+}
+@media (max-width: 720px) {
+  html body #topbar .project-name {
+    flex: 1 1 auto;
+    width: auto;
+  }
+}
+/* Phones upright: the view cube is below the bar — the whole width is free. */
+@media (max-width: 720px) {
+  html body #topbar,
+  html body.history-open #topbar,
+  html body.items-open #topbar {
+    max-width: calc(100vw - 16px) !important;
+  }
+}
+/* Phones sideways: the cube sits up beside the bar (narrower on each side). */
+@media (max-height: 500px) and (min-width: 721px) {
+  html body #topbar,
+  html body.history-open #topbar,
+  html body.items-open #topbar {
+    max-width: calc(100vw - 2 * 180px) !important;
+  }
+}
+.brand-icon {
+  display: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+}
+/* Smaller screens: just the app's icon instead of its name. */
+@media (max-width: 1100px), (max-height: 500px) {
+  html body .brand,
+  html body.history-open .brand {
+    display: flex;
+    align-items: center;
+    width: auto;
+    padding: 0 2px;
+    margin-right: 2px;
+    top: 0;
+  }
+  .brand-name {
+    display: none;
+  }
+  .brand-icon {
+    display: block;
+  }
+}
+/* Phones sideways with History open: the view cube and its column move left,
+   into the middle — they start under the top bar there, not beside it. */
+@media (max-height: 500px), (max-width: 1100px) {
+  html body.history-open #viewcube-host {
+    top: calc(50px + var(--safe-t)) !important;
+  }
+  html body.history-open #right-col {
+    top: calc(52px + var(--safe-t)) !important;
+    bottom: auto !important;
+    transform: none !important;
+    max-height: calc(100vh - 60px - var(--safe-t) - var(--safe-b));
+    overflow-y: auto;
+  }
+}
