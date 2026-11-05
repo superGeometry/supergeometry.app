@@ -150,7 +150,15 @@ export class InputRouter {
         this.hoverAt = { x, y, type: e.pointerType as ToolPointer["type"], shift: e.shiftKey, tol: pickTolerance(e.pointerType) };
         this.hoverFrame ||= requestAnimationFrame(() => {
           this.hoverFrame = 0;
-          if (this.hoverAt && this.mode === "idle") this.handler.hover?.(this.hoverAt);
+          if (this.hoverAt && this.mode === "idle") {
+            // Hovering (not a tap): picks skip the slower near-miss search.
+            this.view.hovering = true;
+            try {
+              this.handler.hover?.(this.hoverAt);
+            } finally {
+              this.view.hovering = false;
+            }
+          }
         });
       }
       return;

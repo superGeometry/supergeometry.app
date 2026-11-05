@@ -305,13 +305,27 @@ export class DimWidget {
 }
 
 /** A screen point moved (if needed) so a box of these half sizes is on screen and off the open side panels. */
+/** The side panels' and the tool card's places, measured at most every 120 ms (not per box per frame). */
+let freeCache: { t: number; sides: DOMRect[]; panel: DOMRect | null } | null = null;
+function freeAreas(): { sides: DOMRect[]; panel: DOMRect | null } {
+  const now = performance.now();
+  if (freeCache && now - freeCache.t < 120) return freeCache;
+  const sides: DOMRect[] = [];
+  for (const id of ["items", "history"]) {
+    const e = document.getElementById(id);
+    if (e && !e.hidden && e.offsetWidth) sides.push(e.getBoundingClientRect());
+  }
+  const p = document.getElementById("panel");
+  const panel = document.documentElement.dataset.screen === "phone" && p && !p.hidden && p.offsetHeight ? p.getBoundingClientRect() : null;
+  freeCache = { t: now, sides, panel };
+  return freeCache;
+}
+
 function clampToFree(s: [number, number], hw: number, hh: number): [number, number] {
   let left = 8;
   let right = window.innerWidth - 8;
-  for (const id of ["items", "history"]) {
-    const e = document.getElementById(id);
-    if (!e || e.hidden || !e.offsetWidth) continue;
-    const r = e.getBoundingClientRect();
+  const free = freeAreas();
+  for (const r of free.sides) {
     if (r.width > window.innerWidth * 0.6) continue; // a phone sheet over everything: ignore
     if (r.left < window.innerWidth / 2) left = Math.max(left, r.right + 8);
     else right = Math.min(right, r.left - 8);
@@ -320,9 +334,8 @@ function clampToFree(s: [number, number], hw: number, hh: number): [number, numb
   const x = Math.max(left + hw, Math.min(right - hw, s[0]));
   let y = Math.max(52 + hh, Math.min(window.innerHeight - 8 - hh, s[1]));
   // Phones: the tool's options card sits fixed along the bottom — the box stays above it.
-  const panel = document.getElementById("panel");
-  if (document.documentElement.dataset.screen === "phone" && panel && !panel.hidden && panel.offsetHeight) {
-    const r = panel.getBoundingClientRect();
+  if (free.panel) {
+    const r = free.panel;
     if (x + hw > r.left - 6 && x - hw < r.right + 6 && y + hh > r.top - 6) y = Math.max(52 + hh, r.top - 8 - hh);
   }
   return [x, y];

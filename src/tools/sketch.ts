@@ -1679,29 +1679,7 @@ export class SketchTool implements Tool {
         loci.push({ kind: "line", p: c.p, d: [1, 0], label: "Horizontal", guide: c.p, axis: 1 });
       }
     }
-    if (s.guidePoints) {
-      const own = new Set(this.entities.map((e) => e.id));
-      for (const e of [...this.entities, ...this.boundary]) {
-        const mine = own.has(e.id) ? e.id : undefined;
-        if (e.kind === "line") {
-          const d = unit2([e.b[0] - e.a[0], e.b[1] - e.a[1]]);
-          loci.push({ kind: "line", p: e.a, d, label: "On line", seg: [e.a, e.b], on: mine });
-        } else if (e.kind === "circle") loci.push({ kind: "circle", c: e.center, r: e.radius, label: "On circle", on: mine });
-        else if (e.kind === "arc") {
-          const a = arcFrom3(e.a, e.m, e.b);
-          if (a) loci.push({ kind: "circle", c: a.c, r: a.r, label: "On arc", on: mine });
-        } else {
-          // Sides of rectangles and polygons, and splines/ellipses piece by piece.
-          for (const poly of entityPolylines(e))
-            for (let i = 0; i + 1 < poly.length; i++) {
-              const a = poly[i];
-              const b = poly[i + 1];
-              if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-9) continue;
-              loci.push({ kind: "line", p: a, d: unit2([b[0] - a[0], b[1] - a[1]]), label: "On curve", seg: [a, b] });
-            }
-        }
-      }
-    }
+    if (s.guidePoints) loci.push(...this.curveLoci());
     // A line being drawn: parallel or square to another line.
     const from = this.kind === "line" && this.pts.length ? this.pts[this.pts.length - 1] : null;
     if (from && s.guideLines) {
@@ -1788,6 +1766,39 @@ export class SketchTool implements Tool {
       if (L.kind === "line" && L.dir) out.dir = L.dir;
     }
     return out;
+  }
+
+  /** The sketch's curves as things to slide along — built once per change of the sketch, not on every move. */
+  private lociCache: { ents: SketchEntity[]; bnd: unknown; loci: Locus[] } | null = null;
+  private curveLoci(): Locus[] {
+    const c = this.lociCache;
+    // (The face outline is rebuilt as a new list each time: compare what's in it — it's short.)
+    const bndSrc = JSON.stringify(this.boundary);
+    if (c && c.ents === this.entities && c.bnd === bndSrc) return c.loci;
+    const loci: Locus[] = [];
+    const own = new Set(this.entities.map((e) => e.id));
+    for (const e of [...this.entities, ...this.boundary]) {
+      const mine = own.has(e.id) ? e.id : undefined;
+      if (e.kind === "line") {
+        const d = unit2([e.b[0] - e.a[0], e.b[1] - e.a[1]]);
+        loci.push({ kind: "line", p: e.a, d, label: "On line", seg: [e.a, e.b], on: mine });
+      } else if (e.kind === "circle") loci.push({ kind: "circle", c: e.center, r: e.radius, label: "On circle", on: mine });
+      else if (e.kind === "arc") {
+        const a = arcFrom3(e.a, e.m, e.b);
+        if (a) loci.push({ kind: "circle", c: a.c, r: a.r, label: "On arc", on: mine });
+      } else {
+        // Sides of rectangles and polygons, and splines/ellipses piece by piece.
+        for (const poly of entityPolylines(e))
+          for (let i = 0; i + 1 < poly.length; i++) {
+            const a = poly[i];
+            const b = poly[i + 1];
+            if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-9) continue;
+            loci.push({ kind: "line", p: a, d: unit2([b[0] - a[0], b[1] - a[1]]), label: "On curve", seg: [a, b] });
+          }
+      }
+    }
+    this.lociCache = { ents: this.entities, bnd: bndSrc, loci };
+    return loci;
   }
 
   /** Constraints that keep a drawn point where it snapped (on a curve, a line's middle). */

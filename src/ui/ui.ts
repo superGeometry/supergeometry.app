@@ -561,6 +561,7 @@ export class UI {
 
   showPanel(spec: ValuePanel | null): void {
     this.panelSpec = spec;
+    this.panelVersion++;
     this.panel.innerHTML = "";
     this.panel.hidden = !spec;
     // Closed: next time it's placed afresh.
@@ -824,6 +825,7 @@ export class UI {
     }
   }
   private savePanelSpot(spot: { x: number; y: number } | null): void {
+    this.panelVersion++;
     try {
       const all = JSON.parse(localStorage.getItem(UI.PANEL_POS) ?? "{}") ?? {};
       if (spot) all[screenClass()] = spot;
@@ -883,12 +885,40 @@ export class UI {
     p.style.top = `${Math.round(Math.max(4, Math.min(window.innerHeight - p.offsetHeight - 4, y)))}px`;
   }
 
+  /** Bumped when the card's contents change (it may need placing again). */
+  private panelVersion = 0;
+  /** What the card was last placed for: the same again, nothing to do (no measuring every frame). */
+  private panelKey = "";
+
   private placePanel(): void {
     const p = this.panel;
     const box = [...document.querySelectorAll<HTMLElement>(".dim-widget.editable")].filter((e) => !e.hidden && e.offsetWidth).pop();
-    p.classList.toggle("attached", !!box);
     // Being dragged, or put somewhere by hand: it stays there.
     if (this.panelDragging) return;
+    const r = (e: Element | null) => {
+      if (!e || (e as HTMLElement).hidden) return "-";
+      const b = e.getBoundingClientRect();
+      return `${Math.round(b.left)},${Math.round(b.top)},${Math.round(b.width)},${Math.round(b.height)}`;
+    };
+    const q = (v: number) => Math.round(v / 16);
+    const phone = screenClass() === "phone";
+    const key = [
+      window.innerWidth,
+      window.innerHeight,
+      this.panelVersion,
+      p.offsetWidth,
+      p.offsetHeight,
+      r(box ?? null),
+      box?.dataset.seg ?? "",
+      phone ? ["#items", "#history", "#toolbar", "#undo-dock", "#bottom-left", "#right-col", "#hint"].map((s) => r(document.querySelector(s))).join("|") : "",
+      phone || !this.lastPointer ? "" : `${q(this.lastPointer.x)},${q(this.lastPointer.y)}`,
+      phone || !this.pointerAt ? "" : `${q(this.pointerAt.x)},${q(this.pointerAt.y)}`,
+      this.lastPress ? `${this.lastPress.x},${this.lastPress.y}` : "",
+      p.contains(document.activeElement) ? "f" : "",
+    ].join(";");
+    if (key === this.panelKey) return;
+    this.panelKey = key;
+    p.classList.toggle("attached", !!box);
     const spot = this.panelSpot();
     if (spot) {
       if (screenClass() === "phone") {

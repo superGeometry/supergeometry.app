@@ -854,6 +854,9 @@ export class Viewport {
     this.raycaster.setFromCamera(ndc, this.camera);
   }
 
+  /** Set while the pointer only hovers: picking skips the near-miss search that taps get. */
+  hovering = false;
+
   /** Pick what's under the pointer. Edges and curves win within the tolerance. */
   pick(x: number, y: number, opts: PickOptions = {}): PickHit | null {
     const { edgeTolPx = 8, profiles = true, bodies = true, edges = true, curves = false, planes = true, axes = true, vertices = edges, planesFirst = false } = opts;
@@ -911,7 +914,7 @@ export class Viewport {
     }
     // Nothing right under the tap: a corner, edge or curve just beside it is what
     // was meant (a finger, or a quick click, is rarely exactly on a thin line).
-    if (!faceHit && edgeTolPx > 0) {
+    if (!faceHit && edgeTolPx > 0 && !this.hovering) {
       const wide = Math.min(28, edgeTolPx * 1.6);
       if (bodies && vertices) {
         const v = this.pickVertex(x, y, wide * 0.8, Infinity);
