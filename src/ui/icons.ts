@@ -4,6 +4,8 @@ const svg = (body: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
 export const icons = {
+  // A small keypad: 3×3 keys and a wide one below.
+  numpad: svg('<rect x="3.5" y="2.5" width="17" height="19" rx="2.5"/><rect x="6.5" y="5.5" width="3" height="2.6" rx=".6"/><rect x="10.5" y="5.5" width="3" height="2.6" rx=".6"/><rect x="14.5" y="5.5" width="3" height="2.6" rx=".6"/><rect x="6.5" y="9.7" width="3" height="2.6" rx=".6"/><rect x="10.5" y="9.7" width="3" height="2.6" rx=".6"/><rect x="14.5" y="9.7" width="3" height="2.6" rx=".6"/><rect x="6.5" y="13.9" width="3" height="2.6" rx=".6"/><rect x="10.5" y="13.9" width="3" height="2.6" rx=".6"/><rect x="14.5" y="13.9" width="3" height="2.6" rx=".6"/><rect x="6.5" y="18" width="11" height="1.2" rx=".6"/>'),
   lineDashed: svg('<path d="M5 19L19 5" stroke-dasharray="3 2.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>'),
   swap: svg('<path d="M19 9a7 7 0 0 0-12.5-3.2"/><path d="M6 3v3.2h3.2"/><path d="M5 15a7 7 0 0 0 12.5 3.2"/><path d="M18 21v-3.2h-3.2"/>'),
   pivot: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><path d="M5.5 8.5a7.5 7.5 0 0 1 3-3" />'),

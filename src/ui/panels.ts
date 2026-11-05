@@ -50,8 +50,6 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
       stepRow.append(input);
       host.append(stepRow);
       host.append(el("div", "pop-note", `Tip: the grid adapts to zoom (now ${fmtStep(view.grid.step)} per square).`));
-      host.append(heading("Typing values"));
-      host.append(toggleRow("On-screen numpad", s.numpad, (v) => settings.set("numpad", v)));
       host.append(heading("Degree format"));
       host.append(choiceRow("Decimal (27.15°)", s.degrees === "decimal", () => settings.set("degrees", "decimal")), choiceRow("Fractional (27° 15′)", s.degrees === "fractional", () => settings.set("degrees", "fractional")));
     },
@@ -133,6 +131,14 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
     });
   });
 
+  // On-screen numpad: one tap on, one tap off (lit while on).
+  const pad = ui.addRight("numpad", "numpad", "On-screen numpad for typing values (tap to switch on / off)", () => {
+    settings.set("numpad", !settings.value.numpad);
+    ui.toast(settings.value.numpad ? "On-screen numpad on" : "On-screen numpad off");
+  }, () => (settings.value.numpad ? "Pad on" : "Pad"));
+  const markPad = () => pad.classList.toggle("on", settings.value.numpad);
+  settings.onChange(() => (markPad(), ui.refreshRight()));
+  markPad();
   ui.addRight("history", "history", "History", () => ui.toggleHistory());
   // Sketch mode only (CSS shows it under body.sketching): show/hide the constraint column.
   const cons = ui.addRight("constraints", "constraints", "Constraints (sketch)", () => settings.set("showConstraints", !settings.value.showConstraints));

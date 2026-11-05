@@ -445,6 +445,41 @@ export class UI {
     });
   }
 
+  /** A question with a few answers (buttons); resolves with the chosen id, or null (Esc / Cancel). */
+  ask(title: string, note: string, choices: { id: string; label: string; primary?: boolean }[]): Promise<string | null> {
+    return new Promise((resolve) => {
+      const back = el("div", "dialog-back");
+      const box = el("div", "dialog");
+      box.append(el("div", "panel-title", title));
+      if (note) box.append(el("div", "dialog-note", note));
+      const row = el("div", "panel-buttons");
+      const close = (v: string | null) => {
+        back.remove();
+        window.removeEventListener("keydown", onKey, true);
+        resolve(v);
+      };
+      row.append(textButton("Cancel", "Esc", () => close(null)));
+      let primary: HTMLButtonElement | null = null;
+      for (const c of choices) {
+        const b = textButton(c.label, c.primary ? "Enter" : "", () => close(c.id), !!c.primary);
+        if (c.primary) primary = b;
+        row.append(b);
+      }
+      for (const b of row.querySelectorAll("button")) b.type = "button";
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === "Escape") (e.preventDefault(), close(null));
+        if (e.key === "Enter" && primary) (e.preventDefault(), primary.click());
+        e.stopPropagation();
+      };
+      window.addEventListener("keydown", onKey, true);
+      box.append(row);
+      back.append(box);
+      back.addEventListener("pointerdown", (e) => e.target === back && close(null));
+      document.body.append(back);
+      primary?.focus();
+    });
+  }
+
   // ------------------------------------------------------------------- panel
 
   get panelOpen(): boolean {
@@ -748,7 +783,7 @@ function textButton(label: string, kbd: string, run: () => void, primary = false
   const b = document.createElement("button");
   b.className = primary ? "text-btn primary" : "text-btn";
   b.append(label);
-  if (matchMedia("(pointer: fine)").matches) b.append(el("kbd", "", kbd));
+  if (kbd && matchMedia("(pointer: fine)").matches) b.append(el("kbd", "", kbd));
   b.addEventListener("click", run);
   return b;
 }

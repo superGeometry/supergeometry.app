@@ -113,7 +113,8 @@ folders to group), **More** (fullscreen, Help, About, support).
 Insert…). With something selected you only see what can be done with it.
 
 **Right column** (middle of the right edge) — Fit, Snapping, Units & grid,
-Display mode, Screenshot, History, and in a sketch, Constraints.
+Views, Display mode, Screenshot, Numpad (on / off), History, and in a sketch,
+Constraints.
 
 **Bottom left** — Undo / Redo, Section View (cut the view open), Measure and
 Isolate (show only the selected bodies).
@@ -197,10 +198,11 @@ revolve, sweep or loft. Overlapping shapes split into separate regions.
 - **Variables** (Insert → Create Variable) are named sizes like `wall = 3`.
   Type them into any field (`wall * 2`) or pick them from the **ƒx** menu
   next to a value. Change the variable later and everything using it updates.
-- The **on-screen numpad** (Units & grid → *On-screen numpad*) replaces the
-  system keyboard for value boxes. It's on by default on phones, tablets and
-  headsets. Tapping a box selects its value, so typing replaces it. After the
-  second tap of a line, its length box opens right away.
+- The **on-screen numpad** (the keypad button in the right column — tap it
+  on or off) replaces the system keyboard for value boxes. It's on by default
+  on phones, tablets and headsets. Tapping a box selects its value, so typing
+  replaces it; nothing is applied until you press ↵. After the second tap of
+  a line, its length box opens right away.
 
 ---
 
@@ -219,8 +221,11 @@ change, it's marked and the reason is shown.
 - Your project **saves itself** in this browser as you work.
 - **File → Save project** downloads a `.super` file (keep it as a backup or
   move it to another device); **File → Open** loads one.
-- **File → Export STL** for 3D printing, **Export STEP** for other CAD
-  programs. With bodies selected (or isolated), only those are exported.
+- **File → Export STL** or **Export 3MF** for 3D printing (3MF keeps body
+  names and colours), **Export STEP** for other CAD programs. With bodies
+  selected (or isolated), only those are exported.
+- **File → New project** asks whether to save the open project first or
+  discard it.
 - **Insert** brings in STEP, STL, SVG and DXF files, and images to trace over.
 
 ---
@@ -255,6 +260,9 @@ change, it's marked and the reason is shown.
   **Isolate** is on.
 - **A "Working…" spinner**: the geometry engine is busy; complex steps can
   take a moment.
+- **A change you expected isn't there yet**: when a newer version is out, a
+  notice offers to update. **More → Reset cache & update** loads the newest
+  version right away (your project is kept).
 
 ---
 

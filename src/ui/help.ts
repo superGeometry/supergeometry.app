@@ -23,9 +23,9 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
   {
     title: "Top bar",
     items: [
-      { icon: "file", name: "File", text: "New, open and save projects (.super), export STL / STEP for 3D printing or other CAD programs." },
+      { icon: "file", name: "File", text: "New, open and save projects (.super); export STL or 3MF for 3D printing, STEP for other CAD programs." },
       { icon: "body", name: "Items", text: "Every body, sketch, plane and image, with an eye to hide or show it. Group things into folders." },
-      { icon: "more", name: "More", text: "Fullscreen, this Help, About, and support links." },
+      { icon: "more", name: "More", text: "Fullscreen, Reset cache & update (loads the newest version), this Help, About, and support links." },
     ],
   },
   {
@@ -73,7 +73,8 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     title: "Right column",
     items: [
       { icon: "magnet", name: "Snapping", text: "What the pointer snaps to: grid, end and middle points, guide lines." },
-      { icon: "ruler", name: "Units & grid", text: "mm, cm, m, inch, foot; grid size; the on-screen numpad for typing values." },
+      { icon: "ruler", name: "Units & grid", text: "mm, cm, m, inch, foot; grid size; degree format." },
+      { icon: "numpad", name: "Numpad", text: "Tap to switch the on-screen numpad on or off: value boxes then open it instead of the keyboard. Typing replaces the value; ↵ applies it." },
       { icon: "display", name: "Display", text: "Shaded, wireframe or X-ray; edges and hidden edges." },
       { icon: "camera", name: "Screenshot", text: "Save a picture of the view." },
       { icon: "history", name: "History", text: "Every step in order. Tap one to change it, hover to see what it works on, the eye switches it off, the bin deletes it." },

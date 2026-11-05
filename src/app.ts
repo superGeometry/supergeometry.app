@@ -24,6 +24,8 @@ import { InputRouter } from "./view/input";
 import { ViewCube } from "./view/viewcube";
 import { PivotButton } from "./ui/pivot";
 import { HelpPanel } from "./ui/help";
+import { Updates } from "./ui/update";
+import { exportThreeMF } from "./io/threemf";
 import { isHeadset } from "./device";
 import { Viewport } from "./view/viewport";
 
@@ -648,6 +650,9 @@ export class App implements AppContext {
       else this.ui.toast("Tip: Share → Add to Home Screen opens supergeometry.app full screen");
     });
     // Help and Tutorial: placeholders for now.
+    // A newer build out? A notice offers to update; More → Reset cache does it now.
+    this.updates = new Updates(() => this.store.flush());
+    moreItem("m-update", () => void this.updates.reset());
     // Help: a panel explaining every button (toggle it from More → Help).
     const help = new HelpPanel();
     moreItem("m-help", () => help.toggle());
@@ -665,16 +670,12 @@ export class App implements AppContext {
         menu.hidden = true;
         fn();
       });
-    item("m-new", () => {
-      if (this.store.features.length && !confirm("Start a new project? (You can undo this.)")) return;
-      this.setTool(null);
-      this.setSection(null);
-      this.store.replace(emptyDoc());
-    });
+    item("m-new", () => void this.newProject());
     item("m-open", () => this.open());
     item("m-save", () => this.save());
     item("m-stl", () => void this.export("stl"));
     item("m-step", () => void this.export("step"));
+    item("m-3mf", () => void this.export3mf());
     on("undo-btn", () => this.store.undo());
     on("redo-btn", () => this.store.redo());
     this.store.onChange(() => this.updateUndo());
@@ -707,6 +708,33 @@ export class App implements AppContext {
     (document.getElementById("redo-btn") as HTMLButtonElement).disabled = !this.store.canRedo;
   }
 
+  private updates!: Updates;
+
+  /**
+   * New project: the current one can be saved (downloaded) or discarded
+   * first. Then the app checks for a newer version and, if there is one,
+   * clears its cached files and reloads — a new project starts on the latest.
+   */
+  private async newProject(): Promise<void> {
+    if (this.store.features.length) {
+      const choice = await this.ui.ask(
+        "Start a new project?",
+        `“${this.store.doc.name}” is open. Save it to a file first, or discard it?`,
+        [
+          { id: "discard", label: "Discard" },
+          { id: "save", label: "Save & start new", primary: true },
+        ],
+      );
+      if (!choice) return;
+      if (choice === "save") this.save();
+    }
+    this.setTool(null);
+    this.setSection(null);
+    this.isolate(null);
+    this.store.replace(emptyDoc());
+    if (await this.updates.check()) await this.updates.reset();
+  }
+
   private save(): void {
     download(new Blob([JSON.stringify(this.store.doc)], { type: "application/json" }), `${this.store.doc.name}.super`);
   }
@@ -731,6 +759,24 @@ export class App implements AppContext {
     input.click();
   }
 
+  /** 3MF for slicers: the meshes, with the exact STEP model packed inside. */
+  private async export3mf(): Promise<void> {
+    const ids = chosenBodies(this);
+    const bodies = (this.result?.bodies ?? []).filter((b) => (ids.length ? ids.includes(b.id) : !this.view.isHidden(b.id)));
+    if (!bodies.length) return this.ui.toast("Nothing to export");
+    try {
+      this.ui.setStatus("Exporting 3MF…");
+      const step = await this.kernel.export(this.store.doc.features, "step", bodies.map((b) => b.id));
+      const names = this.store.doc.names ?? {};
+      const blob = await exportThreeMF(bodies.map((b) => ({ name: names[b.id] ?? b.name, positions: b.positions, indices: b.indices, color: this.store.doc.colors?.[b.id] })), this.store.doc.name, step);
+      download(blob, `${this.store.doc.name}.3mf`);
+    } catch (err) {
+      this.ui.toast(`Export failed: ${(err as Error).message}`, "error");
+    } finally {
+      this.ui.setStatus(null);
+    }
+  }
+
   private async export(format: ExportFormat): Promise<void> {
     // Selected bodies win; otherwise what's isolated; otherwise everything.
     const picked = bodiesOf(this.selection);
@@ -745,6 +791,12 @@ export class App implements AppContext {
       this.ui.setStatus(null);
     }
   }
+}
+
+/** Same choice of bodies as the other exports: selected, else isolated, else all. */
+function chosenBodies(app: App): string[] {
+  const picked = bodiesOf(app.selection);
+  return picked.length ? picked : (app.isolated ?? []).filter((id) => app.result?.bodies.some((b) => b.id === id));
 }
 
 function download(blob: Blob, name: string): void {

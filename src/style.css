@@ -2056,3 +2056,26 @@ body:has(#flyout:not([hidden])) #warn {
     max-width: calc(100vw - 460px);
   }
 }
+
+/* "A newer version is ready" notice. */
+.update-banner {
+  position: fixed;
+  z-index: 90;
+  left: 50%;
+  top: calc(56px + var(--safe-t));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100vw - 24px);
+  padding: 8px 10px 8px 16px;
+  border-radius: 14px;
+  background: var(--chrome-solid);
+  border: 1px solid var(--accent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.update-banner[hidden] {
+  display: none;
+}

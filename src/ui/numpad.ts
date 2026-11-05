@@ -31,6 +31,11 @@ class Numpad {
       const t = e.target as HTMLElement;
       if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad) this.open(t);
     });
+    // Switched on/off: boxes already on screen follow (system keyboard back when off).
+    settings.onChange((v) => {
+      for (const i of document.querySelectorAll<HTMLInputElement>("input[data-numpad='1']")) i.inputMode = v.numpad ? "none" : "decimal";
+      if (!v.numpad) this.close();
+    });
     document.addEventListener("focusout", (e) => {
       if (e.target === this.target) setTimeout(() => document.activeElement !== this.target && this.close(), 0);
     });

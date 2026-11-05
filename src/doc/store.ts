@@ -160,6 +160,12 @@ export class DocStore {
     });
   }
 
+  /** Save the project now (before the page reloads). */
+  async flush(): Promise<void> {
+    clearTimeout(this.saveTimer);
+    await idbSet("autosave", JSON.stringify(this.doc));
+  }
+
   private changed(): void {
     this.listeners.forEach((fn) => fn());
     clearTimeout(this.saveTimer);
