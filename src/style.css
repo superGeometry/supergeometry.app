@@ -2709,3 +2709,48 @@ html[data-screen="phone"] body.is-fullscreen {
   color: #ffd34d;
   box-shadow: none;
 }
+
+/* Constraint marks: one colour per kind, so they're told apart at a glance
+   (still faint — they stay in the background). */
+.cglyph:not(.dim)[data-type="horizontal"],
+.cglyph:not(.dim)[data-type="vertical"] { color: rgba(255, 196, 90, 0.75); }
+.cglyph:not(.dim)[data-type="parallel"] { color: rgba(110, 200, 255, 0.8); }
+.cglyph:not(.dim)[data-type="perpendicular"] { color: rgba(130, 230, 160, 0.8); }
+.cglyph:not(.dim)[data-type="coincident"] { color: rgba(235, 235, 245, 0.7); }
+.cglyph:not(.dim)[data-type="tangent"] { color: rgba(255, 140, 200, 0.8); }
+.cglyph:not(.dim)[data-type="equal"] { color: rgba(190, 160, 255, 0.85); }
+.cglyph:not(.dim)[data-type="midpoint"] { color: rgba(255, 150, 120, 0.8); }
+.cglyph:not(.dim)[data-type="concentric"] { color: rgba(120, 230, 230, 0.8); }
+.cglyph:not(.dim)[data-type="symmetric"] { color: rgba(240, 230, 120, 0.8); }
+.cglyph:not(.dim)[data-type="fix"] { color: rgba(255, 110, 100, 0.8); }
+.cglyph.sel:not(.dim) { color: #ffd34d !important; text-decoration: underline; }
+
+/* History groups: a folder row, its steps indented under it. */
+#history .history-head {
+  gap: 6px;
+}
+#history .history-head > span {
+  flex: 1;
+}
+.history-group .history-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.history-group .history-name svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.history-count {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+}
+.history-item.in-group {
+  padding-left: 22px;
+}
+.history-item.checked {
+  background: var(--accent-soft);
+}

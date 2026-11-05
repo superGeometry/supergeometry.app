@@ -374,6 +374,13 @@ export class App implements AppContext {
         if (this.tool !== this.selectTool) this.setTool(null);
         this.store.remove(id);
       },
+      groups: this.store.doc.historyGroups ?? [],
+      setGroups: (next) => this.store.commit((d) => (d.historyGroups = next.length ? next : undefined)),
+      suppress: (ids, off) =>
+        this.store.commit((d) => {
+          for (const f of d.features) if (ids.includes(f.id)) f.suppressed = off || undefined;
+        }),
+      askName: async (title, current) => (await this.ui.dialog(title, [{ key: "name", label: "Name", value: current }]))?.name.trim() || null,
     }, warnings);
   }
 

@@ -198,6 +198,8 @@ export class ConstraintGlyphs {
       }
       chip.className = `cglyph${c.type === "dim" || c.type === "distance" ? " dim" : ""}${c.id === this.selected ? " sel" : ""}${c.expr ? " expr" : ""}`;
       chip.textContent = label(c, get);
+      // Each kind its own colour (recognised at a glance).
+      chip.dataset.type = c.type;
       chip.title = c.type === "dim" ? `${c.prop} dimension${c.expr ? ` = ${c.expr}` : ""} (click to edit)` : `${c.type} (click to select)`;
     }
     this.layout();

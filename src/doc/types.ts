@@ -384,6 +384,8 @@ export interface ProjectDoc {
   names: Record<string, string>;
   /** Items folders: any bodies / sketches / planes / images, grouped. */
   folders?: ItemFolder[];
+  /** History groups: runs of steps next to each other, shown folded under one name. */
+  historyGroups?: HistoryGroup[];
   /** Body colours (by body id), "#rrggbb"; missing = the default grey. */
   colors?: Record<string, string>;
   /** See-through bodies: opacity 0–1 by body id (missing: solid). */
@@ -430,6 +432,13 @@ export const BODY_OPACITY: { name: string; value: number }[] = [
   { name: "50%", value: 0.5 },
   { name: "25%", value: 0.25 },
 ];
+
+export interface HistoryGroup {
+  id: string;
+  name: string;
+  /** Feature ids (steps next to each other in History). */
+  steps: string[];
+}
 
 export interface ItemFolder {
   id: string;

@@ -1,4 +1,4 @@
-import type { Feature } from "../doc/types";
+import type { Feature, HistoryGroup } from "../doc/types";
 import { screenClass, watchScreenClass } from "../device";
 import type { FeatureError } from "../kernel/protocol";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
@@ -76,6 +76,12 @@ export interface HistoryHandlers {
   hover?(id: string | null): void;
   toggle(id: string): void;
   remove(id: string): void;
+  /** History groups (runs of steps under one name), and changing them. */
+  groups: HistoryGroup[];
+  setGroups(next: HistoryGroup[]): void;
+  /** Switch several steps off (true) or on. */
+  suppress(ids: string[], off: boolean): void;
+  askName(title: string, current: string): Promise<string | null>;
 }
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -980,14 +986,99 @@ export class UI {
   /** Sketches whose steps are folded out in History. */
   private openSteps = new Set<string>();
 
+  /** History: ticking steps to group them (the Select button, or Ctrl/Shift+click). */
+  private historyPicking = false;
+  private historyChecked = new Set<string>();
+  /** Groups folded shut (by id). */
+  private closedGroups = new Set<string>();
+  private lastHistory: Parameters<UI["renderHistory"]> | null = null;
+
+  private rerenderHistory(): void {
+    if (this.lastHistory) this.renderHistory(...this.lastHistory);
+  }
+
+  private checkStep(id: string): void {
+    if (this.historyChecked.has(id)) this.historyChecked.delete(id);
+    else this.historyChecked.add(id);
+    this.rerenderHistory();
+  }
+
+  /** Group the ticked steps: everything from the first to the last of them (groups are runs of steps). */
+  private async groupSteps(features: readonly Feature[], h: HistoryHandlers): Promise<void> {
+    const order = features.map((f) => f.id);
+    const idx = [...this.historyChecked].map((id) => order.indexOf(id)).filter((i) => i >= 0);
+    if (!idx.length) return;
+    let lo = Math.min(...idx);
+    let hi = Math.max(...idx);
+    // A group it runs into joins it (groups don't overlap).
+    let rest = h.groups;
+    let grew = true;
+    while (grew) {
+      grew = false;
+      const keep: HistoryGroup[] = [];
+      for (const g of rest) {
+        const gi = g.steps.map((id) => order.indexOf(id)).filter((i) => i >= 0);
+        if (gi.length && Math.max(...gi) >= lo && Math.min(...gi) <= hi) {
+          lo = Math.min(lo, ...gi);
+          hi = Math.max(hi, ...gi);
+          grew = true;
+        } else keep.push(g);
+      }
+      rest = keep;
+    }
+    const name = await h.askName("New group", `Group ${h.groups.length + 1}`);
+    if (!name) return;
+    const g: HistoryGroup = { id: `hgroup-${Date.now().toString(36)}`, name, steps: order.slice(lo, hi + 1) };
+    this.historyChecked.clear();
+    this.historyPicking = false;
+    document.getElementById("history-pick")?.classList.remove("on");
+    h.setGroups([...rest, g]);
+    if (hi - lo + 1 > idx.length) this.toast("Groups hold steps next to each other: the ones in between went in too");
+  }
+
   renderHistory(features: readonly Feature[], errors: FeatureError[], activeId: string | null, h: HistoryHandlers, warnings: Map<string, string> = new Map()): void {
+    this.lastHistory = [features, errors, activeId, h, warnings];
     this.historyList.innerHTML = "";
+    const pick = document.getElementById("history-pick");
+    if (pick && !pick.dataset.wired) {
+      pick.dataset.wired = "1";
+      pick.addEventListener("click", () => {
+        this.historyPicking = !this.historyPicking;
+        if (!this.historyPicking) this.historyChecked.clear();
+        pick.classList.toggle("on", this.historyPicking);
+        this.rerenderHistory();
+      });
+    }
     if (features.length === 0) {
       this.historyList.append(el("li", "history-empty", "Nothing yet. Start with Sketch."));
       return;
     }
+    // Ticks for steps that are gone don't count.
+    const ids = new Set(features.map((f) => f.id));
+    for (const id of this.historyChecked) if (!ids.has(id)) this.historyChecked.delete(id);
+    // Each step's group, and the step a group starts at (its row goes there).
+    const groupOf = new Map<string, HistoryGroup>();
+    for (const g of h.groups) for (const id of g.steps) if (ids.has(id)) groupOf.set(id, g);
+    const started = new Set<string>();
     for (const f of features) {
-      const li = el("li", "history-item");
+      const g = groupOf.get(f.id);
+      if (g && !started.has(g.id)) {
+        started.add(g.id);
+        const members = features.filter((x) => groupOf.get(x.id) === g);
+        // The step being edited is inside: show it.
+        if (members.some((m) => m.id === activeId)) this.closedGroups.delete(g.id);
+        this.historyList.append(this.groupRow(g, members, errors, h));
+      }
+      if (g && this.closedGroups.has(g.id)) continue;
+      const li = el("li", `history-item${g ? " in-group" : ""}${this.historyChecked.has(f.id) ? " checked" : ""}`);
+      if (this.historyPicking) {
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.className = "items-check";
+        box.checked = this.historyChecked.has(f.id);
+        box.addEventListener("change", () => this.checkStep(f.id));
+        li.append(box);
+      }
       const err = errors.find((e) => e.featureId === f.id);
       if (err) li.classList.add("error");
       if (f.suppressed) li.classList.add("suppressed");
@@ -1009,7 +1100,8 @@ export class UI {
         li.prepend(mark);
         name.title = warn;
       }
-      name.addEventListener("click", () => h.edit(f.id));
+      // Ctrl/Cmd/Shift+click (or Select on): tick it for a group; a plain click edits it.
+      name.addEventListener("click", (e) => (e.ctrlKey || e.metaKey || e.shiftKey || this.historyPicking ? this.checkStep(f.id) : h.edit(f.id)));
       li.addEventListener("pointerenter", () => h.hover?.(f.id));
       li.addEventListener("pointerleave", () => h.hover?.(null));
       const eye = iconButton(f.suppressed ? "eyeOff" : "eye", f.suppressed ? "Enable" : "Suppress", () => h.toggle(f.id));
@@ -1047,6 +1139,42 @@ export class UI {
         this.historyList.append(sub);
       }
     }
+    if (this.historyChecked.size) {
+      const li = el("li", "items-actions");
+      const make = el("button", "text-btn primary", `Group (${this.historyChecked.size})`);
+      make.addEventListener("click", () => void this.groupSteps(features, h));
+      li.append(make);
+      this.historyList.append(li);
+    } else if (this.historyPicking) this.historyList.append(el("li", "history-empty", "Tick steps, then group them."));
+  }
+
+  /** A group's row: fold it open/shut, its name, switch all its steps off/on, rename, ungroup. */
+  private groupRow(g: HistoryGroup, members: Feature[], errors: FeatureError[], h: HistoryHandlers): HTMLElement {
+    const closed = this.closedGroups.has(g.id);
+    const bad = members.some((m) => errors.some((e) => e.featureId === m.id));
+    const allOff = members.every((m) => m.suppressed);
+    const li = el("li", `history-item history-group${bad ? " error" : ""}${allOff ? " suppressed" : ""}`);
+    const caret = el("button", "history-caret", closed ? "▸" : "▾");
+    caret.title = closed ? `Show the ${members.length} steps` : "Fold the group";
+    const fold = (e: Event) => {
+      e.stopPropagation();
+      if (this.closedGroups.has(g.id)) this.closedGroups.delete(g.id);
+      else this.closedGroups.add(g.id);
+      this.rerenderHistory();
+    };
+    caret.addEventListener("click", fold);
+    const name = el("button", "history-name");
+    name.innerHTML = icons.folder;
+    name.append(` ${g.name}`, el("span", "history-count", ` ${members.length}`));
+    name.title = bad ? "A step in this group failed — open it to see" : "Fold / unfold";
+    name.addEventListener("click", fold);
+    const eye = iconButton(allOff ? "eyeOff" : "eye", allOff ? "Enable all its steps" : "Suppress all its steps", () => h.suppress(members.map((m) => m.id), !allOff));
+    const ren = iconButton("rename", "Rename group", () =>
+      void h.askName("Rename group", g.name).then((n) => n && h.setGroups(h.groups.map((x) => (x.id === g.id ? { ...x, name: n } : x)))),
+    );
+    const un = iconButton("close", "Ungroup (keeps the steps)", () => h.setGroups(h.groups.filter((x) => x.id !== g.id)));
+    li.append(caret, name, eye, ren, un);
+    return li;
   }
 }
 
