@@ -302,6 +302,9 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       for (const t of f.tools) {
         const tool = need(bodies, t);
         const solids = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;
+        // An open freeform (a surface with a hole) isn't a solid: nothing to join into.
+        if (!solids(target) || !solids(tool))
+          throw new Error("One of these is an open surface (e.g. a freeform with a hole), not a solid. Close it first: tap an edge of the hole → Fill hole, or give it a Thickness — then Union.");
         const before = f.op === "union" ? solids(target) + solids(tool) : 0;
         target = f.op === "union" ? target.fuse(tool) : f.op === "subtract" ? target.cut(tool) : target.intersect(tool);
         // A union joins: a body that doesn't touch would only be grouped with it, not joined.
@@ -567,6 +570,10 @@ function moveEdge(body: Shape3D, ref: EdgeRef, move: (p: Vec3) => Vec3): Shape3D
   const b = edge.endPoint.toTuple() as Vec3;
   const a2 = move(a);
   const b2 = move(b);
+  // A body of flat faces: just the edge's two corners move; every other corner
+  // stays (bending faces are split) — repeated moves don't drift or pile up.
+  const poly = movePolyhedronPoints(body, [[a, a2], [b, b2]]);
+  if (poly) return poly;
   const d2 = norm(sub(b2, a2));
   const faces = body.faces.filter((g) => g.edges.some((e) => e.isSame(edge)));
   if (faces.some((g) => g.geomType !== "PLANE")) throw new Error("Only edges between flat faces can be moved");
@@ -635,30 +642,55 @@ function coplanar(pts: Vec3[], tol: number): boolean {
 }
 
 function movePolyhedronVertex(body: Shape3D, at: Vec3, to: Vec3): Shape3D | null {
+  return movePolyhedronPoints(body, [[at, to]]);
+}
+
+/**
+ * A body of flat, straight-edged faces with some corners moved: every other
+ * corner stays exactly where it is. A face whose corners no longer lie in one
+ * plane keeps its unmoved part, and the moved corners get triangles (fanned
+ * from the unmoved corner before them); coplanar pieces merge again after.
+ */
+function movePolyhedronPoints(body: Shape3D, moves: [Vec3, Vec3][]): Shape3D | null {
   const size = Math.hypot(body.boundingBox.width, body.boundingBox.height, body.boundingBox.depth) || 1;
   const tol = size * 1e-6;
   const loops = body.faces.map((f) => faceLoop(f, tol));
   if (loops.some((l) => !l)) return null;
+  const movedTo = (p: Vec3): Vec3 | null => moves.find(([a]) => dist(a, p) < tol)?.[1] ?? null;
   const polys: Vec3[][] = [];
   let touched = 0;
   for (const loop of loops as Vec3[][]) {
-    const i = loop.findIndex((p) => dist(p, at) < tol);
-    if (i < 0) {
+    const isMoved = loop.map((p) => movedTo(p) !== null);
+    if (!isMoved.some(Boolean)) {
       polys.push(loop);
       continue;
     }
     touched++;
-    const moved = loop.map((p, k) => (k === i ? to : p));
+    const moved = loop.map((p) => movedTo(p) ?? p);
     if (coplanar(moved, tol * 10)) {
       polys.push(moved);
       continue;
     }
-    // Bent: a triangle at the corner, the rest stays where it was.
-    const prev = loop[(i - 1 + loop.length) % loop.length];
-    const next = loop[(i + 1) % loop.length];
-    polys.push([prev, to, next]);
-    const rest = loop.filter((_, k) => k !== i);
-    if (rest.length >= 3) polys.push(rest);
+    const n = loop.length;
+    const rest = loop.filter((_, k) => !isMoved[k]);
+    if (rest.length < 3) {
+      // Hardly anything stays: the moved face as a fan of triangles.
+      for (let k = 1; k + 1 < n; k++) polys.push([moved[0], moved[k], moved[k + 1]]);
+      continue;
+    }
+    polys.push(rest);
+    // Each run of moved corners: from the corner before it to the corner after it.
+    for (let k = 0; k < n; k++) {
+      if (isMoved[k] || !isMoved[(k + 1) % n]) continue;
+      const run: Vec3[] = [loop[k]];
+      let j = (k + 1) % n;
+      while (isMoved[j]) {
+        run.push(moved[j]);
+        j = (j + 1) % n;
+      }
+      run.push(loop[j]);
+      for (let q = 1; q + 1 < run.length; q++) polys.push([run[0], run[q], run[q + 1]]);
+    }
   }
   if (!touched) throw new Error("That corner is no longer there");
   try {

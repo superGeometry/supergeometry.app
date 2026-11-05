@@ -24,6 +24,7 @@ import { InputRouter } from "./view/input";
 import { ViewCube } from "./view/viewcube";
 import { PivotButton } from "./ui/pivot";
 import { HelpPanel } from "./ui/help";
+import { icons } from "./ui/icons";
 import { Updates } from "./ui/update";
 import { exportThreeMF } from "./io/threemf";
 import { sketchToDXF } from "./io/dxf";
@@ -96,6 +97,8 @@ export class App implements AppContext {
       askName: async (title, current) => (await this.ui.dialog(title, [{ key: "name", label: "Name", value: current }]))?.name.trim() || null,
       isolated: () => this.isolated,
     });
+    // Computers and tablets start with Items open (phones: History only, there's no room for both).
+    if (window.innerWidth > 720) this.items.toggle(true);
 
     this.store.onChange(() => this.docChanged());
     window.addEventListener("keydown", (e) => this.onKey(e));
@@ -630,8 +633,10 @@ export class App implements AppContext {
     const on = (id: string, fn: () => void) => document.getElementById(id)!.addEventListener("click", fn);
     const menu = document.getElementById("file-menu")!;
     const more = document.getElementById("more-menu")!;
-    on("file-btn", () => ((more.hidden = true), menu.toggleAttribute("hidden")));
-    on("more-btn", () => ((menu.hidden = true), more.toggleAttribute("hidden")));
+    // Phones: one thing open at a time at the left — a menu closes Items.
+    const phoneItemsAway = () => window.innerWidth <= 720 && document.getElementById("items")!.classList.contains("open") && this.items.toggle(false);
+    on("file-btn", () => ((more.hidden = true), menu.toggleAttribute("hidden"), !menu.hidden && phoneItemsAway()));
+    on("more-btn", () => ((menu.hidden = true), more.toggleAttribute("hidden"), !more.hidden && phoneItemsAway()));
     document.getElementById("m-version")!.textContent = `Version ${__APP_VERSION__}`;
     const moreItem = (id: string, fn: () => void) => on(id, () => ((more.hidden = true), fn()));
     // Fullscreen (the label follows the state; Esc also leaves it).
@@ -681,6 +686,30 @@ export class App implements AppContext {
     item("m-step", () => void this.export("step"));
     item("m-3mf", () => void this.export3mf());
     item("m-dxf", () => this.exportDXF());
+    // A share button at the right of each export (and Save): straight to the share sheet.
+    if (canShareFiles()) {
+      const shares: [string, () => void][] = [
+        ["m-save", () => this.save("share")],
+        ["m-stl", () => void this.export("stl", "share")],
+        ["m-step", () => void this.export("step", "share")],
+        ["m-3mf", () => void this.export3mf("share")],
+        ["m-dxf", () => this.exportDXF("share")],
+      ];
+      for (const [id, run] of shares) {
+        const btn = document.getElementById(id)!;
+        const sh = document.createElement("span");
+        sh.className = "menu-share";
+        sh.setAttribute("role", "button");
+        sh.title = "Share";
+        sh.innerHTML = icons.share;
+        sh.addEventListener("click", (e) => {
+          e.stopPropagation();
+          menu.hidden = true;
+          run();
+        });
+        btn.append(sh);
+      }
+    }
     on("undo-btn", () => this.store.undo());
     on("redo-btn", () => this.store.redo());
     this.store.onChange(() => this.updateUndo());
@@ -759,8 +788,35 @@ export class App implements AppContext {
     if (await this.updates.check()) await this.updates.reset();
   }
 
-  private save(): void {
-    download(new Blob([JSON.stringify(this.store.doc)], { type: "application/json" }), `${this.store.doc.name}.super`);
+  private save(how: Delivery = "download"): void {
+    void this.deliver(new Blob([JSON.stringify(this.store.doc)], { type: "application/json" }), `${this.store.doc.name}.super`, how);
+  }
+
+  /**
+   * Hand a made file over: download it, or share it (phones and tablets:
+   * the system share sheet — mail, messages, a slicer app…).
+   */
+  private async deliver(blob: Blob, name: string, how: Delivery): Promise<void> {
+    if (how === "download") return download(blob, name);
+    const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+    const share = () => navigator.share({ files: [file], title: name });
+    try {
+      await share();
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return; // closed the share sheet
+      // Making the file took a moment and the browser no longer counts this as a
+      // tap: one more tap shares it.
+      const go = await this.ui.ask("Ready to share", name, [{ id: "share", label: "Share", primary: true }, { id: "dl", label: "Download instead" }]);
+      if (go === "share") {
+        try {
+          await share();
+        } catch {
+          this.ui.toast("Sharing isn't available here — downloaded instead", "error");
+          download(blob, name);
+        }
+      }
+      else if (go === "dl") download(blob, name);
+    }
   }
 
   private open(): void {
@@ -787,7 +843,7 @@ export class App implements AppContext {
    * DXF of a sketch: the one open (e.g. picked in Items), or the one whose
    * curves or regions are selected. Without one, say how to pick it.
    */
-  private exportDXF(): void {
+  private exportDXF(how: Delivery = "download"): void {
     const fromSel = this.selection.flatMap((s) => (s.kind === "curve" || s.kind === "point" || s.kind === "profile" ? [s.sketch] : []))[0];
     const id = this.tool.activeSketch ?? fromSel;
     const sk = id ? this.store.find<SketchFeature>(id) : undefined;
@@ -797,12 +853,12 @@ export class App implements AppContext {
       return;
     }
     if (!sk.entities.length) return this.ui.toast("That sketch is empty");
-    download(new Blob([sketchToDXF(sk.entities)], { type: "application/dxf" }), `${this.store.doc.name} - ${sk.name}.dxf`);
+    void this.deliver(new Blob([sketchToDXF(sk.entities)], { type: "application/dxf" }), `${this.store.doc.name} - ${sk.name}.dxf`, how);
     this.ui.toast(`Exported “${sk.name}” as DXF`);
   }
 
   /** 3MF for slicers: the meshes, with the exact STEP model packed inside. */
-  private async export3mf(): Promise<void> {
+  private async export3mf(how: Delivery = "download"): Promise<void> {
     const ids = chosenBodies(this);
     const bodies = (this.result?.bodies ?? []).filter((b) => (ids.length ? ids.includes(b.id) : !this.view.isHidden(b.id)));
     if (!bodies.length) return this.ui.toast("Nothing to export");
@@ -811,7 +867,7 @@ export class App implements AppContext {
       const step = await this.kernel.export(this.store.doc.features, "step", bodies.map((b) => b.id));
       const names = this.store.doc.names ?? {};
       const blob = await exportThreeMF(bodies.map((b) => ({ name: names[b.id] ?? b.name, positions: b.positions, indices: b.indices, color: this.store.doc.colors?.[b.id] })), this.store.doc.name, step);
-      download(blob, `${this.store.doc.name}.3mf`);
+      await this.deliver(blob, `${this.store.doc.name}.3mf`, how);
     } catch (err) {
       this.ui.toast(`Export failed: ${(err as Error).message}`, "error");
     } finally {
@@ -819,14 +875,14 @@ export class App implements AppContext {
     }
   }
 
-  private async export(format: ExportFormat): Promise<void> {
+  private async export(format: ExportFormat, how: Delivery = "download"): Promise<void> {
     // Selected bodies win; otherwise what's isolated; otherwise everything.
     const picked = bodiesOf(this.selection);
     const bodies = picked.length ? picked : (this.isolated ?? []).filter((id) => this.result?.bodies.some((b) => b.id === id));
     try {
       this.ui.setStatus(`Exporting ${bodies.length ? `${bodies.length} bod${bodies.length > 1 ? "ies" : "y"} as ` : ""}${format.toUpperCase()}…`);
       const blob = await this.kernel.export(this.store.doc.features, format, bodies.length ? bodies : undefined);
-      download(blob, `${this.store.doc.name}.${format === "step" ? "step" : "stl"}`);
+      await this.deliver(blob, `${this.store.doc.name}.${format === "step" ? "step" : "stl"}`, how);
     } catch (err) {
       this.ui.toast(`Export failed: ${(err as Error).message}`, "error");
     } finally {
@@ -839,6 +895,17 @@ export class App implements AppContext {
 function chosenBodies(app: App): string[] {
   const picked = bodiesOf(app.selection);
   return picked.length ? picked : (app.isolated ?? []).filter((id) => app.result?.bodies.some((b) => b.id === id));
+}
+
+type Delivery = "download" | "share";
+
+/** Can this browser share files (the system share sheet)? */
+function canShareFiles(): boolean {
+  try {
+    return typeof navigator.share === "function" && !!navigator.canShare?.({ files: [new File(["x"], "x.txt", { type: "text/plain" })] });
+  } catch {
+    return false;
+  }
 }
 
 function download(blob: Blob, name: string): void {

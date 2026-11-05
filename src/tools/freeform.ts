@@ -82,7 +82,8 @@ export class FreeformTool implements Tool {
     this.app.ui.setTools([{ id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: () => this.cancel() }]);
     this.app.ui.setBottom([]);
     this.rebuild();
-    if (!this.existing && this.overlapsBodies()) {
+    // A new shape inside another body (or a flat surface, which you'll want to place first): move it as a whole first.
+    if (!this.existing && (this.surfaceSheet || this.overlapsBodies())) {
       // Grab the whole shape first; point editing starts after it's been moved.
       this.placing = true;
       this.picks = this.cage.verts.map((_, i) => ({ kind: "vert" as const, i }));
@@ -129,7 +130,7 @@ export class FreeformTool implements Tool {
   }
 
   private hint(): void {
-    if (this.placing) return this.app.ui.setHint("It's inside another body: drag the gimbal to move it into place first. Then tap points, edges or faces to shape it.");
+    if (this.placing) return this.app.ui.setHint("Drag the gimbal to move it into place first. Then tap points, edges or faces to shape it.");
     this.app.ui.setHint(
       this.picks.length
         ? "Drag the gimbal to move or turn the selection (type a value while dragging). Shift+tap adds. Tap empty space to deselect."
@@ -185,6 +186,27 @@ export class FreeformTool implements Tool {
     this.rebuild();
     this.selectionChanged();
     this.panelHint();
+  }
+
+  /**
+   * From the select tool: fill the hole whose rim passes nearest the given
+   * points (a tapped edge of the hole). Returns false if there's no hole.
+   */
+  fillHoleAt(points: Vec3[]): boolean {
+    const rim = boundaryEdges(this.cage);
+    if (!rim.length) return false;
+    const loops = holeLoops(this.cage, new Set(rim.map(([a, b]) => cageEdgeKey(a, b))));
+    if (!loops.length) return false;
+    // The hole nearest the tap (by its rim points on the smooth surface).
+    const sub3 = subdivide(this.cage, 3);
+    const near = (loop: number[]) => {
+      let best = Infinity;
+      for (const q of points) for (const v of loop) best = Math.min(best, Math.hypot(...(sub(sub3.points[v], q) as [number, number, number])));
+      return best;
+    };
+    const loop = loops.reduce((m, l) => (near(l) < near(m) ? l : m), loops[0]);
+    this.fillHoles([loop]);
+    return true;
   }
 
   private fillHoles(loops: number[][]): void {

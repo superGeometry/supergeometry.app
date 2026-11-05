@@ -65,4 +65,28 @@ await check("front face (no fillet) out 5", [offset("o4", front, 5)], 40 * 35 * 
 await check("front-right-top corner up 4", [{ id: "mv", name: "mv", type: "moveFace", vertex: { body: "b", at: [20, -15, 20] }, translate: [0, 0, 4] } as Feature], NaN);
 await check("edge next to it (front top) up 3", [{ id: "me", name: "me", type: "moveFace", edge: { body: "b", mid: [0, -15, 20], dir: [1, 0, 0], length: 40 }, translate: [0, 0, 3] } as Feature], NaN);
 
+// Moving edges again and again: only those corners move; a box keeps its 8 corners
+// (no extra geometry piling up) and stays closed.
+{
+  const box: Feature[] = base.slice(0, 2);
+  const corners = (b: BodyMesh) => {
+    const set = new Set<string>();
+    for (let i = 0; i < b.positions.length; i += 3) set.add([0, 1, 2].map((k) => Math.round(b.positions[i + k] * 1000) / 1000).join(","));
+    return set;
+  };
+  const moves: Feature[] = [
+    { id: "m1", name: "m1", type: "moveFace", edge: { body: "b", mid: [0, -15, 20], dir: [1, 0, 0], length: 40 }, translate: [0, 0, 6] } as Feature,
+    { id: "m2", name: "m2", type: "moveFace", edge: { body: "b", mid: [0, 15, 20], dir: [1, 0, 0], length: 40 }, translate: [0, -4, 0] } as Feature,
+    { id: "m3", name: "m3", type: "moveFace", edge: { body: "b", mid: [20, 0, 0], dir: [0, 1, 0], length: 30 }, translate: [5, 0, 0] } as Feature,
+  ];
+  for (let k = 1; k <= moves.length; k++) {
+    const r = await regenerate([...box, ...moves.slice(0, k)]);
+    const b = r.bodies[0];
+    const c = b && corners(b);
+    const ok = !r.errors.length && !!b && c!.size === 8 && b.openEdges.length === 0 && c!.has("-20,-15,0") && c!.has("-20,15,0");
+    if (!ok) failed++;
+    console.log(ok ? "ok  " : "FAIL", `edge moves ×${k}: ${c?.size} corners, ${b?.faces.length} faces, open ${b?.openEdges.length}`, r.errors.map((e) => e.message).join("; "));
+  }
+}
+
 process.exit(failed ? 1 : 0);

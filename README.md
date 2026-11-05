@@ -135,8 +135,9 @@ face of a part, or a construction plane.
 **Drawing tools:** Line (keeps going from the last point; tap the first point
 to close), Arc (two ends, then the bend), Spline (smooth curve through points;
 *Fit* or *Control* points), Rectangle (diagonal / centre / 3 points), Circle,
-Ellipse, Polygon, Text, Project (copies body edges or other sketches' curves
-here).
+Ellipse, Polygon, Text (pick a font — Sans, Serif, Mono, Narrow, Bold caps,
+Script — or **Import font…** a .ttf / .otf / .woff of your own), Project
+(copies body edges or other sketches' curves here).
 
 **Edit tools:** Offset Edge (parallel copy; whole outlines too), Fillet (round
 a corner), Mirror, Trim (cut away between crossings — or *Join* two lines on
@@ -185,7 +186,9 @@ revolve, sweep or loft. Overlapping shapes split into separate regions.
 - **Union / Subtract / Intersect** — combine bodies (they need to touch to
   unite), cut one from another, or keep the overlap.
 - **Freeform** — organic shapes: start from a box, sphere, cylinder or plane
-  and pull its cage points, edges and faces. Open shapes can get a thickness.
+  and pull its cage points, edges and faces. Delete faces to open it up; tap
+  an edge of a hole → **Fill hole** to close it again, or **Thickness…** to
+  turn the open shape into a solid wall.
 - **Construct** — helper planes (offset — drag its arrow — and midplane)
   and axes.
 - **Section View** — cut the view (not the part) to look inside.
@@ -226,7 +229,9 @@ change, it's marked and the reason is shown.
   move it to another device); **File → Open** loads one.
 - **File → Export STL** or **Export 3MF** for 3D printing (3MF keeps body
   names and colours), **Export STEP** for other CAD programs. With bodies
-  selected (or isolated), only those are exported.
+  selected (or isolated), only those are exported. On phones and tablets the
+  **share mark** next to each export (and Save) sends the file straight to
+  another app — mail, messages, a slicer…
 - **File → Export DXF (sketch)** saves a sketch's curves as a 2D drawing for
   laser cutters, CNC and drawing programs: open **Items**, tap the sketch, then
   File → Export DXF. Construction lines go on their own layer.

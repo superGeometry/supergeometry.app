@@ -32,7 +32,7 @@ import {
   trim,
   uid,
 } from "../sketch/edit";
-import { textEntities } from "../sketch/text";
+import { FONTS, importFont, textEntities } from "../sketch/text";
 import { DragTyping } from "./dragTyping";
 import { DimWidget } from "./annotate";
 import { PatternBox } from "./patternBox";
@@ -96,7 +96,7 @@ const HINTS: Record<Kind, string> = {
   split: "Tap a line or arc to cut it in two at its midpoint (or at a point you tap on it while holding Shift).",
 };
 
-const memory = { trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control", sides: 6, fillet: 2, offset: 2, textSize: 10 };
+const memory = { textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control", sides: 6, fillet: 2, offset: 2, textSize: 10 };
 
 interface Snap {
   uv: Vec2;
@@ -730,7 +730,12 @@ export class SketchTool implements Tool {
         if (this.pts.length === 1) {
           ui.showPanel({
             title: "Text",
-            items: [{ type: "number", label: "Size", value: memory.textSize, kind: "length", min: 0.001, onInput: (v) => (memory.textSize = v) }],
+            items: [
+              { type: "number", label: "Size", value: memory.textSize, kind: "length", min: 0.001, onInput: (v) => ((memory.textSize = v), this.refreshPreview()) },
+              // The font: the bundled ones and any imported.
+              { type: "choice", options: FONTS.map((f) => ({ id: f.id, label: f.name })), value: memory.textFont, onChange: (id) => ((memory.textFont = id), this.refreshPreview()) },
+              { type: "button", label: "Import font…", icon: "insert", onClick: () => void this.importFontFile() },
+            ],
             onDone: () => this.commitText(),
             onCancel: () => this.setKind("text"),
           });
@@ -839,6 +844,26 @@ export class SketchTool implements Tool {
       });
     }
     ui.showPanel(items.length ? { title: titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined } : null);
+  }
+
+  /** Pick a .ttf / .otf / .woff file and use it for the text. */
+  private async importFontFile(): Promise<void> {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".ttf,.otf,.woff,font/ttf,font/otf,font/woff";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        memory.textFont = await importFont(file);
+        this.app.ui.toast(`Font “${FONTS.find((f) => f.id === memory.textFont)?.name}” added`);
+        this.updatePanel();
+        this.refreshPreview();
+      } catch {
+        this.app.ui.toast("That font file can't be read (use .ttf, .otf or .woff)", "error");
+      }
+    };
+    input.click();
   }
 
   private addTextInput(): void {
@@ -1882,7 +1907,7 @@ export class SketchTool implements Tool {
     }
     if (!(this.kind === "line" && this.pts.length && c)) this.hideLineDim();
     if (this.kind === "text" && this.pts.length) {
-      void textEntities(this.text || " ", this.pts[0], memory.textSize).then((es) => {
+      void textEntities(this.text || " ", this.pts[0], memory.textSize, 0, memory.textFont).then((es) => {
         if (this.kind !== "text" || !this.pts.length) return;
         this.drawGhosts(es);
       });
@@ -2065,7 +2090,7 @@ export class SketchTool implements Tool {
 
   private async commitText(): Promise<void> {
     if (!this.pts.length || !this.text.trim()) return;
-    const es = await textEntities(this.text, this.pts[0], memory.textSize);
+    const es = await textEntities(this.text, this.pts[0], memory.textSize, 0, memory.textFont);
     this.commitAdd(es);
     this.resetDrawing();
   }

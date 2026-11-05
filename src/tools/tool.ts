@@ -137,10 +137,22 @@ export function faceAnchor(app: AppContext, body: string, face: number): { base:
   if (!b || !g || !info) return null;
   const view = app.view.cam.viewDir().toArray() as Vec3;
   let best: { base: Vec3; normal: Vec3; score: number } | null = null;
-  for (let i = g.start; i < g.start + g.count; i++) {
+  // The way out of the material, from each triangle's winding (the stored
+  // vertex normals point the wrong way on faces OpenCascade keeps reversed,
+  // e.g. a hole's wall — the arrow then pointed into the material).
+  const P = (i: number): Vec3 => {
     const v = b.indices[i] * 3;
-    const p: Vec3 = [b.positions[v], b.positions[v + 1], b.positions[v + 2]];
-    const n: Vec3 = [b.normals[v], b.normals[v + 1], b.normals[v + 2]];
+    return [b.positions[v], b.positions[v + 1], b.positions[v + 2]];
+  };
+  for (let i = g.start; i + 2 < g.start + g.count; i += 3) {
+    const [a, c, e] = [P(i), P(i + 1), P(i + 2)];
+    const u: Vec3 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const w: Vec3 = [e[0] - a[0], e[1] - a[1], e[2] - a[2]];
+    const cr: Vec3 = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const L = Math.hypot(...cr);
+    if (L < 1e-12) continue;
+    const n: Vec3 = [cr[0] / L, cr[1] / L, cr[2] / L];
+    const p: Vec3 = [(a[0] + c[0] + e[0]) / 3, (a[1] + c[1] + e[1]) / 3, (a[2] + c[2] + e[2]) / 3];
     const facing = n[0] * view[0] + n[1] * view[1] + n[2] * view[2];
     const d = Math.hypot(p[0] - info.center[0], p[1] - info.center[1], p[2] - info.center[2]);
     const score = d + (facing > 0 ? 1e6 : 0);

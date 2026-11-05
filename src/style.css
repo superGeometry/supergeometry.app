@@ -2195,3 +2195,46 @@ body.history-open #topbar {
     max-width: calc(100vw - 452px);
   }
 }
+
+/* Project name: a little wider, shrinking on smaller screens. */
+.project-name {
+  flex: 0 1 360px;
+}
+/* History: the ! folds out what's wrong. */
+.history-warn {
+  border: 0;
+  cursor: pointer;
+  flex: none;
+}
+.history-warning-text {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: #ffc58a;
+  padding: 2px 8px 6px 26px;
+  line-height: 1.4;
+}
+
+/* Share button at the right of an export in the File menu. */
+#file-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.menu-share {
+  margin-left: auto;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--muted);
+  flex: none;
+}
+.menu-share:hover {
+  color: var(--text);
+  background: #30343c;
+}
+.menu-share svg {
+  width: 17px;
+  height: 17px;
+}

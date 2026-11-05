@@ -24,7 +24,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
   {
     title: "Top bar",
     items: [
-      { icon: "file", name: "File", text: "New, open and save projects (.super); export STL or 3MF for 3D printing, STEP for other CAD programs, DXF of a sketch (tap it in Items first) for laser cutters and CNC." },
+      { icon: "file", name: "File", text: "New, open and save projects (.super); export STL or 3MF for 3D printing, STEP for other CAD programs, DXF of a sketch (tap it in Items first) for laser cutters and CNC. The share mark next to each sends the file straight to another app (phones and tablets)." },
       { icon: "body", name: "Items", text: "Every body, sketch, plane and image, with an eye to hide or show it. Group things into folders." },
       { icon: "more", name: "More", text: "Fullscreen, Reset cache & update (loads the newest version), this Help, About, and support links." },
     ],
@@ -34,7 +34,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     intro: "Most work starts with a sketch on a plane or a flat face, then Extrude or Revolve turns it into a solid body.",
     items: [
       { icon: "sketch", name: "Sketch", text: "Pick a plane (XY, XZ, YZ) or a flat face, then draw lines, arcs, circles, rectangles… Closed shapes become profiles you can extrude." },
-      { icon: "freeform", name: "Freeform", text: "Smooth organic shapes: start from a box, sphere, cylinder or plane and pull its control points, edges and faces." },
+      { icon: "freeform", name: "Freeform", text: "Smooth organic shapes: start from a box, sphere, cylinder or plane and pull its control points, edges and faces. A shape with a hole: tap an edge of the hole → Fill hole, or Thickness… to make it a solid wall." },
       { icon: "extrude", name: "Extrude", text: "Pull a profile or a face straight out into a solid. Drag the arrow or type a distance; negative values cut. Running into another body cuts through it." },
       { icon: "revolve", name: "Revolve", text: "Turn a profile around an axis (vases, wheels). Travel moves it along the axis while turning — with more than 360° that makes threads and springs." },
       { icon: "sweep", name: "Sweep", text: "Move a profile along a path curve (pipes, handles)." },

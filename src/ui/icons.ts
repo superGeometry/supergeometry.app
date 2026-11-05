@@ -4,6 +4,8 @@ const svg = (body: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
 export const icons = {
+  // The usual share mark: a box with an arrow leaving it.
+  share: svg('<path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/>'),
   // A small keypad: 3×3 keys and a wide one below.
   numpad: svg('<rect x="3.5" y="2.5" width="17" height="19" rx="2.5"/><rect x="6.5" y="5.5" width="3" height="2.6" rx=".6"/><rect x="10.5" y="5.5" width="3" height="2.6" rx=".6"/><rect x="14.5" y="5.5" width="3" height="2.6" rx=".6"/><rect x="6.5" y="9.7" width="3" height="2.6" rx=".6"/><rect x="10.5" y="9.7" width="3" height="2.6" rx=".6"/><rect x="14.5" y="9.7" width="3" height="2.6" rx=".6"/><rect x="6.5" y="13.9" width="3" height="2.6" rx=".6"/><rect x="10.5" y="13.9" width="3" height="2.6" rx=".6"/><rect x="14.5" y="13.9" width="3" height="2.6" rx=".6"/><rect x="6.5" y="18" width="11" height="1.2" rx=".6"/>'),
   lineDashed: svg('<path d="M5 19L19 5" stroke-dasharray="3 2.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>'),

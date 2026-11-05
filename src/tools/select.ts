@@ -11,6 +11,7 @@ import { Gimbal, IN_PLANE } from "./gimbal";
 import { Handle } from "./handles";
 import { CopyToggle, copyMode } from "./copyToggle";
 import { FreeformTool } from "./freeform";
+import { isClosed } from "../freeform/cage";
 import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
@@ -258,6 +259,24 @@ export class SelectTool implements Tool {
     const first = sel[0];
     const ff = "body" in first ? this.app.store.find<FreeformFeature>(first.body) : undefined;
     if (ff?.type === "freeform") head.push({ id: "editFreeform", label: "Edit Freeform", icon: "freeform", shortcut: "F2", run: () => this.editFreeform(ff) });
+    // An open freeform (faces deleted, or a surface): close a hole, or give it a thickness.
+    if (ff?.type === "freeform" && !isClosed(ff.cage)) {
+      if (first.kind === "edge") {
+        const at = sel.flatMap((x) => (x.kind === "edge" ? [this.app.view.body(x.body)?.edges[x.edge]?.mid].filter((p): p is Vec3 => !!p) : []));
+        head.push({
+          id: "fillHole",
+          label: "Fill hole",
+          icon: "fill",
+          run: () => {
+            const tool = new FreeformTool(this.app, { feature: ff });
+            this.app.setTool(tool);
+            if (!tool.fillHoleAt(at)) this.app.ui.toast("No hole there to fill");
+            else this.app.ui.toast("Hole filled — Done keeps it");
+          },
+        });
+      }
+      head.push({ id: "thicken", label: "Thickness…", icon: "shell", run: () => this.app.setTool(new FreeformTool(this.app, { feature: ff })) });
+    }
     switch (sel[0].kind) {
       case "profile":
         return [...head, ...this.profileActions()];

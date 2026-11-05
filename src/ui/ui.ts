@@ -103,7 +103,8 @@ export class UI {
       const t = e.target as HTMLElement;
       if (!t.closest("#flyout, #toolbar, #bottom-left")) this.closeFlyout();
     });
-    if (window.innerWidth >= 1000) this.toggleHistory(true);
+    // History opens by default everywhere (on phones it floats and can be closed).
+    this.toggleHistory(true);
     this.holdLabels();
     window.addEventListener("resize", () => (this.fitToolbar(), this.fitPanel()));
   }
@@ -631,6 +632,9 @@ export class UI {
 
   // ----------------------------------------------------------------- history
 
+  /** Steps whose ! explanation is folded out in History. */
+  private openWarns = new Set<string>();
+
   /** Sketches whose steps are folded out in History. */
   private openSteps = new Set<string>();
 
@@ -651,9 +655,16 @@ export class UI {
       // A step that works but leaves something to look at (e.g. a body that isn't closed).
       const warn = warnings.get(f.id);
       if (warn && !err) {
-        const mark = el("span", "history-warn", "!");
+        // The ! folds the explanation out under the step (like a sketch's steps).
+        const mark = el("button", "history-warn", "!");
         mark.title = warn;
-        name.prepend(mark);
+        mark.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (this.openWarns.has(f.id)) this.openWarns.delete(f.id);
+          else this.openWarns.add(f.id);
+          this.renderHistory(features, errors, activeId, h, warnings);
+        });
+        li.prepend(mark);
         name.title = warn;
       }
       name.addEventListener("click", () => h.edit(f.id));
@@ -677,6 +688,7 @@ export class UI {
       }
       li.append(name, eye, del);
       if (err) li.append(el("div", "history-error", err.message));
+      if (warn && !err && this.openWarns.has(f.id)) li.append(el("div", "history-warning-text", warn));
       this.historyList.append(li);
       // What was done inside a sketch, step by step.
       if (f.type === "sketch" && f.log?.length && this.openSteps.has(f.id)) {
