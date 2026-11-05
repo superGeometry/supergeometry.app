@@ -23,6 +23,7 @@ import { setUnits, setVariables } from "./units";
 import { InputRouter } from "./view/input";
 import { ViewCube } from "./view/viewcube";
 import { PivotButton } from "./ui/pivot";
+import { isHeadset } from "./device";
 import { Viewport } from "./view/viewport";
 
 const SOON = "Coming soon";
@@ -50,6 +51,8 @@ export class App implements AppContext {
     this.selectTool = new SelectTool(this);
     this.tool = this.selectTool;
     this.input.handler = this.tool;
+    // Headsets: bigger targets everywhere (CSS) — aiming a controller is less precise than a mouse.
+    if (isHeadset) document.body.classList.add("headset");
     // A spinner while the geometry engine works on something that takes a moment.
     const busy = document.createElement("div");
     busy.id = "busy";

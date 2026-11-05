@@ -5,7 +5,7 @@ import { projectPolyline } from "../sketch/edit";
 import type { ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import { add, dot, len, planeY, scale, sub } from "../geom";
-import { fmtLen } from "../units";
+import { evaluate, fmtLen } from "../units";
 import { DimWidget } from "./annotate";
 import { Gimbal, IN_PLANE } from "./gimbal";
 import { Handle } from "./handles";
@@ -552,6 +552,14 @@ export class SelectTool implements Tool {
         onMode: (m) => start(m as "total" | "offset", 0),
         onInput: (v) => start("total", v - opp.distance, this.dim?.text),
         onPin: () => this.app.addPin({ text: fmtLen(opp.distance), a: opp.point, b: f.center, at: scale(add(opp.point, f.center), 0.5) }),
+        // ƒx: the thickness becomes a variable (and follows it when it changes).
+        variables: this.app.store.doc.variables.map((v) => v.name),
+        onVariable: (name) => {
+          const v = evaluate(name, "length");
+          if (v === null) return;
+          const offset = Math.round((v - opp.distance) * 1e9) / 1e9;
+          this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { measure: "total", distance: offset, expr: `${name} - ${Math.round(opp.distance * 1e6) / 1e6}mm` }));
+        },
       });
       this.dim.set(opp.point, f.center);
     }, 400);

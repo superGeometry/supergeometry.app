@@ -4,6 +4,7 @@
 import { BufferGeometry, ConeGeometry, Group, Line, LineBasicMaterial, LineDashedMaterial, Mesh, MeshBasicMaterial, Vector3 } from "three";
 import type { PinDef, Vec3 } from "../doc/types";
 import { el } from "../ui/ui";
+import { numpadInput } from "../ui/numpad";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
 import type { Viewport } from "../view/viewport";
 
@@ -92,6 +93,9 @@ export interface DimWidgetOptions {
   boxGap?: number;
   /** Which way "beyond" goes when the dimension has no length yet (e.g. the arrow's direction). */
   dir?: Vec3;
+  /** Variables to choose from (a ƒx menu before the pin): the value becomes that variable. */
+  variables?: string[];
+  onVariable?(name: string): void;
 }
 
 /**
@@ -131,6 +135,7 @@ export class DimWidget {
       this.box.append(sel);
     }
     this.input.inputMode = "decimal";
+    numpadInput(this.input);
     this.input.spellcheck = false;
     this.input.value = opts.typed ?? trim(toDisplay(opts.value), 3);
     this.input.readOnly = !opts.onInput;
@@ -145,6 +150,26 @@ export class DimWidget {
       if (e.key === "Escape") this.input.blur();
     });
     this.box.append(this.input, el("span", "dim-unit", UNIT_LABEL[units()]));
+    if (opts.onVariable && opts.variables?.length) {
+      // ƒx: pick one of the project's variables for this value.
+      const sel = document.createElement("select");
+      sel.className = "dim-var";
+      sel.title = "Use a variable";
+      const head = document.createElement("option");
+      head.value = "";
+      head.textContent = "ƒx";
+      sel.append(head);
+      for (const name of opts.variables) {
+        const o = document.createElement("option");
+        o.value = name;
+        o.textContent = name;
+        sel.append(o);
+      }
+      sel.addEventListener("change", () => {
+        if (sel.value) opts.onVariable!(sel.value);
+      });
+      this.box.append(sel);
+    }
     if (opts.onPin) {
       const pin = el("button", "dim-pin", "📌");
       pin.title = "Pin this measurement";

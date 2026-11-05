@@ -2,6 +2,7 @@ import type { Feature } from "../doc/types";
 import type { FeatureError } from "../kernel/protocol";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
 import { icons, type IconName } from "./icons";
+import { numpadInput } from "./numpad";
 
 export interface ToolItem {
   id: string;
@@ -18,6 +19,8 @@ export interface ToolItem {
   children?: ToolItem[];
   /** Show a colour circle instead of the icon (colour choices). */
   swatch?: string;
+  /** Small icons after the label (e.g. ⟲ + what a toggle switches to). */
+  trailing?: IconName[];
   run?(): void;
 }
 
@@ -332,9 +335,10 @@ export class UI {
   private popoverFill: (() => void) | null = null;
 
   closePopover(): void {
+    // An action button (no popover shown) must not stay the owner: its next click would only "close".
+    this.popoverOwner = null;
     if (this.popover.hidden) return;
     this.popover.hidden = true;
-    this.popoverOwner = null;
     this.popoverFill = null;
     this.rightCol.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));
     window.dispatchEvent(new Event("resize"));
@@ -499,6 +503,7 @@ export class UI {
     const input = document.createElement("input");
     input.type = "text";
     input.inputMode = "decimal";
+    numpadInput(input);
     input.autocomplete = "off";
     input.spellcheck = false;
     input.value = f.expr ?? shown(f.value, kind);
@@ -571,6 +576,9 @@ export class UI {
 
   // ----------------------------------------------------------------- history
 
+  /** Sketches whose steps are folded out in History. */
+  private openSteps = new Set<string>();
+
   renderHistory(features: readonly Feature[], errors: FeatureError[], activeId: string | null, h: HistoryHandlers, warnings: Map<string, string> = new Map()): void {
     this.historyList.innerHTML = "";
     if (features.length === 0) {
@@ -598,11 +606,25 @@ export class UI {
       li.addEventListener("pointerleave", () => h.hover?.(null));
       const eye = iconButton(f.suppressed ? "eyeOff" : "eye", f.suppressed ? "Enable" : "Suppress", () => h.toggle(f.id));
       const del = iconButton("trash", "Delete", () => h.remove(f.id));
+      // A sketch's own steps fold out under it (closed by default).
+      const steps = f.type === "sketch" ? (f.log ?? []) : [];
+      if (steps.length) {
+        const open = this.openSteps.has(f.id);
+        const caret = el("button", "history-caret", open ? "▾" : "▸");
+        caret.title = open ? "Hide the steps in this sketch" : `Show the ${steps.length} step${steps.length > 1 ? "s" : ""} in this sketch`;
+        caret.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (this.openSteps.has(f.id)) this.openSteps.delete(f.id);
+          else this.openSteps.add(f.id);
+          this.renderHistory(features, errors, activeId, h, warnings);
+        });
+        li.append(caret);
+      }
       li.append(name, eye, del);
       if (err) li.append(el("div", "history-error", err.message));
       this.historyList.append(li);
       // What was done inside a sketch, step by step.
-      if (f.type === "sketch" && f.log?.length) {
+      if (f.type === "sketch" && f.log?.length && this.openSteps.has(f.id)) {
         const steps = f.log;
         const shownSteps = steps.length > 12 ? steps.slice(-12) : steps;
         const sub = el("li", "history-steps");
@@ -634,8 +656,27 @@ function shown(v: number, kind: FieldKind): string {
   return trim(v, 4);
 }
 
-function renderTools(host: HTMLElement, items: ToolItem[], onFlyout: (item: ToolItem, btn: HTMLElement) => void, after?: () => void): void {
+/**
+ * Only what can be used right now: tools that can't (greyed before) are left
+ * out, and so are groups with nothing usable inside.
+ */
+function usable(items: ToolItem[]): ToolItem[] {
+  const out: ToolItem[] = [];
+  for (const item of items) {
+    if (item.disabled) continue;
+    if (item.children?.length) {
+      const children = usable(item.children);
+      if (!children.length && !item.run) continue;
+      out.push({ ...item, children });
+    } else out.push(item);
+  }
+  // No separators at the ends or twice in a row.
+  return out.filter((x, i, a) => !x.id.startsWith("---") || (i > 0 && i < a.length - 1 && !a[i - 1].id.startsWith("---")));
+}
+
+function renderTools(host: HTMLElement, all: ToolItem[], onFlyout: (item: ToolItem, btn: HTMLElement) => void, after?: () => void): void {
   host.innerHTML = "";
+  const items = usable(all);
   for (const item of items) {
     if (item.id.startsWith("---")) {
       host.append(el("div", "tool-sep"));
@@ -672,6 +713,11 @@ function toolButton(item: ToolItem, withLabel: boolean): HTMLButtonElement {
     l.append(top);
     if (item.sub) l.append(el("span", "tool-sub", item.sub));
     b.append(l);
+  }
+  if (item.trailing?.length) {
+    const t = el("span", "tool-trailing");
+    t.innerHTML = item.trailing.map((i) => icons[i]).join("");
+    b.append(t);
   }
   return b;
 }

@@ -1767,3 +1767,94 @@ body.items-open #bottom-left {
   -webkit-user-select: none;
   user-select: none;
 }
+
+.history-caret {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  width: 18px;
+  padding: 0;
+  cursor: pointer;
+  font-size: 12px;
+}
+.history-caret:hover {
+  color: var(--text);
+}
+
+/* ⟲ + the line type a toggle switches to. */
+.tool-trailing {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  padding-left: 8px;
+  opacity: 0.75;
+}
+.tool-trailing svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* On-screen numpad for value boxes. */
+.numpad {
+  position: fixed;
+  z-index: 70;
+  display: grid;
+  grid-template-columns: repeat(4, 52px);
+  gap: 5px;
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.numpad[hidden] {
+  display: none;
+}
+.numpad button {
+  height: 44px;
+  border-radius: 9px;
+  border: 0;
+  background: #30343c;
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 600;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.numpad button:active {
+  background: #3d8bff;
+}
+.numpad .np-enter {
+  grid-row: span 2;
+  height: auto;
+  background: #3d8bff;
+  color: #fff;
+}
+.numpad .np-close {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* ƒx: pick a variable for a value box. */
+.dim-var {
+  margin-left: 4px;
+  background: #2b2e34;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-weight: 650;
+  padding: 2px 4px;
+}
+
+/* Headset browsers (Quest…): bigger targets for controller rays. */
+body.headset .tool {
+  min-height: 46px;
+}
+body.headset .right-btn {
+  min-width: 48px;
+  min-height: 48px;
+}
+body.headset .text-btn {
+  min-height: 42px;
+}

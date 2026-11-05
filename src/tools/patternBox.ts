@@ -4,6 +4,7 @@
 import { Vector3 } from "three";
 import type { Vec3 } from "../doc/types";
 import { el } from "../ui/ui";
+import { numpadInput } from "../ui/numpad";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
 import type { Viewport } from "../view/viewport";
 
@@ -39,6 +40,8 @@ export class PatternBox {
     this.count.value = String(opts.count);
     this.count.title = "Count (the original included)";
     this.dist.inputMode = "decimal";
+    numpadInput(this.count);
+    numpadInput(this.dist);
     this.dist.value = trim(toDisplay(opts.spacing), 3);
     const changed = () => {
       const n = Math.round(Number(this.count.value));

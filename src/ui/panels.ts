@@ -50,6 +50,8 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
       stepRow.append(input);
       host.append(stepRow);
       host.append(el("div", "pop-note", `Tip: the grid adapts to zoom (now ${fmtStep(view.grid.step)} per square).`));
+      host.append(heading("Typing values"));
+      host.append(toggleRow("On-screen numpad", s.numpad, (v) => settings.set("numpad", v)));
       host.append(heading("Degree format"));
       host.append(choiceRow("Decimal (27.15°)", s.degrees === "decimal", () => settings.set("degrees", "decimal")), choiceRow("Fractional (27° 15′)", s.degrees === "fractional", () => settings.set("degrees", "fractional")));
     },

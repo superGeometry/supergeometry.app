@@ -1,7 +1,7 @@
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
 import { dot, GROUND, niceStep as niceStepOf, planeY, toPlane } from "../geom";
-import { pointOf, pointsOf, refsOf, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
+import { addResolving, pointOf, pointsOf, refsOf, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, buttonEnabled, CONSTRAINT_BUTTONS, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
@@ -254,6 +254,9 @@ export class SketchTool implements Tool {
     this.patGimbal = null;
     this.patBox?.dispose();
     this.patBox = null;
+    this.sizeDim?.dispose();
+    this.sizeDim = null;
+    this.closeLineBox();
     this.copyToggle?.dispose();
     this.copyToggle = null;
     this.glyphs?.dispose();
@@ -384,9 +387,16 @@ export class SketchTool implements Tool {
     const swap = (p: string) => (p === "a" ? "b" : p === "b" ? "a" : p);
     const remap = (c: SketchConstraint): SketchConstraint => (c.pts ? { ...c, pts: c.pts.map((q) => (r.swapped.includes(q.e) ? { ...q, p: swap(q.p) } : q)) } : c);
     const same = (c: SketchConstraint) => c.type === "dim" && c.prop === "angle" && c.curves?.length === 2 && c.curves.includes(id1) && c.curves.includes(id2);
-    const cs = [...this.constraints.filter((c) => !same(c)).map(remap), { id: uid(), type: "dim" as const, curves: [id1, id2], prop: "angle", value: deg }];
-    const solved = solve(r.entities, cs, { fixed: new Set([id1]) });
-    this.commit(solved.ok ? solved.entities : r.entities, cs);
+    const res = addResolving(r.entities, this.constraints.filter((c) => !same(c)).map(remap), [{ id: uid(), type: "dim" as const, curves: [id1, id2], prop: "angle", value: deg }], { fixed: new Set([id1]) });
+    this.commit(res.result.ok ? res.result.entities : r.entities, res.constraints);
+    this.toastReplaced(res.removed);
+  }
+
+  /** Say which constraints a new one replaced. */
+  private toastReplaced(removed: SketchConstraint[]): void {
+    if (!removed.length) return;
+    const names = [...new Set(removed.map((c) => (c.type === "dim" ? `${c.prop ?? "size"} dimension` : c.type)))].join(", ");
+    this.app.ui.toast(`Replaced ${removed.length === 1 ? "a" : removed.length} constraint${removed.length > 1 ? "s" : ""} it contradicted (${names})`);
   }
 
   private removeConstraints(list: SketchConstraint[]): void {
@@ -448,10 +458,10 @@ export class SketchTool implements Tool {
     const pts = [...this.selPts];
     const old = new Set(existingConstraints("distance", this.constraints, pts, curves).map((c) => c.id));
     const c: SketchConstraint = { id: uid(), type: "distance", pts, ...(curves.length ? { curves: curves.map((e) => e.id) } : {}), value };
-    const all = [...this.constraints.filter((x) => !old.has(x.id)), c];
     const first = this.firstPicked();
-    const solved = solve(this.entities, all, first ? { fixed: new Set([first]) } : {});
-    this.commit(solved.ok ? solved.entities : this.entities, all);
+    const res = addResolving(this.entities, this.constraints.filter((x) => !old.has(x.id)), [c], first ? { fixed: new Set([first]) } : {});
+    this.commit(res.result.ok ? res.result.entities : this.entities, res.constraints);
+    this.toastReplaced(res.removed);
     if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
     this.refreshDistanceDim();
   }
@@ -472,9 +482,10 @@ export class SketchTool implements Tool {
     // Equal: a size dimension on the curves picked after the first would fight it — drop those.
     const others = new Set(curves.slice(1).map((e) => e.id));
     const kept = type === "equal" ? this.constraints.filter((c) => !(c.type === "dim" && c.curves?.length === 1 && others.has(c.curves[0]) && ["length", "radius", "diameter"].includes(c.prop ?? ""))) : this.constraints;
-    const all = [...kept, ...cs];
-    const solved = first && type !== "fix" ? solve(this.entities, all, { fixed: new Set([first]) }) : null;
-    this.commit(solved?.ok ? solved.entities : this.entities, all);
+    // A new constraint wins over ones it contradicts (they're replaced); others stay.
+    const res = addResolving(this.entities, kept, cs, first && type !== "fix" ? { fixed: new Set([first]) } : {});
+    this.commit(res.result.ok ? res.result.entities : this.entities, res.constraints);
+    this.toastReplaced(res.removed);
     if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
     this.clearSelection();
   }
@@ -610,9 +621,11 @@ export class SketchTool implements Tool {
     app.ui.setBottom([
       {
         id: "construction",
-        label: sel.length ? (isCons ? "Construction" : "Regular") : "Construction",
-        icon: "construction",
-        sub: sel.length ? (mixed ? "Mixed · tap to switch" : "Tap to switch") : this.construction ? "On" : "Off",
+        label: sel.length ? (isCons ? "Construction" : "Regular") : this.construction ? "Construction" : "Regular",
+        // The icon is the line type it is now; ⟲ + the type a tap switches to follow the text.
+        icon: isCons ? "lineDashed" : "line",
+        trailing: ["swap", isCons ? "line" : "lineDashed"],
+        sub: sel.length ? (mixed ? "Mixed · tap to switch" : "Tap to switch") : "New lines · tap to switch",
         active: isCons,
         run: () => this.toggleConstruction(),
       },
@@ -673,6 +686,8 @@ export class SketchTool implements Tool {
 
   private updatePanel(): void {
     const ui = this.app.ui;
+    this.sizeDim?.dispose();
+    this.sizeDim = null;
     const items: PanelItem[] = [];
     const k = this.kind;
     const lock = (key: string, label: string, kind: "length" | "angle" | "int" = "length", value?: number): PanelItem => ({
@@ -1213,11 +1228,18 @@ export class SketchTool implements Tool {
     if (this.phase === "plane") return this.pickPlane(p);
     if (this.edit.picking) return this.pickForEdit(p);
     if (this.kind === "select" && this.tapSurfaceIn3D(p)) return;
+    // A tap on empty space finishes what's waiting for Apply (like elsewhere).
+    if (this.isSelectionTool() && this.selected.size && this.transformPending() && !this.curveAt(p) && !p.shift) {
+      this.applyTransform();
+      // Done with it: nothing left selected, so the next empty tap doesn't do it again.
+      return this.clearSelection();
+    }
     switch (this.kind) {
       case "select":
       case "move":
       case "scale":
       case "patternLinear":
+        return this.tapSelect(p, count);
       case "patternCircular":
         // With curves selected and no centre yet, the tap places the centre (snapping to points).
         if (this.selected.size && !this.edit.pivot && !p.shift) {
@@ -1469,7 +1491,75 @@ export class SketchTool implements Tool {
   private lastLineId: string | null = null;
   private chainFirstId: string | null = null;
 
+  /**
+   * Touch screens (numpad on): after a line's second tap, its length in a box
+   * by it — type it on the numpad; the line keeps its direction.
+   */
+  private lineBox: { id: string; widget: DimWidget; value: number; edited: boolean } | null = null;
+
+  private showLineBox(id: string): void {
+    this.closeLineBox();
+    const l = this.entities.find((e) => e.id === id);
+    if (l?.kind !== "line" || !this.plane) return;
+    const len = Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1]);
+    const widget = new DimWidget(this.app.view, {
+      value: len,
+      boxAt: "side",
+      focus: true,
+      onInput: (v) => v > 0 && this.resizeLine(id, v),
+      onCommit: () => this.closeLineBox(),
+    });
+    this.lineBox = { id, widget, value: len, edited: false };
+    this.placeLineBox();
+  }
+
+  private placeLineBox(): void {
+    const b = this.lineBox;
+    const l = b && this.entities.find((e) => e.id === b.id);
+    if (!b || l?.kind !== "line") return;
+    const w = (q: Vec2) => sketchToWorld(this.plane!, q, 0.02).toArray() as Vec3;
+    b.widget.set(w(l.a), w(l.b));
+  }
+
+  /** Live: the line gets the typed length (along its direction); the chain carries on from its new end. */
+  private resizeLine(id: string, v: number): void {
+    const l = this.entities.find((e) => e.id === id);
+    if (l?.kind !== "line" || !this.sketchId) return;
+    const d: Vec2 = [l.b[0] - l.a[0], l.b[1] - l.a[1]];
+    const L = Math.hypot(...d) || 1;
+    const nb: Vec2 = [l.a[0] + (d[0] / L) * v, l.a[1] + (d[1] / L) * v];
+    const last = this.pts[this.pts.length - 1];
+    if (last && samePt(last, l.b)) this.pts[this.pts.length - 1] = nb;
+    const sid = this.sketchId;
+    this.app.store.transient((doc) => {
+      const f = doc.features.find((x) => x.id === sid);
+      if (f?.type === "sketch") f.entities = f.entities.map((e) => (e.id === id ? { ...l, b: nb } : e));
+    });
+    this.lineBox!.value = v;
+    this.lineBox!.edited = true;
+    this.placeLineBox();
+    this.refreshPreview();
+  }
+
+  /** Done typing: the length becomes a driving dimension (one undo step). */
+  private closeLineBox(): void {
+    const b = this.lineBox;
+    if (!b) return;
+    this.lineBox = null;
+    b.widget.dispose();
+    const l = this.entities.find((e) => e.id === b.id);
+    if (l?.kind !== "line") return;
+    // Nothing typed: nothing to record.
+    if (!b.edited) return;
+    const len = Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1]);
+    const cs = this.constraints.filter((c) => !(c.type === "dim" && c.prop === "length" && c.curves?.length === 1 && c.curves[0] === b.id));
+    this.opLabel = "Line length";
+    this.commit(this.entities, [...cs, { id: uid(), type: "dim", curves: [b.id], prop: "length", value: len }]);
+  }
+
   private addPoint(uv: Vec2, count: number): void {
+    // The next tap finishes the length being typed for the line before.
+    if (this.lineBox) this.closeLineBox();
     const c = this.lockedCursor() ?? uv;
     const pt = this.pts.length ? c : uv;
     const k = this.kind;
@@ -1502,6 +1592,8 @@ export class SketchTool implements Tool {
         this.chainFirstId ??= id;
         // Closing the chain on its first point ends it.
         if (closes || (this.pts.length > 1 && samePt(pt, start))) return this.resetDrawing();
+        // Touch: its length in a box right away, for the numpad.
+        if (settings.value.numpad && this.locks.len === undefined) queueMicrotask(() => this.showLineBox(id));
       }
       this.pts.push(pt);
       this.locks = {};
@@ -1751,8 +1843,16 @@ export class SketchTool implements Tool {
     if (["line", "arc", "rect", "circle", "polygon", "ellipse", "spline"].includes(this.kind) && this.pts.length && c) {
       const pts = this.kind === "line" ? [this.pts[this.pts.length - 1], c] : [...this.pts, c];
       const e = this.buildShape(pts);
-      // A line being drawn is its own dimension (arrows + length box, type to set it); others get a pointer label.
-      if (e?.kind === "line") this.showLineDim(e.a, e.b);
+      // Arc, first end placed: a dashed arc to the pointer shows what's coming (the bend comes with the third tap).
+      if (this.kind === "arc" && this.pts.length === 1 && e?.kind === "line") {
+        const [a, b] = [e.a, e.b];
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (L > 1e-9) {
+          const m: Vec2 = [(a[0] + b[0]) / 2 - ((b[1] - a[1]) / L) * L * 0.3, (a[1] + b[1]) / 2 + ((b[0] - a[0]) / L) * L * 0.3];
+          this.drawGhosts([{ id: "arc-preview", kind: "arc", a, m, b }], 0xffc23d, true);
+        }
+        label = dimLabel(e, pts);
+      } else if (e?.kind === "line") this.showLineDim(e.a, e.b);
       else {
         if (e) ghosts.push(e);
         label = dimLabel(e, pts);
@@ -1846,10 +1946,13 @@ export class SketchTool implements Tool {
     this.setHint();
   }
 
-  private drawGhosts(es: SketchEntity[], color = 0xffc23d): void {
+  private drawGhosts(es: SketchEntity[], color = 0xffc23d, dashed = false): void {
+    const wpp = this.app.view.cam.worldPerPixel(this.app.view.height);
     for (const e of es) {
       for (const poly of entityPolylines(e)) {
-        const line = new Line(new BufferGeometry().setFromPoints(poly.map((q) => sketchToWorld(this.plane!, q, 0.02))), new LineBasicMaterial({ color, depthTest: false }));
+        const mat = dashed ? new LineDashedMaterial({ color, depthTest: false, dashSize: wpp * 7, gapSize: wpp * 5 }) : new LineBasicMaterial({ color, depthTest: false });
+        const line = new Line(new BufferGeometry().setFromPoints(poly.map((q) => sketchToWorld(this.plane!, q, 0.02))), mat);
+        if (dashed) line.computeLineDistances();
         line.renderOrder = 9;
         this.addOverlay(line);
       }
@@ -2057,7 +2160,30 @@ export class SketchTool implements Tool {
     this.tapEmpty();
   }
 
+  /** Has a selection tool something to apply (its values moved off "nothing")? */
+  private transformPending(): boolean {
+    const e = this.edit;
+    switch (this.kind) {
+      case "move":
+        return Math.abs(e.dx) + Math.abs(e.dy) > 1e-12 || Math.abs(e.moveRot) > 1e-9;
+      case "scale":
+        return Math.abs(e.factor - 1) > 1e-9;
+      case "patternLinear":
+        return Math.hypot(e.dx, e.dy) > 1e-12 && e.count > 1;
+      case "patternCircular":
+        return !!e.pivot && e.count > 1;
+      case "rotate":
+        return Math.abs(e.angle) > 1e-9;
+      case "mirror":
+        return !!e.mirrorLine;
+      default:
+        return false;
+    }
+  }
+
   private tapEmpty(): void {
+    // Offset waiting for Apply: an empty tap applies it.
+    if (this.kind === "offset" && this.edit.offsetOf && this.offsetResult().length) return this.applyOffset();
     if (this.edit.extendFrom || this.edit.alignFrom || this.edit.filletFrom || this.edit.offsetOf) {
       this.edit.extendFrom = this.edit.alignFrom = this.edit.filletFrom = this.edit.offsetOf = undefined;
       this.clearPreviewJoin();
@@ -2474,7 +2600,12 @@ export class SketchTool implements Tool {
           // A diameter replaces a radius dimension (and axis lengths the half-axes), never both.
           const replaced: Record<string, string> = { diameter: "radius", dx: "rx", dy: "ry" };
           const base = this.constraints.filter((c) => !(c.type === "dim" && c.curves?.[0] === id && c.curves.length === 1 && c.prop === replaced[prop]));
-          this.commit(this.entities, setDim(base, id, prop, v, expr));
+          // A size that contradicts other constraints replaces them.
+          const next = setDim(base, id, prop, v, expr);
+          const added = next.filter((c) => !base.includes(c));
+          const res = addResolving(this.entities, next.filter((c) => base.includes(c)), added);
+          this.commit(this.entities, res.constraints);
+          this.toastReplaced(res.removed);
           if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
         },
       };
@@ -2509,7 +2640,28 @@ export class SketchTool implements Tool {
       { type: "button", label: "Delete", icon: "trash", onClick: () => this.deleteSelected() },
     );
     this.app.ui.showPanel({ title: titleOf(e.kind as Kind), items, onDone: () => this.clearSelection() });
+    // An arc or circle: its radius (diameter for a circle) in a box right by it — type to change it.
+    if ((e.kind === "arc" || e.kind === "circle") && this.plane) {
+      const c = e.kind === "circle" ? { c: e.center, r: e.radius } : arcFrom3(e.a, e.m, e.b);
+      if (!c) return;
+      const prop = e.kind === "circle" ? "diameter" : "radius";
+      const field = dimField(prop === "diameter" ? "Diameter" : "Radius", prop) as Extract<PanelItem, { type: "number" }>;
+      // From the centre out through the arc's middle (or the circle's top right).
+      const through = e.kind === "arc" ? e.m : ([c.c[0] + c.r * Math.SQRT1_2, c.c[1] + c.r * Math.SQRT1_2] as Vec2);
+      const w = (q: Vec2) => sketchToWorld(this.plane!, q, 0.02).toArray() as Vec3;
+      this.sizeDim = new DimWidget(this.app.view, {
+        value: field.value,
+        boxAt: "beyond",
+        onInput: (v) => field.onInput(v),
+        onCommit: () => this.clearSelection(),
+      });
+      const start = e.kind === "circle" ? ([2 * c.c[0] - through[0], 2 * c.c[1] - through[1]] as Vec2) : c.c;
+      this.sizeDim.set(w(start), w(through));
+    }
   }
+
+  /** The radius box beside a selected arc/circle. */
+  private sizeDim: DimWidget | null = null;
 }
 
 function titleOf(k: string): string {

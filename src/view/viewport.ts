@@ -1,3 +1,4 @@
+import { isHeadset } from "../device";
 import {
   CanvasTexture,
   AmbientLight,
@@ -170,7 +171,8 @@ export class Viewport {
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Headsets render the page into a big virtual screen already: full ratio costs frames for no gain.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, isHeadset ? 1.25 : 2));
     this.renderer.localClippingEnabled = true;
     this.cam = new CameraController(1);
     this.scene.background = new Color(0x2b2d31);
@@ -532,7 +534,8 @@ export class Viewport {
       mesh.userData = { plane: id, origin, size };
       mesh.matrixAutoUpdate = false;
       mesh.matrix.copy(planeMatrix(p).multiply(new Matrix4().makeScale(size, size, 1)));
-      mesh.renderOrder = origin ? 8 : 3;
+      // Origin planes (shown only while choosing where to sketch) draw over everything, highlights included.
+      mesh.renderOrder = origin ? 60 : 3;
       const border = new LineSegments(
         new BufferGeometry().setFromPoints([[-0.5, -0.5], [0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [0.5, 0.5], [-0.5, 0.5], [-0.5, 0.5], [-0.5, -0.5]].map(([x, y]) => new Vector3(x, y, 0))),
         new LineBasicMaterial({ color, transparent: true, opacity: 0.8, depthTest: !origin }),
@@ -616,7 +619,8 @@ export class Viewport {
       if (!p) continue;
       // A construction plane keeps the size it was first shown at: it doesn't
       // grow and shrink while the model is edited.
-      let size = m.userData.origin ? wpp * 90 : this.planeSizes.get(id);
+      // Origin planes: big enough to hit easily (fingers, headsets), even with a body in front.
+      let size = m.userData.origin ? wpp * 120 : this.planeSizes.get(id);
       if (size === undefined) {
         size = Math.max(wpp * 160, this.bounds().getSize(new Vector3()).length() * 0.6);
         this.planeSizes.set(id, size);
@@ -748,7 +752,7 @@ export class Viewport {
         const m = new Mesh(src.geometry.clone(), mat);
         m.matrixAutoUpdate = false;
         m.matrix.copy(src.matrix);
-        m.renderOrder = 9;
+        m.renderOrder = src.userData.origin ? 61 : 9;
         this.highlightGroup.add(m);
         return;
       }

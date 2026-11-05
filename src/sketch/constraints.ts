@@ -457,3 +457,46 @@ export function applicable(type: ConstraintType, pts: PointRef[], curves: Sketch
       return false;
   }
 }
+
+/**
+ * Add constraints without being strict about it: if the new ones contradict
+ * existing ones, the existing ones they clash with give way (newest first,
+ * as few as possible). Ones that agree stay alongside.
+ */
+export function addResolving(
+  entities: SketchEntity[],
+  existing: SketchConstraint[],
+  added: SketchConstraint[],
+  opts: SolveOptions = {},
+): { constraints: SketchConstraint[]; removed: SketchConstraint[]; result: SolveResult } {
+  const all = [...existing, ...added];
+  // "Met" by shrinking a curve to nothing doesn't count.
+  const size = (e: SketchEntity) => (e.kind === "line" ? Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) : e.kind === "circle" ? e.radius : e.kind === "arc" ? Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) : 1);
+  const scale = Math.max(1e-9, ...entities.map(size));
+  const fine = (r: SolveResult) => r.ok && r.entities.every((e, i) => size(e) > scale * 1e-6 || size(entities[i]) <= scale * 1e-6);
+  const solveOk = (cs: SketchConstraint[]) => {
+    const r = solve(entities, cs, opts);
+    return { ...r, ok: fine(r) };
+  };
+  const first = solveOk(all);
+  if (first.ok) return { constraints: all, removed: [], result: first };
+  // Only ones touching what the new constraint touches can be in its way.
+  const refs = new Set(added.flatMap(refsOf));
+  const near = existing.filter((c) => refsOf(c).some((r) => refs.has(r))).reverse();
+  // One is usually enough: try each alone first.
+  for (const c of near) {
+    const rest = all.filter((x) => x !== c);
+    const r = solveOk(rest);
+    if (r.ok) return { constraints: rest, removed: [c], result: r };
+  }
+  // Else take them away one by one until it works out.
+  const removed: SketchConstraint[] = [];
+  let rest = all;
+  for (const c of near) {
+    rest = rest.filter((x) => x !== c);
+    removed.push(c);
+    const r = solveOk(rest);
+    if (r.ok) return { constraints: rest, removed, result: r };
+  }
+  return { constraints: all, removed: [], result: first };
+}

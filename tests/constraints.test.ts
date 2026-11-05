@@ -96,4 +96,19 @@ for (const [name, fn] of checks) {
     console.log("FAIL", name, "—", (e as Error).message);
   }
 }
+
+// A new constraint that contradicts an old one replaces it; one that agrees stays alongside.
+{
+  const { addResolving } = await import("../src/sketch/constraints");
+  const l1: any = { id: "l1", kind: "line", a: [0, 0], b: [10, 1] };
+  const h: any = { id: "h", type: "horizontal", curves: ["l1"] };
+  const v: any = { id: "v", type: "vertical", curves: ["l1"] };
+  const r1 = addResolving([l1], [h], [v]);
+  if (!r1.result.ok || r1.removed.length !== 1 || r1.removed[0].id !== "h" || !r1.constraints.some((c) => c.id === "v")) throw new Error("vertical should replace horizontal");
+  const len: any = { id: "len", type: "dim", curves: ["l1"], prop: "length", value: 10 };
+  const r2 = addResolving([l1], [h], [len]);
+  if (!r2.result.ok || r2.removed.length || r2.constraints.length !== 2) throw new Error("a length should sit alongside horizontal");
+  console.log("ok   contradicting constraint replaces, agreeing one adds");
+}
+
 process.exit(failed ? 1 : 0);

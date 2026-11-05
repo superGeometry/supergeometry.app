@@ -57,6 +57,8 @@ export interface ExtrudeOptions {
   distance?: number;
   /** Text being typed when the tool took over (restored into the widget). */
   typed?: string;
+  /** The distance as an expression (e.g. a variable, or "wall - 4"). */
+  expr?: string;
 }
 
 /**
@@ -84,6 +86,18 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
       if (k !== null) this.thick = oppositeFace(app, source.face.body, k);
     }
     this.measure = this.thick ? (opts.measure ?? "total") : "offset";
+    if (opts.expr && !existing) this.feature.exprs = { distance: opts.expr };
+  }
+
+  /** A variable picked for the value: total thickness = that variable (or the offset, in Offset mode). */
+  private useVariable(name: string): void {
+    const v = evaluate(name, "length");
+    if (v === null) return;
+    const total = this.measure === "total" && this.thick;
+    const d = total ? v - this.thick!.distance : v;
+    this.feature.exprs = { ...(this.feature.exprs ?? {}), distance: total ? `${name} - ${Math.round(this.thick!.distance * 1e6) / 1e6}mm` : name };
+    this.setDistance(d);
+    this.render();
   }
 
   enter(): void {
@@ -104,6 +118,8 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
       onInput: (v) => this.setDistance(this.measure === "total" && this.thick ? v - this.thick.distance : v),
       onCommit: () => this.done(),
       onPin: () => this.pin(),
+      variables: this.app.store.doc.variables.map((v) => v.name),
+      onVariable: (name) => this.useVariable(name),
       typed: this.opts.typed,
       focus: this.opts.typed !== undefined,
     });

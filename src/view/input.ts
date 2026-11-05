@@ -1,3 +1,4 @@
+import { pickTolerance } from "../device";
 // One input model for mouse, touch and pen (see docs/ARCHITECTURE.md §5).
 
 import type { Viewport } from "./viewport";
@@ -92,7 +93,7 @@ export class InputRouter {
   }
 
   private tp(t: Tracked): ToolPointer {
-    return { x: t.x, y: t.y, type: t.type, shift: t.shift, add: this.modifiers, tol: t.type === "touch" ? 18 : 8 };
+    return { x: t.x, y: t.y, type: t.type, shift: t.shift, add: this.modifiers, tol: pickTolerance(t.type) };
   }
 
   private onDown(e: PointerEvent): void {
@@ -146,7 +147,7 @@ export class InputRouter {
     if (!t) {
       if (e.pointerType !== "touch" && this.mode === "idle") {
         // At most one hover pick per frame: mice report far more often than the screen redraws.
-        this.hoverAt = { x, y, type: e.pointerType as ToolPointer["type"], shift: e.shiftKey, tol: 8 };
+        this.hoverAt = { x, y, type: e.pointerType as ToolPointer["type"], shift: e.shiftKey, tol: pickTolerance(e.pointerType) };
         this.hoverFrame ||= requestAnimationFrame(() => {
           this.hoverFrame = 0;
           if (this.hoverAt && this.mode === "idle") this.handler.hover?.(this.hoverAt);

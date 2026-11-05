@@ -4,6 +4,8 @@ const svg = (body: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
 export const icons = {
+  lineDashed: svg('<path d="M5 19L19 5" stroke-dasharray="3 2.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>'),
+  swap: svg('<path d="M19 9a7 7 0 0 0-12.5-3.2"/><path d="M6 3v3.2h3.2"/><path d="M5 15a7 7 0 0 0 12.5 3.2"/><path d="M18 21v-3.2h-3.2"/>'),
   pivot: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><path d="M5.5 8.5a7.5 7.5 0 0 1 3-3" />'),
   sketch: svg('<path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 7l3 3"/>'),
   line: svg('<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>'),

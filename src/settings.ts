@@ -1,5 +1,7 @@
 // Per-device preferences (not part of the project file).
 
+import { isCoarse } from "./device";
+
 const KEY = "supergeometry.settings.v1";
 const OLD_KEY = "tessel.settings.v1";
 
@@ -34,6 +36,8 @@ export interface Settings {
   version: number;
   /** Angle display: decimal degrees or degrees + minutes. */
   degrees: "decimal" | "fractional";
+  /** Value boxes use the on-screen numpad instead of the system keyboard. */
+  numpad: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -54,6 +58,8 @@ const DEFAULTS: Settings = {
   showConstraints: true,
   autoConstrain: true,
   showConstraintGlyphs: true,
+  // On by default on touch screens (phones, tablets, headsets).
+  numpad: isCoarse,
   version: 2,
 };
 
