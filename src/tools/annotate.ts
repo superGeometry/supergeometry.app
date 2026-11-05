@@ -279,6 +279,9 @@ export class DimWidget {
       }
     }
     this.box.hidden = !s;
+    // The dimension on screen (the tool's options card keeps off it).
+    if (sa && sb) this.box.dataset.seg = `${Math.round(sa[0])},${Math.round(sa[1])},${Math.round(sb[0])},${Math.round(sb[1])}`;
+    else delete this.box.dataset.seg;
     if (s && this.input === document.activeElement && this.held) s = this.held;
     if (s) {
       // Always where you can reach it: on screen, clear of the side panels.

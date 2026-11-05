@@ -107,6 +107,13 @@ export class UI {
       },
       true,
     );
+    document.addEventListener(
+      "pointermove",
+      (e) => {
+        if ((e.target as HTMLElement).tagName === "CANVAS") this.lastPointer = { x: e.clientX, y: e.clientY };
+      },
+      true,
+    );
     $("#history-close").innerHTML = icons.close;
     $("#history-close").addEventListener("click", () => this.toggleHistory(false));
     document.addEventListener("pointerdown", (e) => {
@@ -702,6 +709,11 @@ export class UI {
     requestAnimationFrame(step);
   }
 
+  /** Where the pointer is over the model (the card keeps out of its way). */
+  private lastPointer: { x: number; y: number } | null = null;
+  /** Which side the card went last time (kept while it's still clear: no jumping about). */
+  private panelSide = -1;
+
   private placePanel(): void {
     const p = this.panel;
     const box = [...document.querySelectorAll<HTMLElement>(".dim-widget.editable")].filter((e) => !e.hidden && e.offsetWidth).pop();
@@ -709,32 +721,71 @@ export class UI {
     const w = p.offsetWidth;
     const h = p.offsetHeight;
     const M = 8;
-    let x: number;
-    let y: number;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    // Places to try, in order of preference.
+    let spots: [number, number][];
+    // What the card must not cover: the dimension (the line being drawn, the
+    // drag arrow) and the pointer.
+    const avoid: [number, number][][] = [];
     if (box) {
-      // Beside the value box (to its right, its top lined up) — below it would
-      // sit on the drag arrow and the dimension line. No room: to its left.
       const r = box.getBoundingClientRect();
-      x = r.right + 4;
-      y = r.top;
-      if (x + w > window.innerWidth - M) x = r.left - 4 - w;
-      if (x < M) {
-        x = r.left;
-        y = r.bottom + 4;
-      }
+      spots = [
+        [r.right + 4, r.top],
+        [r.left - 4 - w, r.top],
+        [r.left, r.top - 4 - h],
+        [r.left, r.bottom + 4],
+        [r.right + 4, r.bottom - h],
+        [r.left - 4 - w, r.bottom - h],
+      ];
+      const seg = box.dataset.seg?.split(",").map(Number);
+      if (seg && seg.length === 4 && seg.every(Number.isFinite)) avoid.push([[seg[0], seg[1]], [seg[2], seg[3]]]);
     } else if (this.lastPress) {
-      x = this.lastPress.x + 28;
-      y = this.lastPress.y + 20;
-      if (x + w > window.innerWidth - M) x = this.lastPress.x - 28 - w;
-      if (y + h > window.innerHeight - M) y = this.lastPress.y - 20 - h;
-    } else {
-      x = (window.innerWidth - w) / 2;
-      y = window.innerHeight - h - 70;
+      const q = this.lastPress;
+      spots = [
+        [q.x + 28, q.y + 20],
+        [q.x - 28 - w, q.y + 20],
+        [q.x + 28, q.y - 20 - h],
+        [q.x - 28 - w, q.y - 20 - h],
+      ];
+    } else spots = [[(W - w) / 2, H - h - 70]];
+    if (this.lastPointer) avoid.push([[this.lastPointer.x, this.lastPointer.y]]);
+    const clampX = (x: number) => Math.max(M, Math.min(W - w - M, x));
+    const clampY = (y: number) => Math.max(52, Math.min(H - h - M, y));
+    // How badly a spot is in the way: off screen (moved back on), over the line, over the pointer.
+    const cost = ([x0, y0]: [number, number]): number => {
+      const x = clampX(x0);
+      const y = clampY(y0);
+      let c = Math.abs(x - x0) + Math.abs(y - y0) > 1 ? 1 : 0;
+      const pad = 14;
+      const inside = (px: number, py: number) => px > x - pad && px < x + w + pad && py > y - pad && py < y + h + pad;
+      for (const a of avoid) {
+        if (a.length === 1) {
+          if (inside(a[0][0], a[0][1])) c += 2;
+          continue;
+        }
+        for (let k = 0; k <= 24; k++) {
+          const t = k / 24;
+          if (inside(a[0][0] + (a[1][0] - a[0][0]) * t, a[0][1] + (a[1][1] - a[0][1]) * t)) {
+            c += 4;
+            break;
+          }
+        }
+      }
+      return c;
+    };
+    let pick = this.panelSide >= 0 && this.panelSide < spots.length && cost(spots[this.panelSide]) === 0 ? this.panelSide : -1;
+    if (pick < 0) {
+      let best = Infinity;
+      spots.forEach((sp, i) => {
+        const c = cost(sp);
+        if (c < best) [best, pick] = [c, i];
+      });
     }
-    x = Math.max(M, Math.min(window.innerWidth - w - M, x));
-    y = Math.max(52, Math.min(window.innerHeight - h - M, y));
-    p.style.left = `${Math.round(x)}px`;
-    p.style.top = `${Math.round(y)}px`;
+    this.panelSide = pick;
+    const [x, y] = spots[pick];
+    p.style.left = `${Math.round(clampX(x))}px`;
+    p.style.top = `${Math.round(clampY(y))}px`;
   }
 
   /** Creates a variable from a field's current text; returns its name (set by the app). */
