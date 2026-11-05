@@ -451,4 +451,129 @@ export function bridgeLoops(cage: Cage, a: number[], b: number[]): Cage | null {
   return { verts: cage.verts, faces };
 }
 
+/** A run of open-border edges, as its points in order (a hole's rim: closed). */
+export interface Chain {
+  verts: number[];
+  closed: boolean;
+}
+
+/**
+ * The chosen border edges (keys from cageEdgeKey) grouped into runs: each run
+ * is a closed rim, or an open string of edges end to end.
+ */
+export function borderChains(cage: Cage, chosen: Set<string>): Chain[] {
+  const edges = boundaryEdges(cage).filter(([a, b]) => chosen.has(ekey(a, b)));
+  const nb = new Map<number, number[]>();
+  for (const [a, b] of edges) {
+    nb.set(a, [...(nb.get(a) ?? []), b]);
+    nb.set(b, [...(nb.get(b) ?? []), a]);
+  }
+  const used = new Set<string>();
+  const out: Chain[] = [];
+  const walk = (start: number): Chain => {
+    const verts = [start];
+    let v = start;
+    for (;;) {
+      const next = (nb.get(v) ?? []).find((w) => !used.has(ekey(v, w)));
+      if (next === undefined) return { verts, closed: false };
+      used.add(ekey(v, next));
+      if (next === start) return { verts, closed: true };
+      verts.push(next);
+      v = next;
+    }
+  };
+  // Open runs start at an end (a point with one chosen edge); what's left are rims.
+  for (const [v, ws] of nb) if (ws.length === 1 && ws.some((w) => !used.has(ekey(v, w)))) out.push(walk(v));
+  for (const [a, b] of edges) if (!used.has(ekey(a, b))) out.push(walk(a));
+  return out.filter((c) => c.verts.length >= 2);
+}
+
+/** Two cages as one (the second's points renumbered after the first's). */
+export function joinCages(a: Cage, b: Cage): { cage: Cage; offset: number } {
+  const o = a.verts.length;
+  return { cage: { verts: [...a.verts, ...b.verts], faces: [...a.faces, ...b.faces.map((f) => f.map((v) => v + o) as Cage["faces"][number])] }, offset: o };
+}
+
+/**
+ * Connect two runs of border edges with a strip of quads (two edges → one
+ * quad, like making a face from four points; two rims → a tube). Both runs
+ * need the same number of edges; the second is turned and shifted so the
+ * quads line up with the shape of the edges (no twist). The new faces are
+ * wound to match the faces along the first run. Returns null if the runs
+ * don't fit (different counts, sharing points, too short).
+ */
+export function bridgeChains(cage: Cage, A: Chain, B: Chain): Cage | null {
+  if (A.closed !== B.closed) return null;
+  const edgesOf = (c: Chain) => (c.closed ? c.verts.length : c.verts.length - 1);
+  const n = edgesOf(A);
+  if (n < 1 || edgesOf(B) !== n) return null;
+  if (A.verts.some((v) => B.verts.includes(v))) return null;
+  const P = (v: number) => cage.verts[v];
+  const d = (p: number, q: number) => Math.hypot(P(p)[0] - P(q)[0], P(p)[1] - P(q)[1], P(p)[2] - P(q)[2]);
+  const m = A.verts.length;
+  // Best match of B to A: either direction, and (rims) any starting point.
+  let best: number[] = B.verts;
+  let bestCost = Infinity;
+  for (const dir of [B.verts, [...B.verts].reverse()])
+    for (let s = 0; s < (A.closed ? m : 1); s++) {
+      const cand = A.closed ? dir.map((_, i) => dir[(i + s) % m]) : dir;
+      let cost = 0;
+      for (let i = 0; i < m; i++) cost += d(A.verts[i], cand[i]);
+      if (cost < bestCost) ((bestCost = cost), (best = cand));
+    }
+  const quads: Cage["faces"] = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % m;
+    quads.push([A.verts[i], A.verts[j], best[j], best[i]]);
+  }
+  // Winding: each border edge on A must run the other way round in its new
+  // face than in the face it already has.
+  const dirOf = new Map<string, [number, number]>();
+  for (const f of cage.faces) for (let k = 0; k < 4; k++) dirOf.set(ekey(f[k], f[(k + 1) % 4]), [f[k], f[(k + 1) % 4]]);
+  const [a0, a1] = [A.verts[0], A.verts[1 % m]];
+  const had = dirOf.get(ekey(a0, a1));
+  const flip = !!had && had[0] === a0 && had[1] === a1;
+  return { verts: cage.verts, faces: [...cage.faces, ...quads.map((q) => (flip ? ([q[3], q[2], q[1], q[0]] as Cage["faces"][number]) : q))] };
+}
+
+/** Do the faces along run B now meet their new neighbours wound the right way round? */
+export function windingAgrees(cage: Cage): boolean {
+  const seen = new Set<string>();
+  for (const f of cage.faces)
+    for (let k = 0; k < 4; k++) {
+      const key = `${f[k]}>${f[(k + 1) % 4]}`;
+      if (seen.has(key)) return false; // the same edge, the same way, twice
+      seen.add(key);
+    }
+  return true;
+}
+
+/** Turn the given faces inside out (their points the other way round). */
+export function flipFaces(cage: Cage, which: (i: number) => boolean): Cage {
+  return { verts: cage.verts, faces: cage.faces.map((f, i) => (which(i) ? ([f[0], f[3], f[2], f[1]] as Cage["faces"][number]) : f)) };
+}
+
+/**
+ * Where each open-border cage edge runs on the smooth surface: the point
+ * halfway along it (to match a picked edge of the finished body to its cage edge).
+ */
+export function borderEdgeMids(cage: Cage): { e: [number, number]; at: Vec3 }[] {
+  const s = subdivide(cage, 3);
+  const P = limitPoints(s);
+  const h = s.n / 2;
+  const out: { e: [number, number]; at: Vec3 }[] = [];
+  const border = new Set(boundaryEdges(cage).map(([a, b]) => ekey(a, b)));
+  cage.faces.forEach((f, fi) => {
+    const g = s.grids[fi];
+    const sides: [number, number, number][] = [
+      [f[0], f[1], g[h][0]],
+      [f[1], f[2], g[s.n][h]],
+      [f[2], f[3], g[h][s.n]],
+      [f[3], f[0], g[0][h]],
+    ];
+    for (const [a, b, mid] of sides) if (border.has(ekey(a, b))) out.push({ e: [a, b], at: P[mid] });
+  });
+  return out;
+}
+
 export { ekey as cageEdgeKey };

@@ -34,7 +34,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     intro: "Most work starts with a sketch on a plane or a flat face, then Extrude or Revolve turns it into a solid body.",
     items: [
       { icon: "sketch", name: "Sketch", text: "Pick a plane (XY, XZ, YZ) or a flat face, then draw lines, arcs, circles, rectangles… Closed shapes become profiles you can extrude." },
-      { icon: "freeform", name: "Freeform", text: "Smooth organic shapes: start from a box, sphere, cylinder or plane and pull its control points, edges and faces. A shape with a hole: tap an edge of the hole → Fill hole, or Thickness… to make it a solid wall." },
+      { icon: "freeform", name: "Freeform", text: "Smooth organic shapes: start from a box, sphere, cylinder or plane and pull its control points, edges and faces. A shape with a hole: tap an edge of the hole → Fill hole, or Thickness… to make it a solid wall. Connect: pick border edges on one or two surfaces (Shift adds) — two edges get a face between them, two hole rims a tube; two surfaces become one." },
       { icon: "extrude", name: "Extrude", text: "Pull a profile or a face straight out into a solid. Drag the arrow or type a distance; negative values cut. Running into another body cuts through it." },
       { icon: "revolve", name: "Revolve", text: "Turn a profile around an axis (vases, wheels). Travel moves it along the axis while turning — with more than 360° that makes threads and springs." },
       { icon: "sweep", name: "Sweep", text: "Move a profile along a path curve (pipes, handles)." },

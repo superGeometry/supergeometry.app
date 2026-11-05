@@ -6,6 +6,8 @@ import { fillHole, refineCage, boundaryEdges, boxCage, bridgeLoops, cageEdgeKey,
 import { cageToShape } from "../src/kernel/freeform";
 import { evalSurface, interpolateGrid } from "../src/freeform/bspline";
 import { detachFreeformCopy, freeformBodies } from "../src/doc/freeformCopies";
+import { connectEdges } from "../src/doc/freeformConnect";
+import { borderEdgeMids } from "../src/freeform/cage";
 import { emptyDoc, type Feature } from "../src/doc/types";
 
 setOC(await (opencascade as unknown as () => Promise<any>)());
@@ -167,6 +169,54 @@ const checks: [string, () => string][] = [
     const even = fillHole(holed, loop)!;
     assert.ok(isClosed(even.cage) && !even.refined);
     return `${fine.faces.length} faces, volume ${v0.toFixed(0)} → ${v1.toFixed(0)}`;
+  }],
+  ["connect: two stacked surfaces with a hole each → one surface with a tube between", () => {
+    const sheet = (z: number) => {
+      const c = planeCage([60, 60], 3);
+      return deleteFaces({ faces: c.faces, verts: c.verts.map((v) => [v[0], v[1], z] as [number, number, number]) }, [4]);
+    };
+    const lo = sheet(0);
+    const hi = sheet(30);
+    const doc = {
+      ...emptyDoc(),
+      features: [
+        { id: "lo", name: "Lower", type: "freeform", cage: lo, surface: true },
+        { id: "hi", name: "Upper", type: "freeform", cage: hi, surface: true },
+        { id: "mv", name: "Move", type: "transform", bodies: ["hi"], copy: false, op: { kind: "move", translate: [0, 0, 10] } },
+      ] as Feature[],
+    };
+    // Pick the hole rims as a user would: the middle of each rim edge on the surface.
+    const rim = (c: typeof lo, dz: number, body: string) => borderEdgeMids(c).filter((m) => Math.hypot(m.at[0], m.at[1]) < 15).map((m) => ({ body, mid: [m.at[0], m.at[1], m.at[2] + dz] as [number, number, number] }));
+    const picks = [...rim(lo, 0, "lo"), ...rim(hi, 10, "hi")];
+    assert.equal(picks.length, 8);
+    const out = connectEdges(doc, picks);
+    assert.ok("doc" in out, "error" in out ? out.error : "");
+    const f = out.doc.features;
+    assert.deepEqual(f.map((x) => x.id), ["hi", "mv"]);
+    const merged = f[0] as Extract<Feature, { type: "freeform" }>;
+    assert.equal(merged.cage.faces.length, 8 + 8 + 4);
+    // The lower sheet kept its place: stored so that after the move it is back at z = 0.
+    assert.ok(merged.cage.verts.some((v) => Math.abs(v[2] + 10) < 1e-9) && merged.cage.verts.some((v) => Math.abs(v[2] - 30) < 1e-9));
+    const shape = cageToShape(merged.cage) as Shape3D;
+    assert.equal(shape.faces.length, 20);
+    return `${merged.cage.faces.length} cage faces`;
+  }],
+  ["connect: two edges of one surface → a new quad between them", () => {
+    const c = planeCage([40, 40], 2);
+    const bent = { faces: c.faces, verts: c.verts.map((v) => [v[0], v[1], v[1] > 0 ? 0 : 0] as [number, number, number]) };
+    // A strip with a gap: drop the middle row's faces? Use two opposite borders of one sheet folded up.
+    const doc = { ...emptyDoc(), features: [{ id: "s", name: "S", type: "freeform", cage: bent, surface: true }] as Feature[] };
+    const mids = borderEdgeMids(bent);
+    const left = mids.find((m) => m.at[0] < -19 && m.at[1] > 0)!;
+    const right = mids.find((m) => m.at[0] > 19 && m.at[1] > 0)!;
+    const out = connectEdges(doc, [{ body: "s", mid: left.at }, { body: "s", mid: right.at }]);
+    assert.ok("doc" in out, "error" in out ? out.error : "");
+    const ff = out.doc.features[0] as Extract<Feature, { type: "freeform" }>;
+    assert.equal(ff.cage.faces.length, 5);
+    // Different counts are refused with a reason.
+    const bad = connectEdges(doc, [{ body: "s", mid: left.at }, { body: "s", mid: right.at }, { body: "s", mid: mids.find((m) => m.at[0] > 19 && m.at[1] < 0)!.at }]);
+    assert.ok("error" in bad);
+    return `${ff.cage.faces.length} faces; uneven: ${"error" in bad ? bad.error : ""}`;
   }],
 ];
 

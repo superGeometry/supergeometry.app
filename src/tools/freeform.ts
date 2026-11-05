@@ -4,7 +4,7 @@
 
 import { BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
 import type { Feature, FreeformFeature, TransformFeature, Vec3 } from "../doc/types";
-import { boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, fillHole, holeLoops, isClosed, limitPoints, previewMesh, primitiveCage, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
+import { borderChains, bridgeChains, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, fillHole, holeLoops, isClosed, limitPoints, previewMesh, primitiveCage, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
 import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
@@ -151,6 +151,11 @@ export class FreeformTool implements Tool {
     const loops = this.pickedLoops();
     if (loops.length === 1) items.push({ type: "button", label: "Fill hole", icon: "fill", onClick: () => this.fillHoles(loops) });
     if (loops.length === 2) items.push({ type: "button", label: "Bridge holes", icon: "loft", onClick: () => this.fillHoles(loops) });
+    // Two runs of border edges (two edges, two rows): a strip of faces between them.
+    else {
+      const runs = this.pickedRuns();
+      if (runs.length === 2 && !runs.every((r) => r.closed)) items.push({ type: "button", label: "Connect edges", icon: "loft", onClick: () => this.connectRuns(runs) });
+    }
     // An open shape can be given a thickness to become a solid.
     if (!isClosed(this.cage)) {
       items.push(
@@ -178,6 +183,28 @@ export class FreeformTool implements Tool {
     const chosen = new Set<string>();
     for (const [a, b] of boundaryEdges(this.cage)) if (verts.has(a) && verts.has(b)) chosen.add(cageEdgeKey(a, b));
     return chosen.size ? holeLoops(this.cage, chosen) : [];
+  }
+
+  /** Picked border edges grouped into runs (edges picked, or the points along them). */
+  private pickedRuns(): Chain[] {
+    const verts = new Set(this.selectedVerts());
+    const picked = new Set(this.picks.flatMap((p) => (p.kind === "edge" ? [cageEdgeKey(p.e[0], p.e[1])] : [])));
+    const chosen = new Set<string>();
+    for (const [a, b] of boundaryEdges(this.cage)) if (picked.has(cageEdgeKey(a, b)) || (verts.has(a) && verts.has(b) && !picked.size)) chosen.add(cageEdgeKey(a, b));
+    return chosen.size ? borderChains(this.cage, chosen) : [];
+  }
+
+  private connectRuns(runs: Chain[]): void {
+    const edges = (c: Chain) => (c.closed ? c.verts.length : c.verts.length - 1);
+    if (runs[0].closed !== runs[1].closed) return this.app.ui.toast("Connect a hole with a hole, or a row of edges with a row");
+    if (edges(runs[0]) !== edges(runs[1])) return this.app.ui.toast(`Both sides need the same number of edges (${edges(runs[0])} and ${edges(runs[1])})`);
+    const next = bridgeChains(this.cage, runs[0], runs[1]);
+    if (!next) return this.app.ui.toast("These edges can't be connected (they touch each other)");
+    this.cage = next;
+    this.picks = [];
+    this.rebuild();
+    this.selectionChanged();
+    this.panelHint();
   }
 
   private deleteSelectedFaces(): void {

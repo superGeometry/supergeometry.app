@@ -192,6 +192,10 @@ revolve, sweep or loft. Overlapping shapes split into separate regions.
   an edge of a hole → **Fill hole** to close it again, or **Thickness…** to
   turn the open shape into a solid wall. A hole with an odd number of edges
   is closed by making the cage twice as fine first (the shape doesn't change).
+  **Connect**: pick border edges (Shift adds) on one surface or on two — two
+  edges get a face between them, two rows a strip, two hole rims a tube; two
+  surfaces become one, ready for a Thickness. Both sides need the same number
+  of edges.
 - **Copy a sketch to another plane** — tap a region of a finished sketch →
   **Copy to Plane**: drag the blue arrow to a parallel plane, or type the
   distance (Copy off moves it instead).

@@ -14,6 +14,7 @@ import { SketchMoveOp } from "./sketchMove";
 import { FreeformTool } from "./freeform";
 import { isClosed } from "../freeform/cage";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
+import { connectEdges } from "../doc/freeformConnect";
 import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
@@ -264,6 +265,16 @@ export class SelectTool implements Tool {
     // Editing a copy: it becomes its own freeform first (unless it is linked).
     const own = () => this.ownFreeform(ffBody) ?? ff!;
     if (ff?.type === "freeform") head.push({ id: "editFreeform", label: "Edit Freeform", icon: "freeform", shortcut: "F2", run: () => this.editFreeform(own()) });
+    // Border edges of open freeforms (one surface or two): connect them with new faces.
+    const edgeSel = sel.filter((x): x is Extract<Sel, { kind: "edge" }> => x.kind === "edge");
+    if (edgeSel.length >= 2 && edgeSel.length === sel.length) {
+      const bodies = [...new Set(edgeSel.map((x) => x.body))];
+      const open = bodies.every((b) => {
+        const f = this.freeformOf(b);
+        return !!f && !isClosed(f.cage);
+      });
+      if (open && bodies.length <= 2) head.push({ id: "connect", label: "Connect", icon: "loft", sub: bodies.length === 2 ? "Join the two surfaces" : "New faces between the edges", run: () => this.connectEdges(edgeSel) });
+    }
     // An open freeform (faces deleted, or a surface): close a hole, or give it a thickness.
     if (ff?.type === "freeform" && !isClosed(ff.cage)) {
       if (first.kind === "edge") {
@@ -716,6 +727,33 @@ export class SelectTool implements Tool {
   }
 
   private lastTap: ToolPointer | null = null;
+
+  /**
+   * Connect picked border edges of freeform surfaces: two edges get a face
+   * between them, two rows a strip, two hole rims a tube. Edges on two
+   * surfaces make them one surface (ready for a Thickness).
+   */
+  private connectEdges(edges: Extract<Sel, { kind: "edge" }>[]): void {
+    const picks = edges.flatMap((x) => {
+      const mid = this.app.view.body(x.body)?.edges[x.edge]?.mid;
+      return mid ? [{ body: x.body, mid }] : [];
+    });
+    // Copies become their own freeforms first (their ids change).
+    const ids = new Map<string, string>();
+    for (const b of new Set(picks.map((p) => p.body))) {
+      const f = this.ownFreeform(b);
+      if (!f) return this.app.ui.toast("Connect works on freeform surfaces");
+      ids.set(b, f.id);
+    }
+    const out = connectEdges(this.app.store.doc, picks.map((p) => ({ body: ids.get(p.body)!, mid: p.mid })));
+    if ("error" in out) return this.app.ui.toast(out.error);
+    this.app.store.commit((d) => {
+      d.features = out.doc.features;
+      d.hidden = out.doc.hidden;
+    });
+    this.app.setSelection([{ kind: "body", body: out.body }]);
+    this.app.ui.toast("Connected — Thickness… makes it a solid");
+  }
 
   /** The freeform a body is made from (its own, or the one a copy was made of). */
   private freeformOf(body: string): FreeformFeature | undefined {

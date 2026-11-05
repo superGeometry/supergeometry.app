@@ -8,10 +8,10 @@
 import type { Feature, FreeformFeature, ProjectDoc, TransformFeature, Vec3 } from "./types";
 
 /** x' = A x + t as rows [a00 a01 a02 t0, …]. */
-type Affine = number[];
+export type Affine = number[];
 const ID: Affine = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0];
 
-const apply = (m: Affine, p: Vec3): Vec3 => [0, 1, 2].map((r) => m[r * 4] * p[0] + m[r * 4 + 1] * p[1] + m[r * 4 + 2] * p[2] + m[r * 4 + 3]) as Vec3;
+export const applyAffine = (m: Affine, p: Vec3): Vec3 => [0, 1, 2].map((r) => m[r * 4] * p[0] + m[r * 4 + 1] * p[1] + m[r * 4 + 2] * p[2] + m[r * 4 + 3]) as Vec3;
 
 function then(m: Affine, n: Affine): Affine {
   const out: number[] = [];
@@ -22,7 +22,7 @@ function then(m: Affine, n: Affine): Affine {
   return out;
 }
 
-const det = (m: Affine) => m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8]);
+export const det = (m: Affine) => m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8]);
 
 function rotate(p: Vec3, o: Vec3, axis: Vec3, deg: number): Vec3 {
   const l = Math.hypot(...axis) || 1;
@@ -127,7 +127,7 @@ export function detachFreeformCopy(doc: ProjectDoc, bodyId: string, newId: strin
     id: newId,
     name: t.name,
     cage: {
-      verts: ff.feature.cage.verts.map((v) => apply(ff.m, v)),
+      verts: ff.feature.cage.verts.map((v) => applyAffine(ff.m, v)),
       // A mirror turns the shape inside out: wind the quads the other way.
       faces: ff.feature.cage.faces.map((q) => (flip ? ([q[0], q[3], q[2], q[1]] as typeof q) : ([...q] as typeof q))),
     },
@@ -148,4 +148,15 @@ export function detachFreeformCopy(doc: ProjectDoc, bodyId: string, newId: strin
   // The copy's name in Items stays what it was.
   if (!out.names?.[newId] && doc.names?.[bodyId]) out.names = { ...out.names, [newId]: doc.names[bodyId] };
   return { doc: out, id: newId };
+}
+
+/** The map that undoes m. */
+export function invertAffine(m: Affine): Affine {
+  const [a, b, c, , d, e, f, , g, h, i] = m;
+  const D = det(m);
+  const inv = [(e * i - f * h) / D, (c * h - b * i) / D, (b * f - c * e) / D, (f * g - d * i) / D, (a * i - c * g) / D, (c * d - a * f) / D, (d * h - e * g) / D, (b * g - a * h) / D, (a * e - b * d) / D];
+  const t = [m[3], m[7], m[11]];
+  const out: Affine = [];
+  for (let r = 0; r < 3; r++) out.push(inv[r * 3], inv[r * 3 + 1], inv[r * 3 + 2], -(inv[r * 3] * t[0] + inv[r * 3 + 1] * t[1] + inv[r * 3 + 2] * t[2]));
+  return out;
 }
