@@ -75,7 +75,9 @@ export class DocStore {
 
   /** Unique id + "Extrude 03"-style name for a new feature. */
   newIdentity(type: FeatureType, label = LABELS[type]): { id: string; name: string } {
-    const n = this.doc.features.filter((f) => f.name.startsWith(label + " ")).length + 1;
+    // One past the highest number in use (a step deleted from the middle doesn't free its number for a duplicate).
+    const nums = this.doc.features.map((f) => (f.name.startsWith(label + " ") ? Number(f.name.slice(label.length + 1)) : NaN)).filter((x) => Number.isFinite(x));
+    const n = Math.max(0, this.doc.features.filter((f) => f.name.startsWith(label + " ")).length, ...nums) + 1;
     return { id: newId(type), name: `${label} ${String(n).padStart(2, "0")}` };
   }
 

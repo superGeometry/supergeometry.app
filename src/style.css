@@ -2343,8 +2343,10 @@ body.history-open #topbar {
 body #panel.as-list {
   left: 0;
   top: 0;
-  bottom: auto;
-  right: auto;
+  /* (Phone rules move the old bottom bar up by its bottom edge: not this card.) */
+  bottom: auto !important;
+  right: auto !important;
+  height: auto !important;
   transform: none;
   flex-direction: column;
   flex-wrap: nowrap;

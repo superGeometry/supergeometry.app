@@ -177,7 +177,10 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         const face = resolveFace(body, f.source.face);
         const d = f.mode === "cut" ? -Math.abs(f.distance) : f.mode === "join" ? Math.abs(f.distance) : f.distance;
         try {
-          bodies.set(f.target, offsetFace(body, face, d));
+          const out = staysClosed(body, offsetFace(body, face, d));
+          // Hair-thin faces left behind (a face pushed over a fillet): a straight push is cleaner.
+          if (face.geomType === "PLANE" && slivers(out) > slivers(body)) throw new Error("slivers");
+          bodies.set(f.target, out);
           return;
         } catch (err) {
           // Faces whose neighbours don't enclose them still get a straight push.
@@ -382,7 +385,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "scaleFace": {
       const body = need(bodies, f.face.body);
-      bodies.set(f.face.body, scaleFace(body, resolveFace(body, f.face), f.u, f.factors));
+      bodies.set(f.face.body, staysClosed(body, scaleFace(body, resolveFace(body, f.face), f.u, f.factors)));
       return;
     }
 
@@ -405,16 +408,17 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // Keep the face pointing the way it pointed (outward).
       const n0 = planeOf(face).normal;
       const n = dot(plane.normal, n0) < 0 ? scale(plane.normal, -1) : plane.normal;
-      bodies.set(f.face.body, replaceFacePlane(body, face, { origin: plane.origin, normal: n, xDir: xDirFor(n) }));
+      bodies.set(f.face.body, staysClosed(body, replaceFacePlane(body, face, { origin: plane.origin, normal: n, xDir: xDirFor(n) })));
       return;
     }
 
     case "deleteGeom": {
-      let body = need(bodies, f.body);
+      const start = need(bodies, f.body);
+      let body = start;
       for (const r of f.faces) body = deleteFace(body, resolveFace(body, r));
       for (const r of f.edges) body = deleteEdge(body, r);
       for (const v of f.vertices) body = deleteVertex(body, v);
-      bodies.set(f.body, body);
+      bodies.set(f.body, staysClosed(start, body));
       return;
     }
 
@@ -427,16 +431,18 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         const face = resolveFace(body, f.face);
         const { origin, normal } = planeOf(face);
         const n = turn(normal);
-        bodies.set(f.face.body, replaceFacePlane(body, face, { origin: move(origin), normal: n, xDir: xDirFor(n) }));
+        bodies.set(f.face.body, staysClosed(body, replaceFacePlane(body, face, { origin: move(origin), normal: n, xDir: xDirFor(n) })));
         return;
       }
       if (f.vertex) {
         if (ctx.freeforms.has(f.vertex.body)) throw new Error("A freeform's shape comes from its cage: use Edit Freeform to move its points");
-        bodies.set(f.vertex.body, moveVertex(need(bodies, f.vertex.body), f.vertex.at, move(f.vertex.at)));
+        const body = need(bodies, f.vertex.body);
+        bodies.set(f.vertex.body, staysClosed(body, moveVertex(body, f.vertex.at, move(f.vertex.at))));
         return;
       }
       if (!f.edge) throw new Error("Nothing to move");
-      bodies.set(f.edge.body, moveEdge(need(bodies, f.edge.body), f.edge, move));
+      const eb = need(bodies, f.edge.body);
+      bodies.set(f.edge.body, staysClosed(eb, moveEdge(eb, f.edge, move)));
       return;
     }
   }
@@ -1256,6 +1262,23 @@ function openEdges(shape: Shape3D): number[] {
 }
 
 // ------------------------------------------------------------------- helpers
+
+/**
+ * A face/edge/corner edit must not tear the body open: when the result has
+ * gaps the body didn't have, the step stops with a message instead of
+ * leaving a body with holes for the next steps to build on.
+ */
+/** How many faces are next to nothing in area (leftovers of an edit, not real faces). */
+function slivers(s: Shape3D): number {
+  const areas = s.faces.map((f) => measureArea(f));
+  const total = areas.reduce((a, b) => a + b, 0);
+  return areas.filter((a) => a < Math.max(1e-9, total * 1e-7)).length;
+}
+
+function staysClosed(before: Shape3D, after: Shape3D): Shape3D {
+  if (openEdges(after).length > openEdges(before).length) throw new Error("That would tear the body open — try a smaller value, or another face");
+  return after;
+}
 
 function need(bodies: Bodies, id: string): Shape3D {
   const b = bodies.get(id);
