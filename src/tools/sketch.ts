@@ -704,7 +704,8 @@ export class SketchTool implements Tool {
     const apply = (label: string, fn: () => void): PanelItem => ({ type: "button", label, icon: "check", onClick: fn });
     switch (k) {
       case "line":
-        if (this.pts.length) items.push(lock("len", "Length"));
+        // With the numpad, the length is typed in the box by the line itself.
+        if (this.pts.length && !settings.value.numpad) items.push(lock("len", "Length"));
         break;
       case "rect":
         if (this.pts.length === 1 && memory.rect !== "3pt") items.push(lock("w", "Width"), lock("h", "Height"));
@@ -813,9 +814,24 @@ export class SketchTool implements Tool {
         }
         break;
     }
-    // Every tool gets the panel: its values, and the step just done (undo is one tap away).
+    // Select and the edit tools show the step just done; tapping it selects what it made.
     const lastLog = this.sketch?.log?.at(-1);
-    if (lastLog) items.push({ type: "slot", label: "Last step", value: `${lastLog.op}${lastLog.n > 1 ? ` ×${lastLog.n}` : ""}`, active: false, filled: true, onClick: () => {} });
+    const drawing = ["line", "arc", "spline", "rect", "circle", "ellipse", "polygon", "text"].includes(k);
+    const made = this.lastMade.filter((id) => this.entities.some((e) => e.id === id));
+    if (lastLog && !drawing) {
+      items.push({
+        type: "button",
+        label: `Select last: ${lastLog.op}${lastLog.n > 1 ? ` ×${lastLog.n}` : ""}`,
+        icon: "pointer",
+        onClick: () => {
+          if (!made.length) return this.app.ui.toast("Nothing from that step to select");
+          if (this.kind !== "select" && !this.isSelectionTool()) this.setKind("select");
+          this.selected = new Set(made);
+          this.selPts = [];
+          this.selectionChanged();
+        },
+      });
+    }
     ui.showPanel(items.length ? { title: titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined } : null);
   }
 
@@ -1983,6 +1999,9 @@ export class SketchTool implements Tool {
   // ------------------------------------------------------------- commits
 
   /** Save curves (and constraints); constraints on deleted curves are dropped. */
+  /** Curves the last step made (Select last picks them). */
+  private lastMade: string[] = [];
+
   /** Name of the step being committed (else it's named after the tool). */
   private opLabel: string | null = null;
 
@@ -2006,8 +2025,16 @@ export class SketchTool implements Tool {
     this.opLabel = null;
     const log = [...(this.sketch?.log ?? [])];
     const last = log[log.length - 1];
-    if (last?.op === op) log[log.length - 1] = { op, n: last.n + 1 };
-    else log.push({ op, n: 1 });
+    // What this step made (kept across repeats of the same step, for "Select last").
+    const before = new Set(this.entities.map((e) => e.id));
+    const made = entities.filter((e) => !before.has(e.id)).map((e) => e.id);
+    if (last?.op === op) {
+      log[log.length - 1] = { op, n: last.n + 1 };
+      this.lastMade = [...this.lastMade, ...made];
+    } else {
+      log.push({ op, n: 1 });
+      this.lastMade = made;
+    }
     const patch = cs.length ? { entities, constraints: cs, log } : { entities, constraints: undefined, log };
     if (this.sketchId && this.sketch) {
       store.update(this.sketchId, patch);

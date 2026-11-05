@@ -173,7 +173,7 @@ export function splinePoints(pts: Vec2[], closed: boolean, mode: "fit" | "contro
   if (pts.length < 2) return pts.slice();
   if (pts.length === 2) return [pts[0], pts[1]];
   const n = pts.length;
-  const get = (i: number): Vec2 => (closed ? pts[((i % n) + n) % n] : pts[Math.max(0, Math.min(n - 1, i))]);
+  const get = (i: number): Vec2 => pointAt(pts, i, closed, mode);
   const spans = closed ? n : n - 1;
   const out: Vec2[] = [];
   for (let s = 0; s < spans; s++) {
@@ -190,14 +190,29 @@ export function splinePoints(pts: Vec2[], closed: boolean, mode: "fit" | "contro
 
 /** Exact point on span `s` of a spline (each span is one cubic), u in [0, 1]. */
 export function splineSpanAt(d: SplineDef, s: number, u: number): Vec2 {
-  const n = d.points.length;
-  const get = (i: number): Vec2 => (d.closed ? d.points[((i % n) + n) % n] : d.points[Math.max(0, Math.min(n - 1, i))]);
+  const get = (i: number): Vec2 => pointAt(d.points, i, d.closed, d.mode);
   return d.mode === "fit" ? catmull(get(s - 1), get(s), get(s + 1), get(s + 2), u) : bspline(get(s - 1), get(s), get(s + 1), get(s + 2), u);
 }
 
 /** Number of cubic spans of a spline. */
 export function splineSpans(d: SplineDef): number {
   return d.closed ? d.points.length : d.points.length - 1;
+}
+
+/**
+ * Point i of a spline's list, past the ends too: closed splines wrap; an open
+ * fit-point spline gets a mirrored point beyond each end, so it leaves its end
+ * heading towards its neighbour (a repeated end point would leave it at a
+ * tangent of its own making — e.g. along a revolve axis, which can't revolve).
+ */
+function pointAt(pts: Vec2[], i: number, closed: boolean, mode: "fit" | "control"): Vec2 {
+  const n = pts.length;
+  if (closed) return pts[((i % n) + n) % n];
+  if (mode === "fit" && n >= 2) {
+    if (i < 0) return [2 * pts[0][0] - pts[1][0], 2 * pts[0][1] - pts[1][1]];
+    if (i > n - 1) return [2 * pts[n - 1][0] - pts[n - 2][0], 2 * pts[n - 1][1] - pts[n - 2][1]];
+  }
+  return pts[Math.max(0, Math.min(n - 1, i))];
 }
 
 function catmull(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, u: number): Vec2 {

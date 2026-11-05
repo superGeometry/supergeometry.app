@@ -14,3 +14,13 @@ export function pickTolerance(type: string): number {
   if (type === "touch") return 18;
   return isHeadset ? 14 : 8;
 }
+
+/**
+ * Phones, tablets and headsets (not computers, touchscreen laptops included):
+ * a touch-first device by its own description. iPads say "Macintosh" but have
+ * touch points; one with a trackpad still counts.
+ */
+export const isTouchDevice =
+  isHeadset ||
+  (typeof navigator !== "undefined" &&
+    (/Android|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)));

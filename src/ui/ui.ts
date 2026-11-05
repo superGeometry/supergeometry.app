@@ -283,7 +283,17 @@ export class UI {
       const col = anchor.closest?.("#toolbar, #bottom-left")?.getBoundingClientRect();
       this.flyout.style.left = `${Math.max(r.right, col?.right ?? 0) + 6}px`;
       this.flyout.style.bottom = "";
-      this.flyout.style.top = `${Math.min(r.top, window.innerHeight - this.flyout.offsetHeight - 12)}px`;
+      // Short screens (phones sideways): within the tool column's height, never over the
+      // top bar or the undo buttons, scrolling if longer. Elsewhere: clear of the top bar.
+      const toolbar = this.toolbar.getBoundingClientRect();
+      const short = window.innerHeight <= 500 && toolbar.height > 0;
+      const top = short ? toolbar.top : 52;
+      // …and above the buttons at the bottom left (section, measure, undo).
+      const stackTop = Math.min(window.innerHeight, ...[this.bottomLeft, document.getElementById("undo-dock")!].filter((e) => e.childElementCount && getComputedStyle(e).display !== "none").map((e) => e.getBoundingClientRect().top));
+      const bottom = short ? toolbar.bottom : Math.min(window.innerHeight - 12, stackTop - 8);
+      this.flyout.style.maxHeight = `${Math.max(120, bottom - top)}px`;
+      const h = Math.min(this.flyout.scrollHeight, bottom - top);
+      this.flyout.style.top = `${Math.max(top, Math.min(r.top, bottom - h))}px`;
     }
   }
 

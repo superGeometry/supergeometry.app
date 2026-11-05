@@ -1,6 +1,6 @@
 // Per-device preferences (not part of the project file).
 
-import { isCoarse } from "./device";
+import { isTouchDevice } from "./device";
 
 const KEY = "supergeometry.settings.v1";
 const OLD_KEY = "tessel.settings.v1";
@@ -59,8 +59,8 @@ const DEFAULTS: Settings = {
   autoConstrain: true,
   showConstraintGlyphs: true,
   // On by default on touch screens (phones, tablets, headsets).
-  numpad: isCoarse,
-  version: 2,
+  numpad: isTouchDevice,
+  version: 3,
 };
 
 type Listener = (s: Settings) => void;
@@ -80,6 +80,8 @@ class SettingsStore {
     // v2: orthographic view and the sketch constraint column are on by default —
     // also for anyone whose saved preferences still hold the old defaults.
     if ((saved.version ?? 1) < 2) this.value = { ...this.value, ortho: true, showConstraints: true, version: 2 };
+    // v3: the on-screen numpad starts on for phones, tablets and headsets (off on computers).
+    if ((saved.version ?? 1) < 3) this.value = { ...this.value, numpad: isTouchDevice, version: 3 };
   }
 
   set<K extends keyof Settings>(key: K, v: Settings[K]): void {

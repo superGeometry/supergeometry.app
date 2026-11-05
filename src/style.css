@@ -1858,3 +1858,201 @@ body.headset .right-btn {
 body.headset .text-btn {
   min-height: 42px;
 }
+
+/* ------------- right column at the middle of the right edge (all devices) */
+#right-col {
+  top: 50%;
+  transform: translateY(-50%);
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+}
+/* The view cube takes the top right corner, above the column. */
+#viewcube-host {
+  right: calc(8px + var(--safe-r));
+}
+body.history-open #viewcube-host {
+  right: calc(266px + var(--safe-r));
+}
+@media (max-width: 720px) {
+  /* Phones: the top bar can use the whole width (the column is lower down). */
+  #topbar {
+    right: calc(8px + var(--safe-r));
+  }
+  #viewcube-host,
+  body.history-open #viewcube-host {
+    right: calc(8px + var(--safe-r));
+  }
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+  #topbar {
+    right: calc(126px + var(--safe-r));
+  }
+  body.history-open #topbar {
+    right: calc(384px + var(--safe-r));
+  }
+}
+/* Short screens (phones sideways): too low for cube above column — the cube sits left of it. */
+@media (max-height: 600px) {
+  #viewcube-host {
+    right: calc(64px + var(--safe-r));
+  }
+  body.history-open #viewcube-host {
+    right: calc(318px + var(--safe-r));
+  }
+  #right-col {
+    max-height: calc(100vh - 16px);
+  }
+}
+@media (max-height: 600px) and (min-width: 721px) {
+  #topbar {
+    right: calc(182px + var(--safe-r));
+  }
+}
+
+/* ---------------------------------------------------------------- help */
+.help-panel {
+  position: fixed;
+  z-index: 75;
+  top: calc(56px + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(680px, calc(100vw - 24px));
+  max-height: calc(100vh - 80px - var(--safe-t) - var(--safe-b));
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+.help-panel[hidden] {
+  display: none;
+}
+.help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.help-head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+.help-body {
+  overflow-y: auto;
+  padding: 4px 18px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.help-body h3 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+  color: var(--accent);
+}
+.help-intro {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.help-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.help-list li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.help-icon svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  margin-top: 1px;
+}
+.help-list b {
+  font-weight: 650;
+}
+/* Phones: nearly full screen, under the top bar. */
+@media (max-width: 720px) {
+  .help-panel {
+    top: calc(52px + var(--safe-t));
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 64px - var(--safe-t) - var(--safe-b));
+  }
+}
+/* Phones sideways: use the full height. */
+@media (max-height: 500px) {
+  .help-panel {
+    top: calc(8px + var(--safe-t));
+    max-height: calc(100vh - 16px - var(--safe-t) - var(--safe-b));
+  }
+}
+body.headset .help-list li {
+  font-size: 15px;
+}
+@media (max-width: 720px) {
+  /* The warning line sits under the top bar (clear of the bottom buttons). */
+  #warn {
+    top: calc(96px + var(--safe-t));
+    bottom: auto;
+    max-width: calc(100vw - 150px);
+    left: calc(8px + var(--safe-l));
+    transform: none;
+  }
+}
+@media (max-width: 720px) {
+  /* The warning line goes just above the bottom buttons; a panel or an open
+     History/Items takes priority over it. */
+  #warn {
+    top: auto;
+    bottom: calc(118px + var(--safe-b));
+  }
+  body.history-open #warn,
+  body.items-open #warn,
+  body:has(#panel:not([hidden])) #warn,
+  body:has(#flyout:not([hidden])) #warn {
+    display: none;
+  }
+}
+@media (max-height: 600px) and (min-width: 721px) {
+  body.history-open #topbar {
+    right: calc(436px + var(--safe-r));
+  }
+  body.history-open .brand {
+    display: none;
+  }
+  /* The warning line sits in the bottom row, right of the buttons there;
+     panels and open lists take priority over it. */
+  #warn {
+    bottom: calc(14px + var(--safe-b));
+    left: calc(270px + var(--safe-l));
+    transform: none;
+    max-width: calc(100vw - 340px);
+  }
+  body.history-open #warn,
+  body.items-open #warn,
+  body:has(#panel:not([hidden])) #warn,
+  body:has(#flyout:not([hidden])) #warn {
+    display: none;
+  }
+}
+/* The warning line gives way to panels and open lists on every screen. */
+body.history-open #warn,
+body.items-open #warn,
+body:has(#flyout:not([hidden])) #warn {
+  display: none;
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+  /* Right of the bottom-left buttons. */
+  #warn {
+    left: calc(50% + 110px);
+    max-width: calc(100vw - 460px);
+  }
+}

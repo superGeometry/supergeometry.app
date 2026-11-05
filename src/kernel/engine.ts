@@ -49,7 +49,7 @@ import { projectPolyline } from "../sketch/edit";
 import { cageToShape } from "./freeform";
 import { deleteFaces, subdivide } from "../freeform/cage";
 import { deleteFace, offsetFace, planeOf, replaceFacePlane, unify } from "./faceEdit";
-import { entitiesWire, regionFaces, regionWire } from "./sketchGeom";
+import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import type { BodyMesh, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
 type Bodies = Map<string, Shape3D>;
@@ -185,7 +185,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       if (f.mode === "auto") {
         const hit = overlapping(solid, ctx, f.target);
         for (const id of hit) {
-          const cut = need(bodies, id).cut(solid);
+          const cut = fuzzyBoolean("cut", need(bodies, id), solid);
           if (isEmpty(cut)) bodies.delete(id);
           else bodies.set(id, cut);
           ctx.freeforms.delete(id);
@@ -206,7 +206,14 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         return;
       }
       if (Math.abs(f.angle) > 360 + 1e-6) throw new Error("More than one turn needs a Travel along the axis (or it overlaps itself)");
-      const parts = sourceFaces(f.source, ctx).map(({ face }) => revolution(face, axis.origin, axis.dir, f.angle));
+      const turn = () => sourceFaces(f.source, ctx).map(({ face }) => revolution(face, axis.origin, axis.dir, f.angle));
+      let parts: Shape3D[];
+      try {
+        parts = turn();
+      } catch {
+        // A profile whose exact spline won't turn (it touches the axis awkwardly): a close fit does.
+        parts = withFittedSplines(turn);
+      }
       combine(f.id, f.mode, f.target, fuseAll(parts), false, ctx);
       return;
     }
@@ -894,9 +901,40 @@ function combine(id: string, mode: string, target: string | undefined, solid: Sh
     return;
   }
   const t = need(ctx.bodies, target);
-  const result = m === "join" ? t.fuse(solid) : m === "cut" ? t.cut(solid) : t;
+  const result = m === "join" ? fuzzyBoolean("fuse", t, solid) : m === "cut" ? fuzzyBoolean("cut", t, solid) : t;
   if (isEmpty(result)) ctx.bodies.delete(target);
   else ctx.bodies.set(target, result);
+}
+
+/**
+ * A boolean that treats surfaces within a small tolerance as the same (OCCT's
+ * fuzzy option): geometry built from a body's own edges lines up with it.
+ */
+function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Shape3D {
+  const oc = getOC();
+  const bb = a.boundingBox;
+  const tol = Math.max(1e-7, Math.hypot(bb.width, bb.height, bb.depth) * 1e-6);
+  const algo = op === "cut" ? new oc.BRepAlgoAPI_Cut() : op === "fuse" ? new oc.BRepAlgoAPI_Fuse() : new oc.BRepAlgoAPI_Common();
+  const args = new oc.NCollection_List_TopoDS_Shape();
+  const tools = new oc.NCollection_List_TopoDS_Shape();
+  try {
+    args.Append(a.wrapped);
+    tools.Append(b.wrapped);
+    algo.SetArguments(args);
+    algo.SetTools(tools);
+    algo.SetFuzzyValue(tol);
+    algo.Build(new oc.Message_ProgressRange());
+    if (!algo.IsDone()) throw new Error("boolean failed");
+    const out = cast(algo.Shape()) as Shape3D;
+    // Fuse and cut keep their faces tidy like the usual booleans do.
+    return op === "common" ? out : (unify(out) as Shape3D);
+  } catch {
+    return op === "cut" ? a.cut(b) : op === "fuse" ? a.fuse(b) : a.intersect(b);
+  } finally {
+    algo.delete();
+    args.delete();
+    tools.delete();
+  }
 }
 
 /** Bodies (other than `skip`) that `solid` really overlaps (not just touches). */
@@ -910,7 +948,9 @@ function overlapping(solid: Shape3D, ctx: Ctx, skip?: string): string[] {
     const apart = [0, 1, 2].some((k) => (bb.bounds[1] as number[])[k] < (sb.bounds[0] as number[])[k] || (bb.bounds[0] as number[])[k] > (sb.bounds[1] as number[])[k]);
     if (apart) continue;
     try {
-      const common = body.intersect(solid);
+      // Tolerant: a wall drawn from the body's own edge (projected, offset…) sits a hair
+      // off the body's surface, and an exact boolean then finds no overlap at all.
+      const common = fuzzyBoolean("common", body, solid);
       if (!isEmpty(common) && Math.abs(measureVolume(common)) > Math.max(1e-9, Math.min(vs, Math.abs(measureVolume(body))) * 1e-6)) out.push(id);
     } catch {
       // can't tell: leave it alone
@@ -1120,7 +1160,8 @@ function openEdges(shape: Shape3D): number[] {
       if (m) m.n += oc.BRep_Tool.IsClosed(fe.wrapped, f.wrapped) ? 2 : 1;
     }
   }
-  return [...buckets.values()].flat().filter((x) => x.n < 2).map((x) => x.i);
+  // A pole (where a revolved profile touches the axis) is a point-edge, not a gap.
+  return [...buckets.values()].flat().filter((x) => x.n < 2 && !oc.BRep_Tool.Degenerated(x.e.wrapped)).map((x) => x.i);
 }
 
 // ------------------------------------------------------------------- helpers

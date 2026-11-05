@@ -195,6 +195,44 @@ for (const [name, features, describe] of tests) {
   console.log(ok ? "ok  " : "FAIL", "union of bodies that don't touch is refused");
 }
 
+// A profile with a spline starting on the revolve axis turns (no Travel needed).
+{
+  const prof = [
+    { id: "ax", kind: "line", a: [0, 0], b: [60, 0] },
+    { id: "sp", kind: "spline", points: [[60, 0], [30, 40], [50, 80], [60, 160]], closed: false, mode: "fit" },
+    { id: "t", kind: "line", a: [60, 160], b: [-10, 160] },
+    { id: "l1", kind: "line", a: [-10, 160], b: [-10, 80] },
+    { id: "l2", kind: "line", a: [-10, 80], b: [20, 80] },
+    { id: "l3", kind: "line", a: [20, 80], b: [20, 20] },
+    { id: "l4", kind: "line", a: [20, 20], b: [0, 20] },
+    { id: "l5", kind: "line", a: [0, 20], b: [0, 0] },
+  ];
+  const r = await regenerate([sketch("rv", XY, prof), { id: "rev", name: "Revolve", type: "revolve", source: { kind: "profile", sketch: "rv", regions: regions(prof) }, axis: { origin: [0, 0, 0], dir: [1, 0, 0], ref: { kind: "sketchLine", sketch: "rv", entity: "ax" } }, angle: 360, mode: "auto" } as Feature]);
+  const ok = !r.errors.length && r.bodies.length === 1;
+  if (!ok) failed++;
+  console.log(ok ? "ok  " : "FAIL", "revolve: spline leaving the axis", r.errors.map((e) => e.message).join());
+}
+
+// Extruding a ring drawn from a body's own edge (a hair off its surface) still cuts through it.
+{
+  const ringBody = [{ id: "r1", kind: "rect", center: [60, 65], w: 60, h: 50, rotation: 0 }];
+  const XZn: PlaneDef = { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, -1, 0] };
+  const ring = [
+    { id: "o", kind: "circle", center: [0.0000013696, -0.00000046], radius: 89.9999986303581 },
+    { id: "i", kind: "circle", center: [0.0000013696, -0.00000046], radius: 79.9999986303581 },
+  ];
+  const ringRegion = arrangement(ring as any).regions.filter((g) => g.holes.length).map(regionRef);
+  const r = await regenerate([
+    sketch("b", XY, ringBody),
+    { id: "rb", name: "Revolve", type: "revolve", source: { kind: "profile", sketch: "b", regions: regions(ringBody) }, axis: { origin: [0, 0, 0], dir: [0, 1, 0] }, angle: 360, mode: "auto" },
+    sketch("c", XZn, ring),
+    { id: "cut", name: "Extrude", type: "extrude", source: { kind: "profile", sketch: "c", regions: ringRegion }, distance: -61, mode: "auto" },
+  ]);
+  const ok = !r.errors.length && r.bodies.length === 1 && r.bodies[0].faces.length > 4;
+  if (!ok) failed++;
+  console.log(ok ? "ok  " : "FAIL", "extrude through a body from its own (projected) edge cuts it", r.bodies.length, r.errors.map((e) => e.message).join());
+}
+
 // Closed solids report no open edges.
 {
   const r = await regenerate(base);

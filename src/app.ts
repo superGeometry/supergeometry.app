@@ -23,6 +23,7 @@ import { setUnits, setVariables } from "./units";
 import { InputRouter } from "./view/input";
 import { ViewCube } from "./view/viewcube";
 import { PivotButton } from "./ui/pivot";
+import { HelpPanel } from "./ui/help";
 import { isHeadset } from "./device";
 import { Viewport } from "./view/viewport";
 
@@ -647,7 +648,9 @@ export class App implements AppContext {
       else this.ui.toast("Tip: Share → Add to Home Screen opens supergeometry.app full screen");
     });
     // Help and Tutorial: placeholders for now.
-    moreItem("m-help", () => {});
+    // Help: a panel explaining every button (toggle it from More → Help).
+    const help = new HelpPanel();
+    moreItem("m-help", () => help.toggle());
     moreItem("m-tutorial", () => {});
     // About → the project on GitHub; support → MakerWorld (new tab, no access back to this page).
     const openTab = (url: string) => window.open(url, "_blank", "noopener");

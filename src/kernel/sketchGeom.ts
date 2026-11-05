@@ -94,7 +94,7 @@ function pieceEdge(arr: Arrangement, pc: Piece, plane: PlaneDef): Edge {
  * `a`/`b` pin the ends onto the arrangement's nodes so neighbours meet.
  */
 function exactSpline(p: Prim, t0: number, t1: number, plane: PlaneDef, a?: Vec2, b?: Vec2): Edge | null {
-  if (p.t !== "spline" || !p.ctrl) return null;
+  if (p.t !== "spline" || !p.ctrl || approxOnly) return null;
   const spans = splineSpans(p.ctrl);
   const n = p.pts.length - 1;
   if (n !== spans * SPLINE_PER_SPAN) return null;
@@ -138,11 +138,31 @@ function exactSpline(p: Prim, t0: number, t1: number, plane: PlaneDef, a?: Vec2,
       arr.SetValue(i + 1, pt);
       pt.delete();
     });
+    // Knots spaced like the spline's own parameter (centripetal for fit
+    // points): then the pieces join smoothly in parameter too, and the
+    // repeated joins can be thinned to C1 — revolves need a smooth profile.
+    const ctrl = p.ctrl;
+    const n = ctrl.points.length;
+    const at = (i: number) => ctrl.points[ctrl.closed ? ((i % n) + n) % n : Math.max(0, Math.min(n - 1, i))];
+    const spanLen = (sIdx: number) => {
+      if (ctrl.mode !== "fit") return 1;
+      const s0 = ((sIdx % spans) + spans) % spans;
+      const a0 = at(s0);
+      const a1 = at(s0 + 1);
+      return Math.max(1e-9, Math.sqrt(Math.hypot(a1[0] - a0[0], a1[1] - a0[1])));
+    };
+    let t = 0;
     for (let i = 0; i <= m; i++) {
-      knots.SetValue(i + 1, i);
+      if (i > 0) {
+        const [u0, u1] = [cuts[i - 1], cuts[i]];
+        t += (u1 - u0) * spanLen(Math.floor(u0 + 1e-9));
+      }
+      knots.SetValue(i + 1, t);
       mults.SetValue(i + 1, i === 0 || i === m ? 4 : 3);
     }
     const curve = new oc.Geom_BSplineCurve(arr, knots, mults, 3, false);
+    const tol = 1e-6 * Math.max(1, ...poles.map((q) => Math.hypot(q[0], q[1])));
+    for (let i = 2; i <= m; i++) curve.RemoveKnot(i, 2, tol);
     const mk = new oc.BRepBuilderAPI_MakeEdge(curve);
     const edge = cast(mk.Edge()) as Edge;
     mk.delete();
@@ -153,6 +173,18 @@ function exactSpline(p: Prim, t0: number, t1: number, plane: PlaneDef, a?: Vec2,
     arr.delete();
     knots.delete();
     mults.delete();
+  }
+}
+
+/** Splines as close fits instead of their exact curves (a fallback when an exact one won't build). */
+let approxOnly = false;
+
+export function withFittedSplines<T>(fn: () => T): T {
+  approxOnly = true;
+  try {
+    return fn();
+  } finally {
+    approxOnly = false;
   }
 }
 
