@@ -837,8 +837,6 @@ export class SketchTool implements Tool {
         break;
       case "move":
         items.push(
-          { type: "number", label: "Δ X", value: this.edit.dx, kind: "length", onInput: (v) => ((this.edit.dx = v), this.refreshPreview()) },
-          { type: "number", label: "Δ Y", value: this.edit.dy, kind: "length", onInput: (v) => ((this.edit.dy = v), this.refreshPreview()) },
           { type: "number", label: "Rotate", value: this.edit.moveRot, kind: "angle", onInput: (v) => ((this.edit.moveRot = v), this.refreshPreview()) },
           { type: "toggle", label: "Copy", value: this.edit.copy, onChange: (v) => ((this.edit.copy = v), this.updatePanel()) },
           apply(`Apply (${selCount})`, () => this.applyTransform()),

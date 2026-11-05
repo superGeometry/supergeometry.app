@@ -58,8 +58,6 @@ export class SketchMoveOp extends FeatureOp<SketchFeature> {
     };
     return [
       { type: "number", label: "Distance", value: along, kind: "length", onInput: (v) => set(2, v) },
-      { type: "number", label: "Δ X", value: dot(this.d, this.axes[0]), kind: "length", onInput: (v) => set(0, v) },
-      { type: "number", label: "Δ Y", value: dot(this.d, this.axes[1]), kind: "length", onInput: (v) => set(1, v) },
       {
         type: "toggle",
         label: "Copy",

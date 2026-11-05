@@ -804,14 +804,17 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       },
     };
     const copy: PanelItem[] = this.feature.copy && !this.existing ? [copyToggle, link] : [copyToggle];
+    // ΔX ΔY ΔZ: only when changing a step opened from History (moving is done
+    // by dragging, or typing while dragging — the numbers there are just clutter).
+    const deltas = (): PanelItem[] => (this.existing ? (["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `op.translate.${i}`, "length")) : []);
     switch (o.kind) {
       case "scaleXYZ":
         return [];
       case "move":
-        if (this.kind === "translate") return [...(["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `op.translate.${i}`, "length")), ...copy];
+        if (this.kind === "translate") return [...deltas(), ...copy];
         if (this.kind === "rotate") return [{ type: "number", label: "Angle", value: o.rotate?.angle ?? 0, kind: "angle", onInput: (v) => ((o.rotate = { ...(o.rotate ?? { origin: [0, 0, 0], axis: [0, 0, 1] }), angle: v }), up()) }, ...copy];
         return [
-          ...(["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `op.translate.${i}`, "length")),
+          ...deltas(),
           o.rotate
             ? this.num(`Rotate ${axisName(o.rotate.axis)}`, "op.rotate.angle", "angle")
             : { type: "number", label: "Rotate Z", value: 0, kind: "angle", onInput: (v) => ((o.rotate = { origin: this.center, axis: [0, 0, 1], angle: v }), up()) },
@@ -1011,7 +1014,8 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
 
   protected items(): PanelItem[] {
     const f = this.feature;
-    const xyz = (["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `translate.${i}`, "length"));
+    // ΔX ΔY ΔZ only when changing a step opened from History.
+    const xyz = this.existing ? (["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `translate.${i}`, "length")) : [];
     if (f.vertex) return xyz;
     return [
       ...xyz,
