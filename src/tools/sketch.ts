@@ -644,7 +644,7 @@ export class SketchTool implements Tool {
       icon,
       shortcut,
       active: this.kind === kind,
-      run: () => this.setKind(kind),
+      run: () => this.pickTool(kind),
       ...extra,
     });
     const variant = <T extends string>(kind: Kind, key: "rect" | "spline" | "trim", options: [T, string][]): ToolItem[] =>
@@ -708,6 +708,18 @@ export class SketchTool implements Tool {
     this.showSelection();
     this.updatePanel();
     this.refreshPreview();
+  }
+
+  /**
+   * A tool tapped in the column. The one already in use: (phones) its names
+   * come back, or go again — what you're drawing carries on. Another: switch.
+   */
+  private pickTool(kind: Kind): void {
+    if (kind === this.kind && this.phase === "draw") {
+      document.body.classList.toggle("sketch-compact");
+      return;
+    }
+    this.setKind(kind);
   }
 
   setKind(kind: Kind): void {
@@ -1896,6 +1908,8 @@ export class SketchTool implements Tool {
   }
 
   private addPoint(uv: Vec2, count: number): void {
+    // Drawing started: (phones) the tool column shrinks to its icons.
+    document.body.classList.add("sketch-compact");
     // The next tap finishes the length being typed for the line before.
     if (this.lineBox) this.closeLineBox();
     const c = this.lockedCursor() ?? uv;
