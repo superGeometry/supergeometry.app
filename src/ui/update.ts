@@ -28,7 +28,7 @@ export class Updates {
   /** `beforeReload` saves the project before the page is reloaded. */
   constructor(private beforeReload: () => Promise<void>) {
     this.banner.hidden = true;
-    const text = el("span", "", "A newer version of supergeometry.app is ready.");
+    const text = el("span", "", "New app version available");
     const now = el("button", "text-btn primary", "Update now");
     now.addEventListener("click", () => void this.reset());
     const later = el("button", "text-btn", "Later");

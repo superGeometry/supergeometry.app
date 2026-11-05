@@ -7,7 +7,29 @@
 // answers on the key's release, and only closes on ↵, or a tap elsewhere.
 // Nothing is applied while typing: ↵ applies it (tool panel boxes preview as you type).
 
+import { screenClass } from "../device";
 import { settings } from "../settings";
+
+/** Where the numpad was dragged to, per kind of screen (it stays there). */
+const POS_KEY = "sg-numpad-pos";
+type Spot = { x: number; y: number };
+function savedSpots(): Record<string, Spot> {
+  try {
+    return JSON.parse(localStorage.getItem(POS_KEY) ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+function saveSpot(spot: Spot | null): void {
+  try {
+    const all = savedSpots();
+    if (spot) all[screenClass()] = spot;
+    else delete all[screenClass()];
+    localStorage.setItem(POS_KEY, JSON.stringify(all));
+  } catch {
+    // private window: it just isn't remembered
+  }
+}
 
 const KEYS = ["7", "8", "9", "⌫", "4", "5", "6", "−", "1", "2", "3", "↵", "ƒx", "0", "."];
 
@@ -23,6 +45,40 @@ class Numpad {
   constructor() {
     this.el.className = "numpad";
     this.el.hidden = true;
+    // The grip along the top: drag it to put the numpad where you want it — it
+    // opens there from then on. Double-tap it: back to opening by the box.
+    const grip = document.createElement("div");
+    grip.className = "np-grip";
+    grip.title = "Drag to move · double-tap to put it back by the box";
+    grip.innerHTML = "<span></span>";
+    let drag: { id: number; dx: number; dy: number; moved: boolean } | null = null;
+    let lastTap = 0;
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const r = this.el.getBoundingClientRect();
+      drag = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false };
+      grip.setPointerCapture(e.pointerId);
+    });
+    grip.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.moved = true;
+      this.moveTo(e.clientX - drag.dx, e.clientY - drag.dy);
+    });
+    const end = (e: PointerEvent) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (drag.moved) saveSpot({ x: parseFloat(this.el.style.left), y: parseFloat(this.el.style.top) });
+      else if (performance.now() - lastTap < 350) {
+        saveSpot(null);
+        this.place();
+      } else lastTap = performance.now();
+      drag = null;
+    };
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+    this.el.append(grip);
     for (const k of KEYS) {
       const b = document.createElement("button");
       b.type = "button";
@@ -113,10 +169,20 @@ class Numpad {
     }
   }
 
-  /** Below the box (or above it near the bottom), kept on screen. */
+  /** On screen, whole. */
+  private moveTo(x: number, y: number): void {
+    const w = this.el.offsetWidth;
+    const h = this.el.offsetHeight;
+    this.el.style.left = `${Math.round(Math.max(4, Math.min(window.innerWidth - w - 4, x)))}px`;
+    this.el.style.top = `${Math.round(Math.max(4, Math.min(window.innerHeight - h - 4, y)))}px`;
+  }
+
+  /** Where it was dragged to last (on this kind of screen); else below the box (or above it near the bottom). */
   private place(): void {
     const t = this.target;
     if (!t) return;
+    const spot = savedSpots()[screenClass()];
+    if (spot) return this.moveTo(spot.x, spot.y);
     const r = t.getBoundingClientRect();
     const w = this.el.offsetWidth;
     const h = this.el.offsetHeight;

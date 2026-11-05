@@ -2559,3 +2559,43 @@ html body #topbar .project-name {
     overflow-y: auto;
   }
 }
+
+/* The numpad's grip: drag it to move the numpad (it stays there). */
+.numpad .np-grip {
+  grid-column: 1 / -1;
+  height: 18px;
+  margin: -4px 0 0;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+.numpad .np-grip span {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--muted);
+  opacity: 0.6;
+}
+.numpad .np-grip:active {
+  cursor: grabbing;
+}
+/* Phones: keys the size of the tool buttons (40 px). */
+html[data-screen="phone"] .numpad {
+  grid-template-columns: repeat(4, 40px);
+  gap: 4px;
+  padding: 6px;
+  border-radius: 12px;
+}
+html[data-screen="phone"] .numpad button {
+  height: 40px;
+  border-radius: 8px;
+  font-size: 17px;
+}
+html[data-screen="phone"] .numpad .np-enter {
+  height: auto;
+}
+html[data-screen="phone"] .numpad .np-grip {
+  height: 16px;
+  margin-top: -2px;
+}
