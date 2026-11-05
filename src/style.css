@@ -2633,3 +2633,25 @@ html[data-screen="phone"] body.is-fullscreen {
   gap: 8px;
   padding: 6px 8px 6px 14px;
 }
+
+/* The card's grip (like the numpad's): drag it to move the card. */
+#panel .panel-grip {
+  flex: 0 0 100%;
+  align-self: stretch;
+  height: 14px;
+  margin: -4px 0 -2px;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+#panel .panel-grip span {
+  width: 32px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--muted);
+  opacity: 0.55;
+}
+#panel .panel-grip:active {
+  cursor: grabbing;
+}

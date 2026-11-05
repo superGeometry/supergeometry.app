@@ -563,7 +563,7 @@ export class UI {
     // name. It hangs under the tool's value box on the model (or by the pointer).
     this.panel.classList.add("as-list");
     this.followPanel();
-    this.panel.append(el("div", "panel-title", spec.title));
+    this.panel.append(this.panelGrip(), el("div", "panel-title", spec.title));
     const row = el("div", "panel-fields");
     const items: PanelItem[] = [
       ...(spec.fields ?? []).map(
@@ -787,10 +787,88 @@ export class UI {
     p.style.top = `${Math.round(Math.max(52, H - M - p.offsetHeight))}px`;
   }
 
+  /** Where the card was dragged to, per kind of screen (it stays there). */
+  private static PANEL_POS = "sg-panel-pos";
+  private panelSpot(): { x: number; y: number } | null {
+    try {
+      return JSON.parse(localStorage.getItem(UI.PANEL_POS) ?? "{}")?.[screenClass()] ?? null;
+    } catch {
+      return null;
+    }
+  }
+  private savePanelSpot(spot: { x: number; y: number } | null): void {
+    try {
+      const all = JSON.parse(localStorage.getItem(UI.PANEL_POS) ?? "{}") ?? {};
+      if (spot) all[screenClass()] = spot;
+      else delete all[screenClass()];
+      localStorage.setItem(UI.PANEL_POS, JSON.stringify(all));
+    } catch {
+      // private window: not remembered
+    }
+  }
+  private panelDragging = false;
+
+  /**
+   * The grip along the card's top (like the numpad's): drag it to put the card
+   * where you want — it opens there from then on, on this kind of screen.
+   * Double-tap it: back to finding its own place.
+   */
+  private panelGrip(): HTMLElement {
+    const grip = el("div", "panel-grip");
+    grip.title = "Drag to move · double-tap to let it place itself";
+    grip.append(el("span", ""));
+    let drag: { id: number; dx: number; dy: number; moved: boolean } | null = null;
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const r = this.panel.getBoundingClientRect();
+      drag = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false };
+      this.panelDragging = true;
+      grip.setPointerCapture(e.pointerId);
+    });
+    grip.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag.moved = true;
+      this.putPanel(e.clientX - drag.dx, e.clientY - drag.dy);
+    });
+    const end = (e: PointerEvent) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (drag.moved) this.savePanelSpot({ x: parseFloat(this.panel.style.left), y: parseFloat(this.panel.style.top) });
+      else if (performance.now() - this.lastGripTap < 350) {
+        this.savePanelSpot(null);
+        this.panelSide = -1;
+      } else this.lastGripTap = performance.now();
+      drag = null;
+      this.panelDragging = false;
+    };
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+    return grip;
+  }
+  private lastGripTap = 0;
+
+  /** The card at this spot, kept whole on screen. */
+  private putPanel(x: number, y: number): void {
+    const p = this.panel;
+    p.style.left = `${Math.round(Math.max(4, Math.min(window.innerWidth - p.offsetWidth - 4, x)))}px`;
+    p.style.top = `${Math.round(Math.max(4, Math.min(window.innerHeight - p.offsetHeight - 4, y)))}px`;
+  }
+
   private placePanel(): void {
     const p = this.panel;
     const box = [...document.querySelectorAll<HTMLElement>(".dim-widget.editable")].filter((e) => !e.hidden && e.offsetWidth).pop();
     p.classList.toggle("attached", !!box);
+    // Being dragged, or put somewhere by hand: it stays there.
+    if (this.panelDragging) return;
+    const spot = this.panelSpot();
+    if (spot) {
+      if (screenClass() === "phone") p.style.maxWidth = `${window.innerWidth - 16}px`;
+      this.putPanel(spot.x, spot.y);
+      this.panelSide = 0;
+      return;
+    }
     // Phones: one fixed place, right above the hint text (or the bottom
     // buttons) — never chasing the model across a small screen.
     if (screenClass() === "phone") {
