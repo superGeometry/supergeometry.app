@@ -2356,6 +2356,9 @@ export class SketchTool implements Tool {
     const plane = this.plane!;
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (len < 1e-9) return this.hideLineDim();
+    // The next line is under way: only its length shows — the box of the line
+    // before goes (unless something was typed into it).
+    if (this.lineBox && !this.lineBox.edited) this.closeLineBox();
     const w = (q: Vec2) => sketchToWorld(plane, q, 0.02).toArray() as Vec3;
     this.lineDim ??= new DimWidget(this.app.view, {
       solidColor: 0xffc23d,
