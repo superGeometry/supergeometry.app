@@ -94,6 +94,10 @@ export interface DimWidgetOptions {
   boxGap?: number;
   /** Which way "beyond" goes when the dimension has no length yet (e.g. the arrow's direction). */
   dir?: Vec3;
+  /** An angle in degrees (no unit conversion, ° label) instead of a length. */
+  angle?: boolean;
+  /** No dimension line (just the box, e.g. at the corner between two lines). */
+  noLine?: boolean;
   /** Variables to choose from (a ƒx menu before the pin): the value becomes that variable. */
   variables?: string[];
   onVariable?(name: string): void;
@@ -138,10 +142,12 @@ export class DimWidget {
     this.input.inputMode = "decimal";
     numpadInput(this.input);
     this.input.spellcheck = false;
-    this.input.value = opts.typed ?? trim(toDisplay(opts.value), 3);
+    this.angle = !!opts.angle;
+    this.line.group.visible = !opts.noLine;
+    this.input.value = opts.typed ?? this.show(opts.value);
     this.input.readOnly = !opts.onInput;
     this.input.addEventListener("input", () => {
-      const v = evaluate(this.input.value, "length");
+      const v = evaluate(this.input.value, this.angle ? "angle" : "length");
       this.input.classList.toggle("invalid", v === null);
       if (v !== null) opts.onInput?.(v);
     });
@@ -150,7 +156,7 @@ export class DimWidget {
       if (e.key === "Enter") opts.onCommit?.();
       if (e.key === "Escape") this.input.blur();
     });
-    this.box.append(this.input, el("span", "dim-unit", UNIT_LABEL[units()]));
+    this.box.append(this.input, el("span", "dim-unit", this.angle ? "°" : UNIT_LABEL[units()]));
     if (opts.onVariable && opts.variables?.length) {
       // ƒx: pick one of the project's variables for this value.
       const sel = document.createElement("select");
@@ -193,6 +199,12 @@ export class DimWidget {
     }
   }
 
+  private angle = false;
+
+  private show(v: number): string {
+    return this.angle ? trim(v, 2) : trim(toDisplay(v), 3);
+  }
+
   get text(): string {
     return this.input.value;
   }
@@ -207,7 +219,7 @@ export class DimWidget {
   }
 
   setValue(v: number): void {
-    if (document.activeElement !== this.input) this.input.value = trim(toDisplay(v), 3);
+    if (document.activeElement !== this.input) this.input.value = this.show(v);
     this.box.classList.remove("typing", "invalid");
   }
 

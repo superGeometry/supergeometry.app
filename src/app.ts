@@ -70,7 +70,10 @@ export class App implements AppContext {
       if (on) busyTimer = window.setTimeout(() => (busy.hidden = false), 300);
       else busy.hidden = true;
     };
-    document.getElementById("viewcube-host")!.append(new ViewCube(this.view).el, new PivotButton(this.view, (t) => this.ui.toast(t)).el);
+    const cube = new ViewCube(this.view);
+    document.getElementById("viewcube-host")!.append(cube.el);
+    // The orbit centre button sits at the cube's bottom left (Views at its bottom right).
+    cube.el.append(new PivotButton(this.view, (t) => this.ui.toast(t)).el);
     setupRightColumn(this.ui, this.view, this.store, (u) => this.setUnits(u));
     this.pinLayer = new PinLayer(this.view);
     // ƒx buttons on number fields create named variables.

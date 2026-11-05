@@ -94,9 +94,12 @@ There's no wrong order. Undo (bottom left) is always one tap away.
 | Deselect | Esc or click empty space | tap empty space | tap empty space |
 
 - **Fit** (right column) zooms so everything is on screen.
-- **View cube** (top right): tap a face for a straight-on view (Top, Front…).
-- **Orbit centre** (the small target under the cube): tap it, then tap a
-  point — the view now turns around that point. Fit resets it.
+- **View cube** (top right): tap a face for a straight-on view (Top, Front…);
+  ⟲ ⟳ at its top corners turn the view by 90°.
+- **Orbit centre** (the cube's bottom-left button): tap it, then tap a point —
+  the view now turns around that point. Fit resets it.
+- **Views** (the cube's bottom-right button): standard and saved views, and
+  how the view looks; tap again to close.
 - On touch screens, **press and hold a tool** to see its name in the middle
   of the screen; let go on it to use it, slide off to cancel.
 
@@ -104,7 +107,7 @@ There's no wrong order. Undo (bottom left) is always one tap away.
 
 ## The screen, piece by piece
 
-**Top bar** — the project name (tap to rename), **File** (new / open / save /
+**Top bar** (top centre) — the project name (tap to rename), **File** (new / open / save /
 export), **Items** (a list of everything, with eyes to hide or show and
 folders to group), **More** (fullscreen, Help, About, support).
 
@@ -113,7 +116,7 @@ folders to group), **More** (fullscreen, Help, About, support).
 Insert…). With something selected you only see what can be done with it.
 
 **Right column** (middle of the right edge) — Fit, Snapping, Units & grid,
-Views, Display mode, Screenshot, Numpad (on / off), History, and in a sketch,
+Display mode, Screenshot, Numpad (on / off), History, and in a sketch,
 Constraints.
 
 **Bottom left** — Undo / Redo, Section View (cut the view open), Measure and

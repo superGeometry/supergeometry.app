@@ -2087,3 +2087,111 @@ body:has(#flyout:not([hidden])) #warn {
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* --------------- cube zone: four small round buttons at the cube's corners */
+.vc-roll {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 1;
+}
+.vc-roll.bottom {
+  top: auto;
+  bottom: 0;
+}
+.vc-roll svg {
+  width: 15px;
+  height: 15px;
+}
+.vc-roll.pivot-btn {
+  margin: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+.vc-roll.pivot-btn.on,
+.vc-roll.pop-open {
+  color: var(--accent);
+  background: var(--chrome);
+}
+body.headset .vc-roll {
+  width: 30px;
+  height: 30px;
+}
+
+/* ---------- top bar at the top centre, on every device (clear of the corners,
+   where tablets put their own buttons in fullscreen and the view cube sits) */
+body #topbar {
+  left: 50%;
+  right: auto !important;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 272px);
+}
+.brand {
+  width: auto;
+  margin-right: 4px;
+}
+.project-name {
+  flex: 0 1 300px;
+  width: auto;
+  min-width: 80px;
+}
+/* History docked on the right: centred in the space left of it and the view cube. */
+body.history-open #topbar {
+  left: calc((100vw - 384px) / 2);
+  max-width: calc(100vw - 400px);
+}
+@media (max-width: 1100px) {
+  .brand {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  body #topbar,
+  body.history-open #topbar {
+    left: 50%;
+    width: calc(100vw - 16px);
+    max-width: none;
+  }
+  .project-name {
+    flex: 1 1 auto;
+  }
+  /* File / More open at the left edge on phones (like Items), not off the right.
+     (The bar spans the width, so its left edge is the screen's left gutter.) */
+  .menu-wrap {
+    position: static;
+  }
+  #file-menu,
+  #more-menu {
+    left: 0;
+    top: 44px;
+    max-width: calc(100vw - 16px);
+  }
+}
+@media (max-height: 600px) and (min-width: 721px) {
+  body #topbar {
+    max-width: calc(100vw - 380px);
+  }
+  body.history-open #topbar {
+    left: calc((100vw - 318px) / 2);
+    max-width: calc(100vw - 318px - 380px);
+  }
+}
+.brand {
+  flex: none;
+}
+@media (max-height: 600px) and (min-width: 721px) {
+  /* History docked: centred in the space left of it and the view cube. */
+  body.history-open #topbar {
+    left: calc((100vw - 436px) / 2);
+    max-width: calc(100vw - 452px);
+  }
+}

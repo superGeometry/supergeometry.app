@@ -15,7 +15,7 @@ export class PivotButton {
   private marker: Points;
 
   constructor(private view: Viewport, private toast: (text: string) => void) {
-    this.el.className = "pivot-btn";
+    this.el.className = "vc-roll bottom left pivot-btn";
     this.el.title = "Orbit centre: tap here, then tap where the view should turn around";
     this.el.innerHTML = icons.pivot;
     this.el.addEventListener("click", () => this.setChoosing(!this.choosing));

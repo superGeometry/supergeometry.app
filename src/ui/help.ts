@@ -16,8 +16,9 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     intro: "Drag with one finger or the left mouse button to turn the view, two fingers or the right button to move it, pinch or scroll to zoom. On touch screens, press and hold a tool to see its name — let go on it to use it, slide off to cancel.",
     items: [
       { icon: "fit", name: "Fit", text: "Zooms so everything fits on screen (F)." },
-      { icon: "pivot", name: "Orbit centre", text: "Under the view cube: tap it, then tap a point — the view turns around that point. Fit resets it." },
-      { icon: "views", name: "View cube & Views", text: "Tap a face of the cube for a straight-on view. Views saves and restores camera positions." },
+      { icon: "views", name: "View cube", text: "Tap a face of the cube for a straight-on view; ⟲ ⟳ at its top corners turn the view by 90°." },
+      { icon: "pivot", name: "Orbit centre", text: "The cube's bottom-left button: tap it, then tap a point — the view turns around that point. Fit resets it." },
+      { icon: "views", name: "Views & appearance", text: "The cube's bottom-right button opens (and closes) standard and saved views and the look of the view." },
     ],
   },
   {

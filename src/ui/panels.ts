@@ -56,7 +56,9 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
     () => UNIT_LABEL[units()],
   );
 
-  ui.addRight("views", "views", "Views", (host) => {
+  // Views: a small toggle at the view cube's bottom right (the orbit centre is at its bottom left).
+  const cube = document.getElementById("viewcube")!;
+  ui.addRight("views", "views", "Views & appearance (tap to open / close)", (host) => {
     const tabs = el("div", "pop-tabs");
     const views = el("button", "", "Views");
     const appearance = el("button", "active", "Appearance");
@@ -107,7 +109,7 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
     views.addEventListener("click", showViews);
     appearance.addEventListener("click", showAppearance);
     showAppearance();
-  });
+  }, undefined, { host: cube, className: "vc-roll bottom right vc-views" });
 
   ui.addRight("display", "display", "Display modes", (host) => {
     const s = settings.value;

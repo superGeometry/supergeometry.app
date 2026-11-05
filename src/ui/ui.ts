@@ -304,9 +304,9 @@ export class UI {
 
   // ------------------------------------------------------------ right column
 
-  addRight(id: string, icon: IconName, title: string, open: (host: HTMLElement) => void, label?: () => string): HTMLButtonElement {
+  addRight(id: string, icon: IconName, title: string, open: (host: HTMLElement) => void, label?: () => string, place?: { host: HTMLElement; className: string }): HTMLButtonElement {
     const b = document.createElement("button");
-    b.className = "right-btn";
+    b.className = place ? place.className : "right-btn";
     b.title = title;
     b.innerHTML = icons[icon];
     if (label) {
@@ -329,12 +329,22 @@ export class UI {
       if (!this.popover.childElementCount) return this.closePopover();
       this.popover.hidden = false;
       const r = b.getBoundingClientRect();
-      this.popover.style.top = `${Math.max(8, Math.min(r.top, window.innerHeight - this.popover.offsetHeight - 8))}px`;
-      this.rightCol.querySelectorAll(".right-btn").forEach((x) => x.classList.toggle("pop-open", x === b));
+      if (place) {
+        // Opened from the view cube: under the cube, its right edge lined up with the button.
+        // (Clear of the right-hand column below it.)
+        const col = this.rightCol.getBoundingClientRect();
+        this.popover.style.right = `${Math.max(window.innerWidth - r.right, col.width ? window.innerWidth - col.left + 8 : 8)}px`;
+        this.popover.style.top = `${Math.min(r.bottom + 6, window.innerHeight - this.popover.offsetHeight - 8)}px`;
+      } else {
+        this.popover.style.right = "";
+        this.popover.style.top = `${Math.max(8, Math.min(r.top, window.innerHeight - this.popover.offsetHeight - 8))}px`;
+      }
+      document.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));
+      b.classList.add("pop-open");
       // Things placed beside the right column (the constraint column) move over.
       window.dispatchEvent(new Event("resize"));
     });
-    this.rightCol.append(b);
+    (place?.host ?? this.rightCol).append(b);
     return b;
   }
 
@@ -350,7 +360,7 @@ export class UI {
     if (this.popover.hidden) return;
     this.popover.hidden = true;
     this.popoverFill = null;
-    this.rightCol.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));
+    document.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));
     window.dispatchEvent(new Event("resize"));
   }
 

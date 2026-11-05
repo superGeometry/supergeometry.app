@@ -256,6 +256,8 @@ export class SketchTool implements Tool {
     this.patBox = null;
     this.sizeDim?.dispose();
     this.sizeDim = null;
+    this.angleDim?.dispose();
+    this.angleDim = null;
     this.closeLineBox();
     this.copyToggle?.dispose();
     this.copyToggle = null;
@@ -585,6 +587,7 @@ export class SketchTool implements Tool {
     app.ui.setTools([
       exit,
       { id: "---1", label: "", icon: "line" },
+      t("select", "Select", "pointer", "V"),
       t("line", "Line", "line", "L"),
       t("arc", "Arc", "arc", "A"),
       t("spline", "Spline", "spline", "I", { sub: memory.spline === "fit" ? "Fit" : "Control", children: variant("spline", "spline", [["fit", "Fit points"], ["control", "Control points"]]) }),
@@ -611,8 +614,8 @@ export class SketchTool implements Tool {
         sub: memory.pattern === "patternLinear" ? "Linear" : "Circular",
         children: (["patternLinear", "patternCircular"] as const).map((k) => ({ id: k, label: k === "patternLinear" ? "Linear" : "Circular", icon: k, active: this.kind === k, run: () => ((memory.pattern = k), this.setKind(k)) })),
       },
-      t("delete", "Delete", "trash", "Del"),
-      t("select", "Select", "pointer", "V"),
+      // With curves selected, Delete removes them right away; else it's the tap-to-delete tool.
+      t("delete", "Delete", "trash", "Del", { run: () => (this.selected.size || this.selPts.length ? this.deleteSelected() : this.setKind("delete")) }),
     ]);
     // With curves selected the button shows (and flips) their type; otherwise the type of new curves.
     const sel = this.entities.filter((e) => this.selected.has(e.id));
@@ -688,6 +691,8 @@ export class SketchTool implements Tool {
     const ui = this.app.ui;
     this.sizeDim?.dispose();
     this.sizeDim = null;
+    this.angleDim?.dispose();
+    this.angleDim = null;
     const items: PanelItem[] = [];
     const k = this.kind;
     const lock = (key: string, label: string, kind: "length" | "angle" | "int" = "length", value?: number): PanelItem => ({
@@ -803,6 +808,7 @@ export class SketchTool implements Tool {
             selCount === 2 && l1?.kind === "line" && l2?.kind === "line"
               ? [{ type: "number", label: "Angle", value: this.angleBetween(l1.id, l2.id), kind: "angle", onInput: (v) => this.setLinesAngle(l1.id, l2.id, v) }]
               : [];
+          if (selCount === 2 && l1?.kind === "line" && l2?.kind === "line") this.showAngleBox(l1, l2);
           return ui.showPanel({
             title: `${selCount} curves`,
             items: [
@@ -2044,6 +2050,11 @@ export class SketchTool implements Tool {
       this.sketchId = f.id;
     }
     this.refreshConstraintUI();
+    // Curves went away: no hover mark, snap point or middle point of theirs stays drawn.
+    if (entities.length < before.size) {
+      this.app.setHover(null);
+      if (this.phase === "draw" && !this.sdrag) this.refreshPreview();
+    }
     // Tools with nothing to set show the step just done.
     if (["trim", "extend", "split", "align", "delete", "project"].includes(this.kind)) this.updatePanel();
   }
@@ -2337,9 +2348,16 @@ export class SketchTool implements Tool {
   }
 
   private deleteSelected(): void {
-    const ids = this.selected;
+    const ids = new Set(this.selected);
+    // Points picked on their own take their curves along.
+    for (const r of this.selPts) ids.add(r.e);
+    if (!ids.size) return;
+    this.opLabel = "Delete";
     this.commit(this.entities.filter((e) => !ids.has(e.id)));
     this.clearSelection();
+    // Nothing of them stays on screen (end and middle points, hover marks).
+    this.app.setHover(null);
+    this.refreshPreview();
   }
 
   private pickForEdit(p: ToolPointer): void {
@@ -2689,6 +2707,42 @@ export class SketchTool implements Tool {
 
   /** The radius box beside a selected arc/circle. */
   private sizeDim: DimWidget | null = null;
+
+  /**
+   * Two lines selected (not on one axis): their angle in a box where they meet
+   * — type a new angle (the second line turns), or pin it as a measurement.
+   */
+  private showAngleBox(l1: Extract<SketchEntity, { kind: "line" }>, l2: Extract<SketchEntity, { kind: "line" }>): void {
+    if (!this.plane) return;
+    const d1: Vec2 = [l1.b[0] - l1.a[0], l1.b[1] - l1.a[1]];
+    const d2: Vec2 = [l2.b[0] - l2.a[0], l2.b[1] - l2.a[1]];
+    const cr = d1[0] * d2[1] - d1[1] * d2[0];
+    const L1 = Math.hypot(...d1);
+    const L2 = Math.hypot(...d2);
+    if (L1 < 1e-12 || L2 < 1e-12) return;
+    // On one axis: no angle to show.
+    const off = Math.abs((l2.a[0] - l1.a[0]) * d1[1] - (l2.a[1] - l1.a[1]) * d1[0]) / L1;
+    if (Math.abs(cr) < 1e-9 * L1 * L2 && off < 1e-6 * (L1 + L2)) return;
+    // Where their lines cross (or between them, if parallel).
+    let at: Vec2;
+    if (Math.abs(cr) > 1e-9 * L1 * L2) {
+      const t = ((l2.a[0] - l1.a[0]) * d2[1] - (l2.a[1] - l1.a[1]) * d2[0]) / cr;
+      at = [l1.a[0] + d1[0] * t, l1.a[1] + d1[1] * t];
+    } else at = [(l1.a[0] + l1.b[0] + l2.a[0] + l2.b[0]) / 4, (l1.a[1] + l1.b[1] + l2.a[1] + l2.b[1]) / 4];
+    const deg = this.angleBetween(l1.id, l2.id);
+    const w = sketchToWorld(this.plane, at, 0.02).toArray() as Vec3;
+    this.angleDim = new DimWidget(this.app.view, {
+      value: deg,
+      angle: true,
+      noLine: true,
+      onInput: (v) => this.setLinesAngle(l1.id, l2.id, v),
+      onCommit: () => this.clearSelection(),
+      onPin: () => this.app.addPin({ text: `${trimNum(this.angleBetween(l1.id, l2.id), 2)}°`, at: w }),
+    });
+    this.angleDim.set(w, w);
+  }
+
+  private angleDim: DimWidget | null = null;
 }
 
 function titleOf(k: string): string {
