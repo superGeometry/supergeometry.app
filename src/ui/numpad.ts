@@ -92,6 +92,8 @@ class Numpad {
       // Flip the sign of the whole value.
       t.value = v.startsWith("-") ? v.slice(1) : `-${v}`;
     } else if (k === "↵") {
+      // Only now does the value count: the box hears it, then Enter.
+      t.dispatchEvent(new Event("input", { bubbles: true }));
       t.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       t.dispatchEvent(new Event("change", { bubbles: true }));
       return;
@@ -105,7 +107,7 @@ class Numpad {
       setTimeout(() => t.focus(), 0);
       return this.close();
     } else put(k);
-    t.dispatchEvent(new Event("input", { bubbles: true }));
+    // Typing only edits the text: nothing is applied until ↵.
   }
 }
 
