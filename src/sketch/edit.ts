@@ -3,6 +3,7 @@
 
 import type { PlaneDef, SketchConstraint, SketchEntity, Vec2, Vec3 } from "../doc/types";
 import { toPlane } from "../geom";
+import { constraintError, pointOf, pointsOf, refsOf } from "./constraints";
 import { arcFrom3, closestOnPrim, entityCorners, entityPrims, evalPrim, isClosedPrim, primSegments, samplePrim, type Prim } from "./curves";
 
 export function uid(): string {
@@ -120,12 +121,74 @@ function crossings(p: Prim, others: Prim[]): number[] {
     const B = Array.from({ length: m + 1 }, (_, i) => evalPrim(q, i / m));
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < m; j++) {
-        const h = segHit(A[i], A[i + 1], B[j], B[j + 1]);
-        if (h) ts.push((i + h) / n);
+        const h = segHit2(A[i], A[i + 1], B[j], B[j + 1]);
+        if (!h) continue;
+        // The samples only find it roughly: put it exactly on both curves.
+        const [t] = refineCrossing(p, q, (i + h[0]) / n, (j + h[1]) / m);
+        if (t >= -1e-9 && t <= 1 + 1e-9) ts.push(Math.min(1, Math.max(0, t)));
+      }
+    }
+    // A curve that ends right on p (e.g. an arc left by an earlier trim) counts
+    // as a crossing there: its samples may stop just short of p's.
+    if (!isClosedPrim(q)) {
+      const size = Math.max(1, ...A.map((v) => Math.max(Math.abs(v[0]), Math.abs(v[1]))));
+      for (const E of [evalPrim(q, 0), evalPrim(q, 1)]) {
+        const c = closestOnPrim(p, E);
+        if (c.d < size * 1e-7) ts.push(c.t);
       }
     }
   }
   return ts.sort((a, b) => a - b);
+}
+
+/**
+ * Newton on P(t) = Q(s): a crossing found between samples, moved exactly onto
+ * both curves (round curves are only approximated by their samples — a cut
+ * there would leave a hair-thin gap). Straight pieces are exact already.
+ */
+function refineCrossing(p: Prim, q: Prim, t: number, s: number): [number, number] {
+  const round = (x: Prim) => x.t === "circle" || x.t === "ellipse";
+  if (!round(p) && !round(q)) return [t, s];
+  const t0 = t;
+  const s0 = s;
+  const h = 1e-7;
+  for (let it = 0; it < 30; it++) {
+    const P = evalPrim(p, t);
+    const Q = evalPrim(q, s);
+    const fx = P[0] - Q[0];
+    const fy = P[1] - Q[1];
+    const Pt = evalPrim(p, t + h);
+    const Qs = evalPrim(q, s + h);
+    const a = (Pt[0] - P[0]) / h;
+    const c = (Pt[1] - P[1]) / h;
+    const b = -(Qs[0] - Q[0]) / h;
+    const d = -(Qs[1] - Q[1]) / h;
+    const det = a * d - b * c;
+    if (Math.abs(det) < 1e-14) break;
+    const dt = (d * fx - b * fy) / det;
+    const ds = (-c * fx + a * fy) / det;
+    t -= dt;
+    s -= ds;
+    if (Math.abs(dt) < 1e-15 && Math.abs(ds) < 1e-15) break;
+  }
+  // Wandered off to some other crossing (or nowhere): keep the rough one.
+  if (!Number.isFinite(t) || !Number.isFinite(s) || Math.abs(t - t0) > 0.05 || Math.abs(s - s0) > 0.05) return [t0, s0];
+  return [t, s];
+}
+
+/** Where segments ab and cd cross: fractions along each (null if they don't). */
+function segHit2(a: Vec2, b: Vec2, c: Vec2, d: Vec2): [number, number] | null {
+  const rx = b[0] - a[0];
+  const ry = b[1] - a[1];
+  const sx = d[0] - c[0];
+  const sy = d[1] - c[1];
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-14) return null;
+  const qx = c[0] - a[0];
+  const qy = c[1] - a[1];
+  const u = (qx * sy - qy * sx) / den;
+  const v = (qx * ry - qy * rx) / den;
+  return u >= -1e-9 && u <= 1 + 1e-9 && v >= -1e-9 && v <= 1 + 1e-9 ? [u, v] : null;
 }
 
 function segHit(a: Vec2, b: Vec2, c: Vec2, d: Vec2): number | null {
@@ -171,7 +234,21 @@ export function trim(entities: SketchEntity[], id: string, at: Vec2): SketchEnti
     const cuts = [0, ...ts.filter((t) => t > 1e-6 && t < 1 - 1e-6), 1];
     for (let i = 0; i < cuts.length - 1; i++) if (!(tap >= cuts[i] && tap <= cuts[i + 1])) keep.push([cuts[i], cuts[i + 1]]);
   }
-  const pieces = keep.map(([t0, t1]) => pieceEntity(prim, t0, t1, target!.construction));
+  const pieces = keep.map(([t0, t1]) => {
+    const piece = pieceEntity(prim, t0, t1, target!.construction);
+    // An end that wasn't cut stays exactly where it was (not re-evaluated).
+    if (!closed && (piece.kind === "line" || piece.kind === "arc") && (target!.kind === "line" || target!.kind === "arc")) {
+      if (t0 === 0) piece.a = target!.a;
+      if (t1 === 1) piece.b = target!.b;
+    }
+    return piece;
+  });
+  // The piece that keeps the start (or the only one left) keeps the curve's id,
+  // so what's tied to it stays tied (see carryConstraints).
+  if (pieces.length) {
+    const i = closed ? 0 : Math.max(0, keep.findIndex(([t0]) => t0 === 0));
+    pieces[i] = { ...pieces[i], id: target.id };
+  }
   return list.flatMap((e) => (e.id === target!.id ? pieces : [e]));
 }
 
@@ -186,28 +263,44 @@ function pieceEntity(p: Prim, t0: number, t1: number, construction?: boolean): S
   return { id: uid(), kind: "spline", points: pts, closed: false, mode: "fit", construction };
 }
 
-/** Extend the end of a line nearest `at` to the next curve it would hit. */
+/**
+ * Extend the end of a line or arc nearest `at` to the next curve it would hit:
+ * a line straight on, an arc along its own circle.
+ */
 export function extend(entities: SketchEntity[], id: string, at: Vec2): SketchEntity[] | null {
   const e = entities.find((x) => x.id === id);
-  if (!e || e.kind !== "line") return null;
+  if (!e || (e.kind !== "line" && e.kind !== "arc")) return null;
   const endB = Math.hypot(at[0] - e.b[0], at[1] - e.b[1]) < Math.hypot(at[0] - e.a[0], at[1] - e.a[1]);
-  const from = endB ? e.b : e.a;
-  const other = endB ? e.a : e.b;
-  const dx = from[0] - other[0];
-  const dy = from[1] - other[1];
-  const L = Math.hypot(dx, dy) || 1;
-  const far: Vec2 = [from[0] + (dx / L) * 1e6, from[1] + (dy / L) * 1e6];
-  let best = Infinity;
-  for (const q of entities.filter((x) => x.id !== id && !x.construction).flatMap(entityPrims)) {
-    const m = Math.max(primSegments(q), 1) * 4;
-    for (let j = 0; j < m; j++) {
-      const u = segHit(from, far, evalPrim(q, j / m), evalPrim(q, (j + 1) / m));
-      if (u !== null && u * 1e6 > 1e-6) best = Math.min(best, u * 1e6);
+  const others = entities.filter((x) => x.id !== id && !x.construction).flatMap(entityPrims);
+  let path: Prim;
+  if (e.kind === "line") {
+    const from = endB ? e.b : e.a;
+    const other = endB ? e.a : e.b;
+    const dx = from[0] - other[0];
+    const dy = from[1] - other[1];
+    const L = Math.hypot(dx, dy) || 1;
+    // Far enough to pass everything in the sketch (and short enough to refine on).
+    let reach = 1;
+    for (const x of entities) for (const p of pointsOf(x)) reach = Math.max(reach, Math.hypot(p.at[0] - from[0], p.at[1] - from[1]));
+    for (const q of others) for (let i = 0; i <= 8; i++) {
+      const p = evalPrim(q, i / 8);
+      reach = Math.max(reach, Math.hypot(p[0] - from[0], p[1] - from[1]));
     }
+    reach *= 3;
+    path = { t: "line", a: from, b: [from[0] + (dx / L) * reach, from[1] + (dy / L) * reach], src: "" };
+  } else {
+    const c = arcFrom3(e.a, e.m, e.b);
+    if (!c) return null;
+    // On round its circle from that end, the way the arc runs, up to its other end.
+    const dir = endB ? Math.sign(c.sweep) : -Math.sign(c.sweep);
+    const start = endB ? c.a0 + c.sweep : c.a0;
+    path = { t: "circle", c: c.c, r: c.r, a0: start, sweep: dir * (2 * Math.PI - Math.abs(c.sweep)), src: "" };
   }
-  if (!Number.isFinite(best)) return null;
-  const to: Vec2 = [from[0] + (dx / L) * best, from[1] + (dy / L) * best];
-  return entities.map((x) => (x.id === id ? { ...e, ...(endB ? { b: to } : { a: to }) } : x));
+  const ts = crossings(path, others).filter((t) => t > 1e-9);
+  if (!ts.length) return null;
+  const to = evalPrim(path, ts[0]);
+  if (e.kind === "line") return entities.map((x) => (x.id === id ? { ...e, ...(endB ? { b: to } : { a: to }) } : x));
+  return entities.map((x) => (x.id === id ? moveEnd(e, endB ? "b" : "a", to) : x));
 }
 
 /** Which end of an open curve the pick is nearer to ("a" or "b"); null for closed curves. */
@@ -658,36 +751,70 @@ export function offsetChain(entities: SketchEntity[], id: string, d: number): Sk
   // offsetEntity moves lines to their left but arcs always outward: an arc
   // turning left (counter-clockwise) has its left side towards its centre.
   const leftOf = (e: Piece) => (e.kind === "arc" && (arcFrom3(e.a, e.m, e.b)?.sweep ?? 0) > 0 ? -1 : 1);
-  const moved = pieces.map((e) => offsetEntity(e, leftOf(e) * side * d) as Piece | null);
-  if (moved.some((m) => !m)) return null;
-  const out = moved as Piece[];
   const endOf = (e: Piece, k: "a" | "b"): Vec2 => (e.kind === "spline" ? splineEnds(e)![k === "a" ? 0 : 1] : e[k]);
-  // Re-join neighbours where their offset carriers cross, nearest the original corner.
-  const n = out.length;
-  for (let i = 0; i < (chain.closed ? n : n - 1); i++) {
-    const j = (i + 1) % n;
-    const k1 = carrierOf(out[i]);
-    const k2 = carrierOf(out[j]);
-    const corner = endOf(pieces[i], "b");
-    let meet: Vec2 | null = null;
-    if (k1 && k2) {
-      const cands = carrierCrossings(k1, k2);
-      if (cands.length) meet = cands.reduce((m, q) => (Math.hypot(q[0] - corner[0], q[1] - corner[1]) < Math.hypot(m[0] - corner[0], m[1] - corner[1]) ? q : m), cands[0]);
-    } else if (k1 || k2) {
-      // A spline next to a line/arc: the spline's offset end, brought onto the other's carrier.
-      const k = (k1 ?? k2)!;
-      const q = k1 ? endOf(out[j], "a") : endOf(out[i], "b");
-      meet = k.kind === "line" ? projectOnLine(q, k.p, [k.p[0] + k.d[0], k.p[1] + k.d[1]]) : towards(k.c, q, k.r);
-    } else {
-      // Two splines: halfway between their offset ends.
-      const p = endOf(out[i], "b");
-      const q = endOf(out[j], "a");
-      meet = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+  const lenOf = (e: Piece) => (e.kind === "line" ? Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) : 1);
+  let size = 1;
+  for (const e of pieces) for (const k of ["a", "b"] as const) size = Math.max(size, Math.abs(endOf(e, k)[0]), Math.abs(endOf(e, k)[1]));
+  // Pieces that would shrink past nothing (a fillet offset inward beyond its
+  // radius, a side squeezed out between its neighbours) drop out, and their
+  // neighbours meet straight away — like a CAD offset, not an inside-out loop.
+  let alive = pieces.map((_, i) => i);
+  let out: Piece[] = [];
+  for (let round = 0; round <= pieces.length; round++) {
+    if (alive.length < (chain.closed ? 2 : 1)) return null;
+    const moved = alive.map((i) => offsetEntity(pieces[i], leftOf(pieces[i]) * side * d) as Piece | null);
+    const gone = alive.filter((_, k) => !moved[k]);
+    if (gone.length) {
+      alive = alive.filter((i) => !gone.includes(i));
+      continue;
     }
-    // Tangent neighbours (e.g. line into a fillet) already meet: keep the offset end.
-    if (!meet) meet = endOf(out[i], "b");
-    out[i] = moveEnd(out[i], "b", meet) as (typeof out)[number];
-    out[j] = moveEnd(out[j], "a", meet) as (typeof out)[number];
+    out = moved as Piece[];
+    // Re-join neighbours where their offset carriers cross, nearest the original corner.
+    const n = out.length;
+    for (let i = 0; i < (chain.closed ? n : n - 1); i++) {
+      const j = (i + 1) % n;
+      const k1 = carrierOf(out[i]);
+      const k2 = carrierOf(out[j]);
+      const corner = endOf(pieces[alive[i]], "b");
+      let meet: Vec2 | null = null;
+      if (k1 && k2) {
+        const cands = carrierCrossings(k1, k2);
+        if (cands.length) meet = cands.reduce((m, q) => (Math.hypot(q[0] - corner[0], q[1] - corner[1]) < Math.hypot(m[0] - corner[0], m[1] - corner[1]) ? q : m), cands[0]);
+      } else if (k1 || k2) {
+        // A spline next to a line/arc: the spline's offset end, brought onto the other's carrier.
+        const k = (k1 ?? k2)!;
+        const q = k1 ? endOf(out[j], "a") : endOf(out[i], "b");
+        meet = k.kind === "line" ? projectOnLine(q, k.p, [k.p[0] + k.d[0], k.p[1] + k.d[1]]) : towards(k.c, q, k.r);
+      } else {
+        // Two splines: halfway between their offset ends.
+        const p = endOf(out[i], "b");
+        const q = endOf(out[j], "a");
+        meet = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+      }
+      // Neighbours that no longer meet (parallel after a piece between them went): no outline.
+      if (!meet && alive[j] !== (alive[i] + 1) % pieces.length) return null;
+      // Tangent neighbours (e.g. line into a fillet) already meet: keep the offset end.
+      if (!meet) meet = endOf(out[i], "b");
+      out[i] = moveEnd(out[i], "b", meet) as (typeof out)[number];
+      out[j] = moveEnd(out[j], "a", meet) as (typeof out)[number];
+    }
+    // Turned round or squeezed to nothing: that piece goes, and again.
+    const flipped = alive.filter((src, k) => {
+      const o = out[k];
+      const e = pieces[src];
+      if (o.kind === "line" && e.kind === "line") {
+        const dot = (o.b[0] - o.a[0]) * (e.b[0] - e.a[0]) + (o.b[1] - o.a[1]) * (e.b[1] - e.a[1]);
+        return dot <= 0 || lenOf(o) < size * 1e-9;
+      }
+      if (o.kind === "arc" && e.kind === "arc") {
+        const c0 = arcFrom3(e.a, e.m, e.b);
+        const c1 = arcFrom3(o.a, o.m, o.b);
+        return !c0 || !c1 || Math.sign(c0.sweep) !== Math.sign(c1.sweep) || Math.abs(c1.sweep) > Math.abs(c0.sweep) + Math.PI / 2 || Math.hypot(o.b[0] - o.a[0], o.b[1] - o.a[1]) < size * 1e-9;
+      }
+      return false;
+    });
+    if (!flipped.length) break;
+    alive = alive.filter((i) => !flipped.includes(i));
   }
   return [...entities, ...out.map((e) => ({ ...e, id: uid() }))];
 }
@@ -768,7 +895,7 @@ export function filletCorner(entities: SketchEntity[], at: Vec2, radius: number,
   const lines = list.filter((e): e is Extract<SketchEntity, { kind: "line" }> => e.kind === "line");
   const ends: { e: (typeof lines)[number]; end: "a" | "b" }[] = [];
   for (const e of lines) for (const end of ["a", "b"] as const) if (Math.hypot(e[end][0] - at[0], e[end][1] - at[1]) < tol) ends.push({ e, end });
-  if (ends.length < 2) return null;
+  if (ends.length < 2) return roundCorner(list, at, radius, tol);
   const [p, q] = ends;
   const corner = p.e[p.end];
   const farP = p.e[p.end === "a" ? "b" : "a"];
@@ -789,6 +916,92 @@ export function filletCorner(entities: SketchEntity[], at: Vec2, radius: number,
   list = list.map((e) => (e === p.e ? { ...p.e, [p.end]: tp } : e === q.e ? { ...q.e, [q.end]: tq } : e));
   list.push({ id: uid(), kind: "arc", a: tp, m: mid, b: tq, construction: p.e.construction });
   return list;
+}
+
+/**
+ * Fillet where a line meets an arc, or two arcs meet: the rounding circle sits
+ * at `radius` from both (offset carriers crossing), on the side where it
+ * touches both curves on their own length, nearest the corner.
+ */
+function roundCorner(list: SketchEntity[], at: Vec2, radius: number, tol: number): SketchEntity[] | null {
+  type End = { e: Extract<SketchEntity, { kind: "line" | "arc" }>; end: "a" | "b" };
+  const ends: End[] = [];
+  for (const e of list) if (e.kind === "line" || e.kind === "arc") for (const end of ["a", "b"] as const) if (Math.hypot(e[end][0] - at[0], e[end][1] - at[1]) < tol) ends.push({ e, end });
+  if (ends.length < 2 || ends[0].e === ends[1].e || !(radius > 0)) return null;
+  const [P, Q] = ends;
+  const corner = P.e[P.end];
+  const k1 = carrierOf(P.e);
+  const k2 = carrierOf(Q.e);
+  if (!k1 || !k2) return null;
+  const shifted = (k: Carrier): Carrier[] => {
+    if (k.kind === "line") {
+      const L = Math.hypot(...k.d) || 1;
+      const n: Vec2 = [(-k.d[1] / L) * radius, (k.d[0] / L) * radius];
+      return [{ kind: "line", p: [k.p[0] + n[0], k.p[1] + n[1]], d: k.d }, { kind: "line", p: [k.p[0] - n[0], k.p[1] - n[1]], d: k.d }];
+    }
+    return [{ kind: "circle", c: k.c, r: k.r + radius }, ...(k.r - radius > 1e-12 ? [{ kind: "circle" as const, c: k.c, r: k.r - radius }] : [])];
+  };
+  const touch = (k: Carrier, c: Vec2): Vec2 => (k.kind === "line" ? projectOnLine(c, k.p, [k.p[0] + k.d[0], k.p[1] + k.d[1]]) : towards(k.c, c, k.r));
+  // Where on the curve a point is, from the corner end (0) to the far end (1); outside → out of range.
+  const along = (x: End, q: Vec2): number => {
+    const e = x.e;
+    if (e.kind === "line") {
+      const from = e[x.end];
+      const to = x.end === "a" ? e.b : e.a;
+      const d: Vec2 = [to[0] - from[0], to[1] - from[1]];
+      return ((q[0] - from[0]) * d[0] + (q[1] - from[1]) * d[1]) / (d[0] * d[0] + d[1] * d[1] || 1);
+    }
+    const c = arcFrom3(e.a, e.m, e.b)!;
+    const ang = Math.atan2(q[1] - c.c[1], q[0] - c.c[0]);
+    let f = (ang - c.a0) / c.sweep;
+    const turn = (2 * Math.PI) / Math.abs(c.sweep);
+    while (f < -1e-9) f += turn;
+    while (f > 1 + 1e-9 && f - turn >= -1e-9) f -= turn;
+    return x.end === "a" ? f : 1 - f;
+  };
+  /** Direction of travel along a curve at q: towards its corner end ("in") or away from it ("out"). */
+  const dirAt = (x: End, q: Vec2, way: "in" | "out"): Vec2 => {
+    const e = x.e;
+    let d: Vec2;
+    if (e.kind === "line") d = unit(x.end === "b" ? [e.b[0] - e.a[0], e.b[1] - e.a[1]] : [e.a[0] - e.b[0], e.a[1] - e.b[1]]);
+    else {
+      const k = arcFrom3(e.a, e.m, e.b)!;
+      const s = Math.sign(k.sweep) * (x.end === "b" ? 1 : -1);
+      d = unit([-(q[1] - k.c[1]) * s, (q[0] - k.c[0]) * s]);
+    }
+    return way === "in" ? d : [-d[0], -d[1]];
+  };
+  let best: { c: Vec2; tp: Vec2; tq: Vec2; d: number } | null = null;
+  for (const u of shifted(k1))
+    for (const v of shifted(k2))
+      for (const c of carrierCrossings(u, v)) {
+        const tp = touch(k1, c);
+        const tq = touch(k2, c);
+        const fp = along(P, tp);
+        const fq = along(Q, tq);
+        if (!(fp > 1e-9 && fp < 1 - 1e-9 && fq > 1e-9 && fq < 1 - 1e-9)) continue;
+        // It must carry on smoothly: running along P into the corner, the
+        // rounding takes over in the same direction and hands over to Q the same way.
+        const mid = towards(c, corner, radius);
+        const f = arcFrom3(tp, mid, tq);
+        if (!f || Math.abs(f.sweep) >= Math.PI) continue;
+        const spin = Math.sign(f.sweep);
+        const tan = (q: Vec2): Vec2 => unit([-(q[1] - c[1]) * spin, (q[0] - c[0]) * spin]);
+        const inP = dirAt(P, tp, "in");
+        const outQ = dirAt(Q, tq, "out");
+        const tp1 = tan(tp);
+        const tq1 = tan(tq);
+        if (inP[0] * tp1[0] + inP[1] * tp1[1] < 0.999 || outQ[0] * tq1[0] + outQ[1] * tq1[1] < 0.999) continue;
+        const d = Math.hypot(c[0] - corner[0], c[1] - corner[1]);
+        if (!best || d < best.d) best = { c, tp, tq, d };
+      }
+  if (!best) return null;
+  const { c, tp, tq } = best;
+  // The rounding's middle: the point of its circle nearest the old corner.
+  const mid = towards(c, corner, radius);
+  const arc: SketchEntity = { id: uid(), kind: "arc", a: tp, m: mid, b: tq, construction: P.e.construction };
+  if (!arcFrom3(tp, mid, tq)) return null;
+  return [...list.map((e) => (e === P.e ? moveEnd(P.e, P.end, tp) : e === Q.e ? moveEnd(Q.e, Q.end, tq) : e)), arc];
 }
 
 function cornerNear(e: Extract<SketchEntity, { kind: "rect" | "polygon" | "polyline" }>, at: Vec2, tol: number): boolean {
@@ -854,7 +1067,7 @@ export function filletConstraints(entities: SketchEntity[], constraints: SketchC
   for (const arc of arcs) {
     const touching: { e: string; p: "a" | "b"; arcEnd: "a" | "b" }[] = [];
     for (const l of entities)
-      if (l.kind === "line")
+      if ((l.kind === "line" || l.kind === "arc") && l.id !== arc.id)
         for (const p of ["a", "b"] as const)
           for (const arcEnd of ["a", "b"] as const) if (Math.hypot(l[p][0] - arc[arcEnd][0], l[p][1] - arc[arcEnd][1]) < 1e-9) touching.push({ e: l.id, p, arcEnd });
     if (touching.length < 2) continue;
@@ -949,4 +1162,145 @@ export function joinCollinear(entities: SketchEntity[], id: string, prefer?: Vec
 
 function mid(l: LineE): Vec2 {
   return [(l.a[0] + l.b[0]) / 2, (l.a[1] + l.b[1]) / 2];
+}
+
+// ------------------------------------------------- constraints after edits
+
+/**
+ * Constraints after an edit changed curves (trim, extend, …): ones on points
+ * that are still there follow them (to whichever piece now has that point),
+ * ones on a curve that was cut go to the pieces of it, and any that no longer
+ * hold are dropped — an old length would pull an extended line back, a join
+ * to a trimmed-away end would drag it out again.
+ */
+export function carryConstraints(before: SketchEntity[], after: SketchEntity[], cs: SketchConstraint[]): SketchConstraint[] {
+  const old = new Map(before.map((e) => [e.id, e]));
+  const now = new Map(after.map((e) => [e.id, e]));
+  let size = 1;
+  for (const e of after) for (const p of pointsOf(e)) size = Math.max(size, Math.abs(p.at[0]), Math.abs(p.at[1]));
+  const tol = size * 1e-7;
+  const changed = after.filter((e) => old.get(e.id) !== e);
+  const same = (p: Vec2, q: Vec2) => Math.hypot(p[0] - q[0], p[1] - q[1]) < tol;
+  /** Curves (new or changed) that lie on the old curve `id`: its pieces. */
+  const piecesOf = (id: string): SketchEntity[] => {
+    const o = old.get(id);
+    if (!o) return [];
+    const prims = entityPrims(o);
+    return changed.filter((e) => {
+      const m = entityPrims(e)[0];
+      if (!m) return false;
+      const mid = evalPrim(m, 0.5);
+      return prims.some((pr) => closestOnPrim(pr, mid).d < tol * 10);
+    });
+  };
+  const out: SketchConstraint[] = [];
+  for (const c of cs) {
+    let ok = true;
+    const pts = c.pts?.map((r) => {
+      const was = old.get(r.e);
+      const q = was && pointOf(was, r.p);
+      const e = now.get(r.e);
+      const at = e && pointOf(e, r.p);
+      if (at && q && same(at, q)) return r;
+      if (!q) return r;
+      // That point now belongs to a piece of the curve.
+      for (const piece of [...(e ? [e] : []), ...piecesOf(r.e)])
+        for (const p of pointsOf(piece)) if (same(p.at, q)) return { e: piece.id, p: p.p };
+      ok = false;
+      return r;
+    });
+    const curves = c.curves?.map((id) => {
+      if (now.has(id)) return id;
+      const ps = piecesOf(id);
+      if (!ps.length) ok = false;
+      return ps[0]?.id ?? id;
+    });
+    if (!ok) continue;
+    const next: SketchConstraint = { ...c, ...(pts ? { pts } : {}), ...(curves ? { curves } : {}) };
+    if (!refsOf(next).every((id) => now.has(id))) continue;
+    // Two refs that became the very same point hold nothing.
+    if (next.pts?.length === 2 && next.pts[0].e === next.pts[1].e && next.pts[0].p === next.pts[1].p) continue;
+    // Only what still holds stays.
+    if (constraintError(after, [next]) > tol * 10) continue;
+    out.push(next);
+  }
+  return out;
+}
+
+// ------------------------------------------------------ more shapes
+
+/** Arc by its centre: from `start` round to the direction of `toward`, the short way. */
+export function centreArc(id: string, c: Vec2, start: Vec2, toward: Vec2): SketchEntity | null {
+  const r = Math.hypot(start[0] - c[0], start[1] - c[1]);
+  if (r < 1e-9) return null;
+  const t0 = Math.atan2(start[1] - c[1], start[0] - c[0]);
+  let sw = Math.atan2(toward[1] - c[1], toward[0] - c[0]) - t0;
+  while (sw > Math.PI) sw -= 2 * Math.PI;
+  while (sw < -Math.PI) sw += 2 * Math.PI;
+  if (Math.abs(sw) < 1e-6) return null;
+  const at = (t: number): Vec2 => [c[0] + r * Math.cos(t), c[1] + r * Math.sin(t)];
+  return { id, kind: "arc", a: start, m: at(t0 + sw / 2), b: at(t0 + sw) };
+}
+
+/**
+ * Chamfer the corner nearest `at` where two lines meet: both are cut back by
+ * `dist` and a straight line joins the cuts. Null if a line is too short.
+ */
+export function chamferCorner(entities: SketchEntity[], at: Vec2, dist: number, tol: number): SketchEntity[] | null {
+  const list = entities.flatMap((e) => (e.kind === "rect" || e.kind === "polygon" || e.kind === "polyline" ? (cornerNear(e, at, tol) ? explode(e) : [e]) : [e]));
+  const ends: { e: LineE; end: "a" | "b" }[] = [];
+  for (const e of list) if (e.kind === "line") for (const end of ["a", "b"] as const) if (Math.hypot(e[end][0] - at[0], e[end][1] - at[1]) < tol) ends.push({ e, end });
+  if (ends.length < 2 || !(dist > 0)) return null;
+  const [p, q] = ends;
+  const corner = p.e[p.end];
+  const cut = (x: { e: LineE; end: "a" | "b" }): Vec2 | null => {
+    const far = x.e[x.end === "a" ? "b" : "a"];
+    const L = Math.hypot(far[0] - corner[0], far[1] - corner[1]);
+    if (dist >= L - 1e-9) return null;
+    return [corner[0] + ((far[0] - corner[0]) / L) * dist, corner[1] + ((far[1] - corner[1]) / L) * dist];
+  };
+  const tp = cut(p);
+  const tq = cut(q);
+  if (!tp || !tq) return null;
+  // Lines that carry straight on (no corner): nothing to cut.
+  const u = unit(sub2(p.e[p.end === "a" ? "b" : "a"], corner));
+  const v = unit(sub2(q.e[q.end === "a" ? "b" : "a"], corner));
+  if (Math.abs(u[0] * v[1] - u[1] * v[0]) < 1e-6) return null;
+  const chamfer: SketchEntity = { id: uid(), kind: "line", a: tp, b: tq, construction: p.e.construction };
+  return [...list.map((e) => (e === p.e ? { ...p.e, [p.end]: tp } : e === q.e ? { ...q.e, [q.end]: tq } : e)), chamfer];
+}
+
+/** Two lines picked by their halves: extended/trimmed to meet, then that corner chamfered. */
+export function chamferEnds(entities: SketchEntity[], first: { id: string; at: Vec2 }, second: { id: string; at: Vec2 }, dist: number): SketchEntity[] | null {
+  const e1 = entities.find((x) => x.id === first.id);
+  const e2 = entities.find((x) => x.id === second.id);
+  if (e1?.kind !== "line" || e2?.kind !== "line" || e1.id === e2.id) return null;
+  const joined = joinEnds(entities, first, second);
+  if (!joined) return null;
+  const end = endNear(e1, first.at)!;
+  const corner = (joined.find((x) => x.id === e1.id) as LineE)[end];
+  const size = Math.max(Math.hypot(e1.b[0] - e1.a[0], e1.b[1] - e1.a[1]), Math.hypot(e2.b[0] - e2.a[0], e2.b[1] - e2.a[1]), 1);
+  return chamferCorner(joined, corner, dist, size * 1e-7);
+}
+
+/** After a chamfer: the cut line is joined to both lines (the old corner's join goes). */
+export function chamferConstraints(entities: SketchEntity[], constraints: SketchConstraint[], before: Set<string>): SketchConstraint[] {
+  let cs = constraints;
+  for (const c of entities) {
+    if (c.kind !== "line" || before.has(c.id)) continue;
+    const touching: { e: string; p: "a" | "b"; mine: "a" | "b" }[] = [];
+    for (const l of entities)
+      if (l.kind === "line" && l.id !== c.id)
+        for (const p of ["a", "b"] as const) for (const mine of ["a", "b"] as const) if (near2(l[p], c[mine], 1e-9)) touching.push({ e: l.id, p, mine });
+    if (touching.length < 2) continue;
+    const ends = new Set(touching.map((t) => `${t.e}:${t.p}`));
+    cs = cs.filter((k) => !(k.type === "coincident" && k.pts?.length === 2 && k.pts.every((q) => ends.has(`${q.e}:${q.p}`))));
+    for (const t of touching) cs = [...cs, { id: uid(), type: "coincident", pts: [{ e: t.e, p: t.p }, { e: c.id, p: t.mine }] }];
+  }
+  return cs;
+}
+
+/** Where the (infinite) lines of two line curves meet. */
+export function lineMeet(p: LineE, q: LineE): Vec2 | null {
+  return meetLines(p.a, [p.b[0] - p.a[0], p.b[1] - p.a[1]], q.a, q.b);
 }

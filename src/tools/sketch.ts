@@ -7,7 +7,7 @@ import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, buttonEnabled, CONSTRAINT_BUTTONS, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
 import { settings } from "../settings";
 import { isCoarse, screenClass } from "../device";
-import { arcFrom3, entityCorners, entityPolylines } from "../sketch/curves";
+import { arcFrom3, closestOnPrim, entityCorners, entityPolylines, entityPrims } from "../sketch/curves";
 import {
   offsetChain,
   connectedChain,
@@ -19,6 +19,12 @@ import {
   extend,
   joinEnds,
   splitAny,
+  carryConstraints,
+  centreArc,
+  chamferConstraints,
+  chamferCorner,
+  chamferEnds,
+  lineMeet,
   filletConstraints,
   filletEnds,
   filletCorner,
@@ -91,14 +97,23 @@ const HINTS: Record<Kind, string> = {
   patternCircular: "Tap curves to select (double-tap for a whole shape), then tap the centre to turn them around.",
   rotate: "Tap curves to select, set the pivot and angle.",
   mirror: "Tap a shape to select it (Shift+tap: single curves), then tap the line to mirror it across — any line, even one of its own edges.",
-  trim: "Tap the part of a curve to cut away (between crossings). Join mode: tap a line to merge it with the line on the same axis it touches.",
+  trim: "Tap the part of a curve to cut away (between crossings), or swipe across several. Join mode: tap a line to merge it with the line on the same axis it touches.",
   align: "Tap the line to move, then the line it should line up with (the first one moves onto the second one's axis).",
   extend: "Tap the half of a line or arc whose end should move, then the half of the curve it should meet. Tap the same half twice to extend to the next curve.",
   delete: "Tap curves to delete them.",
   split: "Tap a line or arc to cut it in two at its midpoint (or at a point you tap on it while holding Shift).",
 };
 
-const memory = { textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control", sides: 6, fillet: 2, offset: 2, textSize: 10 };
+/** The hint for a tool, as its chosen variant works. */
+function hintOf(kind: Kind): string {
+  if (kind === "arc" && memory.arc === "center") return "Tap the centre, then where the arc starts, then where it ends.";
+  if (kind === "circle" && memory.circle === "2pt") return "Tap two points across the circle (its diameter).";
+  if (kind === "circle" && memory.circle === "3pt") return "Tap three points the circle passes through.";
+  if (kind === "fillet" && memory.corner === "chamfer") return "Tap a corner where two lines meet to cut it off straight (or tap the two lines).";
+  return HINTS[kind];
+}
+
+const memory = { arc: "3pt" as "3pt" | "center", circle: "center" as "center" | "2pt" | "3pt", corner: "round" as "round" | "chamfer", textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control", sides: 6, fillet: 2, offset: 2, textSize: 10 };
 
 interface Snap {
   uv: Vec2;
@@ -263,6 +278,39 @@ export class SketchTool implements Tool {
   }
   private withoutBoundary(es: SketchEntity[]): SketchEntity[] {
     return es.filter((e) => !e.id.startsWith("bnd-"));
+  }
+
+  /** Swipe trim: cut the piece under this spot (live; committed when the swipe ends). */
+  private swipeAt(p: ToolPointer): void {
+    const uv = this.uvAt(p);
+    if (!uv || !this.sketchId || !this.swipe) return;
+    // Hit-tested against the curves as they are now (the view's picking still
+    // sees them as they were a moment ago, before the last cut).
+    const cur = this.swipe.now ?? this.entities;
+    const tol = this.app.view.cam.worldPerPixel(this.app.view.height) * Math.max(6, p.tol * 0.6);
+    let best: { id: string; d: number } | null = null;
+    for (const e of [...cur, ...this.boundary]) {
+      if (e.construction && !cur.includes(e)) continue;
+      const d = Math.min(...entityPrims(e).map((pr) => closestOnPrim(pr, uv).d));
+      if (d < tol && (!best || d < best.d)) best = { id: e.id, d };
+    }
+    if (!best) return;
+    const next = this.trimHere(cur, best.id, uv);
+    if (next.length === cur.length && next.every((x, i) => x === cur[i])) return;
+    this.swipe.cut++;
+    this.swipe.now = next;
+    const id = this.sketchId;
+    this.app.store.transient((doc) => {
+      const f = doc.features.find((x) => x.id === id);
+      if (f?.type === "sketch") f.entities = next;
+    });
+  }
+
+  /** Trim with the face's own edges in play: what's left of a trimmed face edge becomes a sketch curve. */
+  private trimHere(entities: SketchEntity[], id: string, uv: Vec2): SketchEntity[] {
+    const bnd = new Map(this.boundary.map((e) => [e.id, e]));
+    const out = trim([...entities, ...this.boundary], id, uv).map((e) => (e.id.startsWith("bnd-") && bnd.get(e.id) !== e ? { ...e, id: uid() } : e));
+    return this.withoutBoundary(out);
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -648,24 +696,25 @@ export class SketchTool implements Tool {
       run: () => this.pickTool(kind),
       ...extra,
     });
-    const variant = <T extends string>(kind: Kind, key: "rect" | "spline" | "trim", options: [T, string][]): ToolItem[] =>
-      options.map(([v, l]) => ({ id: `${kind}-${v}`, label: l, icon: kind === "rect" ? "rect" : kind === "trim" ? "trim" : "spline", active: memory[key] === v, run: () => (((memory as unknown as Record<string, string>)[key] = v), this.setKind(kind)) }));
+    const icons: Partial<Record<Kind, string>> = { rect: "rect", trim: "trim", arc: "arc", circle: "circle", fillet: "sketchFillet" };
+    const variant = <T extends string>(kind: Kind, key: "rect" | "spline" | "trim" | "arc" | "circle" | "corner", options: [T, string][]): ToolItem[] =>
+      options.map(([v, l]) => ({ id: `${kind}-${v}`, label: l, icon: icons[kind] ?? "spline", active: memory[key] === v, run: () => (((memory as unknown as Record<string, string>)[key] = v), this.setKind(kind)) }) as ToolItem);
     app.ui.setTools([
       exit,
       { id: "---1", label: "", icon: "line" },
       t("select", "Select", "pointer", "V"),
       t("line", "Line", "line", "L"),
-      t("arc", "Arc", "arc", "A"),
+      t("arc", "Arc", "arc", "A", { sub: memory.arc === "center" ? "Center" : "3 Points", children: variant("arc", "arc", [["3pt", "3 Points"], ["center", "Center"]]) }),
       t("spline", "Spline", "spline", "I", { sub: memory.spline === "fit" ? "Fit" : "Control", children: variant("spline", "spline", [["fit", "Fit points"], ["control", "Control points"]]) }),
       t("rect", "Rectangle", "rect", "R", { sub: { diagonal: "Diagonal", center: "Center", "3pt": "3 Points" }[memory.rect], children: variant("rect", "rect", [["center", "Center"], ["diagonal", "Diagonal"], ["3pt", "3 Points"]]) }),
-      t("circle", "Circle", "circle", "C"),
+      t("circle", "Circle", "circle", "C", { sub: { center: "Center", "2pt": "2 Points", "3pt": "3 Points" }[memory.circle], children: variant("circle", "circle", [["center", "Center"], ["2pt", "2 Points"], ["3pt", "3 Points"]]) }),
       t("ellipse", "Ellipse", "ellipse"),
       t("polygon", "Polygon", "polygon", "G", { sub: `${memory.sides} sides` }),
       t("text", "Text", "text"),
       t("project", "Project", "project", "P"),
       t("offset", "Offset Edge", "offset", "O"),
       // Modify tools.
-      t("fillet", "Fillet", "sketchFillet"),
+      t("fillet", memory.corner === "chamfer" ? "Chamfer" : "Fillet", "sketchFillet", undefined, { sub: memory.corner === "chamfer" ? "Straight" : "Round", children: variant("fillet", "corner", [["round", "Fillet (round)"], ["chamfer", "Chamfer (straight)"]]) }),
       t("mirror", "Mirror", "mirror"),
       t("trim", "Trim", "trim", "T", { sub: memory.trim === "cut" ? "Cut" : "Join", children: variant("trim", "trim", [["cut", "Cut"], ["join", "Join lines"]]) }),
       t("align", "Align", "alignLine"),
@@ -750,7 +799,7 @@ export class SketchTool implements Tool {
   }
 
   private setHint(extra?: string): void {
-    const hint = this.phase === "plane" ? "Select a plane or a flat face to sketch on." : extra ?? HINTS[this.kind];
+    const hint = this.phase === "plane" ? "Select a plane or a flat face to sketch on." : extra ?? hintOf(this.kind);
     this.app.ui.setHint(hint);
   }
 
@@ -797,7 +846,7 @@ export class SketchTool implements Tool {
         if (this.pts.length === 1 && memory.rect !== "3pt") items.push(lock("w", "Width"), lock("h", "Height"));
         break;
       case "circle":
-        if (this.pts.length === 1) items.push(lock("r", "Diameter"));
+        if (this.pts.length === 1 && memory.circle !== "3pt") items.push(lock("r", "Diameter"));
         break;
       case "polygon":
         items.push({ type: "number", label: "Sides", value: memory.sides, kind: "int", min: 3, onInput: (v) => ((memory.sides = Math.max(3, Math.min(64, v))), this.refreshPreview(), this.updateMenu()) });
@@ -825,7 +874,7 @@ export class SketchTool implements Tool {
         }
         break;
       case "fillet":
-        items.push({ type: "number", label: "Radius", value: memory.fillet, kind: "length", min: 0.0001, onInput: (v) => (memory.fillet = v) });
+        items.push({ type: "number", label: memory.corner === "chamfer" ? "Distance" : "Radius", value: memory.fillet, kind: "length", min: 0.0001, onInput: (v) => (memory.fillet = v) });
         break;
       case "offset":
         // Edge: just the tapped curve. Chain: the whole connected outline, kept closed.
@@ -904,7 +953,7 @@ export class SketchTool implements Tool {
         }
         break;
     }
-    ui.showPanel(items.length ? { title: titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined } : null);
+    ui.showPanel(items.length ? { title: k === "fillet" && memory.corner === "chamfer" ? "Chamfer" : titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined } : null);
   }
 
   /** Pick a .ttf / .otf / .woff file and use it for the text. */
@@ -1022,6 +1071,14 @@ export class SketchTool implements Tool {
   }
 
   drag(p: ToolPointer): void {
+    if (this.swipe) {
+      // Along the way from the last spot (a quick swipe skips over thin curves otherwise).
+      const { x, y } = this.swipe.last;
+      const n = Math.max(1, Math.ceil(Math.hypot(p.x - x, p.y - y) / 6));
+      for (let i = 1; i <= n; i++) this.swipeAt({ ...p, x: x + ((p.x - x) * i) / n, y: y + ((p.y - y) * i) / n });
+      this.swipe.last = { x: p.x, y: p.y };
+      return;
+    }
     if (this.patDrag) return this.dragPattern(p);
     if (this.scaleDrag) return this.dragScale(p);
     if (this.arcBend) {
@@ -1068,7 +1125,7 @@ export class SketchTool implements Tool {
       case "rect":
         return memory.rect === "3pt" ? [] : ["w", "h"];
       case "circle":
-        return ["r"];
+        return memory.circle === "3pt" ? [] : ["r"];
       case "polygon":
         // Tab: radius → number of sides.
         return ["r", "sides"];
@@ -1119,6 +1176,14 @@ export class SketchTool implements Tool {
   }
 
   up(p: ToolPointer): void {
+    if (this.swipe) {
+      const sw = this.swipe;
+      this.swipe = null;
+      this.app.setHover(null);
+      // One step for the whole swipe; constraints follow what's left.
+      if (sw.cut && sw.now) this.commit(sw.now, carryConstraints(sw.base, sw.now, this.constraints));
+      return;
+    }
     if (this.patDrag) return this.endPatternDrag();
     if (this.scaleDrag) {
       // The factor stays in the panel: Apply (or an empty tap) scales.
@@ -1204,7 +1269,18 @@ export class SketchTool implements Tool {
   }
 
   /** Press on a curve/point and move: drag it (a tap without moving selects it instead). */
+  /** Trim by swiping: the curves as the swipe began, and the last pointer spot. */
+  private swipe: { base: SketchEntity[]; last: { x: number; y: number }; cut: number; now?: SketchEntity[] } | null = null;
+
   dragStart(p: ToolPointer): boolean {
+    // Trim (Cut): a swipe that starts on a curve trims every piece it crosses
+    // (one undo step). A swipe from empty space still moves the view.
+    if (this.phase === "draw" && this.kind === "trim" && memory.trim === "cut" && this.sketchId) {
+      if (!this.curveAt(p)) return false;
+      this.swipe = { base: this.entities, last: { x: p.x, y: p.y }, cut: 0 };
+      this.swipeAt(p);
+      return true;
+    }
     if (this.phase !== "draw" || this.kind !== "select") return false;
     const hit = this.app.view.pick(p.x, p.y, { curves: this.sketchId ?? true, profiles: false, bodies: false, planes: false, axes: false, images: false, edgeTolPx: p.tol });
     const from = this.uvAt(p);
@@ -1545,7 +1621,7 @@ export class SketchTool implements Tool {
         return this.tapCurve(p, (id) => this.commit(this.entities.filter((e) => e.id !== id)));
       case "trim":
         if (memory.trim === "join") return this.tapCurve(p, (id, uv) => this.tapJoin(id, uv));
-        return this.tapCurve(p, (id, uv) => this.commit(this.withoutBoundary(trim([...this.entities, ...this.boundary], id, uv))));
+        return this.tapCurve(p, (id, uv) => this.commitEdit(this.trimHere(this.entities, id, uv)));
       case "align":
         return this.tapCurve(p, (id) => this.tapAlign(id));
       case "extend":
@@ -1871,7 +1947,8 @@ export class SketchTool implements Tool {
       case "polygon": {
         if (L.r === undefined) return c;
         // A circle's typed size is its diameter; a polygon's, its radius.
-        const r = this.kind === "circle" ? L.r / 2 : L.r;
+        // (Circle by two points: the second point is the diameter away.)
+        const r = this.kind === "circle" ? (memory.circle === "2pt" ? L.r : L.r / 2) : L.r;
         const ang = Math.atan2(c[1] - a[1], c[0] - a[0]);
         return [a[0] + Math.cos(ang) * r, a[1] + Math.sin(ang) * r];
       }
@@ -2012,9 +2089,10 @@ export class SketchTool implements Tool {
     } else {
       // Arc, third point: through where it was tapped (or the bend dragged to).
       this.pts.push(pt);
-      if (k === "arc" && this.pts.length === 2) this.arcM = this.defaultArcMid(this.pts[0], this.pts[1]);
-      if (k === "arc" && this.pts.length !== 2) this.arcM = null;
-      const need = k === "arc" || k === "ellipse" || (k === "rect" && memory.rect === "3pt") ? 3 : 2;
+      // (Centre arcs have no bend: their third tap is where they end.)
+      if (k === "arc" && memory.arc === "3pt" && this.pts.length === 2) this.arcM = this.defaultArcMid(this.pts[0], this.pts[1]);
+      if (k === "arc" && (memory.arc !== "3pt" || this.pts.length !== 2)) this.arcM = null;
+      const need = k === "arc" || k === "ellipse" || (k === "rect" && memory.rect === "3pt") || (k === "circle" && memory.circle === "3pt") ? 3 : 2;
       if (this.pts.length >= need) {
         const e = this.buildShape(this.pts);
         const cs: SketchConstraint[] = [];
@@ -2030,9 +2108,10 @@ export class SketchTool implements Tool {
           if (e.kind === "polygon") dim("radius", L.r);
           if (e.kind === "ellipse") (dim("dx", L.rx), dim("dy", L.ry));
           // A centre placed on an existing point stays on it.
-          if (settings.value.autoConstrain && (e.kind === "circle" || e.kind === "polygon" || e.kind === "ellipse" || (e.kind === "rect" && memory.rect === "center")) && this.startRef) {
+          const centred = (e.kind === "circle" && memory.circle === "center") || e.kind === "polygon" || e.kind === "ellipse" || (e.kind === "rect" && memory.rect === "center") || (e.kind === "arc" && memory.arc === "center");
+          if (settings.value.autoConstrain && centred && this.startRef) {
             cs.push({ id: uid(), type: "coincident", pts: [{ e: e.id, p: "c" }, this.startRef] });
-          } else if (e.kind === "circle" || e.kind === "polygon" || e.kind === "ellipse") cs.push(...this.snapKeeps(this.startSnap, { e: e.id, p: "c" }));
+          } else if (centred && e.kind !== "rect") cs.push(...this.snapKeeps(this.startSnap, { e: e.id, p: "c" }));
         }
         this.pts = [];
         this.locks = {};
@@ -2133,6 +2212,7 @@ export class SketchTool implements Tool {
       case "arc":
         if (!b) return null;
         if (!c) return { id, kind: "line", a, b };
+        if (memory.arc === "center") return centreArc(id, a, b, c);
         return arcFrom3(a, c, b) ? { id, kind: "arc", a, m: c, b } : null;
       case "rect": {
         if (!b) return null;
@@ -2151,7 +2231,18 @@ export class SketchTool implements Tool {
         return w > 1e-9 && h > 1e-9 ? { id, kind: "rect", center, w, h, rotation: 0 } : null;
       }
       case "circle": {
-        const r = b ? Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
+        if (!b) return null;
+        if (memory.circle === "3pt") {
+          // Two points so far: the chord; the third puts the circle through all three.
+          if (!c) return Math.hypot(b[0] - a[0], b[1] - a[1]) > 1e-9 ? { id, kind: "line", a, b } : null;
+          const k = arcFrom3(a, b, c);
+          return k ? { id, kind: "circle", center: k.c, radius: k.r } : null;
+        }
+        if (memory.circle === "2pt") {
+          const r = Math.hypot(b[0] - a[0], b[1] - a[1]) / 2;
+          return r > 1e-9 ? { id, kind: "circle", center: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], radius: r } : null;
+        }
+        const r = Math.hypot(b[0] - a[0], b[1] - a[1]);
         return r > 1e-9 ? { id, kind: "circle", center: a, radius: r } : null;
       }
       case "polygon": {
@@ -2322,7 +2413,7 @@ export class SketchTool implements Tool {
       if (this.kind === "arc" && this.pts.length === 2 && this.arcM && (isCoarse || this.arcBend)) {
         const [a, b] = this.pts;
         if (arcFrom3(a, this.arcM, b)) ghosts.push({ id: "arc-preview", kind: "arc", a, m: this.arcM, b });
-      } else if (this.kind === "arc" && this.pts.length === 1 && e?.kind === "line") {
+      } else if (this.kind === "arc" && memory.arc === "3pt" && this.pts.length === 1 && e?.kind === "line") {
         // Arc, first end placed: a dashed arc to the pointer shows what's coming (the bend comes with the third tap).
         const [a, b] = [e.a, e.b];
         const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -2524,6 +2615,11 @@ export class SketchTool implements Tool {
     return titleOf(k);
   }
 
+  /** An edit that changed curves: their constraints follow (or go, where they no longer hold). */
+  private commitEdit(entities: SketchEntity[]): void {
+    this.commit(entities, carryConstraints(this.entities, entities, this.constraints));
+  }
+
   private commit(entities: SketchEntity[], constraints: SketchConstraint[] = this.constraints): void {
     const store = this.app.store;
     const ids = new Set(entities.map((e) => e.id));
@@ -2662,7 +2758,7 @@ export class SketchTool implements Tool {
     // Same half twice: the old one-tap extend, to the next curve in the way.
     if (first.id === id && endA === endB) {
       const next = extend(all, id, uv);
-      if (next) this.commit(this.withoutBoundary(next));
+      if (next) this.commitEdit(this.withoutBoundary(next));
       else this.app.ui.toast("Nothing to extend to");
       return;
     }
@@ -2674,7 +2770,8 @@ export class SketchTool implements Tool {
       !closed && endA && endB && !first.id.startsWith("bnd-") && !id.startsWith("bnd-")
         ? [...this.constraints, { id: uid(), type: "coincident" as const, pts: [{ e: first.id, p: endA }, { e: id, p: endB }] }]
         : this.constraints;
-    this.commit(this.withoutBoundary(next), keep);
+    const ents = this.withoutBoundary(next);
+    this.commit(ents, carryConstraints(this.entities, ents, keep));
   }
 
   /**
@@ -3023,7 +3120,7 @@ export class SketchTool implements Tool {
         const d = Math.hypot(q[0] - uv[0], q[1] - uv[1]);
         return d < tol && (!best || d < best.d) ? { p: q, d } : best;
       }, null);
-      if (corner) return this.startFillet((r) => filletCorner(base, corner.p, r, tol * 0.01 + 1e-6));
+      if (corner) return this.startFillet((r) => (memory.corner === "chamfer" ? chamferCorner(base, corner.p, r, tol * 0.01 + 1e-6) : filletCorner(base, corner.p, r, tol * 0.01 + 1e-6)));
       const c = this.curveAt(p);
       if (!c) return this.tapEmpty();
       if (base.find((x) => x.id === c.id)?.kind !== "line") return this.app.ui.toast("Pick a line (or tap a corner)");
@@ -3037,14 +3134,14 @@ export class SketchTool implements Tool {
     this.edit.filletFrom = undefined;
     this.clearPreviewJoin();
     this.app.setSelection([]);
-    this.startFillet((r) => filletEnds(base, first, { id: c.id, at: c.uv }, r));
+    this.startFillet((r) => (memory.corner === "chamfer" ? chamferEnds(base, first, { id: c.id, at: c.uv }, r) : filletEnds(base, first, { id: c.id, at: c.uv }, r)));
   }
 
   private filletEdit: { make: (r: number) => SketchEntity[] | null; widget: DimWidget; base: SketchEntity[]; baseIds: Set<string> } | null = null;
 
   /** Show the fillet with the last radius and a focused radius box to type into. */
   private startFillet(make: (r: number) => SketchEntity[] | null): void {
-    if (!make(memory.fillet)) return this.app.ui.toast("Can't fillet these (radius too big, parallel, or not two lines)");
+    if (!make(memory.fillet)) return this.app.ui.toast(memory.corner === "chamfer" ? "Can't chamfer these (distance too big, parallel, or not two lines)" : "Can't fillet these (radius too big, parallel, or not curves meeting at a corner)");
     const widget = new DimWidget(this.app.view, {
       value: memory.fillet,
       boxAt: "beyond",
@@ -3055,7 +3152,7 @@ export class SketchTool implements Tool {
     });
     this.filletEdit = { make, widget, base: this.entities, baseIds: new Set(this.entities.map((e) => e.id)) };
     this.applyFillet(memory.fillet);
-    this.setHint("Type the radius, then Enter (or tap anywhere).");
+    this.setHint(memory.corner === "chamfer" ? "Type how far back to cut each line, then Enter (or tap anywhere)." : "Type the radius, then Enter (or tap anywhere).");
   }
 
   private applyFillet(r: number): void {
@@ -3070,6 +3167,14 @@ export class SketchTool implements Tool {
       const f = doc.features.find((x) => x.id === id);
       if (f?.type === "sketch") f.entities = next;
     });
+    // A chamfer: the distance runs from one cut back to the old corner.
+    const cutLine = next.find((e) => e.kind === "line" && !fe.baseIds.has(e.id) && memory.corner === "chamfer");
+    if (cutLine?.kind === "line") {
+      const side = next.find((e): e is Extract<SketchEntity, { kind: "line" }> => e.kind === "line" && e.id !== cutLine.id && (samePt(e.a, cutLine.a) || samePt(e.b, cutLine.a)));
+      const other = next.find((e): e is Extract<SketchEntity, { kind: "line" }> => e.kind === "line" && e.id !== cutLine.id && (samePt(e.a, cutLine.b) || samePt(e.b, cutLine.b)));
+      const corner = side && other && lineMeet(side, other);
+      if (corner) fe.widget.set(sketchToWorld(this.plane!, cutLine.a).toArray() as Vec3, sketchToWorld(this.plane!, corner).toArray() as Vec3);
+    }
     // The radius dimension runs from the new arc's centre to its middle.
     const arc = next.find((e) => e.kind === "arc" && !fe.baseIds.has(e.id));
     if (arc?.kind === "arc") {
@@ -3105,8 +3210,10 @@ export class SketchTool implements Tool {
           if (x !== y && samePt(x.b, y.a)) cs = [...cs, { id: uid(), type: "coincident", pts: [{ e: x.id, p: "b" }, { e: y.id, p: "a" }] }];
     }
     // One undo step for the whole fillet; the arc stays tangent and joined to its lines.
-    this.commit(this.entities, filletConstraints(this.entities, cs, fe.baseIds));
+    this.commit(this.entities, memory.corner === "chamfer" ? chamferConstraints(this.entities, cs, fe.baseIds) : filletConstraints(this.entities, cs, fe.baseIds));
     this.setHint();
+    // The card shows the size just used (it may have been typed in the box on the corner).
+    this.updatePanel();
   }
 
   /** Last curve of another sketch projected (a second tap on it brings the whole sketch). */
