@@ -107,6 +107,9 @@ export class App implements AppContext {
 
     this.store.onChange(() => this.docChanged());
     window.addEventListener("keydown", (e) => this.onKey(e));
+    // A phone may drop the page once it's in the background: save now, undo steps included.
+    document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && void this.store.flush());
+    window.addEventListener("pagehide", () => void this.store.flush());
     this.wireTopbar();
     this.tool.enter?.();
 
@@ -115,7 +118,7 @@ export class App implements AppContext {
       .then(async () => {
         this.ui.setStatus(null);
         await this.regenerate();
-        this.view.cam.fit(this.view.bounds(), false);
+        this.view.fitAll(false);
       })
       .catch((err) => this.ui.setStatus(`Could not start the geometry kernel: ${err.message ?? err}`));
   }
@@ -711,7 +714,7 @@ export class App implements AppContext {
   }
 
   private fit(): void {
-    this.view.cam.fit(this.view.bounds());
+    this.view.fitAll();
   }
 
   // ------------------------------------------------------------ files

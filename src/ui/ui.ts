@@ -1162,7 +1162,15 @@ export class UI {
       li.addEventListener("pointerenter", () => h.hover?.(f.id));
       li.addEventListener("pointerleave", () => h.hover?.(null));
       const eye = iconButton(f.suppressed ? "eyeOff" : "eye", f.suppressed ? "Enable" : "Suppress", () => h.toggle(f.id));
-      const del = iconButton("trash", "Delete", () => h.remove(f.id));
+      // Two taps: the bin sits where a phone user expects the panel's close
+      // button, and one stray tap deleted a whole extrude.
+      const del = iconButton("trash", "Delete", () => {
+        if (del.classList.contains("armed")) return h.remove(f.id);
+        del.classList.add("armed");
+        del.title = "Tap again to delete";
+        this.toast(`Tap the bin again to delete ${f.name}`);
+        setTimeout(() => (del.classList.remove("armed"), (del.title = "Delete")), 3000);
+      });
       // A sketch's own steps fold out under it (closed by default).
       const steps = f.type === "sketch" ? (f.log ?? []) : [];
       if (steps.length) {

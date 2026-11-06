@@ -40,6 +40,7 @@ import {
   uid,
 } from "../sketch/edit";
 import { FONTS, importFont, textEntities } from "../sketch/text";
+import type { TextAlign } from "../sketch/textLayout";
 import { DragTyping } from "./dragTyping";
 import { DimWidget } from "./annotate";
 import { PatternBox } from "./patternBox";
@@ -133,7 +134,7 @@ function hintOf(kind: Kind): string {
   return HINTS[kind];
 }
 
-const memory = { arc: "3pt" as "3pt" | "center", circle: "center" as "center" | "2pt" | "3pt", corner: "round" as "round" | "chamfer", textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control", sides: 6, fillet: 2, offset: 2, textSize: storedTextSize() };
+const memory = { arc: "3pt" as "3pt" | "center", circle: "center" as "center" | "2pt" | "3pt", corner: "round" as "round" | "chamfer", textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control", sides: 6, fillet: 2, offset: 2, textSize: storedTextSize(), textAlign: "left" as TextAlign };
 
 /** The text size survives a reload (a ruler's 3.5 mm numbers came back at 10 mm after one). */
 function storedTextSize(): number {
@@ -919,6 +920,11 @@ export class SketchTool implements Tool {
           ui.showPanel({
             title: "Text",
             items: [
+              // Where the tapped point is (typed, it moves the text exactly) and
+              // how the text sits on it: numbers along a ruler are centred on their tick.
+              { type: "number", label: "X", value: this.pts[0][0], kind: "length", onInput: (v) => ((this.pts[0] = [v, this.pts[0][1]]), this.refreshPreview()) },
+              { type: "number", label: "Y", value: this.pts[0][1], kind: "length", onInput: (v) => ((this.pts[0] = [this.pts[0][0], v]), this.refreshPreview()) },
+              { type: "choice", label: "Align", options: [{ id: "left", label: "Left" }, { id: "center", label: "Centre" }, { id: "right", label: "Right" }], value: memory.textAlign, onChange: (id) => ((memory.textAlign = id as TextAlign), this.refreshPreview()) },
               { type: "number", label: "Size", value: memory.textSize, kind: "length", min: 0.001, onInput: (v) => ((memory.textSize = v), storeTextSize(v), this.refreshPreview()) },
               // The font: the bundled ones and any imported.
               { type: "choice", label: "Font", list: true, options: FONTS.map((f) => ({ id: f.id, label: f.name })), value: memory.textFont, onChange: (id) => ((memory.textFont = id), this.refreshPreview()) },
@@ -1051,8 +1057,15 @@ export class SketchTool implements Tool {
       e.stopPropagation();
     });
     panel.querySelector(".panel-fields")?.prepend(input);
-    setTimeout(() => input.select(), 0);
+    // Focus now, inside the tap: a phone only opens its keyboard for a focus
+    // made during the tap, and keys typed straight away must land here.
+    this.textTyped = false;
+    input.focus();
+    input.select();
+    input.addEventListener("input", () => (this.textTyped = true), { once: true });
   }
+  /** Something was typed into the text box since it opened (else the last text is still there, selected). */
+  private textTyped = false;
 
   // -------------------------------------------------------------- pointer
 
@@ -1709,6 +1722,26 @@ export class SketchTool implements Tool {
 
   key(e: KeyboardEvent): boolean {
     if (e.ctrlKey || e.metaKey) return false;
+    // Text placed, its box not focused yet (typed straight after the tap): the
+    // keys are the text, not shortcuts — "1" then Enter used to be lost.
+    if (this.kind === "text" && this.pts.length === 1) {
+      const box = document.querySelector<HTMLInputElement>("#panel .text-input");
+      if (box && document.activeElement !== box) {
+        if (e.key.length === 1) {
+          if (!this.textTyped) box.value = "";
+          box.value += e.key;
+          this.textTyped = true;
+          this.text = box.value;
+          this.refreshPreview();
+          box.focus();
+          return true;
+        }
+        if (e.key === "Enter") {
+          void this.commitText();
+          return true;
+        }
+      }
+    }
     const k = e.key.toLowerCase();
     // Shift+letter: constraints.
     if (e.shiftKey && k.length === 1) {
@@ -1823,7 +1856,11 @@ export class SketchTool implements Tool {
     const s = settings.value.snap;
     const view = this.app.view;
     const screen = (uv: Vec2) => view.toScreen(sketchToWorld(plane, uv));
-    const tol = p.tol * 1.4;
+    // A finger covers what it lands on and can't nudge: on touch screens snap
+    // reach stays near a fingertip's own error (~14 px), not 25 — placing text
+    // beside a ruler's ticks, every tap jumped onto a tick end.
+    const touch = p.type === "touch";
+    const tol = touch ? p.tol * 0.8 : p.tol * 1.4;
 
     // The origin is a guide point like the others: with them switched off it
     // must not pull taps either (numbers placed along a ruler near the origin
@@ -1896,7 +1933,7 @@ export class SketchTool implements Tool {
     }
     // How far (in pixels) the cursor is from each; a line's own length counts as
     // "on line", past its ends as "extension" (not too far out).
-    const lt = p.tol;
+    const lt = touch ? p.tol * 0.6 : p.tol;
     const near: { L: Locus; q: Vec2; d: number; label: string; ext?: Vec2 }[] = [];
     for (const L of loci) {
       const q = nearestOnLocus(L, raw);
@@ -2558,7 +2595,7 @@ export class SketchTool implements Tool {
     }
     if (!(this.kind === "line" && this.pts.length && c)) this.hideLineDim();
     if (this.kind === "text" && this.pts.length) {
-      void textEntities(this.text || " ", this.pts[0], memory.textSize, 0, memory.textFont).then((es) => {
+      void textEntities(this.text || " ", this.pts[0], memory.textSize, 0, memory.textFont, memory.textAlign).then((es) => {
         if (this.kind !== "text" || !this.pts.length) return;
         this.drawGhosts(es);
       });
@@ -2787,7 +2824,7 @@ export class SketchTool implements Tool {
 
   private async commitText(): Promise<void> {
     if (!this.pts.length || !this.text.trim()) return;
-    const es = await textEntities(this.text, this.pts[0], memory.textSize, 0, memory.textFont);
+    const es = await textEntities(this.text, this.pts[0], memory.textSize, 0, memory.textFont, memory.textAlign);
     this.commitAdd(es);
     this.resetDrawing();
   }

@@ -49,7 +49,7 @@ import { settings } from "../settings";
 import { pointsOf } from "../sketch/constraints";
 import { entityPolylines } from "../sketch/curves";
 import { arrangement } from "../sketch/regions";
-import { CameraController } from "./camera";
+import { CameraController, type Insets } from "./camera";
 import { AdaptiveGrid } from "./grid";
 
 export type PickHit =
@@ -411,6 +411,41 @@ export class Viewport {
 
   get bodyList(): BodyMesh[] {
     return [...this.bodies.values()].map((b) => b.data);
+  }
+
+  /** Zoom to fit everything shown, in the part of the screen the tools leave free. */
+  fitAll(animate = true): void {
+    this.cam.fit(this.bounds(), animate, this.coveredInsets());
+  }
+
+  /**
+   * How much of each side of the canvas the tool columns and bars cover: a
+   * column hugging the left or right edge, a bar along the top or bottom.
+   * Panels that cover most of the screen (History on a phone) don't count —
+   * the model would have nowhere left to go.
+   */
+  coveredInsets(): Insets {
+    const W = this.width, H = this.height;
+    const cv = this.canvas.getBoundingClientRect();
+    const ins = { left: 0, right: 0, top: 0, bottom: 0 };
+    if (!W || !H) return ins;
+    for (const id of ["topbar", "toolbar", "right-col", "undo-dock", "bottom-left", "panel"]) {
+      const el = document.getElementById(id);
+      if (!el || el.hidden || !el.offsetParent) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4) continue;
+      const l = r.left - cv.left, t = r.top - cv.top, rr = cv.right - r.right, b = cv.bottom - r.bottom;
+      const wide = r.width > W * 0.5, tall = r.height > H * 0.25;
+      if (tall && !wide && l < W * 0.15) ins.left = Math.max(ins.left, (r.right - cv.left) / W);
+      else if (tall && !wide && rr < W * 0.15) ins.right = Math.max(ins.right, (cv.right - r.left) / W);
+      else if (!tall && t < H * 0.2 && (wide || r.height < H * 0.12)) ins.top = Math.max(ins.top, (r.bottom - cv.top) / H);
+      else if (!tall && b < H * 0.2 && wide) ins.bottom = Math.max(ins.bottom, (cv.bottom - r.top) / H);
+    }
+    // Never squeeze the model into less than half the screen either way.
+    const cap = (a: number, b: number) => (a + b > 0.5 ? [(a * 0.5) / (a + b), (b * 0.5) / (a + b)] : [a, b]);
+    [ins.left, ins.right] = cap(ins.left, ins.right);
+    [ins.top, ins.bottom] = cap(ins.top, ins.bottom);
+    return ins;
   }
 
   bounds(): Box3 {

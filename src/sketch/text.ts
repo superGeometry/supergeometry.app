@@ -11,7 +11,7 @@ import oswald from "@fontsource/oswald/files/oswald-latin-400-normal.woff?url";
 import bebas from "@fontsource/bebas-neue/files/bebas-neue-latin-400-normal.woff?url";
 import pacifico from "@fontsource/pacifico/files/pacifico-latin-400-normal.woff?url";
 import type { SketchEntity, Vec2 } from "../doc/types";
-import { textOutlines } from "./textLayout";
+import { textOutlines, type TextAlign } from "./textLayout";
 
 /** The fonts to choose from (id → name, file). Imported ones are added at runtime. */
 export const FONTS: { id: string; name: string; url?: string }[] = [
@@ -73,6 +73,6 @@ export async function importFont(file: File): Promise<string> {
 }
 
 /** Outline entities for `text` with its baseline-left at `at`, cap height ≈ size. */
-export async function textEntities(text: string, at: Vec2, size: number, angle = 0, fontId = "roboto"): Promise<SketchEntity[]> {
-  return textOutlines(await loadFont(fontId), text, at, size, angle);
+export async function textEntities(text: string, at: Vec2, size: number, angle = 0, fontId = "roboto", align: TextAlign = "left"): Promise<SketchEntity[]> {
+  return textOutlines(await loadFont(fontId), text, at, size, angle, align);
 }

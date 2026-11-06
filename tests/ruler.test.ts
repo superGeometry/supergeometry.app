@@ -30,12 +30,11 @@ for (let mm = 0; mm <= CM * 10; mm++) {
   marks.push({ id: `t${mm}`, kind: "rect", center: [ZERO + mm, W - len / 2], w: TICK, h: len, rotation: 0 });
 }
 for (let cm = 0; cm <= CM; cm++) {
-  const s = String(cm);
-  // Centred under its tick: lay it out once to measure, then shift.
-  const probe = textOutlines(font, s, [0, 0], TEXT);
-  const xs = probe.flatMap((e: any) => e.points.map((p: number[]) => p[0]));
-  const w = Math.max(...xs) - Math.min(...xs);
-  marks.push(...textOutlines(font, s, [ZERO + cm * 10 - w / 2 - Math.min(...xs), W - 9 - 1.5 - TEXT], TEXT).map((e: any, i: number) => ({ ...e, id: `n${cm}-${i}` })));
+  // Centred under its tick (the Text tool's Align: Centre).
+  const ns = textOutlines(font, String(cm), [ZERO + cm * 10, W - 9 - 1.5 - TEXT], TEXT, 0, "center");
+  const xs = ns.flatMap((e: any) => e.points.map((p: number[]) => p[0]));
+  if (Math.abs((Math.min(...xs) + Math.max(...xs)) / 2 - (ZERO + cm * 10)) > 1e-9) check(`${cm} centred on its tick`, false);
+  marks.push(...ns.map((e: any, i: number) => ({ ...e, id: `n${cm}-${i}` })));
 }
 
 // The regions to cut: every shape, holes left (the app's own "All shapes").

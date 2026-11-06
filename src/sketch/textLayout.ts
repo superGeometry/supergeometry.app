@@ -5,13 +5,17 @@ import type { Font } from "opentype.js";
 import type { SketchEntity, Vec2 } from "../doc/types";
 import { uid } from "./edit";
 
-/** `text` with its capitals `size` tall, its baseline starting at `at`, turned `angle` radians. */
+/** Where `at` sits along the baseline: the text's start, the middle of its ink, or the end of its ink. */
+export type TextAlign = "left" | "center" | "right";
+
+/** `text` with its capitals `size` tall, its baseline through `at` (aligned there by `align`), turned `angle` radians. */
 export function textOutlines(
   f: Font,
   text: string,
   at: Vec2,
   size: number,
   angle = 0,
+  align: TextAlign = "left",
 ): SketchEntity[] {
   // opentype sizes are em: scale so capitals are `size` tall (the font says how tall its caps are).
   const os2 = (f.tables as { os2?: { sCapHeight?: number } }).os2;
@@ -97,6 +101,13 @@ export function textOutlines(
   if (cur.length > 2) contours.push(cur);
   const cs = Math.cos(angle);
   const sn = Math.sin(angle);
+  // Centred / right: by the ink, not the advance (a "1" is mostly side bearing).
+  let dx = 0;
+  if (align !== "left" && contours.length) {
+    const xs = contours.flat().map((p) => p[0]);
+    const lo = Math.min(...xs), hi = Math.max(...xs);
+    dx = align === "center" ? -(lo + hi) / 2 : -hi;
+  }
   // Points closer than this are one point: fonts repeat a point where a curve
   // meets a line (an "8" in Roboto), and a zero-length edge can't be made into
   // a face — the text then fails to extrude or cut.
@@ -132,7 +143,7 @@ export function textOutlines(
         closed: true,
         points: pts.map(
           ([x, y]) =>
-            [at[0] + x * cs - y * sn, at[1] + x * sn + y * cs] as Vec2,
+            [at[0] + (x + dx) * cs - y * sn, at[1] + (x + dx) * sn + y * cs] as Vec2,
         ),
       };
     });

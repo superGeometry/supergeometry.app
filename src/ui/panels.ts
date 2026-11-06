@@ -9,7 +9,7 @@ import type { UI } from "./ui";
 import { el } from "./ui";
 
 export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnits: (u: Units) => void): void {
-  ui.addRight("fit", "fit", "Zoom to fit (F)", () => view.cam.fit(view.bounds()), () => "Fit");
+  ui.addRight("fit", "fit", "Zoom to fit (F)", () => view.fitAll(), () => "Fit");
   ui.addRight("snap", "magnet", "Snapping", (host) => {
     const s = settings.value;
     host.append(heading("Snap to"));
@@ -77,7 +77,7 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
       body.innerHTML = "";
       // Picking a view closes the list (it would only cover the view picked).
       const go = (label: string, n: Vec3, x?: Vec3) => choiceRow(label, false, () => (view.cam.lookAlong(n, x), ui.closePopover()));
-      body.append(choiceRow("⌂ Default view", false, () => (view.cam.iso(), view.cam.fit(view.bounds()), ui.closePopover())));
+      body.append(choiceRow("⌂ Default view", false, () => (view.cam.iso(), view.fitAll(), ui.closePopover())));
       body.append(go("Top", [0, 0, 1]), go("Bottom", [0, 0, -1]), go("Front", [0, -1, 0]), go("Back", [0, 1, 0], [-1, 0, 0]), go("Right", [1, 0, 0], [0, 1, 0]), go("Left", [-1, 0, 0], [0, -1, 0]));
       body.append(heading("Saved views"));
       for (const v of store.doc.views) {

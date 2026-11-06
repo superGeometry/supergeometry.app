@@ -83,11 +83,54 @@ export class DocStore {
     if (saved) {
       try {
         this.doc = migrate(JSON.parse(saved));
+        await this.loadHistory(saved);
       } catch {
         // A broken autosave must never block the app.
       }
     }
+    this.loaded = true;
     this.listeners.forEach((fn) => fn());
+  }
+  /** Until the saved project is read, saving would overwrite it with an empty one. */
+  private loaded = false;
+
+  /**
+   * Undo survives a reload (a phone drops the page whenever it likes): the
+   * stacks are saved beside the project, and taken back only if they end at
+   * exactly the project that was loaded.
+   */
+  private async loadHistory(saved: string): Promise<void> {
+    const text = await idbGet("undo");
+    if (!text) return;
+    const h = JSON.parse(text) as SavedHistory;
+    if (h.head !== hashText(saved) || !Array.isArray(h.undo) || !Array.isArray(h.redo)) return;
+    for (const [id, v] of h.big ?? []) {
+      bigById.set(id, v);
+      idOfBig.set(v, id);
+    }
+    this.undoStack = h.undo;
+    this.redoStack = h.redo;
+  }
+
+  private historyTimer = 0;
+  private saveHistory(docText: string): Promise<void> {
+    clearTimeout(this.historyTimer);
+    // The newest steps first, up to a few MB (200 snapshots of a big model would be hundreds).
+    const keep = (stack: string[]) => {
+      const out: string[] = [];
+      let left = HISTORY_BYTES / 2;
+      for (let i = stack.length - 1; i >= 0 && left - stack[i].length >= 0; i--) {
+        left -= stack[i].length;
+        out.unshift(stack[i]);
+      }
+      return out;
+    };
+    const undo = keep(this.undoStack), redo = keep(this.redoStack);
+    const refs = new Set<string>();
+    for (const t of [...undo, ...redo]) for (const m of t.matchAll(/\\u0000sg-big:(\d+)/g)) refs.add(REF + m[1]);
+    const big = [...refs].filter((id) => bigById.has(id)).map((id) => [id, bigById.get(id)!] as [string, string]);
+    const h: SavedHistory = { head: hashText(docText), undo, redo, big };
+    return idbSet("undo", JSON.stringify(h));
   }
 
   onChange(fn: Listener): () => void {
@@ -203,15 +246,40 @@ export class DocStore {
 
   /** Save the project now (before the page reloads). */
   async flush(): Promise<void> {
+    if (!this.loaded) return;
     clearTimeout(this.saveTimer);
-    await idbSet("autosave", JSON.stringify(this.doc));
+    const text = JSON.stringify(this.doc);
+    await idbSet("autosave", text);
+    await this.saveHistory(text);
   }
 
   private changed(): void {
     this.listeners.forEach((fn) => fn());
     clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(() => void idbSet("autosave", JSON.stringify(this.doc)), 400);
+    this.saveTimer = window.setTimeout(() => {
+      const text = JSON.stringify(this.doc);
+      void idbSet("autosave", text);
+      // The undo steps less eagerly: they're bigger, and only matter after a reload.
+      clearTimeout(this.historyTimer);
+      this.historyTimer = window.setTimeout(() => void this.saveHistory(text), 1200);
+    }, 400);
   }
+}
+
+/** Undo history as saved: the stacks, the big values they refer to, and the project they lead up to. */
+interface SavedHistory {
+  head: string;
+  undo: string[];
+  redo: string[];
+  big: [string, string][];
+}
+const HISTORY_BYTES = 8_000_000;
+
+/** A short fingerprint of a saved project (FNV-1a, plus the length). */
+function hashText(t: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 0x01000193);
+  return `${t.length}:${(h >>> 0).toString(36)}`;
 }
 
 export function newId(prefix: string): string {

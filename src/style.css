@@ -167,6 +167,11 @@ kbd {
   background: var(--chrome);
   flex: none;
 }
+/* History's bin after one tap: a second tap deletes. */
+.icon-btn.armed {
+  color: #fff;
+  background: var(--danger);
+}
 .icon-btn.small {
   width: 26px;
   height: 26px;
