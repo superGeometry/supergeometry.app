@@ -1088,9 +1088,36 @@ function combine(id: string, mode: string, target: string | undefined, solid: Sh
     return;
   }
   const t = need(ctx.bodies, target);
-  const result = m === "join" ? fuzzyBoolean("fuse", t, solid) : m === "cut" ? fuzzyBoolean("cut", t, solid) : t;
+  let result = m === "join" ? fuzzyBoolean("fuse", t, solid) : m === "cut" ? fuzzyBoolean("cut", t, solid) : t;
+  if (m === "join" || m === "cut") {
+    // OpenCascade can get a boolean wrong without saying so (a thread only just
+    // overlapping the core it's joined to): its volume then can't be right.
+    const ok = (r: Shape3D) => booleanVolumeOk(m === "join" ? "fuse" : "cut", t, solid, r);
+    if (!ok(result)) {
+      const plain = m === "join" ? t.fuse(solid) : t.cut(solid);
+      if (!ok(plain)) throw new Error(m === "join" ? "Joining these didn't work out — the shapes only just overlap here: let them overlap more" : "This cut didn't work out — the shapes only just overlap here: let them overlap more, or less");
+      result = plain;
+    }
+  }
   if (isEmpty(result)) ctx.bodies.delete(target);
   else ctx.bodies.set(target, result);
+}
+
+/**
+ * Can this be the volume of a ∪ b (or a − b)? A union is at least the bigger
+ * of the two and at most both together; a cut is at most a and at least a − b.
+ */
+function booleanVolumeOk(op: "fuse" | "cut", a: Shape3D, b: Shape3D, r: Shape3D): boolean {
+  try {
+    const va = Math.abs(measureVolume(a));
+    const vb = Math.abs(measureVolume(b));
+    const v = isEmpty(r) ? 0 : measureVolume(r);
+    const tol = (va + vb) * 1e-6 + 1e-9;
+    if (!Number.isFinite(v) || v < -tol) return false;
+    return op === "fuse" ? v >= Math.max(va, vb) - tol && v <= va + vb + tol : v <= va + tol && v >= va - vb - tol;
+  } catch {
+    return true; // can't tell: leave it to the usual checks
+  }
 }
 
 /**
