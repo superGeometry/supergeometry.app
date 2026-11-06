@@ -286,9 +286,7 @@ function findFace(body: Shape3D, ok: (f: Face) => boolean, center: Vec3, area: n
 
 function replacePlaneDirect(body: Shape3D, F: Face, to: PlaneDef): Shape3D {
   const L = sizeOf(body) * 4;
-  const { p, n } = onFace(body, F);
-  const q = sub(p, scale(n, sizeOf(body) * 1e-3));
-  const E = extendedRegion(body, F, q, L);
+  const E = faceColumn(body, F, L);
   const behind = (pl: PlaneDef) => halfSpace({ ...pl, normal: scale(pl.normal, -1), xDir: xDirFor(scale(pl.normal, -1)) }, L);
   const front = (pl: PlaneDef) => halfSpace(pl, L);
   const old = planeOf(F);
@@ -299,6 +297,62 @@ function replacePlaneDirect(body: Shape3D, F: Face, to: PlaneDef): Shape3D {
   const shrink = E.intersect(behind(old)).intersect(front(neu));
   if (!isEmpty(shrink)) out = out.cut(shrink);
   return sanity(body, out);
+}
+
+/**
+ * The space a flat face's neighbours enclose around it, carried on along their
+ * own surfaces. A face with inward corners (an L, a notch cut into it) isn't
+ * one convex piece: its neighbours' surfaces cut its plane into cells, and the
+ * face is exactly the cells it covers — so take each of those (points spread
+ * over the face tell which) and join them.
+ */
+function faceColumn(body: Shape3D, F: Face, L: number): Shape3D {
+  const { p, n } = onFace(body, F);
+  const lift = sizeOf(body) * 1e-3;
+  const q0 = sub(p, scale(n, lift));
+  if (convexFace(F)) return extendedRegion(body, F, q0, L);
+  const tol = sizeOf(body) * 1e-6;
+  const sides = neighbours(body, F).map((g): ((q: Vec3) => number) | null => {
+    if (g.geomType === "PLANE") {
+      const pl = planeOf(g);
+      return (q) => dot(sub(q, pl.origin), pl.normal);
+    }
+    if (g.geomType === "CYLINDRE") {
+      const cy = cylinderOf(g);
+      if (!cy) return null;
+      return (q) => {
+        const rel = sub(q, cy.c);
+        return len(sub(rel, scale(cy.a, dot(rel, cy.a)))) - cy.r;
+      };
+    }
+    return null;
+  });
+  let t = F.triangulation();
+  if (!t || !t.trianglesIndexes.length) {
+    body.mesh({ tolerance: sizeOf(body) * 1e-3, angularTolerance: 0.3 });
+    t = F.triangulation();
+  }
+  if (!t || !t.trianglesIndexes.length) return extendedRegion(body, F, q0, L);
+  const v = (i: number): Vec3 => [t!.vertices[3 * i], t!.vertices[3 * i + 1], t!.vertices[3 * i + 2]];
+  const cells = new Map<string, Vec3>();
+  for (let k = 0; k < t.trianglesIndexes.length; k += 3) {
+    const [a, b, c] = [0, 1, 2].map((j) => v(t!.trianglesIndexes[k + j]));
+    // The middle and near each corner: a triangle may straddle a line where a neighbour's surface crosses the face.
+    for (const [wa, wb, wc] of [[1 / 3, 1 / 3, 1 / 3], [0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8]]) {
+      const q = sub(add(add(scale(a, wa), scale(b, wb)), scale(c, wc)), scale(n, lift));
+      const ds = sides.map((f) => (f ? f(q) : 0));
+      if (ds.some((d, i) => sides[i] && Math.abs(d) < tol)) continue;
+      const key = ds.map((d, i) => (!sides[i] ? "" : d < 0 ? "-" : "+")).join("");
+      if (!cells.has(key)) cells.set(key, q);
+    }
+  }
+  if (cells.size <= 1) return extendedRegion(body, F, q0, L);
+  let E: Shape3D | null = null;
+  for (const q of cells.values()) {
+    const c = extendedRegion(body, F, q, L);
+    E = E ? E.fuse(c) : c;
+  }
+  return E!;
 }
 
 /** Does a flat face's outline turn the same way at every corner (no inward corners, no holes)? */
