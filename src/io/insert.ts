@@ -207,7 +207,33 @@ export function parseDXF(text: string): SketchEntity[] {
       if (pts.length >= 2) out.push({ id: uid(), kind: "polyline", points: pts, closed });
     }
   }
-  return out;
+  // Only curves that make sense: real numbers, some size (a damaged file
+  // mustn't put NaN or a dot into the sketch).
+  return out.filter(usableCurve);
+}
+
+function usableCurve(e: SketchEntity): boolean {
+  let finite = true;
+  JSON.stringify(e, (_k, v) => {
+    if (typeof v === "number" && !Number.isFinite(v)) finite = false;
+    return v;
+  });
+  if (!finite) return false;
+  switch (e.kind) {
+    case "line":
+      return Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) > 1e-9;
+    case "circle":
+      return e.radius > 1e-9;
+    case "arc":
+      return Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) > 1e-9 || Math.hypot(e.m[0] - e.a[0], e.m[1] - e.a[1]) > 1e-9;
+    case "ellipse":
+      return e.rx > 1e-9 && e.ry > 1e-9;
+    case "spline":
+    case "polyline":
+      return e.points.length >= 2;
+    default:
+      return true;
+  }
 }
 
 // -------------------------------------------------------------------- OBJ
@@ -216,18 +242,26 @@ export function parseDXF(text: string): SketchEntity[] {
 export function objToStl(text: string): Uint8Array {
   const v: number[][] = [];
   const tris: number[][] = [];
+  let skipped = 0;
   for (const line of text.split(/\r?\n/)) {
     const p = line.trim().split(/\s+/);
     if (p[0] === "v") v.push([Number(p[1]), Number(p[2]), Number(p[3])]);
     else if (p[0] === "f") {
+      // Points by number (from 1), or counted back from the last one (-1).
       const idx = p.slice(1).map((s) => {
         const n = parseInt(s.split("/")[0], 10);
         return n < 0 ? v.length + n : n - 1;
       });
+      // A face pointing at points that aren't there (or with broken numbers): skipped.
+      const ok = (k: number) => Number.isInteger(k) && k >= 0 && k < v.length && v[k].every(Number.isFinite);
+      if (idx.length < 3 || !idx.every(ok)) {
+        skipped++;
+        continue;
+      }
       for (let k = 1; k + 1 < idx.length; k++) tris.push([idx[0], idx[k], idx[k + 1]]);
     }
   }
-  if (!tris.length) throw new Error("No faces in the OBJ file");
+  if (!tris.length) throw new Error(skipped ? "The OBJ file's faces use points that are missing or broken (a damaged file?)" : "No faces in the OBJ file");
   const buf = new ArrayBuffer(84 + tris.length * 50);
   const dv = new DataView(buf);
   dv.setUint32(80, tris.length, true);

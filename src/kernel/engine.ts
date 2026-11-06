@@ -139,7 +139,9 @@ async function run(features: Feature[]) {
 
   for (let i = 0; i < features.length; i++) {
     const f = features[i];
-    key += JSON.stringify(f);
+    // Chained hashes, not the text itself: a key holding every step's JSON
+    // grew with the square of the project (an import's megabytes in each one).
+    key = chainKey(key, JSON.stringify(f));
     const cached: CacheEntry | undefined = hit && cache[i]?.key === key ? cache[i] : undefined;
     hit = !!cached;
     let entry: CacheEntry;
@@ -1504,4 +1506,23 @@ function whatsWrong(h: ReturnType<typeof healthOf>): string {
   if (!h.valid) out.push("faces that don't meet up");
   if (h.thin) out.push(`${h.thin} hair-thin face${h.thin > 1 ? "s" : ""}`);
   return out.join(", ") || "it doesn't enclose a volume";
+}
+
+/** Key of the steps so far: the previous key and this step's JSON, hashed (two 53-bit hashes, no collisions in practice). */
+function chainKey(prev: string, json: string): string {
+  return `${hash53(prev + json, 1)}.${hash53(json, 7)}.${json.length}`;
+}
+
+/** cyrb53: a fast, well-mixed 53-bit string hash. */
+function hash53(str: string, seed: number): string {
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
