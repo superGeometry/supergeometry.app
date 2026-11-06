@@ -48,6 +48,7 @@ import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "
 import { projectPolyline } from "../sketch/edit";
 import { cageToShape } from "./freeform";
 import { deleteFaces, subdivide } from "../freeform/cage";
+import { useSafeBooleans } from "./safeBooleans";
 import { deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, unify } from "./faceEdit";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import type { BodyMesh, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
@@ -118,7 +119,14 @@ export async function regenerate(features: Feature[]): Promise<RegenResult> {
  * Replay features in order. Results are cached per feature, keyed by the JSON
  * of every feature up to it, so editing feature k only rebuilds k onwards.
  */
+/** The solids of the last rebuild (for tests that check the real geometry, not just its mesh). */
+let lastBodies: Map<string, Shape3D> = new Map();
+export function debugBodies(): Map<string, Shape3D> {
+  return lastBodies;
+}
+
 async function run(features: Feature[]) {
+  useSafeBooleans();
   const errors: FeatureError[] = [];
   const notes: FeatureError[] = [];
   let ctx: Ctx = { bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map() };
@@ -140,7 +148,35 @@ async function run(features: Feature[]) {
       if (!f.suppressed) {
         try {
           editNotes.length = 0;
+          // An edit works on copies of the bodies it may touch: OpenCascade is
+          // allowed to adjust the shapes it is given, and the earlier steps'
+          // results (kept in the cache) must never change — not even when this
+          // step fails. Bodies it leaves alone get their originals back.
+          const copies = new Map<string, Shape3D>();
+          if (GUARDED.has(f.type)) {
+            for (const id of touchedBodies(f, ctx)) {
+              const b = out.bodies.get(id);
+              if (!b || out.freeforms.has(id)) continue;
+              const c = b.clone() as Shape3D;
+              copies.set(id, c);
+              out.bodies.set(id, c);
+            }
+          }
           await apply(f, out);
+          for (const [id, c] of copies) if (out.bodies.get(id) === c) out.bodies.set(id, ctx.bodies.get(id)!);
+          // Every edit of a solid ends in one: checked (and tidied) before it counts.
+          if (GUARDED.has(f.type)) {
+            for (const [id, after] of [...out.bodies]) {
+              const before = ctx.bodies.get(id);
+              if (after === before || out.freeforms.has(id) || ctx.freeforms.has(id)) continue;
+              // Offsetting a face of the body itself is a face move: it doesn't split it either.
+              const inPlace = f.type === "extrude" && f.source.kind === "face" && f.mode !== "new" && f.target === f.source.face.body;
+              const kept = guardEdit(before, after, !NO_SPLIT.has(f.type) && !inPlace);
+              // Cut away to dust: the body is gone.
+              if (kept) out.bodies.set(id, kept);
+              else out.bodies.delete(id);
+            }
+          }
           if (editNotes.length) entry.note = [...new Set(editNotes)].join(" ");
           // Anything but a move/scale changing a freeform body makes it an ordinary body.
           if (f.type !== "freeform" && f.type !== "transform") for (const id of [...out.freeforms.keys()]) if (out.bodies.get(id) !== ctx.bodies.get(id)) out.freeforms.delete(id);
@@ -156,6 +192,7 @@ async function run(features: Feature[]) {
     next.push(entry);
   }
   cache = next;
+  lastBodies = ctx.bodies;
   // Bodies are numbered in the order they first appeared (a body that's
   // deleted later keeps its number used, so the others don't change names).
   const numbers = new Map<string, number>();
@@ -275,10 +312,17 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       for (const [bodyId, refs] of byBody) {
         const body = need(bodies, bodyId);
         const edges = refs.map((r) => resolveEdge(body, r));
-        const result =
-          f.type === "fillet"
-            ? body.fillet(f.radius, (finder) => finder.inList(edges))
-            : body.chamfer(f.radius, (finder) => finder.inList(edges));
+        let result: Shape3D;
+        try {
+          result =
+            f.type === "fillet"
+              ? body.fillet(f.radius, (finder) => finder.inList(edges))
+              : body.chamfer(f.radius, (finder) => finder.inList(edges));
+        } catch (err) {
+          if (err instanceof Error && !/WebAssembly|kernel/i.test(err.message)) throw err;
+          const what = f.type === "fillet" ? "radius" : "distance";
+          throw new Error(`That ${f.type} doesn't fit here — the ${what} is too big for the faces around ${edges.length > 1 ? "those edges" : "that edge"}. Try a smaller ${what}.`);
+        }
         bodies.set(bodyId, result);
       }
       return;
@@ -724,7 +768,16 @@ function movePolyhedronPoints(body: Shape3D, moves: [Vec3, Vec3][]): Shape3D | n
  * triangles holding a moved corner, plus the untouched rest as one polygon.
  */
 /** OpenCascade's own check (self-crossing faces, bad edges…). */
+const validCache = new WeakMap<Shape3D, boolean>();
 export function shapeValid(shape: Shape3D): boolean {
+  const known = validCache.get(shape);
+  if (known !== undefined) return known;
+  const ok = checkValid(shape);
+  validCache.set(shape, ok);
+  return ok;
+}
+
+function checkValid(shape: Shape3D): boolean {
   try {
     const oc = getOC();
     const check = new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false);
@@ -1027,6 +1080,8 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
     algo.SetArguments(args);
     algo.SetTools(tools);
     algo.SetFuzzyValue(tol);
+    // (Never adjusting a or b: they're earlier steps' results.)
+    algo.SetNonDestructive(true);
     algo.Build(new oc.Message_ProgressRange());
     if (!algo.IsDone()) throw new Error("boolean failed");
     const out = cast(algo.Shape()) as Shape3D;
@@ -1282,6 +1337,116 @@ function slivers(s: Shape3D): number {
   return areas.filter((a) => a < Math.max(1e-9, total * 1e-7)).length;
 }
 
+/**
+ * The bodies an edit may change: the ones it names — and, for a solid made
+ * from a sketch or face that joins/cuts whatever it runs into, all of them.
+ */
+function touchedBodies(f: Feature, ctx: Ctx): string[] {
+  const named = new Set<string>();
+  const walk = (v: unknown, key = ""): void => {
+    if (Array.isArray(v)) return v.forEach((x) => walk(x, key));
+    if (v && typeof v === "object") {
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) walk(x, k);
+      return;
+    }
+    if (typeof v === "string" && (key === "body" || key === "bodies" || key === "target" || key === "tools")) named.add(v);
+  };
+  walk(f);
+  const mode = (f as { mode?: string }).mode;
+  if ((f.type === "extrude" || f.type === "revolve" || f.type === "sweep" || f.type === "loft") && mode && mode !== "new") for (const id of ctx.bodies.keys()) named.add(id);
+  return [...named].filter((id) => ctx.bodies.has(id));
+}
+
+/** Edits that change a solid in place (their results are checked). */
+const GUARDED = new Set<string>(["extrude", "revolve", "sweep", "loft", "boolean", "fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom", "split"]);
+/** Edits that must not break a body into pieces (cuts and booleans may). */
+const NO_SPLIT = new Set<string>(["fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom"]);
+
+function subShapes(s: Shape3D, kind: "SOLID" | "SHELL"): any[] {
+  const oc = getOC();
+  const ex = new oc.TopExp_Explorer(s.wrapped, kind === "SOLID" ? oc.TopAbs_ShapeEnum.TopAbs_SOLID : oc.TopAbs_ShapeEnum.TopAbs_SHELL, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+  const out: any[] = [];
+  for (; ex.More(); ex.Next()) out.push(kind === "SOLID" ? oc.TopoDS.Solid(ex.Current()) : oc.TopoDS.Shell(ex.Current()));
+  ex.delete();
+  return out;
+}
+
+function hairThin(s: Shape3D): number {
+  const areas = s.faces.map((f) => measureArea(f));
+  const total = areas.reduce((a, b) => a + b, 0);
+  return areas.filter((a) => a < total * 1e-7).length;
+}
+
+/**
+ * The result of an edit must be a solid like the one it changed: crumbs a
+ * cut left behind are swept away, a hollow left as loose surfaces is made a
+ * solid, an inside-out one is turned right — and anything still broken
+ * (invalid, hair-thin faces, split by an edit that shouldn't split) makes the
+ * step stop with a message instead of leaving a damaged body to build on.
+ */
+function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean): Shape3D | null {
+  const oc = getOC();
+  // A new body (made by this edit): held to being a good solid, like an edited one.
+  const was = before ? subShapes(before, "SOLID").length : Math.max(1, subShapes(after, "SOLID").length);
+  // Not a solid before (an imported mesh, a sheet): nothing to hold it to.
+  if (!was) return after;
+  const v0 = before ? Math.abs(measureVolume(before)) : 0;
+  let solids = subShapes(after, "SOLID");
+  if (!solids.length) {
+    // A hollow (outer skin + inner skin) left as loose skins: one solid with a void.
+    const shells = subShapes(after, "SHELL");
+    if (!shells.length) throw new Error("That edit would leave nothing solid");
+    const mk = new oc.BRepBuilderAPI_MakeSolid();
+    for (const sh of shells) mk.Add(sh);
+    const solid = mk.Solid();
+    oc.BRepLib.OrientClosedSolid(solid);
+    mk.delete();
+    solids = [solid];
+    after = cast(solid) as Shape3D;
+  }
+  // A lump inside out among the others: the cut went wrong.
+  const signed = solids.map((x) => measureVolume(cast(x) as Shape3D));
+  if (solids.length > 1 && signed.some((v) => v < 0) && signed.some((v) => v > 0)) throw new Error("That edit would damage the body — try a different value");
+  // Crumbs: lumps far smaller than the rest (left between coincident faces).
+  const vols = signed.map((v) => Math.abs(v));
+  const total = vols.reduce((a, b) => a + b, 0);
+  // All of it cut away but dust: no body left.
+  if (before && total < v0 * 1e-6) return null;
+  const keep = solids.filter((_, i) => vols[i] > total * 1e-5);
+  if (!keep.length) throw new Error("That edit would leave nothing solid");
+  if (keep.length < solids.length) {
+    if (keep.length === 1) after = cast(keep[0]) as Shape3D;
+    else after = makeCompound(keep.map((x) => cast(x))) as Shape3D;
+    solids = keep;
+  }
+  if (!mayPart && solids.length > was) throw new Error("That would break the body into pieces — try a smaller value");
+  // Inside out (negative volume): turn it right — on a copy (its faces may be
+  // shared with earlier steps' results, which must never change).
+  if (measureVolume(after) < 0) {
+    after = after.clone() as Shape3D;
+    solids = subShapes(after, "SOLID");
+    for (const x of solids) oc.BRepLib.OrientClosedSolid(x);
+    if (measureVolume(after) < 0) throw new Error("That edit would turn the body inside out");
+  }
+  // Gaps it didn't have before (an edge with a face on one side only).
+  if (openEdges(after).length > (before ? openEdges(before).length : 0)) throw new Error("That edit would tear the body open — try a smaller value, or another face");
+  const validBefore = before ? shapeValid(before) : true;
+  if (validBefore && !shapeValid(after)) throw new Error("That edit would damage the body (the faces don't meet up) — try a different value");
+  const thinBefore = before ? hairThin(before) : 0;
+  if (hairThin(after) > thinBefore) {
+    // Often just faces left split on one surface: merge them, then look again.
+    let merged: Shape3D | null = null;
+    try {
+      merged = unify(after);
+    } catch {
+      merged = null;
+    }
+    if (merged && hairThin(merged) <= thinBefore && (!validBefore || shapeValid(merged))) return merged;
+    throw new Error("That edit would leave hair-thin faces — try a slightly different value");
+  }
+  return after;
+}
+
 function staysClosed(before: Shape3D, after: Shape3D): Shape3D {
   if (openEdges(after).length > openEdges(before).length) throw new Error("That would tear the body open — try a smaller value, or another face");
   return after;
@@ -1331,6 +1496,7 @@ function bodyNames(features: Feature[], ids: string[], numbers: Map<string, numb
 
 export function errorText(err: unknown): string {
   if (err instanceof Error) return err.message;
-  if (typeof err === "number") return "The geometry kernel could not compute this (try other values)";
+  // OpenCascade gave up (a raw exception from the kernel): say so in words.
+  if (typeof err === "number" || String(err).includes("WebAssembly.Exception") || String(err) === "[object Object]") return "The geometry kernel could not compute this (try other values)";
   return String(err);
 }
