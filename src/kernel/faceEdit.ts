@@ -259,8 +259,11 @@ function aroundBlends(body: Shape3D, F: Face, blends: Blend[], to: PlaneDef): Sh
     const p1 = bl.sides[0] ?? moved;
     const p2 = bl.sides[1];
     const edges = b.edges.filter((e) => {
-      const m = tup(e.pointAt(0.5));
-      return on(m, p1) && on(m, p2);
+      // All along it, not just its middle (another edge's middle can happen to sit on both planes).
+      return [0.15, 0.5, 0.85].every((t) => {
+        const m = tup(e.pointAt(t));
+        return on(m, p1) && on(m, p2);
+      });
     });
     if (!edges.length) throw new Error("edge lost");
     try {
@@ -312,7 +315,7 @@ function replacePlaneDirect(body: Shape3D, F: Face, to: PlaneDef): Shape3D {
 }
 
 /**
- * The space a flat face's neighbours enclose around it, carried on along their
+ * The space a face's neighbours enclose around it, carried on along their
  * own surfaces. A face with inward corners (an L, a notch cut into it) isn't
  * one convex piece: its neighbours' surfaces cut its plane into cells, and the
  * face is exactly the cells it covers — so take each of those (points spread
@@ -322,7 +325,7 @@ function faceColumn(body: Shape3D, F: Face, L: number): Shape3D {
   const { p, n } = onFace(body, F);
   const lift = sizeOf(body) * 1e-3;
   const q0 = sub(p, scale(n, lift));
-  if (convexFace(F)) return extendedRegion(body, F, q0, L);
+  if (F.geomType === "PLANE" && convexFace(F)) return extendedRegion(body, F, q0, L);
   const tol = sizeOf(body) * 1e-6;
   const sides = neighbours(body, F).map((g): ((q: Vec3) => number) | null => {
     if (g.geomType === "PLANE") {
@@ -351,7 +354,16 @@ function faceColumn(body: Shape3D, F: Face, L: number): Shape3D {
     const [a, b, c] = [0, 1, 2].map((j) => v(t!.trianglesIndexes[k + j]));
     // The middle and near each corner: a triangle may straddle a line where a neighbour's surface crosses the face.
     for (const [wa, wb, wc] of [[1 / 3, 1 / 3, 1 / 3], [0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8]]) {
-      const q = sub(add(add(scale(a, wa), scale(b, wb)), scale(c, wc)), scale(n, lift));
+      const on = add(add(scale(a, wa), scale(b, wb)), scale(c, wc));
+      // Just inside the material: along the face's own normal there (a round face's turns).
+      let nq = n;
+      if (F.geomType !== "PLANE")
+        try {
+          nq = norm(tup(F.normalAt(on)));
+        } catch {
+          continue;
+        }
+      const q = sub(on, scale(nq, lift));
       const ds = sides.map((f) => (f ? f(q) : 0));
       if (ds.some((d, i) => sides[i] && Math.abs(d) < tol)) continue;
       const key = ds.map((d, i) => (!sides[i] ? "" : d < 0 ? "-" : "+")).join("");
@@ -533,10 +545,9 @@ export function offsetFace(body: Shape3D, F: Face, d: number): Shape3D {
   const r2 = cy.r + cy.s * d;
   if (r2 <= 1e-6) throw new Error("That offset would remove the whole round face");
   const L = sizeOf(body) * 4;
-  // q: just inside the material next to the face.
-  const { p, n } = onFace(body, F);
-  const q = sub(p, scale(n, sizeOf(body) * 1e-3));
-  const E = extendedRegion(body, F, q, L);
+  // Bounded by its neighbours carried on (a round face swept past half a turn
+  // isn't one wedge: the cells it covers, joined).
+  const E = faceColumn(body, F, L);
   const ring = infiniteCylinder(cy, Math.max(cy.r, r2), L).cut(infiniteCylinder(cy, Math.min(cy.r, r2), L));
   const slab = E.intersect(ring);
   if (isEmpty(slab)) throw new Error("Nothing to offset");
@@ -908,6 +919,15 @@ export function deleteFaces(body: Shape3D, S: Face[]): Shape3D {
       return out!.faces.some((h) => h.geomType === g.geomType && samples(h).every((q) => offSurface(g, q) < tol)) && pts.length > 0;
     });
     if (!walls) continue;
+    // Every face that wasn't next to S is still there (on its own surface):
+    // deleting a big wall must not just keep some other piece of the part.
+    const stays = kept.every((g) => {
+      if (N.some((x) => x.isSame(g))) return true;
+      // (most of it: a scrap on the same plane doesn't count)
+      const on = out!.faces.filter((h) => h.geomType === g.geomType && samples(h).every((q) => offSurface(g, q) < tol));
+      return on.reduce((a, h) => a + measureArea(h), 0) >= measureArea(g) * 0.5;
+    });
+    if (!stays) continue;
     const change = Math.abs(Math.abs(measureVolume(out)) - v0);
     if (!(change > v0 * 1e-9)) continue;
     // Only what was round S changed: what was added or taken away lies within
@@ -977,11 +997,18 @@ function takeOffBlend(body: Shape3D, F: Face): Shape3D {
 export function unify(body: Shape3D): Shape3D {
   const oc = getOC();
   const u = new oc.ShapeUpgrade_UnifySameDomain(body.wrapped, true, true, false);
-  // Surfaces rebuilt from samples match the originals only to ~1e-9 relative.
-  u.SetLinearTolerance(sizeOf(body) * 1e-6);
-  u.SetAngularTolerance(1e-6);
-  u.Build();
-  return cast(u.Shape()) as Shape3D;
+  try {
+    // Surfaces rebuilt from samples match the originals only to ~1e-9 relative.
+    u.SetLinearTolerance(sizeOf(body) * 1e-6);
+    u.SetAngularTolerance(1e-6);
+    u.Build();
+    return cast(u.Shape()) as Shape3D;
+  } catch {
+    // Merging is tidying only: if OpenCascade can't (a fillet ending on a face split in two), keep the pieces.
+    return body;
+  } finally {
+    u.delete();
+  }
 }
 
 function isEmpty(s: Shape3D): boolean {

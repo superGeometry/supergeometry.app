@@ -171,4 +171,15 @@ run("fillet next to a hole (the hole cuts into it): delete the fillet", () => {
   return [clean(out) && near(V(out), want, 1e-4), `vol ${V(out).toFixed(3)} want ${want.toFixed(3)}`];
 });
 
+run("a whole side wall of a box with a boss through it: refused (not \"just the boss is left\")", () => {
+  const b = (box() as any).fuse(makeCylinder(6, 36, [10, 0, 0])) as Shape3D;
+  const side = b.faces.find((f: Face) => f.geomType === "PLANE" && f.normalAt().toTuple()[0] < -0.99)!;
+  try {
+    const out = deleteFace(b, side);
+    return [false, `accepted: vol ${V(b).toFixed(1)} → ${V(out).toFixed(1)}`];
+  } catch (e) {
+    return [/can't be removed/.test((e as Error).message), (e as Error).message];
+  }
+});
+
 process.exit(failed ? 1 : 0);
