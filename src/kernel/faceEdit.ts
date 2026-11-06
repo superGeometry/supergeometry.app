@@ -6,7 +6,7 @@
 // the body is on (planes → half-spaces, cylinders → infinite cylinders). Changing
 // F then only means adding/removing the right slab of E.
 
-import { assembleWire, basicFaceExtrusion, getOC, loft, makeBSplineApproximation, makeCylinder, makeLine, makePolygon, measureArea, measureVolume, cast, Vector, type Face, type Shape3D } from "replicad";
+import { assembleWire, basicFaceExtrusion, getOC, loft, makeBSplineApproximation, makeCylinder, makeLine, makePolygon, makeSphere, measureArea, measureVolume, cast, Vector, type Face, type Shape3D } from "replicad";
 import type { PlaneDef, Vec3 } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, xDirFor } from "../geom";
 
@@ -228,7 +228,7 @@ function aroundBlends(body: Shape3D, F: Face, blends: Blend[], to: PlaneDef): Sh
   for (const bl of blends) {
     const g = findFace(b, (h) => h.geomType === "CYLINDRE", bl.sig.center, bl.sig.area);
     if (!g) throw new Error("blend lost");
-    b = deleteFace(b, g);
+    b = takeOffBlend(b, g);
   }
   // 2. Move the face, now bounded by flat neighbours only.
   const F1 = findFace(b, (h) => h.geomType === "PLANE" && Math.abs(dot(planeOf(h).normal, fp.normal)) > 1 - 1e-9 && Math.abs(dot(sub(planeOf(h).origin, fp.origin), fp.normal)) < sizeOf(b) * 1e-7, tup(F.center), measureArea(F));
@@ -473,7 +473,329 @@ export function offsetFace(body: Shape3D, F: Face, d: number): Shape3D {
 }
 
 /** Remove a face; its neighbours extend to close the gap (fillets, chamfers, holes). */
+/**
+ * Delete a face as if it had never been there: its neighbours carry on along
+ * their own surfaces until they meet. A face that's part of a fillet (or any
+ * smooth blend) that can't go on its own takes the whole blend with it.
+ */
 export function deleteFace(body: Shape3D, F: Face): Shape3D {
+  try {
+    return deleteFaces(body, samePieces(body, F));
+  } catch (err) {
+    const chain = blendChain(body, F);
+    if (chain.length > 1) {
+      try {
+        return deleteFaces(body, chain);
+      } catch {
+        // try the whole fillet below
+      }
+    }
+    // A fillet put on several edges at once meets itself at mitred corners
+    // (no smooth run): all its pieces of the same radius go together.
+    const group = filletGroup(body, F);
+    if (group.length > chain.length) return deleteFaces(body, group);
+    throw err;
+  }
+}
+
+/**
+ * F and the faces next to it on the very same surface (one round surface is
+ * often split in two along its seam): they're one face to the user.
+ */
+function samePieces(body: Shape3D, F: Face): Face[] {
+  const tol = sizeOf(body) * 1e-6;
+  const out: Face[] = [F];
+  // A round surface cut in pieces (by a seam, or a hole through a fillet) is
+  // one feature wherever its pieces are; flat ones only where they touch (two
+  // separate faces in one plane are often unrelated).
+  const pool = F.geomType === "PLANE" ? null : body.faces;
+  for (let i = 0; i < out.length; i++)
+    for (const g of pool ?? neighbours(body, out[i])) {
+      if (g.geomType !== F.geomType || out.some((x) => x.isSame(g))) continue;
+      if (samples(g).every((q) => offSurface(F, q) < tol)) out.push(g);
+    }
+  return out;
+}
+
+/** Radius of a round face (cylinder), or null. */
+function radiusOf(f: Face): number | null {
+  return cylinderOf(f)?.r ?? null;
+}
+
+/**
+ * The pieces of one fillet: F's smooth chain, plus round faces of the same
+ * radius it meets (at a mitre) — and theirs, and so on.
+ */
+export function filletGroup(body: Shape3D, F: Face): Face[] {
+  const r = radiusOf(F);
+  const out: Face[] = [...blendChain(body, F)];
+  if (r === null) return out;
+  const tol = r * 1e-4;
+  for (let i = 0; i < out.length; i++)
+    for (const g of neighbours(body, out[i])) {
+      if (g.geomType === "PLANE" || out.some((x) => x.isSame(g))) continue;
+      const rg = radiusOf(g);
+      if (rg !== null && Math.abs(rg - r) < tol) out.push(...blendChain(body, g).filter((x) => !out.some((y) => y.isSame(x))));
+      else if (rg === null && tangentAlong(out[i], g)) out.push(g);
+    }
+  return out;
+}
+
+/**
+ * The smooth blend a face belongs to: it and the curved faces running on from
+ * it with no crease (a fillet along several edges, its corner pieces).
+ */
+export function blendChain(body: Shape3D, F: Face): Face[] {
+  if (F.geomType === "PLANE") return [F];
+  const out: Face[] = [F];
+  for (let i = 0; i < out.length; i++) {
+    const f = out[i];
+    for (const g of neighbours(body, f)) {
+      if (g.geomType === "PLANE" || out.some((x) => x.isSame(g))) continue;
+      if (tangentAlong(f, g)) out.push(g);
+    }
+  }
+  return out;
+}
+
+/** Do two faces meet without a crease (same normal across their shared edge)? */
+function tangentAlong(f: Face, g: Face): boolean {
+  const shared = f.edges.find((e) => g.edges.some((x) => x.isSame(e)));
+  if (!shared) return false;
+  try {
+    const p = tup(shared.pointAt(0.5));
+    const nf = norm(tup(f.normalAt(p)));
+    const ng = norm(tup(g.normalAt(p)));
+    return dot(nf, ng) > 0.996;
+  } catch {
+    return false;
+  }
+}
+
+/** How far a point is from a face's whole (untrimmed, extended) surface. */
+function offSurface(f: Face, q: Vec3): number {
+  const oc = getOC();
+  const pt = new oc.gp_Pnt(q[0], q[1], q[2]);
+  try {
+    const proj = new oc.GeomAPI_ProjectPointOnSurf(pt, oc.BRep_Tool.Surface(f.wrapped), oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad);
+    try {
+      return proj.NbPoints() ? proj.LowerDistance() : Infinity;
+    } finally {
+      proj.delete();
+    }
+  } catch {
+    return Infinity;
+  } finally {
+    pt.delete();
+  }
+}
+
+/** A few points spread over a face (on its surface). */
+function samples(f: Face): Vec3[] {
+  const out: Vec3[] = [];
+  for (const [u, v] of [[0.5, 0.5], [0.2, 0.3], [0.8, 0.7], [0.3, 0.8], [0.7, 0.2]])
+    try {
+      out.push(tup(f.pointOnSurface(u, v)));
+    } catch {
+      /* off the face's range */
+    }
+  return out;
+}
+
+/** Solid on the material side (behind the outward normal) of a face's surface — or null if that can't be made. */
+function behind(f: Face, L: number): Shape3D | null {
+  if (f.geomType === "PLANE") {
+    const { origin, normal } = planeOf(f);
+    return halfSpace({ origin, normal: scale(normal, -1), xDir: xDirFor(normal) }, L);
+  }
+  if (f.geomType === "CYLINDRE") {
+    const cy = cylinderOf(f);
+    if (!cy) return null;
+    const inside = infiniteCylinder(cy, cy.r, L);
+    // A boss: the material is inside it; a hole: outside it.
+    return cy.s > 0 ? inside : bigBox(L, cy.c).cut(inside);
+  }
+  if (f.geomType === "SPHERE") {
+    const sp = sphereOf(f);
+    if (!sp) return null;
+    const ball = makeSphere(sp.r).translate(sp.c) as Shape3D;
+    return sp.s > 0 ? ball : bigBox(L, sp.c).cut(ball);
+  }
+  return null;
+}
+
+/** The air side of a face's surface (in front of it). */
+function inFront(f: Face, L: number): Shape3D | null {
+  if (f.geomType === "PLANE") {
+    const { origin, normal } = planeOf(f);
+    return halfSpace({ origin, normal, xDir: xDirFor(normal) }, L);
+  }
+  const b = behind(f, L);
+  if (!b) return null;
+  const c = f.boundingBox.center as Vec3;
+  return bigBox(L, c).cut(b);
+}
+
+function bigBox(L: number, c: Vec3): Shape3D {
+  const h = vary(L);
+  return halfSpace({ origin: sub(c, [0, 0, h]), xDir: [1, 0, 0], normal: [0, 0, 1] }, 2 * h);
+}
+
+/** Centre, radius and side of a spherical face (from two surface points and their normals). */
+function sphereOf(f: Face): { c: Vec3; r: number; s: number } | null {
+  const at = (u: number, v: number) => {
+    const p = tup(f.pointOnSurface(u, v));
+    return { p, n: norm(tup(f.normalAt(p))) };
+  };
+  const a = at(0.3, 0.4);
+  const b = at(0.7, 0.6);
+  const dn = len(sub(a.n, b.n));
+  if (dn < 1e-9) return null;
+  const r = len(sub(a.p, b.p)) / dn;
+  const cOut = sub(a.p, scale(a.n, r));
+  const cIn = add(a.p, scale(a.n, r));
+  const s = dist(cOut, sub(b.p, scale(b.n, r))) < dist(cIn, add(b.p, scale(b.n, r))) ? 1 : -1;
+  return { c: s > 0 ? cOut : cIn, r, s };
+}
+
+/**
+ * Delete faces S together, as if they'd never been there: the gap they leave
+ * is closed by their neighbours carried on along their own surfaces. Several
+ * ways are tried — fill the space behind every neighbour (an outside fillet,
+ * a chamfer, a hole), or take away what's in front of them (an inside fillet,
+ * a boss) — bounded by S's own surface where it can be, else by a box round S.
+ * One counts only if every face it leaves lies on a surface that was already
+ * there (nothing new invented) and S is gone; the smallest change wins.
+ */
+export function deleteFaces(body: Shape3D, S: Face[]): Shape3D {
+  const size = sizeOf(body);
+  const L = size * 4;
+  const inS = (g: Face) => S.some((f) => f.isSame(g));
+  const N = body.faces.filter((g) => !inS(g) && S.some((f) => neighbours(body, f).some((x) => x.isSame(g))));
+  if (!N.length) throw new Error("This face can't be removed — nothing around it to close the gap");
+  const kept = body.faces.filter((g) => !inS(g));
+  const tol = size * 1e-5;
+  // Within the body's own extent (a little more): nothing is filled out into space.
+  const bb = body.boundingBox;
+  const lo = bb.bounds[0] as number[];
+  const hi = bb.bounds[1] as number[];
+  // Exactly its box: a fill ending flush with an outer face merges into it (a hair beyond would stick out).
+  const pad = 0;
+  const boxOf = (a: number[], b: number[]) =>
+    basicFaceExtrusion(
+      makePolygon([
+        [a[0], a[1], a[2]],
+        [b[0], a[1], a[2]],
+        [b[0], b[1], a[2]],
+        [a[0], b[1], a[2]],
+      ]),
+      new Vector([0, 0, b[2] - a[2]]),
+    );
+  const within = boxOf(lo.map((v) => v - pad), hi.map((v) => v + pad));
+  // Near S: its own box, a little bigger.
+  const sLo = [0, 1, 2].map((k) => Math.min(...S.map((f) => f.boundingBox.bounds[0][k])) - size * 1e-3);
+  const sHi = [0, 1, 2].map((k) => Math.max(...S.map((f) => f.boundingBox.bounds[1][k])) + size * 1e-3);
+  const nearS = boxOf(sLo, sHi);
+
+  const meet = (parts: (Shape3D | null)[]): Shape3D | null => {
+    let r: Shape3D | null = null;
+    for (const p of parts) {
+      if (!p) continue;
+      r = r ? r.intersect(p) : p;
+      if (isEmpty(r)) return null;
+    }
+    return r;
+  };
+  /** Behind every neighbour (but `skip`): the space a fill may take. */
+  const behindAll = (skip?: Face) => meet([within, ...N.filter((g) => g !== skip).map((g) => behind(g, L))]);
+  /** In front of the given neighbours, behind the rest (but `skip`). */
+  const frontOf = (front: (g: Face) => boolean, skip?: Face) => {
+    let r: Shape3D = within;
+    for (const g of N) {
+      if (g === skip) continue;
+      const b = behind(g, L);
+      if (!b) continue;
+      r = front(g) ? r.cut(b) : r.intersect(b);
+      if (isEmpty(r)) return null;
+    }
+    return r;
+  };
+  // Faces S runs smoothly into (a fillet's walls) — not the ones it ends on.
+  const tangent = new Set(N.filter((g) => S.some((f) => tangentAlong(f, g))));
+  const single = S.length === 1 ? S[0] : null;
+  const airOfS = () => (single ? inFront(single, L) ?? nearS : nearS);
+  const matOfS = () => (single ? behind(single, L) ?? nearS : nearS);
+  const fill = (e: Shape3D | null, bound: Shape3D | null) => (e && bound ? body.fuse(meet([e, bound])!) : null);
+  const cut = (e: Shape3D | null, bound: Shape3D | null) => (e && bound ? body.cut(meet([e, bound])!) : null);
+  const candidates: { name: string; make: () => Shape3D | null }[] = [
+    // Fill: behind every neighbour, on the air side of S (a fillet's wedge, a chamfer, a hole).
+    { name: "fill", make: () => fill(behindAll(), airOfS()) },
+    { name: "fill near", make: () => fill(behindAll(), nearS) },
+    // Take away: in front of the faces S blends into (and behind the ones it ends on), on S's material side (an inside fillet).
+    { name: "cut blend", make: () => (tangent.size ? cut(frontOf((g) => tangent.has(g)), matOfS()) : null) },
+    // …or in front of all of them (a boss).
+    { name: "cut", make: () => cut(frontOf(() => true), matOfS()) },
+    // One neighbour that goes along with S (a blind hole's floor, a boss's top): left out.
+    ...N.flatMap((g) => [
+      { name: "fill but one", make: () => fill(behindAll(g), airOfS()) },
+      { name: "cut but one", make: () => cut(frontOf(() => true, g), matOfS()) },
+    ]),
+  ];
+  const v0 = Math.abs(measureVolume(body));
+  let best: { out: Shape3D; change: number } | null = null;
+  for (const c of candidates) {
+    let out: Shape3D | null = null;
+    try {
+      out = c.make();
+      if (out) out = unify(out);
+    } catch {
+      out = null;
+    }
+    if (!out || isEmpty(out)) continue;
+    // Nothing new: every face lies on a surface the body already had (S's aside).
+    const honest = out.faces.every((g) => {
+      const pts = samples(g);
+      return kept.some((f) => f.geomType === g.geomType && pts.every((q) => offSurface(f, q) < tol));
+    });
+    if (!honest) continue;
+    // And S is gone: no face left on S's surface that isn't also on a kept one's.
+    const left = out.faces.some((g) => {
+      const pts = samples(g);
+      return S.some((f) => f.geomType === g.geomType && pts.every((q) => offSurface(f, q) < tol)) && !kept.some((f) => f.geomType === g.geomType && pts.every((q) => offSurface(f, q) < tol));
+    });
+    if (left) continue;
+    // The faces S ran smoothly into carry on: they're still there (deleting a
+    // fillet never takes away the walls it rounded).
+    const walls = [...tangent].every((g) => {
+      const pts = samples(g);
+      return out!.faces.some((h) => h.geomType === g.geomType && samples(h).every((q) => offSurface(g, q) < tol)) && pts.length > 0;
+    });
+    if (!walls) continue;
+    const change = Math.abs(Math.abs(measureVolume(out)) - v0);
+    if (!(change > v0 * 1e-9)) continue;
+    // Only what was round S changed: what was added or taken away lies within
+    // S's own box (a "delete" that carves off half the part isn't one).
+    try {
+      const reach = size * 1e-3;
+      for (const d of [out.cut(body), body.cut(out)]) {
+        if (isEmpty(d) || Math.abs(measureVolume(d)) < v0 * 1e-9) continue;
+        const db = d.boundingBox.bounds;
+        if ([0, 1, 2].some((k) => db[0][k] < sLo[k] - reach || db[1][k] > sHi[k] + reach)) throw new Error("reaches out");
+      }
+    } catch {
+      continue;
+    }
+    if (!best || change < best.change) best = { out, change };
+  }
+  if (!best) throw new Error(S.length > 1 ? "This fillet can't be removed — the faces around it don't meet up when carried on" : "This face can't be removed — its neighbours don't close the gap");
+  return sanity(body, best.out);
+}
+
+/**
+ * Take one fillet piece off while moving a face around it (Offset Face): the
+ * original fill-or-cut within the piece's own box, which that step is tuned for.
+ */
+function takeOffBlend(body: Shape3D, F: Face): Shape3D {
   const L = sizeOf(body) * 4;
   const { p, n } = onFace(body, F);
   const q = sub(p, scale(n, sizeOf(body) * 1e-3));
