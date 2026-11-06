@@ -31,7 +31,7 @@ import { Updates } from "./ui/update";
 import { Install } from "./ui/install";
 import { exportThreeMF } from "./io/threemf";
 import { sketchToDXF } from "./io/dxf";
-import { isHeadset } from "./device";
+import { isHeadset, screenClass } from "./device";
 import { Viewport } from "./view/viewport";
 
 const SOON = "Coming soon";
@@ -103,7 +103,8 @@ export class App implements AppContext {
       isolated: () => this.isolated,
     });
     // Computers and tablets start with Items open (phones: History only, there's no room for both).
-    if (window.innerWidth > 720) this.items.toggle(true);
+    // (A phone on its side is wider than 720 px but only ~375 tall: Items would cover a third of it.)
+    if (screenClass() !== "phone") this.items.toggle(true);
 
     this.store.onChange(() => this.docChanged());
     window.addEventListener("keydown", (e) => this.onKey(e));

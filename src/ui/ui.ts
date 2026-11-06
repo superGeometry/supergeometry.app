@@ -975,9 +975,22 @@ export class UI {
         [q.x - 28 - w, q.y + 20],
         [q.x + 28, q.y - 20 - h],
         [q.x - 28 - w, q.y - 20 - h],
+        // Straight under / over the tap: fits between columns too narrow for beside it.
+        [q.x - w / 2, q.y + 36],
+        [q.x - w / 2, q.y - 36 - h],
       ];
     } else spots = [[(W - w) / 2, H - h - 70]];
     if (this.lastPointer) avoid.push([[this.lastPointer.x, this.lastPointer.y]]);
+    // The app's own columns and bars: a card over the tool column hides the
+    // tools (a tablet with Items open has the tools right beside it).
+    const chrome = ["#toolbar", "#items", "#history", "#right-col", "#topbar", "#undo-dock", "#bottom-left", "#viewcube-host", "#hint"]
+      .map((s) => document.querySelector<HTMLElement>(s))
+      .filter((e): e is HTMLElement => !!e && !e.hidden && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden")
+      .map((e) => e.getBoundingClientRect());
+    // …and somewhere clear of them all, should every spot by the tap be covered.
+    const free = { l: M, r: W - M };
+    for (const c of chrome) if (c.height > H * 0.2 && c.width < W * 0.5) c.left < W / 2 ? (free.l = Math.max(free.l, c.right + M)) : (free.r = Math.min(free.r, c.left - M));
+    spots.push([(free.l + free.r - w) / 2, H - h - 70], [(free.l + free.r - w) / 2, 60]);
     const clampX = (x: number) => Math.max(M, Math.min(W - w - M, x));
     const clampY = (y: number) => Math.max(52, Math.min(H - h - M, y));
     // How badly a spot is in the way: off screen (moved back on), over the line, over the pointer.
@@ -985,6 +998,7 @@ export class UI {
       const x = clampX(x0);
       const y = clampY(y0);
       let c = Math.abs(x - x0) + Math.abs(y - y0) > 1 ? 1 : 0;
+      for (const r of chrome) if (x < r.right && x + w > r.left && y < r.bottom && y + h > r.top) c += 3;
       const pad = 14;
       const inside = (px: number, py: number) => px > x - pad && px < x + w + pad && py > y - pad && py < y + h + pad;
       for (const a of avoid) {

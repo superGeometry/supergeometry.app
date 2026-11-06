@@ -429,20 +429,30 @@ export class Viewport {
     const cv = this.canvas.getBoundingClientRect();
     const ins = { left: 0, right: 0, top: 0, bottom: 0 };
     if (!W || !H) return ins;
-    for (const id of ["topbar", "toolbar", "right-col", "undo-dock", "bottom-left", "panel"]) {
+    const cols: DOMRect[] = [];
+    for (const id of ["topbar", "toolbar", "right-col", "undo-dock", "bottom-left", "panel", "items", "history"]) {
       const el = document.getElementById(id);
-      if (!el || el.hidden || !el.offsetParent) continue;
+      // (Not offsetParent: it is null for fixed-position bars, which these are.)
+      if (!el || el.hidden || !el.getClientRects().length || getComputedStyle(el).visibility === "hidden") continue;
       const r = el.getBoundingClientRect();
       if (r.width < 4 || r.height < 4) continue;
-      const l = r.left - cv.left, t = r.top - cv.top, rr = cv.right - r.right, b = cv.bottom - r.bottom;
-      const wide = r.width > W * 0.5, tall = r.height > H * 0.25;
-      if (tall && !wide && l < W * 0.15) ins.left = Math.max(ins.left, (r.right - cv.left) / W);
-      else if (tall && !wide && rr < W * 0.15) ins.right = Math.max(ins.right, (cv.right - r.left) / W);
+      const t = r.top - cv.top, b = cv.bottom - r.bottom;
+      // A column: clearly taller than wide (a tablet's tool menu is under a quarter of the height).
+      const wide = r.width > W * 0.5, tall = r.height > Math.min(H * 0.25, r.width * 1.8);
+      if (tall && !wide) cols.push(r);
       else if (!tall && t < H * 0.2 && (wide || r.height < H * 0.12)) ins.top = Math.max(ins.top, (r.bottom - cv.top) / H);
       else if (!tall && b < H * 0.2 && wide) ins.bottom = Math.max(ins.bottom, (cv.bottom - r.top) / H);
     }
-    // Never squeeze the model into less than half the screen either way.
-    const cap = (a: number, b: number) => (a + b > 0.5 ? [(a * 0.5) / (a + b), (b * 0.5) / (a + b)] : [a, b]);
+    // Columns from each edge inwards, side by side: Items, then the tool column
+    // just right of it (a phone on its side) all count as the left side.
+    let lpx = 0, rpx = 0;
+    for (const r of [...cols].sort((a, b) => a.left - b.left)) if (r.left - cv.left <= Math.max(W * 0.04, lpx + 24) && r.right - cv.left < W * 0.65) lpx = Math.max(lpx, r.right - cv.left);
+    for (const r of [...cols].sort((a, b) => b.right - a.right)) if (cv.right - r.right <= Math.max(W * 0.04, rpx + 24) && cv.right - r.left < W * 0.65) rpx = Math.max(rpx, cv.right - r.left);
+    ins.left = lpx / W;
+    ins.right = rpx / W;
+    // Never squeeze the model into less than a third of the screen either way
+    // (a tablet held upright with Items and the tool menu open leaves ~40 %).
+    const cap = (a: number, b: number) => (a + b > 0.65 ? [(a * 0.65) / (a + b), (b * 0.65) / (a + b)] : [a, b]);
     [ins.left, ins.right] = cap(ins.left, ins.right);
     [ins.top, ins.bottom] = cap(ins.top, ins.bottom);
     return ins;

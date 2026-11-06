@@ -182,6 +182,28 @@ export class CameraController {
     const oy = ((free.top - free.bottom) / 2) * 2 * distance * tanV;
     const target = center.clone().addScaledVector(right, -ox).addScaledVector(up, oy);
     const dest = { ...to, target, distance };
+    // Perspective swells the near side of a deep model, and not about the
+    // free area's centre: project the corners and correct, a few times over.
+    const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
+    const fx = free.left + fw / 2, fy = free.top + fh / 2;
+    for (let it = 0; it < 10; it++) {
+      const eye = dest.target.clone().addScaledVector(back, dest.distance);
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, near = dest.distance;
+      for (const c of corners) {
+        const v = c.clone().sub(eye);
+        const depth = this.ortho ? dest.distance : Math.max(1e-9, -v.dot(back));
+        near = Math.min(near, depth);
+        const sx = (v.dot(right) / (depth * tanH) + 1) / 2;
+        const sy = (1 - v.dot(up) / (depth * tanV)) / 2;
+        x0 = Math.min(x0, sx), x1 = Math.max(x1, sx), y0 = Math.min(y0, sy), y1 = Math.max(y1, sy);
+      }
+      const k = Math.max((x1 - x0) / (fw / 1.12), (y1 - y0) / (fh / 1.12), 1e-6);
+      const dx = (x0 + x1) / 2 - fx, dy = (y0 + y1) / 2 - fy;
+      if (Math.abs(k - 1) < 0.01 && Math.abs(dx) < 0.002 && Math.abs(dy) < 0.002) break;
+      // The extremes are mostly the near corners: they move by the shift over their own depth.
+      dest.target.addScaledVector(right, dx * 2 * near * tanH).addScaledVector(up, -dy * 2 * near * tanV);
+      dest.distance *= k;
+    }
     if (animate) this.go(dest);
     else this.applyState(dest);
   }

@@ -2637,6 +2637,15 @@ html[data-screen="phone"] body.is-fullscreen {
   gap: 8px;
   padding: 6px 8px 6px 14px;
 }
+/* Small phones (320 px): one line doesn't fit — the question goes above its buttons. */
+@media (max-width: 360px) {
+  .fs-banner {
+    flex-wrap: wrap;
+    white-space: normal;
+    justify-content: center;
+    text-align: center;
+  }
+}
 
 /* The card's grip (like the numpad's): drag it to move the card. */
 #panel .panel-grip {
@@ -2772,6 +2781,15 @@ html[data-screen="phone"] #panel.as-list .field input {
   height: 34px;
   padding: 0 6px;
   font-size: 15px;
+}
+/* Long values (-123.45) widen their box rather than hide digits, where the browser can. */
+@supports (field-sizing: content) {
+  html[data-screen="phone"] #panel.as-list .field input {
+    field-sizing: content;
+    width: auto;
+    min-width: 58px;
+    max-width: 92px;
+  }
 }
 html[data-screen="phone"] #panel.as-list .field-label {
   font-size: 12px;

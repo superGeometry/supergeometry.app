@@ -922,8 +922,8 @@ export class SketchTool implements Tool {
             items: [
               // Where the tapped point is (typed, it moves the text exactly) and
               // how the text sits on it: numbers along a ruler are centred on their tick.
-              { type: "number", label: "X", value: this.pts[0][0], kind: "length", onInput: (v) => ((this.pts[0] = [v, this.pts[0][1]]), this.refreshPreview()) },
-              { type: "number", label: "Y", value: this.pts[0][1], kind: "length", onInput: (v) => ((this.pts[0] = [this.pts[0][0], v]), this.refreshPreview()) },
+              { type: "number", label: "X", value: Math.round(this.pts[0][0] * 100) / 100, kind: "length", onInput: (v) => ((this.pts[0] = [v, this.pts[0][1]]), this.refreshPreview()) },
+              { type: "number", label: "Y", value: Math.round(this.pts[0][1] * 100) / 100, kind: "length", onInput: (v) => ((this.pts[0] = [this.pts[0][0], v]), this.refreshPreview()) },
               { type: "choice", label: "Align", options: [{ id: "left", label: "Left" }, { id: "center", label: "Centre" }, { id: "right", label: "Right" }], value: memory.textAlign, onChange: (id) => ((memory.textAlign = id as TextAlign), this.refreshPreview()) },
               { type: "number", label: "Size", value: memory.textSize, kind: "length", min: 0.001, onInput: (v) => ((memory.textSize = v), storeTextSize(v), this.refreshPreview()) },
               // The font: the bundled ones and any imported.
