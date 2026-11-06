@@ -114,7 +114,7 @@ export class CameraController {
    */
   lookAlong(normal: Vec3, xDir?: Vec3, target?: Vec3): void {
     const n = new Vector3(...normal).normalize();
-    const to = this.state();
+    const to = this.aim();
     if (target) to.target = new Vector3(...target);
     to.elevation = MathUtils.clamp(Math.asin(n.z), -Math.PI / 2 + 1e-4, Math.PI / 2 - 1e-4);
     to.roll = 0;
@@ -137,13 +137,13 @@ export class CameraController {
 
   /** Rotate the view 90° around the view direction (view cube arrows). */
   rollBy(rad: number): void {
-    const to = this.state();
+    const to = this.aim();
     to.roll += rad;
     this.go(to);
   }
 
   iso(): void {
-    this.go({ ...this.state(), azimuth: MathUtils.degToRad(-60), elevation: MathUtils.degToRad(30), roll: 0 });
+    this.go({ ...this.aim(), azimuth: MathUtils.degToRad(-60), elevation: MathUtils.degToRad(30), roll: 0 });
   }
 
   fit(box: Box3, animate = true): void {
@@ -156,7 +156,7 @@ export class CameraController {
     const tanV = Math.tan(MathUtils.degToRad(FOV / 2));
     const tanH = tanV * this.aspect;
     const distance = (Math.max(size, 0.01) / (2 * Math.min(tanV, tanH))) * 1.15;
-    const to = { ...this.state(), target: center, distance };
+    const to = { ...this.aim(), target: center, distance };
     if (animate) this.go(to);
     else this.applyState(to);
   }
@@ -199,6 +199,16 @@ export class CameraController {
 
   private state(): ViewState {
     return { target: this.target.clone(), distance: this.distance, azimuth: this.azimuth, elevation: this.elevation, roll: this.roll };
+  }
+
+  /**
+   * Where the view is heading: the end of a move still animating, else where it
+   * is. A new move builds on this — Fit tapped while a turn to Top is still
+   * animating must keep the Top, not freeze it half way round.
+   */
+  private aim(): ViewState {
+    const a = this.animation;
+    return a ? { ...a.to, target: a.to.target.clone() } : this.state();
   }
 
   private go(to: ViewState): void {

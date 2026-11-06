@@ -16,6 +16,7 @@ import { arrangement, resolveRegion } from "../sketch/regions";
 import { DimWidget } from "./annotate";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
 import { DragTyping } from "./dragTyping";
+import { isTouchDevice } from "../device";
 import { CopyToggle, linkMode } from "./copyToggle";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 
@@ -816,9 +817,10 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       },
     };
     const copy: PanelItem[] = this.feature.copy && !this.existing ? [copyToggle, link] : [copyToggle];
-    // ΔX ΔY ΔZ: only when changing a step opened from History (moving is done
-    // by dragging, or typing while dragging — the numbers there are just clutter).
-    const deltas = (): PanelItem[] => (this.existing ? (["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `op.translate.${i}`, "length")) : []);
+    // ΔX ΔY ΔZ: when changing a step opened from History, and on touch screens
+    // (with a mouse, moving is dragging or typing while dragging — the numbers
+    // are clutter there; a finger has no keyboard mid-drag, so exact moves need them).
+    const deltas = (): PanelItem[] => (this.existing || isTouchDevice ? (["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `op.translate.${i}`, "length")) : []);
     switch (o.kind) {
       case "scaleXYZ":
         return [];

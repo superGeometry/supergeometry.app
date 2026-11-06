@@ -363,6 +363,23 @@ export class SketchTool implements Tool {
     if (this.phase === "plane") {
       this.app.view.setOriginPlanesVisible(true);
       this.app.ui.setHint("Select a plane or a flat face to sketch on.");
+      // The three origin planes as buttons too: in a 3D view they overlap near
+      // the origin, and a tap meant for the floor can land on the front plane.
+      const pick = (id: string) => () => {
+        const pl = this.app.view.planeOf(id);
+        if (!pl || this.phase !== "plane") return;
+        this.plane = pl;
+        this.app.ui.showPanel(null);
+        this.beginDrawing();
+      };
+      this.app.ui.showPanel({
+        title: "Sketch on",
+        items: [
+          { type: "button", label: "XY (floor)", onClick: pick("XY") },
+          { type: "button", label: "XZ (front)", onClick: pick("XZ") },
+          { type: "button", label: "YZ (side)", onClick: pick("YZ") },
+        ],
+      });
       this.updateMenu();
     } else this.beginDrawing();
   }
@@ -1757,6 +1774,9 @@ export class SketchTool implements Tool {
       this.sketchId = hit.sketch;
       this.plane = this.app.sketchPlane(hit.sketch) ?? null;
     } else return;
+    this.app.ui.showPanel(null);
+    // Say which plane it is (an origin plane tapped in 3D is easy to mistake).
+    if (hit.kind === "plane") this.app.ui.toast(`Sketching on ${hit.id === "XY" ? "XY (floor)" : hit.id === "XZ" ? "XZ (front)" : hit.id === "YZ" ? "YZ (side)" : "the plane"}`);
     this.beginDrawing();
   }
 

@@ -75,12 +75,13 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
     host.append(heading("Views"), body);
     const showViews = () => {
       body.innerHTML = "";
-      const go = (label: string, n: Vec3, x?: Vec3) => choiceRow(label, false, () => view.cam.lookAlong(n, x));
-      body.append(choiceRow("⌂ Default view", false, () => (view.cam.iso(), view.cam.fit(view.bounds()))));
+      // Picking a view closes the list (it would only cover the view picked).
+      const go = (label: string, n: Vec3, x?: Vec3) => choiceRow(label, false, () => (view.cam.lookAlong(n, x), ui.closePopover()));
+      body.append(choiceRow("⌂ Default view", false, () => (view.cam.iso(), view.cam.fit(view.bounds()), ui.closePopover())));
       body.append(go("Top", [0, 0, 1]), go("Bottom", [0, 0, -1]), go("Front", [0, -1, 0]), go("Back", [0, 1, 0], [-1, 0, 0]), go("Right", [1, 0, 0], [0, 1, 0]), go("Left", [-1, 0, 0], [0, -1, 0]));
       body.append(heading("Saved views"));
       for (const v of store.doc.views) {
-        const row = choiceRow(v.name, false, () => view.cam.restore(v));
+        const row = choiceRow(v.name, false, () => (view.cam.restore(v), ui.closePopover()));
         const del = el("button", "icon-btn small", "✕");
         del.title = "Delete view";
         del.addEventListener("click", (e) => {

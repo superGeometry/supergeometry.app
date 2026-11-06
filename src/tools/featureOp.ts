@@ -4,6 +4,7 @@ import type { FieldKind, PanelItem, ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import type { PickHit, PickOptions } from "../view/viewport";
 import { hitToSel, type AppContext, type Sel, type Tool } from "./tool";
+import { arrangement, resolveRegion } from "../sketch/regions";
 
 /** Something the user has to point at (an axis, a path, faces to remove, …). */
 export interface Slot {
@@ -242,14 +243,39 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     if (this.existing) this.app.store.update(this.feature.id, this.feature);
     else {
       // A new solid from sketches: the sketches step out of the way (the eye in Items brings them back).
-      const used = sketchesUsed(this.feature as Feature);
       const f = this.feature as Feature;
+      // …once all their regions are used: one drawn with several parts (a
+      // side, a plinth and a door) stays in view until the last is made.
+      const used = sketchesUsed(f).filter((id) => allRegionsUsed(this.app, id, [...this.app.store.doc.features, f]));
       this.app.store.commit((d) => {
         d.features.push(f);
         if (used.length) d.hidden = [...new Set([...d.hidden, ...used])];
       });
     }
     this.app.setTool(null);
+  }
+}
+
+/** Has every region of a sketch been made into something (by these steps)? */
+function allRegionsUsed(app: AppContext, sketch: string, features: Feature[]): boolean {
+  try {
+    const arr = arrangement(app.sketchCurves(sketch));
+    if (arr.regions.length <= 1) return true;
+    const used = new Set<number>();
+    const add = (s: ExtrudeSource) => {
+      if (s.kind !== "profile" || s.sketch !== sketch) return;
+      for (const ref of s.regions) {
+        const r = resolveRegion(arr, ref);
+        if (r) used.add(arr.regions.indexOf(r));
+      }
+    };
+    for (const g of features) {
+      if (g.type === "extrude" || g.type === "revolve" || g.type === "sweep") add(g.source);
+      else if (g.type === "loft") g.sections.forEach(add);
+    }
+    return used.size >= arr.regions.length;
+  } catch {
+    return true;
   }
 }
 
