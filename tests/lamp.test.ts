@@ -90,6 +90,7 @@ const bulb = [{ id: "b1", kind: "arc", a: [80, 112], m: [94, 126], b: [80, 140] 
 feats.push({ id: "sBulb", name: "Bulb profile", type: "sketch", plane: XZ, entities: bulb });
 feats.push({ id: "bulb", name: "Bulb", type: "revolve", source: { kind: "profile", sketch: "sBulb", regions: all(bulb) }, axis: hang, angle: 360, mode: "new" });
 
+const code: Record<string, number> = {};
 const t0 = Date.now();
 const r: any = await regenerate(feats);
 const ms = Date.now() - t0;
@@ -112,19 +113,21 @@ if (lamp && shade && bulbS) {
   const vb = Math.abs(measureVolume(bulbS));
   check("the bulb: a 28 mm ball", Math.abs(vb - (4 / 3) * Math.PI * 14 ** 3) < 1, `${vb.toFixed(1)} mm³`);
   const vLamp = Math.abs(measureVolume(lamp));
+  Object.assign(code, { lamp: vLamp, shade: vs, bulb: vb });
   check("base rounded and bevelled, stem joined (more than the base alone)", vLamp > vBase && Math.abs(measureVolume((lamp as any).intersect(shade))) < 1, `${(vLamp / 1000).toFixed(1)} cm³ (base alone ${(vBase / 1000).toFixed(1)})`);
   check("the bulb hangs free inside the shade", Math.abs(measureVolume((bulbS as any).intersect(shade))) < 1e-6);
 }
 // The same lamp built by hand on a phone-sized screen, as a beginner would
-// (tests/fixtures/lamp-hand.json): the base as two stacked rectangles turned
-// about Z (tapped, then "Revolve instead"), rim and foot rounded and bevelled;
-// the stem path typed as lengths and angles (158 up, an arch snapped through
-// three taps, 15 down) and swept in one tap (the whole joined run); the shade
-// as four lines from the stem's end (12 across, 55 down, 45 across, then tapped
-// back) turned about its side, shelled open at the bottom, a socket pushed
-// down from its inside top; one vent on an offset plane, Pattern Circular
-// round the shade's rim, Whole Pattern + Subtract; the bulb a half disc from
-// the socket's centre, turned about its side. No value worked out by hand.
+// (tests/fixtures/lamp-hand.json), and it has to come out the same: the base
+// outline as lines typed across / up (60, up 10, in 10 up 12, in 36 up 4,
+// in 14, then tapped shut), tapped, "Revolve instead" about Z, rim and foot
+// rounded and bevelled; the stem path from the base's top as a typed length,
+// an arch through three taps and 15 down, swept in one tap (the whole run);
+// the shade as four lines from the stem's end turned about its side, shelled
+// open at the bottom, a socket pushed down from its inside top; one vent on an
+// offset plane, Pattern Circular round the shade's rim, Whole Pattern +
+// Subtract; the bulb a half disc from the socket's centre; colours picked with
+// Custom. No value worked out by hand.
 {
   const hand = JSON.parse(readFileSync(new URL("./fixtures/lamp-hand.json", import.meta.url), "utf8")).features;
   const rh: any = await regenerate(hand);
@@ -135,11 +138,11 @@ if (lamp && shade && bulbS) {
   const lo = [0, 1, 2].map((k) => Math.min(...bb.map((b: any) => b[0][k])));
   const hi = [0, 1, 2].map((k) => Math.max(...bb.map((b: any) => b[1][k])));
   check("by hand: the same size as by code (226 tall, 185 across)", Math.abs(lo[2]) < 1e-6 && Math.abs(hi[2] - 226) < 0.5 && Math.abs(hi[0] - lo[0] - 185) < 0.5, [0, 1, 2].map((k) => (hi[k] - lo[k]).toFixed(1)).join(" × "));
-  const [hLamp, hShade, hBulb] = ["revolve-mw5kpoig-qvy9", "revolve-mw5l6hmw-wunt", "revolve-mw5lmgjb-fv18"].map((id) => debugBodies().get(id)!);
+  const [hLamp, hShade, hBulb] = ["revolve-mw5m45n0-klet", "revolve-mw5m6fdt-i3k2", "revolve-mw5maqal-2i3i"].map((id) => debugBodies().get(id)!);
   const vs = Math.abs(measureVolume(hShade));
   const cutAt = hand.findIndex((f: any) => f.type === "boolean");
   await regenerate(hand.slice(0, cutAt));
-  const holes = Math.abs(measureVolume(debugBodies().get("revolve-mw5l6hmw-wunt")!)) - vs;
+  const holes = Math.abs(measureVolume(debugBodies().get("revolve-mw5m6fdt-i3k2")!)) - vs;
   await regenerate(hand);
   check("by hand: shade hollow, eight vents through its wall", vs < vCone * 0.25 && holes > 8 * Math.PI * 2.5 ** 2 * 1.8 && holes < 8 * Math.PI * 2.5 ** 2 * 3.5, `${(vs / 1000).toFixed(1)} cm³, ${holes.toFixed(1)} mm³ of vents`);
   const vb = Math.abs(measureVolume(hBulb));
@@ -147,9 +150,14 @@ if (lamp && shade && bulbS) {
   const vLampHand = Math.abs(measureVolume(hLamp));
   const touchShade = Math.abs(measureVolume((hLamp as any).intersect(hShade)));
   await regenerate(hand.slice(0, hand.findIndex((f: any) => f.type === "sweep")));
-  const vBaseHand = Math.abs(measureVolume(debugBodies().get("revolve-mw5kpoig-qvy9")!));
+  const vBaseHand = Math.abs(measureVolume(debugBodies().get("revolve-mw5m45n0-klet")!));
   await regenerate(hand);
   check("by hand: stem joined to the base, clear of the shade", vLampHand > vBaseHand + 15000 && touchShade < 1, `${(vLampHand / 1000).toFixed(1)} cm³ (base alone ${(vBaseHand / 1000).toFixed(1)})`);
+  // The same as by code, part by part (volumes to 0.1 %) and colour by colour.
+  const same = [["lamp", vLampHand], ["shade", vs], ["bulb", vb]].map(([k, v]) => [k, v, code[k as string]] as [string, number, number]);
+  check("by hand: each part the same as by code", same.every(([, h, c]) => Math.abs(h - c) < c * 1e-3), same.map(([k, h, c]) => `${k} ${(h / 1000).toFixed(2)} / ${(c / 1000).toFixed(2)} cm³`).join(", "));
+  const hc = JSON.parse(readFileSync(new URL("./fixtures/lamp-hand.json", import.meta.url), "utf8")).colors;
+  check("by hand: the same colours", hc["revolve-mw5m45n0-klet"] === "#2f3a45" && hc["revolve-mw5m6fdt-i3k2"] === "#d9a441" && hc["revolve-mw5maqal-2i3i"] === "#fff4c8");
 }
 
 // The helpers the hand build leaned on.

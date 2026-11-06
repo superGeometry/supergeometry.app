@@ -951,7 +951,8 @@ export class SketchTool implements Tool {
         // A finger can't hover: after the first tap there's no line to type a
         // length on (and the next point is often off the screen) — so the card
         // takes the length and the direction (0° right, 90° up), Done places it.
-        else if (this.pts.length && isTouchDevice) items.push(lock("len", "Length"), lock("ang", "Angle", "angle"));
+        // Or how far across and up it goes: a slope ("in 10, up 12") with no angle to work out.
+        else if (this.pts.length && isTouchDevice) items.push(lock("len", "Length"), lock("ang", "Angle", "angle"), lock("dx", "Across"), lock("dy", "Up"));
         break;
       case "rect":
         if (this.pts.length === 1 && memory.rect !== "3pt") items.push(lock("w", "Width"), lock("h", "Height"));
@@ -2063,7 +2064,10 @@ export class SketchTool implements Tool {
     }
     // Grid along a straight-across guide (and everywhere when there's none).
     if (s.grid && used.length < 2) {
-      const step = view.grid.step;
+      // Finer than the drawn grid when zoomed in: its lines jump 1 → 10 mm, and
+      // at 10 mm apart (90 px on a phone) a tap at 152 still landed on 150.
+      // About what a fingertip can tell apart (8 px), rounded to 1 / 5 / 10.
+      const step = settings.value.gridLocked ? view.grid.step : Math.min(view.grid.step, niceStepOf(wpp * 8));
       const g = (v: number) => Math.round(v / step) * step;
       const only = used[0]?.L;
       if (!only) out.uv = [g(out.uv[0]), g(out.uv[1])];
@@ -2141,6 +2145,8 @@ export class SketchTool implements Tool {
     const last = this.pts[this.pts.length - 1];
     switch (this.kind) {
       case "line": {
+        // Typed across / up: exactly there (what isn't typed stays put).
+        if (L.dx !== undefined || L.dy !== undefined) return [last[0] + (L.dx ?? 0), last[1] + (L.dy ?? 0)];
         let ang = Math.atan2(c[1] - last[1], c[0] - last[0]);
         let len = Math.hypot(c[0] - last[0], c[1] - last[1]);
         if (L.ang !== undefined) ang = (L.ang * Math.PI) / 180;
@@ -2303,7 +2309,11 @@ export class SketchTool implements Tool {
         if (auto && Math.abs(pt[1] - a[1]) < 1e-9) cs.push({ id: uid(), type: "horizontal", curves: [id] });
         else if (auto && Math.abs(pt[0] - a[0]) < 1e-9) cs.push({ id: uid(), type: "vertical", curves: [id] });
         else if (auto && !locked && this.cursor?.dir) cs.push({ id: uid(), type: this.cursor.dir.type, curves: [id, this.cursor.dir.curve] });
-        // Typed values become driving dimensions.
+        // Typed values become driving dimensions (across / up: as its length and angle).
+        if (this.locks.dx !== undefined || this.locks.dy !== undefined) {
+          this.locks.len = Math.hypot(pt[0] - a[0], pt[1] - a[1]);
+          this.locks.ang = (Math.atan2(pt[1] - a[1], pt[0] - a[0]) * 180) / Math.PI;
+        }
         if (this.locks.len !== undefined) cs.push({ id: uid(), type: "dim", curves: [id], prop: "length", value: this.locks.len });
         if (this.locks.ang !== undefined && !cs.some((x) => x.type === "horizontal" || x.type === "vertical")) cs.push({ id: uid(), type: "dim", curves: [id], prop: "angle", value: this.locks.ang });
         this.commitAdd([{ id, kind: "line", a, b: pt }], cs);

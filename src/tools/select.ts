@@ -550,8 +550,8 @@ export class SelectTool implements Tool {
         id: "color",
         label: "Color",
         icon: "color",
-        sub: BODY_COLORS.find((c) => c.hex === bodyColor((app.store.doc.colors ?? {})[bodies[0]]))?.name ?? "Grey",
-        children: BODY_COLORS.map((c, i) => ({
+        sub: BODY_COLORS.find((c) => c.hex === bodyColor((app.store.doc.colors ?? {})[bodies[0]]))?.name ?? ((app.store.doc.colors ?? {})[bodies[0]] ? "Custom" : "Grey"),
+        children: [...BODY_COLORS.map((c, i): ToolItem => ({
           id: `color-${i}`,
           label: c.name,
           icon: "color",
@@ -565,6 +565,42 @@ export class SelectTool implements Tool {
               d.colors = colors;
             }),
         })),
+        // Any colour (a dark lamp base, a brass shade): the ten soft ones
+        // couldn't give what a model made by code had.
+        ((): ToolItem => {
+          const now = bodyColor((app.store.doc.colors ?? {})[bodies[0]]);
+          const custom = !!now && !BODY_COLORS.some((c) => c.hex === now);
+          return {
+            id: "color-custom",
+            label: "Custom…",
+            icon: "color" as const,
+            ...(custom ? { swatch: now } : {}),
+            active: custom,
+            run: () => {
+              const input = document.createElement("input");
+              input.type = "color";
+              input.value = now ?? BODY_COLORS[0].hex;
+              input.style.cssText = "position:fixed;left:-100px;top:0;opacity:0";
+              document.body.append(input);
+              const set = (final: boolean) => {
+                const hex = input.value;
+                const write = (d: { colors?: Record<string, string> }) => {
+                  const colors = { ...(d.colors ?? {}) };
+                  for (const b of bodies) colors[b] = hex;
+                  d.colors = colors;
+                };
+                // One undo step for the whole pick: live while choosing, kept on change.
+                if (final) app.store.commit(write);
+                else app.store.transient(write);
+                if (final) input.remove();
+              };
+              input.addEventListener("input", () => set(false));
+              input.addEventListener("change", () => set(true));
+              input.click();
+            },
+          };
+        })(),
+        ],
       },
       {
         // Next to Color: how see-through the body is.
