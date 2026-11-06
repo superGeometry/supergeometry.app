@@ -284,7 +284,8 @@ for (let sc = 0; sc < SCENARIOS; sc++) {
     res = r;
   }
 }
-writeFileSync(process.env.BREAKIT_OUT ?? "breakit-failures.json", JSON.stringify(failures, null, 1));
+// Only when asked (BREAKIT_OUT=file), so a normal run leaves nothing behind.
+if (process.env.BREAKIT_OUT) writeFileSync(process.env.BREAKIT_OUT, JSON.stringify(failures, null, 1));
 console.log(`${ok} edits ok, ${refused} refused (${JSON.stringify(refusedBy)}), ${failures.length} broke the model`);
 const byStep: Record<string, number> = {};
 for (const f of failures) byStep[f.step] = (byStep[f.step] ?? 0) + 1;

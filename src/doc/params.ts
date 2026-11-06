@@ -1,7 +1,7 @@
 // Parametric document: evaluate expressions (variables) into feature values and
 // re-solve sketch constraints, so the document's numbers are always consistent.
 
-import { solve } from "../sketch/constraints";
+import { solveFine } from "../sketch/constraints";
 import { evaluate, setVariables } from "../units";
 import type { Feature, ProjectDoc } from "./types";
 
@@ -44,9 +44,10 @@ export function resolveDoc(doc: ProjectDoc): string[] {
         if (v === null) problems.push(`${f.name}: "${c.expr}" can't be evaluated`);
         else c.value = v;
       }
-      const r = solve(f.entities, f.constraints);
-      f.entities = r.entities;
-      if (!r.ok) problems.push(`${f.name}: constraints can't all be met`);
+      const r = solveFine(f.entities, f.constraints);
+      // Can't all be met: the sketch stays as it was rather than being bent out of shape.
+      if (r.ok) f.entities = r.entities;
+      else problems.push(`${f.name}: constraints can't all be met`);
     }
   }
   return problems;

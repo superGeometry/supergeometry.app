@@ -864,6 +864,10 @@ export function filletConstraints(entities: SketchEntity[], constraints: SketchC
     for (const t of touching) {
       cs = [...cs, { id: uid(), type: "coincident", pts: [{ e: t.e, p: t.p }, { e: arc.id, p: t.arcEnd }] }, { id: uid(), type: "tangent", curves: [t.e, arc.id] }];
     }
+    // The fillet keeps the radius it was made with (else it floats whenever
+    // anything else changes, and a big change can fold the corner over).
+    const c = arcFrom3(arc.a, arc.m, arc.b);
+    if (c) cs = [...cs, { id: uid(), type: "dim", curves: [arc.id], prop: "radius", value: c.r }];
   }
   return cs;
 }

@@ -1,7 +1,7 @@
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
 import { dot, GROUND, niceStep as niceStepOf, planeY, toPlane } from "../geom";
-import { addStrict, pointOf, pointsOf, refsOf, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
+import { addStrict, constraintError, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, buttonEnabled, CONSTRAINT_BUTTONS, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
@@ -596,10 +596,10 @@ export class SketchTool implements Tool {
   private setConstraintValue(id: string, v: number): void {
     const expr = this.pendingExpr;
     this.pendingExpr = null;
-    this.commit(
-      this.entities,
-      this.constraints.map((c) => (c.id === id ? { ...c, value: v, expr: expr ?? undefined } : c)),
-    );
+    // Strict, like a new constraint: a value the sketch can't take isn't taken.
+    const res = setValueStrict(this.entities, this.constraints, id, v, expr ?? undefined);
+    if (!res) return this.refused();
+    this.commit(res.result.entities, res.constraints);
   }
 
   private deleteConstraint(id: string): void {
@@ -1303,6 +1303,9 @@ export class SketchTool implements Tool {
     const base = this.dragBase ?? this.entities;
     this.dragBase ??= base;
     const r = solve(base, this.constraints, { drag: refs.map((d) => ({ ref: d.ref, to: to(d.at) })) });
+    // Somewhere the constraints can't follow: stay at the last good place
+    // (unless the sketch was already off before the drag — then just follow).
+    if (!r.ok && constraintError(base, this.constraints) < r.error) return;
     const id = this.sketchId;
     this.app.store.transient((doc) => {
       const f = doc.features.find((x) => x.id === id);

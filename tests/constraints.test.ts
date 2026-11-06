@@ -124,4 +124,38 @@ for (const [name, fn] of checks) {
   console.log("ok   strict: contradicting constraint refused, agreeing one adds");
 }
 
+// Break-it findings, kept as checks.
+{
+  const { followDrag, setValueStrict, solveFine, constraintError } = await import("../src/sketch/constraints");
+  const base = solve(quad, rect).entities;
+  // A drag far past what the constraints allow: they still hold exactly (corners stay joined).
+  const far = followDrag(base, rect, [{ ref: { e: "l1", p: "a" }, to: [40, 30] }], [[0, 0]]);
+  if (constraintError(far.entities, rect) > 1e-6) throw new Error("drag left constraints unmet");
+  // A typed value the sketch can't take is refused, nothing moves.
+  const tri = [L("t1", [0, 0], [10, 0]), L("t2", [10, 0], [5, 8]), L("t3", [5, 8], [0, 0])];
+  const tcs: SketchConstraint[] = [coin("t1", "b", "t2", "a"), coin("t2", "b", "t3", "a"), coin("t3", "b", "t1", "a"),
+    { id: "d1", type: "dim", curves: ["t1"], prop: "length", value: 10 }, { id: "d2", type: "dim", curves: ["t2"], prop: "length", value: Math.hypot(5, 8) },
+    { id: "d3", type: "dim", curves: ["t3"], prop: "length", value: Math.hypot(5, 8) }];
+  if (setValueStrict(tri, tcs, "d1", 100)) throw new Error("a triangle side longer than the other two together should be refused");
+  if (!setValueStrict(tri, tcs, "d1", 12)) throw new Error("a possible side length should be taken");
+  // Nothing may shrink to nothing to "meet" constraints.
+  const l = [L("z", [0, 0], [10, 1])];
+  if (solveFine(l, [{ id: "h", type: "horizontal", curves: ["z"] }, { id: "v", type: "vertical", curves: ["z"] }]).ok) throw new Error("horizontal + vertical on one line must not be met by a dot");
+  // A fillet keeps its radius when the rectangle is resized, and doesn't fold over.
+  const es = [L("h", [0, 0], [20, 0]), L("v", [20, 0], [20, 20])];
+  const cs: SketchConstraint[] = [coin("h", "b", "v", "a"), { id: "hh", type: "horizontal", curves: ["h"] }, { id: "vv", type: "vertical", curves: ["v"] }, { id: "fx", type: "fix", pts: [{ e: "h", p: "a" }], at: [0, 0] }];
+  const next = filletCorner(es, [20, 0], 4, 1e-6)!;
+  const fc = filletConstraints(next, cs, new Set(es.map((e) => e.id)));
+  const grown = setValueStrict(next, [...fc, { id: "len", type: "dim", curves: ["h"], prop: "length", value: 16 }], "len", 160);
+  if (!grown) throw new Error("growing the filleted side should work");
+  const arc = grown.result.entities.find((e) => e.kind === "arc") as any;
+  const c = arcFrom3(arc.a, arc.m, arc.b)!;
+  if (Math.abs(c.r - 4) > 1e-6 || c.sweep <= 0) throw new Error(`fillet changed: r ${c.r}, sweep ${c.sweep}`);
+  // Separate shapes are solved apart: an untouched one doesn't move at all.
+  const other = L("o", [100, 100], [110, 100]);
+  const r2 = solve([...quad, other], [...rect, { id: "oh", type: "horizontal", curves: ["o"] }], { drag: [{ ref: { e: "l2", p: "b" }, to: [20, 12] }] });
+  if (JSON.stringify(r2.entities[4]) !== JSON.stringify(other)) throw new Error("a separate shape moved");
+  console.log("ok   break-it findings: exact drags, strict values, no crumbs, fillets keep radius, shapes solved apart");
+}
+
 process.exit(failed ? 1 : 0);
