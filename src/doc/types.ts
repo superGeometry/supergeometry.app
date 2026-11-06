@@ -321,7 +321,18 @@ export interface ReplaceFaceFeature extends FeatureBase {
   target?: FaceRef;
 }
 
+/**
+ * Repair bodies: gaps sewn, missing flat faces filled, hair-thin faces
+ * removed, faces fixed and merged, inside-out solids turned — the shape
+ * itself stays. Turns loose faces (an imported mesh or STEP surface) into a solid.
+ */
+export interface RepairFeature extends FeatureBase {
+  type: "repair";
+  bodies: string[];
+}
+
 export type Feature =
+  | RepairFeature
   | ScaleFaceFeature
   | ReplaceFaceFeature
   | FreeformFeature

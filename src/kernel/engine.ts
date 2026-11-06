@@ -47,6 +47,9 @@ import type {
 import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "../geom";
 import { projectPolyline } from "../sketch/edit";
 import { cageToShape } from "./freeform";
+import { deepCopy, hairThin, openEdges, shapeValid, subShapes } from "./health";
+import { healthOf, repairShape } from "./repair";
+export { shapeValid } from "./health";
 import { deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
 import { deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, unify } from "./faceEdit";
@@ -466,6 +469,17 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       return;
     }
 
+    case "repair": {
+      for (const id of f.bodies) {
+        const body = need(bodies, id);
+        const r = repairShape(body);
+        if (!r) throw new Error(`This body can't be made a clean solid: ${whatsWrong(healthOf(body))}`);
+        editNotes.push(r.fixes.length ? `Repaired: ${r.fixes.join(", ")}.` : "Nothing to repair — it's a clean solid already.");
+        bodies.set(id, r.shape);
+      }
+      return;
+    }
+
     case "deleteGeom": {
       const start = need(bodies, f.body);
       let body = start;
@@ -590,7 +604,12 @@ function checkedFreeform(cage: { verts: Vec3[]; faces: [number, number, number, 
   }
   const closed = isClosed(cage) || !!thicken;
   const degenerate = "This freeform has collapsed somewhere (cage points on top of each other, or a face squashed flat) — move those points apart";
-  if (!shapeValid(shape)) throw new Error(thicken ? "That thickness doesn't fit this surface (it folds into itself) — try a thinner one, or the other side" : degenerate);
+  if (!shapeValid(shape)) {
+    const r = repairShape(shape, { maxSolids: 1 });
+    if (!r) throw new Error(thicken ? "That thickness doesn't fit this surface (it folds into itself) — try a thinner one, or the other side" : degenerate);
+    editNotes.push(`Repaired automatically: ${r.fixes.join(", ")}.`);
+    shape = r.shape;
+  }
   if (closed && (subShapes(shape, "SOLID").length !== 1 || !(measureVolume(shape) > 0))) throw new Error(degenerate);
   return shape;
 }
@@ -791,28 +810,6 @@ function movePolyhedronPoints(body: Shape3D, moves: [Vec3, Vec3][]): Shape3D | n
  * Ear clipping of a flat face's loop that removes the moved corners first:
  * triangles holding a moved corner, plus the untouched rest as one polygon.
  */
-/** OpenCascade's own check (self-crossing faces, bad edges…). */
-const validCache = new WeakMap<Shape3D, boolean>();
-export function shapeValid(shape: Shape3D): boolean {
-  const known = validCache.get(shape);
-  if (known !== undefined) return known;
-  const ok = checkValid(shape);
-  validCache.set(shape, ok);
-  return ok;
-}
-
-function checkValid(shape: Shape3D): boolean {
-  try {
-    const oc = getOC();
-    const check = new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false);
-    const ok = (check as unknown as { IsValid(): boolean }).IsValid();
-    check.delete();
-    return ok;
-  } catch {
-    return true;
-  }
-}
-
 function clipMovedCorners(loop: Vec3[], isMoved: boolean[]): { tris: number[][]; rest: number[] } {
   const n = norm(polyNormal(loop));
   const x = norm(sub(loop[1], loop[0]));
@@ -1328,25 +1325,6 @@ function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
  * Edges used by fewer than two faces: the body is not closed (watertight)
  * there. Imported meshes and failed operations are the usual cause.
  */
-function openEdges(shape: Shape3D): number[] {
-  const edges = shape.edges;
-  const buckets = new Map<number, { e: Edge; i: number; n: number }[]>();
-  edges.forEach((e, i) => {
-    const h = e.hashCode;
-    buckets.set(h, [...(buckets.get(h) ?? []), { e, i, n: 0 }]);
-  });
-  const oc = getOC();
-  for (const f of shape.faces) {
-    for (const fe of f.edges) {
-      const m = buckets.get(fe.hashCode)?.find((x) => x.e.isSame(fe));
-      // A seam (cylinder/torus) belongs to its face twice but is listed once.
-      if (m) m.n += oc.BRep_Tool.IsClosed(fe.wrapped, f.wrapped) ? 2 : 1;
-    }
-  }
-  // A pole (where a revolved profile touches the axis) is a point-edge, not a gap.
-  return [...buckets.values()].flat().filter((x) => x.n < 2 && !oc.BRep_Tool.Degenerated(x.e.wrapped)).map((x) => x.i);
-}
-
 // ------------------------------------------------------------------- helpers
 
 /**
@@ -1385,38 +1363,6 @@ function touchedBodies(f: Feature, ctx: Ctx): string[] {
 const GUARDED = new Set<string>(["extrude", "revolve", "sweep", "loft", "boolean", "fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom", "split"]);
 /** Edits that must not break a body into pieces (cuts and booleans may). */
 const NO_SPLIT = new Set<string>(["fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom"]);
-
-/**
- * A real copy: its own topology and its own curves and surfaces (replicad's
- * clone() only wraps the same shape again). Made by "moving" it nowhere with
- * copying on.
- */
-function deepCopy(s: Shape3D): Shape3D {
-  const oc = getOC();
-  const t = new oc.gp_Trsf();
-  const mk = new oc.BRepBuilderAPI_Transform(s.wrapped, t, true, false);
-  try {
-    return cast(mk.ModifiedShape(s.wrapped)) as Shape3D;
-  } finally {
-    mk.delete();
-    t.delete();
-  }
-}
-
-function subShapes(s: Shape3D, kind: "SOLID" | "SHELL"): any[] {
-  const oc = getOC();
-  const ex = new oc.TopExp_Explorer(s.wrapped, kind === "SOLID" ? oc.TopAbs_ShapeEnum.TopAbs_SOLID : oc.TopAbs_ShapeEnum.TopAbs_SHELL, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
-  const out: any[] = [];
-  for (; ex.More(); ex.Next()) out.push(kind === "SOLID" ? oc.TopoDS.Solid(ex.Current()) : oc.TopoDS.Shell(ex.Current()));
-  ex.delete();
-  return out;
-}
-
-function hairThin(s: Shape3D): number {
-  const areas = s.faces.map((f) => measureArea(f));
-  const total = areas.reduce((a, b) => a + b, 0);
-  return areas.filter((a) => a < total * 1e-7).length;
-}
 
 /**
  * The result of an edit must be a solid like the one it changed: crumbs a
@@ -1469,10 +1415,18 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
     for (const x of solids) oc.BRepLib.OrientClosedSolid(x);
     if (measureVolume(after) < 0) throw new Error("That edit would turn the body inside out");
   }
+  // Something wrong with it: repaired if that can be done without changing
+  // the shape (noted in History); else the step stops with the message.
+  const fixOr = (message: string): Shape3D => {
+    const r = repairShape(after, { maxSolids: mayPart ? undefined : Math.max(1, was) });
+    if (!r) throw new Error(message);
+    editNotes.push(`Repaired automatically: ${r.fixes.join(", ")}.`);
+    return r.shape;
+  };
   // Gaps it didn't have before (an edge with a face on one side only).
-  if (openEdges(after).length > (before ? openEdges(before).length : 0)) throw new Error("That edit would tear the body open — try a smaller value, or another face");
+  if (openEdges(after).length > (before ? openEdges(before).length : 0)) return fixOr("That edit would tear the body open — try a smaller value, or another face");
   const validBefore = before ? shapeValid(before) : true;
-  if (validBefore && !shapeValid(after)) throw new Error("That edit would damage the body (the faces don't meet up) — try a different value");
+  if (validBefore && !shapeValid(after)) return fixOr("That edit would damage the body (the faces don't meet up) — try a different value");
   const thinBefore = before ? hairThin(before) : 0;
   if (hairThin(after) > thinBefore) {
     // Often just faces left split on one surface: merge them, then look again.
@@ -1483,7 +1437,7 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
       merged = null;
     }
     if (merged && hairThin(merged) <= thinBefore && (!validBefore || shapeValid(merged))) return merged;
-    throw new Error("That edit would leave hair-thin faces — try a slightly different value");
+    return fixOr("That edit would leave hair-thin faces — try a slightly different value");
   }
   return after;
 }
@@ -1540,4 +1494,14 @@ export function errorText(err: unknown): string {
   // OpenCascade gave up (a raw exception from the kernel): say so in words.
   if (typeof err === "number" || String(err).includes("WebAssembly.Exception") || String(err) === "[object Object]") return "The geometry kernel could not compute this (try other values)";
   return String(err);
+}
+
+/** What's wrong with a body, in words (for a repair that couldn't fix it). */
+function whatsWrong(h: ReturnType<typeof healthOf>): string {
+  const out: string[] = [];
+  if (!h.solids) out.push(h.shells ? "it's a surface that doesn't close" : "it has no surface that encloses anything");
+  if (h.openEdges) out.push(`${h.openEdges} open edge${h.openEdges > 1 ? "s" : ""} (a gap or a missing curved face)`);
+  if (!h.valid) out.push("faces that don't meet up");
+  if (h.thin) out.push(`${h.thin} hair-thin face${h.thin > 1 ? "s" : ""}`);
+  return out.join(", ") || "it doesn't enclose a volume";
 }

@@ -598,6 +598,17 @@ export class App implements AppContext {
           { id: "split", label: "Split Body", icon: "split", run: wait("Split Body", ["body", "face"], () => this.setTool(new SplitOp(this, bodiesOf(this.selection)[0]))) },
           { id: "revolve", label: "Revolve", icon: "revolve", run: wait("Revolve", ["profile", "face"], () => src() && this.setTool(new RevolveOp(this, src()!))) },
           { id: "sweep", label: "Sweep", icon: "sweep", run: wait("Sweep", ["profile", "face"], () => src() && this.setTool(new SweepOp(this, src()!))) },
+          {
+            id: "repair",
+            label: "Repair Body",
+            icon: "check",
+            run: wait("Repair Body", ["body", "face", "edge"], () => {
+              const ids = bodiesOf(this.selection);
+              if (!ids.length) return;
+              this.store.add({ ...this.store.newIdentity("repair"), type: "repair", bodies: ids });
+              this.ui.toast("Repair added to History — it notes what it fixed");
+            }),
+          },
           { id: "fill", label: "Fill", icon: "fill", disabled: true, why: SOON },
           { id: "replace", label: "Replace Face", icon: "replaceFace", disabled: true, why: SOON },
           { id: "proje", label: "Project as Edge", icon: "projectEdge", disabled: true, why: SOON },

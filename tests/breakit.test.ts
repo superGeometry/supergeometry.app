@@ -215,6 +215,7 @@ function randomStep(R: () => number, i: number, result: any, size: number): Feat
   }
 }
 
+const repaired: string[] = [];
 const failures: { scenario: number; step: string; problems: string[]; features: Feature[] }[] = [];
 let ok = 0;
 let refused = 0;
@@ -250,6 +251,7 @@ for (let sc = 0; sc < SCENARIOS; sc++) {
       break;
     }
     const err = r.errors.find((e: any) => e.featureId === step.id);
+    if (!err && (r.notes ?? []).some((n: any) => n.featureId === step.id && /Repaired automatically/.test(n.message))) repaired.push(step.name);
     if (sig(prevSolids) !== sigBefore) {
       failures.push({ scenario: sc, step: step.name, problems: ["changed an earlier step's result"], features: next });
       console.log(`FAIL scenario ${sc} step ${st} (${step.name}): changed an earlier step's result${err ? " (refused)" : ""}`);
@@ -286,6 +288,7 @@ for (let sc = 0; sc < SCENARIOS; sc++) {
 }
 // Only when asked (BREAKIT_OUT=file), so a normal run leaves nothing behind.
 if (process.env.BREAKIT_OUT) writeFileSync(process.env.BREAKIT_OUT, JSON.stringify(failures, null, 1));
+if (repaired.length) console.log(`${repaired.length} edits saved by the automatic repair (${[...new Set(repaired)].join(", ")})`);
 console.log(`${ok} edits ok, ${refused} refused (${JSON.stringify(refusedBy)}), ${failures.length} broke the model`);
 const byStep: Record<string, number> = {};
 for (const f of failures) byStep[f.step] = (byStep[f.step] ?? 0) + 1;

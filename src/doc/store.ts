@@ -34,6 +34,7 @@ const LABELS: Record<FeatureType, string> = {
   freeform: "Freeform",
   scaleFace: "Scale Face",
   replaceFace: "Replace Face",
+  repair: "Repair",
 };
 
 /**
