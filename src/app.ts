@@ -147,6 +147,7 @@ export class App implements AppContext {
     this.hover = null;
     this.ui.closeFlyout();
     next.enter?.();
+    this.updateUndo();
     // Leaving an operation drops its preview.
     if (leavingOp && next === this.selectTool) void this.regenerate();
     else this.refreshSketches();
@@ -689,14 +690,13 @@ export class App implements AppContext {
     const k = e.key.toLowerCase();
     if (mod && k === "z") {
       e.preventDefault();
-      if (this.tool !== this.selectTool && !(this.tool instanceof SketchTool)) this.setTool(null);
-      if (e.shiftKey) this.store.redo();
-      else this.store.undo();
+      if (e.shiftKey) this.redo();
+      else this.undo();
       return;
     }
     if (mod && k === "y") {
       e.preventDefault();
-      this.store.redo();
+      this.redo();
       return;
     }
     if (mod && k === "s") {
@@ -860,8 +860,8 @@ export class App implements AppContext {
         btn.append(sh);
       }
     }
-    on("undo-btn", () => this.store.undo());
-    on("redo-btn", () => this.store.redo());
+    on("undo-btn", () => this.undo());
+    on("redo-btn", () => this.redo());
     this.store.onChange(() => this.updateUndo());
     this.updateUndo();
 
@@ -887,9 +887,35 @@ export class App implements AppContext {
     show();
   }
 
+  /**
+   * Undo: a tool with steps of its own (a freeform cage being shaped) takes
+   * those back, and leaves the project alone while it's open — Ctrl+Z used to
+   * throw the whole cage edit away and undo the step before it too.
+   */
+  private undo(): void {
+    if (this.tool.undo) {
+      if (!this.tool.undo()) this.ui.toast("Nothing to undo in this edit yet (Cancel leaves it unchanged)");
+      return this.updateUndo();
+    }
+    if (this.tool !== this.selectTool && !(this.tool instanceof SketchTool)) this.setTool(null);
+    this.store.undo();
+  }
+  private redo(): void {
+    if (this.tool.redo) {
+      this.tool.redo();
+      return this.updateUndo();
+    }
+    if (this.tool !== this.selectTool && !(this.tool instanceof SketchTool)) this.setTool(null);
+    this.store.redo();
+  }
+  refreshUndo(): void {
+    this.updateUndo();
+  }
+
   private updateUndo(): void {
-    (document.getElementById("undo-btn") as HTMLButtonElement).disabled = !this.store.canUndo;
-    (document.getElementById("redo-btn") as HTMLButtonElement).disabled = !this.store.canRedo;
+    const t = this.tool?.undo ? this.tool : null;
+    (document.getElementById("undo-btn") as HTMLButtonElement).disabled = t ? !t.canUndo : !this.store.canUndo;
+    (document.getElementById("redo-btn") as HTMLButtonElement).disabled = t ? !t.canRedo : !this.store.canRedo;
   }
 
   private updates!: Updates;

@@ -2,7 +2,7 @@
 // extrude, inset), and a part built with them, joined to other bodies.
 import opencascade from "replicad-opencascadejs";
 import { measureVolume, setOC } from "replicad";
-import { boxCage, cylinderCage, deleteFaces, extrudeFaces, holeLoops, bridgeLoops, boundaryEdges, cageEdgeKey, insertEdgeLoop, insetFaces, isClosed, planeCage, refineCage, selfCrossings, sphereCage, windingAgrees, type Cage } from "../src/freeform/cage";
+import { boxCage, bridgeFaces, cylinderCage, moveTurnScale, deleteFaces, extrudeFaces, holeLoops, bridgeLoops, boundaryEdges, cageEdgeKey, insertEdgeLoop, insetFaces, isClosed, planeCage, refineCage, selfCrossings, sphereCage, windingAgrees, type Cage } from "../src/freeform/cage";
 import { cageToShape } from "../src/kernel/freeform";
 import { debugBodies, regenerate, shapeValid } from "../src/kernel/engine";
 import { arrangement, regionRef } from "../src/sketch/regions";
@@ -53,6 +53,34 @@ const faceWith = (c: Cage, test: (n: [number, number, number], m: [number, numbe
   const side = faceWith(cy, (n) => Math.abs(n[2]) < 0.3)[0];
   const cl = insertEdgeLoop(cy, cy.faces[side][0], cy.faces[side][1]);
   check("edge loop round a cylinder (a new ring of points)", !!cl && isClosed(cl) && solidOk(cl).ok, cl ? `${cy.faces.length} → ${cl.faces.length}` : "refused");
+}
+
+// ---------------------------------------------- exact Move / Turn / Scale
+{
+  const sq: [number, number, number][] = [[10, 0, 50], [20, 0, 50], [20, 10, 50], [10, 10, 50]];
+  const near = (a: number[][], b: number[][]) => a.every((p, i) => p.every((v, k) => Math.abs(v - b[i][k]) < 1e-9));
+  check("Scale with only All typed: every factor starts at 1 (the face isn't flattened)", near(moveTurnScale(sq, "scale", [1, 1, 1, 0.5]), [[12.5, 2.5, 50], [17.5, 2.5, 50], [17.5, 7.5, 50], [12.5, 7.5, 50]]));
+  check("Scale X only stretches along X", near(moveTurnScale(sq, "scale", [2, 1, 1, 1]), [[5, 0, 50], [25, 0, 50], [25, 10, 50], [5, 10, 50]]));
+  check("Move adds the offset", near(moveTurnScale(sq, "move", [1, 2, 3, 1]), sq.map((p) => [p[0] + 1, p[1] + 2, p[2] + 3])));
+  check("Turn 90° about Z through the middle", near(moveTurnScale(sq, "turn", [0, 0, 90, 1]), [[20, 0, 50], [20, 10, 50], [10, 10, 50], [10, 0, 50]]));
+  const ground = cylinderCage(40, 40, 2).verts;
+  const tall = moveTurnScale(ground, "scale", [1, 1, 5, 1]);
+  check("a shape standing on the ground grows up from it", Math.min(...tall.map((p) => p[2])) === 0 && Math.abs(Math.max(...tall.map((p) => p[2])) - 200) < 1e-9);
+}
+
+// ------------------------------------------------------------ bridge faces
+{
+  // A tunnel through a box: top and bottom faces bridged.
+  // (3×3 a side: the middle faces, clear of the box's edges.)
+  const b = boxCage([40, 40, 40], 3);
+  const top = faceWith(b, (n, m) => n[2] > 0.9 && Math.hypot(m[0], m[1]) < 1)[0];
+  const bot = faceWith(b, (n, m) => n[2] < -0.9 && Math.hypot(m[0], m[1]) < 1)[0];
+  const t = bridgeFaces(b, top, bot);
+  check("bridge two faces: a closed, consistently wound cage with a tunnel", !!t && isClosed(t) && windingAgrees(t) && t.faces.length === b.faces.length - 2 + 4, t ? `${b.faces.length} → ${t.faces.length} faces` : "refused");
+  const touching = bridgeFaces(boxCage([40, 40, 40], 2), 0, 1);
+  check("faces that share a point can't be bridged", touching === null);
+  const r = t && solidOk(t);
+  check("  …and the box with a hole through it is a clean solid, smaller than the box", !!r?.ok && r.v < measureVolume(cageToShape(b)), r ? `vol ${r.v.toFixed(0)} vs ${measureVolume(cageToShape(b)).toFixed(0)}` : "");
 }
 
 // -------------------------------------------------------- extrude, inset

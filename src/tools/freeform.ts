@@ -1,10 +1,12 @@
 // Freeform: shape a smooth body by pulling its control cage. Tap cage points,
-// edges or faces (Shift adds), then drag the gimbal — or type a value while
-// dragging. The smooth surface updates live; Done turns it into a body.
+// edges or faces (Shift adds; on a touch screen every tap adds), then drag the
+// gimbal — or type a value while dragging, or exact Move / Turn / Scale values
+// in the card. The smooth surface updates live; Done turns it into a body.
+// Undo/Redo step through the cage changes made here.
 
-import { BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
+import { Box3, BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
 import type { Feature, FreeformFeature, PlaneDef, TransformFeature, Vec3 } from "../doc/types";
-import { borderChains, bridgeChains, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, limitPoints, previewMesh, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
+import { borderChains, bridgeChains, bridgeFaces, moveTurnScale, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, limitPoints, previewMesh, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
 import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
@@ -31,7 +33,13 @@ export class FreeformTool implements Tool {
   private gimbal: Gimbal | null = null;
   private dragging: { part: GimbalPart; from: ToolPointer; base: Vec3[]; center: Vec3; d: Vec3; ang: number } | null = null;
   private typing: DragTyping;
-  private uniform = 1;
+  /** The card's exact values: what they act on (Move, Turn, Scale), and the points as they were before typing. */
+  private xform: "move" | "turn" | "scale" = "move";
+  private fieldBase: Map<number, Vec3> | null = null;
+  private fieldVals = [0, 0, 0, 1];
+  /** Cage changes made in this edit, for Undo/Redo. */
+  private past: { cage: Cage; picks: Pick[] }[] = [];
+  private future: { cage: Cage; picks: Pick[] }[] = [];
   /** Moves applied to the body later in History: the cage is shown (and edited) where the body is. */
   private place: Placement = { fwd: (v) => v, inv: (v) => v };
   private surfaceSheet = false;
@@ -70,6 +78,8 @@ export class FreeformTool implements Tool {
       this.choosingPlane = from.primitive === "plane";
     }
     this.typing = new DragTyping(app);
+    // Zoom to fit frames the cage being shaped (its points: the smooth shape lies inside them).
+    this.dots.userData.fit = true;
     // The cage on top of everything (planes, other bodies, the gimbal).
     this.lines.renderOrder = 68;
     this.dots.renderOrder = 70;
@@ -113,6 +123,11 @@ export class FreeformTool implements Tool {
     }
     this.panel();
     this.hint();
+    // A new shape: framed, clear of the card (it used to appear tiny, half under it on a phone).
+    if (!this.existing) {
+      const box = new Box3().setFromPoints(this.cage.verts.map((v) => new Vector3(...v)));
+      this.app.view.cam.fit(box, true, this.app.view.coveredInsets());
+    }
   }
 
   /** Does the cage's box overlap any visible body's box? */
@@ -152,18 +167,33 @@ export class FreeformTool implements Tool {
   }
 
   private hint(): void {
-    if (this.placing) return this.app.ui.setHint("Drag the gimbal to move it into place first. Then tap points, edges or faces to shape it.");
+    if (this.placing) return this.app.ui.setHint("Drag the gimbal (or type Move values) to put it in place first. Then tap points, edges or faces to shape it.");
+    // A phone has no Shift: there every tap adds, a second tap drops it.
+    const more = isCoarse ? "Tap more to add, tap one again to drop it" : "Shift+tap adds";
     this.app.ui.setHint(
       this.picks.length
-        ? "Drag the gimbal to move or turn the selection (type a value while dragging). Shift+tap adds. Tap empty space to deselect."
-        : "Tap cage points, edges or faces to select them (Shift adds). Done turns the shape into a body.",
+        ? `Drag the gimbal, or type exact Move / Turn / Scale values. ${more}. Tap empty space to deselect.`
+        : `Tap cage points, edges or faces to select them (${isCoarse ? "every tap adds" : "Shift adds"}). Done turns the shape into a body.`,
     );
   }
 
   private panel(): void {
     const n = this.selectedVerts().length;
     const items: PanelItem[] = [];
-    if (n) items.push({ type: "number", label: "Scale", value: 1, kind: "number", min: 0.01, onInput: (v) => this.scaleSelection(v) });
+    if (n) {
+      // Exact values (a phone can't type while dragging), from where the points are now.
+      this.fieldBase = null;
+      // Nothing moved yet: no offset, no turn — and every scale factor 1 (0 flattened the points).
+      this.fieldVals = this.xform === "scale" ? [1, 1, 1, 1] : [0, 0, 0, 1];
+      items.push({ type: "choice", options: [{ id: "move", label: "Move" }, { id: "turn", label: "Turn" }, { id: "scale", label: "Scale" }], value: this.xform, onChange: (v) => ((this.xform = v as typeof this.xform), this.panel()) });
+      if (this.xform === "scale") {
+        items.push({ type: "number", label: "All", value: 1, kind: "number", min: 0.01, onInput: (v) => this.setField(3, v) });
+        for (const [k, a] of ["X", "Y", "Z"].entries()) items.push({ type: "number", label: a, value: 1, kind: "number", min: 0.01, onInput: (v) => this.setField(k, v) });
+      } else {
+        const turn = this.xform === "turn";
+        for (const [k, a] of ["X", "Y", "Z"].entries()) items.push({ type: "number", label: turn ? `${a}°` : `Δ${a}`, value: 0, kind: turn ? "angle" : "length", onInput: (v) => this.setField(k, v) });
+      }
+    }
     const faces = this.picks.filter((p) => p.kind === "face").length;
     if (faces && !this.placing) {
       items.push(
@@ -172,6 +202,8 @@ export class FreeformTool implements Tool {
       );
     }
     if (faces) items.push({ type: "button", label: `Delete face${faces > 1 ? "s" : ""}`, icon: "trash", onClick: () => this.deleteSelectedFaces() });
+    // Two faces: a tube between them (a handle, a tunnel) — both open up and join.
+    if (faces === 2 && !this.placing) items.push({ type: "button", label: "Bridge faces", icon: "loft", onClick: () => this.bridgeSelectedFaces() });
     // One edge picked: a new loop of points across the faces it runs through.
     const edges = this.picks.filter((p) => p.kind === "edge");
     if (edges.length === 1 && !faces && !this.placing) items.push({ type: "button", label: "Add edge loop", icon: "splitLine", onClick: () => this.addEdgeLoop(edges[0].e) });
@@ -203,7 +235,6 @@ export class FreeformTool implements Tool {
         },
       );
     }
-    this.uniform = 1;
     this.app.ui.showPanel({
       title: `Freeform${n ? ` · ${n} point${n > 1 ? "s" : ""}` : ""}`,
       items,
@@ -214,6 +245,7 @@ export class FreeformTool implements Tool {
       ],
       onDone: () => this.done(),
       onCancel: () => this.cancel(),
+      enterApplies: true,
     });
   }
 
@@ -244,6 +276,7 @@ export class FreeformTool implements Tool {
     if (edges(runs[0]) !== edges(runs[1])) return this.app.ui.toast(`Both sides need the same number of edges (${edges(runs[0])} and ${edges(runs[1])})`);
     const next = bridgeChains(this.cage, runs[0], runs[1]);
     if (!next) return this.app.ui.toast("These edges can't be connected (they touch each other)");
+    this.remember();
     this.cage = next;
     this.picks = [];
     this.rebuild();
@@ -253,6 +286,7 @@ export class FreeformTool implements Tool {
 
   /** A cage change: the new cage, what's picked after it, and a fresh preview. */
   private changeCage(next: Cage, picks: Pick[]): void {
+    this.remember();
     this.cage = next;
     this.picks = picks;
     this.rebuild();
@@ -301,10 +335,19 @@ export class FreeformTool implements Tool {
     this.changeCage(refineCage(this.cage), []);
   }
 
+  private bridgeSelectedFaces(): void {
+    const [a, b] = this.pickedFaces();
+    const next = bridgeFaces(this.cage, a, b);
+    if (!next) return this.app.ui.toast("These two faces can't be bridged (they touch each other)");
+    this.changeCage(next, []);
+    this.app.ui.toast("Bridged — the two faces are joined by a tube (pull its points to shape it)");
+  }
+
   private deleteSelectedFaces(): void {
     const faces = this.picks.flatMap((p) => (p.kind === "face" ? [p.f] : []));
     if (!faces.length) return;
     if (faces.length >= this.cage.faces.length) return this.app.ui.toast("At least one face has to stay");
+    this.remember();
     this.cage = deleteFaces(this.cage, faces);
     this.picks = [];
     this.rebuild();
@@ -342,6 +385,7 @@ export class FreeformTool implements Tool {
       if (filled?.refined) this.app.ui.toast("The cage got twice as fine so this hole could be closed — the shape stays the same");
     }
     if (!next) return this.app.ui.toast(loops.length === 2 ? "Bridging needs two holes with the same number of edges" : "That hole can't be filled");
+    this.remember();
     this.cage = next;
     this.picks = [];
     this.rebuild();
@@ -382,8 +426,8 @@ export class FreeformTool implements Tool {
   }
 
   /**
-   * Nearest cage point, else edge, else the frontmost face under the pointer.
-   * Points and edges behind the smooth surface (the far side) don't count.
+   * The cage point, edge or (frontmost) face the tap is closest to. Points and
+   * edges behind the smooth surface (the far side) don't count.
    */
   private pickAt(p: ToolPointer): Pick | null {
     const view = this.app.view;
@@ -394,16 +438,25 @@ export class FreeformTool implements Tool {
     const tol = Math.max(16, p.tol * 1.8);
     const eye = view.cam.camera.position.toArray() as Vec3;
     const wall = this.surfaceDepth(p);
-    const visible = (q: Vec3) => len(sub(q, eye)) < wall + 1e-6;
+    // In front of the smooth surface along the tap's ray, give or take a little:
+    // a cage edge can lie just millimetres outside the surface (a cylinder's
+    // sides), and where along it the tap falls is only estimated — with no
+    // allowance, half the edges of a tall cylinder couldn't be picked.
+    const reach = (this.surface.geometry.boundingSphere?.radius ?? 10) * 0.08;
+    const visible = (q: Vec3) => len(sub(q, eye)) < wall + reach;
     let best: { d: number; i: number } | null = null;
     scr.forEach((s, i) => {
       if (!s) return;
       const d = Math.hypot(s[0] - p.x, s[1] - p.y);
       if (d >= tol) return;
-      const score = d + (this.hiddenPoint(this.cage.verts[i], eye) ? tol : 0);
+      const hidden = this.hiddenPoint(this.cage.verts[i], eye);
+      // Behind the shape while the tap lands on it: that's a tap on the near
+      // side — the spout's points showing through the can took taps meant for
+      // the face in front of them.
+      if (hidden && wall < Infinity) return;
+      const score = d + (hidden ? tol : 0);
       if (!best || score < best.d) best = { d: score, i };
     });
-    if (best) return { kind: "vert", i: (best as { i: number }).i };
     let bestE: { d: number; e: [number, number] } | null = null;
     for (const e of cageEdges(this.cage)) {
       const a = scr[e[0]];
@@ -413,17 +466,28 @@ export class FreeformTool implements Tool {
       const at = add(this.cage.verts[e[0]], scale(sub(this.cage.verts[e[1]], this.cage.verts[e[0]]), t));
       if (d < p.tol && visible(at) && (!bestE || d < bestE.d)) bestE = { d, e };
     }
-    if (bestE) return { kind: "edge", e: (bestE as { e: [number, number] }).e };
     // Faces: inside the projected quad; nearest to the camera wins.
-    let bestF: { d: number; f: number } | null = null;
+    let bestF: { d: number; f: number; mid: number } | null = null;
     this.cage.faces.forEach((f, fi) => {
       const q = f.map((i) => scr[i]);
       if (q.some((s) => !s) || !inPoly(p.x, p.y, q as [number, number][])) return;
       const c = scale(f.reduce((s, i) => add(s, this.cage.verts[i]), [0, 0, 0] as Vec3), 0.25);
       const d = len(sub(c, eye));
-      if (!bestF || d < bestF.d) bestF = { d, f: fi };
+      const m = view.toScreen(c);
+      if (!bestF || d < bestF.d) bestF = { d, f: fi, mid: m ? Math.hypot(m[0] - p.x, m[1] - p.y) : Infinity };
     });
-    return bestF ? { kind: "face", f: (bestF as { f: number }).f } : null;
+    // Whichever the tap is closest to: a point, an edge, or the middle of the
+    // face under it. (Points always won within a fingertip's reach: on a
+    // phone, among a detailed cage, a face's middle couldn't be tapped.)
+    const pt = best as { d: number; i: number } | null;
+    const ed = bestE as { d: number; e: [number, number] } | null;
+    const fc = bestF as { d: number; f: number; mid: number } | null;
+    const faceAt = fc ? fc.mid : Infinity;
+    if (pt && pt.d <= Math.min(ed?.d ?? Infinity, faceAt)) return { kind: "vert", i: pt.i };
+    if (ed && ed.d < faceAt) return { kind: "edge", e: ed.e };
+    if (fc) return { kind: "face", f: fc.f };
+    if (pt) return { kind: "vert", i: pt.i };
+    return ed ? { kind: "edge", e: ed.e } : null;
   }
 
   /** Which plane / flat face is under the pointer (choosing where a new surface goes). */
@@ -476,7 +540,7 @@ export class FreeformTool implements Tool {
       const again = this.pickAt(p);
       if (again) {
         if (!this.picks.some((x) => JSON.stringify(x) === JSON.stringify(again))) {
-          if (p.shift || p.add) this.picks.push(again);
+          if (p.shift || p.add || p.type === "touch") this.picks.push(again);
           else this.picks = [again];
           this.selectionChanged();
         }
@@ -493,14 +557,17 @@ export class FreeformTool implements Tool {
     }
     const hit = this.pickAt(p);
     if (!hit) {
-      // Empty space: deselect; with nothing selected, finish.
+      // Empty space: deselect. With nothing selected it used to finish the
+      // whole edit — one stray tap on a phone (meant to deselect) ended it
+      // half made. Done, or a double-tap on empty space, finishes.
       if (this.picks.length) return ((this.picks = []), this.selectionChanged());
-      this.done();
+      this.app.ui.toast("Nothing picked. Done (or a double-tap on empty space) finishes the shape");
       return;
     }
     const key = JSON.stringify(hit);
     const i = this.picks.findIndex((x) => JSON.stringify(x) === key);
-    if (p.shift || p.add) {
+    // A touch screen has no Shift: there every tap adds, and a second tap drops it.
+    if (p.shift || p.add || p.type === "touch") {
       if (i >= 0) this.picks.splice(i, 1);
       else this.picks.push(hit);
     } else this.picks = i >= 0 && this.picks.length === 1 ? [] : [hit];
@@ -548,6 +615,8 @@ export class FreeformTool implements Tool {
     // One point turned about itself wouldn't move: it turns about the shape's centre instead.
     const ids = this.selectedVerts();
     const center = part.kind === "ring" && ids.length === 1 ? this.centroid(this.cage.verts.map((_, i) => i)) : this.gimbal.origin;
+    this.remember();
+    this.fieldBase = null;
     this.dragging = { part, from: p, base: this.cage.verts.map((v) => [...v] as Vec3), center, d: [0, 0, 0], ang: 0 };
     this.gimbal.setHot(part);
     return true;
@@ -615,7 +684,20 @@ export class FreeformTool implements Tool {
 
   up(): void {
     const moved = !!this.dragging && (len(this.dragging.d) > 0 || this.dragging.ang !== 0);
+    const from = this.dragging?.from;
+    // A press on the gimbal that moved nothing isn't a step to undo…
+    if (this.dragging && !moved) (this.past.pop(), this.app.refreshUndo());
     this.dragging = null;
+    // …it's a tap on what's under it: the gimbal's arrows lie over the faces
+    // next to the picked one, and picking the four faces of a cap one after
+    // another only ever got the first.
+    if (from && !moved && !this.typing.active && this.pickAt(from)) {
+      this.typing.reset();
+      this.app.ui.setLabel(0, 0, null);
+      this.gimbal?.setHot(null);
+      this.tap(from);
+      return;
+    }
     this.typing.reset();
     this.app.ui.setLabel(0, 0, null);
     this.gimbal?.setHot(null);
@@ -627,6 +709,8 @@ export class FreeformTool implements Tool {
       return;
     }
     this.placeGimbal();
+    // The card's exact values start again from where the drag left the points.
+    if (moved) this.panel();
   }
 
   dragKey(e: KeyboardEvent): boolean {
@@ -646,16 +730,62 @@ export class FreeformTool implements Tool {
     });
   }
 
-  /** Panel Scale: grow/shrink the selection about its centre (relative to the last value). */
-  private scaleSelection(v: number): void {
-    if (v <= 0) return;
+  /**
+   * A typed Move, Turn or Scale of the picked points (see moveTurnScale),
+   * always from where they were when typing began.
+   */
+  private setField(k: number, v: number): void {
+    if (this.xform === "scale" && !(v > 0)) return;
     const ids = this.selectedVerts();
-    const c = this.centroid(ids);
-    const k = v / this.uniform;
-    this.uniform = v;
-    for (const i of ids) this.cage.verts[i] = add(c, scale(sub(this.cage.verts[i], c), k));
+    if (!ids.length) return;
+    if (!this.fieldBase) {
+      this.remember();
+      this.fieldBase = new Map(ids.map((i) => [i, [...this.cage.verts[i]] as Vec3]));
+    }
+    this.fieldVals[k] = v;
+    const base = [...this.fieldBase];
+    const moved = moveTurnScale(base.map(([, p]) => p), this.xform, this.fieldVals as [number, number, number, number]);
+    base.forEach(([i], n) => (this.cage.verts[i] = moved[n]));
     this.rebuild();
     this.placeGimbal();
+  }
+
+  // ---------------------------------------------------------------- undo
+
+  /** Keep the cage as it is now, before a change (Undo goes back to it). */
+  private remember(): void {
+    this.past.push({ cage: structuredClone(this.cage), picks: structuredClone(this.picks) });
+    if (this.past.length > 100) this.past.shift();
+    this.future = [];
+    this.app.refreshUndo();
+  }
+  get canUndo(): boolean {
+    return this.past.length > 0;
+  }
+  get canRedo(): boolean {
+    return this.future.length > 0;
+  }
+  undo(): boolean {
+    const prev = !this.dragging && this.past.pop();
+    if (!prev) return false;
+    this.future.push({ cage: structuredClone(this.cage), picks: structuredClone(this.picks) });
+    this.restore(prev);
+    return true;
+  }
+  redo(): boolean {
+    const next = !this.dragging && this.future.pop();
+    if (!next) return false;
+    this.past.push({ cage: structuredClone(this.cage), picks: structuredClone(this.picks) });
+    this.restore(next);
+    return true;
+  }
+  private restore(st: { cage: Cage; picks: Pick[] }): void {
+    this.cage = st.cage;
+    this.picks = st.picks;
+    this.rebuild();
+    this.selectionChanged();
+    this.panelHint();
+    this.app.refreshUndo();
   }
 
   // --------------------------------------------------------------- drawing
@@ -821,6 +951,7 @@ function setPositions(o: LineSegments | Points, xyz: number[]): void {
   const g = o.geometry;
   g.setAttribute("position", new BufferAttribute(new Float32Array(xyz), 3));
   g.computeBoundingSphere();
+  g.computeBoundingBox();
 }
 
 /** Screen distance from (x, y) to segment a–b, and where along it (0…1). */

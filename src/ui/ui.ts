@@ -68,6 +68,12 @@ export interface ValuePanel {
   onCancel?(): void;
   /** Extra buttons shown in the panel (e.g. Delete). */
   actions?: ToolItem[];
+  /**
+   * Enter in a field only applies the value (the card stays open). For cards
+   * whose fields are steps of a longer edit — Freeform's exact moves: Enter
+   * after a ΔZ ended the whole cage edit.
+   */
+  enterApplies?: boolean;
 }
 
 export interface HistoryHandlers {
@@ -678,7 +684,8 @@ export class UI {
       if (e.key === "Enter") {
         e.preventDefault();
         apply();
-        spec.onDone?.();
+        if (spec.enterApplies) input.select();
+        else spec.onDone?.();
       } else if (e.key === "Escape") {
         e.preventDefault();
         spec.onCancel?.();

@@ -328,6 +328,32 @@ export function isClosed(cage: Cage): boolean {
 
 // ------------------------------------------------------------ cage editing
 
+/**
+ * Freeform's exact values on picked points: Move by [x, y, z] (mm); Turn by
+ * x°, y°, z° about X, then Y, then Z through the points' middle; or Scale by
+ * all × [x, y, z] about the middle — about the ground instead, upwards, when
+ * the points stand on it (a cylinder made 5× taller sank 80 mm below the floor).
+ */
+export function moveTurnScale(pts: Vec3[], mode: "move" | "turn" | "scale", [x, y, z, all]: [number, number, number, number]): Vec3[] {
+  if (!pts.length) return [];
+  const c = mul3(pts.reduce((s, p) => add3(s, p), [0, 0, 0] as Vec3), 1 / pts.length);
+  if (mode === "move") return pts.map((p) => [p[0] + x, p[1] + y, p[2] + z]);
+  if (mode === "scale") {
+    const low = Math.min(...pts.map((p) => p[2]));
+    const cz = Math.abs(low) < 1e-6 ? 0 : c[2];
+    return pts.map((p) => [c[0] + (p[0] - c[0]) * all * x, c[1] + (p[1] - c[1]) * all * y, cz + (p[2] - cz) * all * z]);
+  }
+  return pts.map((p) => {
+    let q = sub3(p, c);
+    for (const [ax, deg] of [[[1, 0, 0], x], [[0, 1, 0], y], [[0, 0, 1], z]] as [Vec3, number][]) {
+      if (!deg) continue;
+      const t = (deg * Math.PI) / 180;
+      q = add3(add3(mul3(q, Math.cos(t)), mul3(cross3(ax, q), Math.sin(t))), mul3(ax, dot3(ax, q) * (1 - Math.cos(t))));
+    }
+    return add3(c, q);
+  });
+}
+
 /** Remove faces; points no face uses any more go too (indices are renumbered). */
 export function deleteFaces(cage: Cage, faces: number[]): Cage {
   const drop = new Set(faces);
@@ -449,6 +475,25 @@ export function bridgeLoops(cage: Cage, a: number[], b: number[]): Cage | null {
   // Each a-edge (a_i → a_i+1) already runs as the new face needs it; the b side runs back.
   for (let i = 0; i < n; i++) faces.push([a[i], a[(i + 1) % n], B(i + 1), B(i)]);
   return { verts: cage.verts, faces };
+}
+
+/**
+ * Bridge two faces: both are taken out and a tube of quads joins the two holes
+ * (a handle between two faces pulled towards each other, a tunnel through a
+ * body). One step instead of deleting both and picking every rim point.
+ * The faces must have the same number of sides and share no point.
+ */
+export function bridgeFaces(cage: Cage, fa: number, fb: number): Cage | null {
+  const A = cage.faces[fa];
+  const B = cage.faces[fb];
+  if (!A || !B || fa === fb || A.some((v) => B.includes(v))) return null;
+  // Holes as holeLoops gives them: wound like the face that filled them.
+  const loopA = [...A];
+  const loopB = [...B];
+  const without = { verts: cage.verts, faces: cage.faces.filter((_, i) => i !== fa && i !== fb) };
+  const out = bridgeLoops(without, loopA, loopB);
+  // Same points, same numbers (nothing compacted: every rim point is still used by its neighbours).
+  return out && windingAgrees(out) ? out : null;
 }
 
 /** A run of open-border edges, as its points in order (a hole's rim: closed). */

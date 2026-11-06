@@ -24,6 +24,15 @@ export interface Tool extends PointerHandler {
   dragKey?(e: KeyboardEvent): boolean;
   /** Called after every regeneration (committed or preview). */
   refresh?(): void;
+  /**
+   * The tool's own steps, before anything is committed (a freeform cage being
+   * shaped): Undo/Redo take these back first, and never the project's steps
+   * underneath while the tool is open. Return true when a step was taken back.
+   */
+  undo?(): boolean;
+  redo?(): boolean;
+  readonly canUndo?: boolean;
+  readonly canRedo?: boolean;
 }
 
 export interface AppContext {
@@ -39,6 +48,8 @@ export interface AppContext {
   setHover(h: Sel | null): void;
   /** null returns to the selection tool. */
   setTool(tool: Tool | null): void;
+  /** The tool's own undo steps changed: refresh the Undo/Redo buttons. */
+  refreshUndo(): void;
   /** Show the model as if `features` were the document (live preview). */
   preview(features: Feature[]): Promise<RegenResult | null>;
   /** Current plane of a sketch (sketches on faces follow the face). */

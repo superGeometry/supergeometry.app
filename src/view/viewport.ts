@@ -439,9 +439,12 @@ export class Viewport {
       const t = r.top - cv.top, b = cv.bottom - r.bottom;
       // A column: clearly taller than wide (a tablet's tool menu is under a quarter of the height).
       const wide = r.width > W * 0.5, tall = r.height > Math.min(H * 0.25, r.width * 1.8);
+      // A panel over most of the screen (History on a phone): nowhere left to put the model — ignored.
+      if (wide && r.height > H * 0.6) continue;
       if (tall && !wide) cols.push(r);
-      else if (!tall && t < H * 0.2 && (wide || r.height < H * 0.12)) ins.top = Math.max(ins.top, (r.bottom - cv.top) / H);
-      else if (!tall && b < H * 0.2 && wide) ins.bottom = Math.max(ins.bottom, (cv.bottom - r.top) / H);
+      // Bars: wide along the top or bottom (a phone's tool card can be tall as well as wide).
+      else if (t < H * 0.2 && (wide || r.height < H * 0.12)) ins.top = Math.max(ins.top, (r.bottom - cv.top) / H);
+      else if (b < H * 0.2 && wide) ins.bottom = Math.max(ins.bottom, (cv.bottom - r.top) / H);
     }
     // Columns from each edge inwards, side by side: Items, then the tool column
     // just right of it (a phone on its side) all count as the left side.
@@ -467,6 +470,8 @@ export class Viewport {
     };
     for (const b of this.visibleBodies()) add(b.mesh);
     this.sketchGroup.children.forEach(add);
+    // Shapes a tool is still making (a freeform cage) count too: Fit framed an empty scene.
+    this.overlay.children.forEach((o) => o.userData.fit && o.visible && add(o));
     this.imageMeshes.forEach((m) => m.visible && add(m));
     return box;
   }
