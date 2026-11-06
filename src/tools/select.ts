@@ -408,6 +408,7 @@ export class SelectTool implements Tool {
       // Scales just this face, within its plane; the sides tilt to follow.
       { id: "scale", label: "Scale Face", icon: "scale", ...needFlat, run: () => ref && info?.plane && app.setTool(new ScaleFaceOp(app, ref, info.plane)) },
       { id: "align", label: "Align", icon: "align", disabled: true, why: SOON },
+      { id: "thread", label: "Thread", icon: "thread", disabled: !one || !info?.round, why: "Needs one round face (a shank or a hole)", run: () => app.startThread() },
       { id: "offsetFace", label: "Offset Face", icon: "offsetFace", shortcut: "E", active: true, disabled: !one || !offsettable(info?.type), why: "Needs one flat or round face", run: () => src && app.setTool(new ExtrudeOp(app, src)) },
       { id: "fillet", label: "Fillet", icon: "fillet", shortcut: "F", run: () => this.edgesOfFaces("fillet") },
       { id: "chamfer", label: "Chamfer", icon: "chamfer", run: () => this.edgesOfFaces("chamfer") },
@@ -470,6 +471,8 @@ export class SelectTool implements Tool {
       // Moves just this edge: the faces on it tilt to follow.
       { id: "move", label: "Move/Rotate Edge", icon: "move", shortcut: "M", disabled: !straight || sel.length !== 1, why: "Needs one straight edge", run: () => ref && app.setTool(new MoveFaceOp(app, { edge: ref })) },
       { id: "moveBody", label: "Move/Rotate Body", icon: "move", run: () => app.setTool(new TransformOp(app, "move", bodies)) },
+      // A round edge (a hole's rim, a shank's end): thread the round face it bounds — in a small hole the rim is what a finger hits.
+      ...(info?.type === "CIRCLE" && sel.length === 1 ? [{ id: "thread", label: "Thread", icon: "thread" as const, run: () => app.startThread() }] : []),
       { id: "axis", label: "Axis – Along Edge", icon: "axis", disabled: !straight, why: "Needs a straight edge", run: () => info && app.setTool(new AxisOp(app, info.start, info.dir)) },
       { id: "planePerp", label: "Plane – Perp. to Edge", icon: "plane", run: () => info && app.setTool(new PlaneOp(app, { origin: info.mid, normal: info.dir, xDir: perpTo(info.dir) }, undefined)) },
       { id: "translate", label: "Translate", icon: "translate", shortcut: "N", run: () => app.setTool(new TransformOp(app, "translate", bodies)) },

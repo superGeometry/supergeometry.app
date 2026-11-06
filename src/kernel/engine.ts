@@ -16,6 +16,8 @@ import {
   makeCompound,
   iterTopo,
   makeBSplineApproximation,
+  makeCylinder,
+  makeHelix,
   isShape3D,
   makeFace,
   cast,
@@ -52,7 +54,8 @@ import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
-import { deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, unify } from "./faceEdit";
+import { cylinderOf, deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, unify } from "./faceEdit";
+import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import type { BodyMesh, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
@@ -468,6 +471,13 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const n0 = planeOf(face).normal;
       const n = dot(plane.normal, n0) < 0 ? scale(plane.normal, -1) : plane.normal;
       bodies.set(f.face.body, staysClosed(body, replaceFacePlane(body, face, { origin: plane.origin, normal: n, xDir: xDirFor(n) })));
+      return;
+    }
+
+    case "thread": {
+      const body = need(bodies, f.face.body);
+      const face = resolveFace(body, f.face);
+      bodies.set(f.face.body, threadFace(body, face, f.pitch, !!f.left));
       return;
     }
 
@@ -967,6 +977,105 @@ function helicalSweep(wire: Wire, origin: Vec3, dir: Vec3, angle: number, travel
   }
 }
 
+/** Sweep a profile along a path, keeping it square to `up` (a helix: the profile stays in planes through the axis). */
+function pipeAlong(profile: Wire, path: Wire, up: Vec3): Shape3D {
+  const oc = getOC();
+  const builder = new oc.BRepOffsetAPI_MakePipeShell(path.wrapped);
+  const bi = new oc.gp_Dir(up[0], up[1], up[2]);
+  try {
+    builder.SetMode(bi);
+    builder.Add(profile.wrapped, false, false);
+    builder.Build();
+    if (!builder.IsDone()) throw new Error("The thread's groove couldn't be made");
+    builder.MakeSolid();
+    const shape = cast(builder.Shape());
+    if (!isShape3D(shape)) throw new Error("The thread's groove couldn't be made");
+    return shape;
+  } finally {
+    builder.delete();
+    bi.delete();
+  }
+}
+
+/**
+ * Cut an ISO 60° thread into a round face: a V groove swept along a helix
+ * round the face's axis (deepest at the minor diameter of a shank, the major
+ * of a hole), kept to the face's own length, cut away. Cutting (never adding
+ * a ridge) is the reliable way: a ridge only just overlapping its core can
+ * come out of OpenCascade wrong without a word.
+ */
+export function threadFace(body: Shape3D, face: Face, pitch: number, left = false): Shape3D {
+  if (face.geomType !== "CYLINDRE") throw new Error("Threads go on round faces (a shank or a hole)");
+  if (!(pitch > 0)) throw new Error("The pitch must be more than 0");
+  const cy = cylinderOf(face);
+  if (!cy) throw new Error("Threads go on round faces (a shank or a hole)");
+  const inside = cy.s < 0;
+  const depth = threadDepth(pitch, inside);
+  if (!inside && depth >= cy.r * 0.9) throw new Error("That pitch is too coarse for this diameter");
+  const a = norm(cy.a);
+  // The face's length along its axis.
+  const ts: number[] = [];
+  for (const e of face.edges) for (const k of [0, 0.25, 0.5, 0.75, 1]) ts.push(dot(sub(e.pointAt(k).toTuple() as Vec3, cy.c), a));
+  const t0 = Math.min(...ts);
+  const t1 = Math.max(...ts);
+  if (t1 - t0 < pitch) throw new Error("This face is shorter than one turn of the thread");
+  // The groove stops just short of both ends: its ends never lie on a face of
+  // the body (a groove running out through an end face can make OpenCascade's
+  // cut silently do nothing, or take the whole rod), and under a head it
+  // mustn't cut into the head anyway.
+  const lo = t0 + 0.05 * pitch;
+  const hi = t1 - 0.05 * pitch;
+  // The groove's section in a plane through the axis: a 60° V from its tip
+  // (the thread's depth) opening past the face.
+  const out = inside ? -1 : 1;
+  const tip = cy.r - out * depth;
+  const mouth = cy.r + out * 0.2 * pitch;
+  const hm = Math.abs(mouth - tip) * Math.tan(Math.PI / 6);
+  // Only along the face (a shank's thread mustn't run into the head).
+  const reach = Math.max(cy.r, tip, mouth) + pitch * 2;
+  const slab = makeCylinder(reach, hi - lo, add(cy.c, scale(a, lo)), a) as Shape3D;
+  const v0 = Math.abs(measureVolume(body));
+  // What it must take away: the V inside the face (depth deep, 2·depth·tan30
+  // wide at the face) along the helix through its centroid.
+  const section = depth * depth * Math.tan(Math.PI / 6);
+  const rc = inside ? cy.r + depth / 3 : cy.r - depth / 3;
+  const expect = section * Math.hypot(2 * Math.PI * rc, pitch) * ((hi - lo) / pitch);
+  const ok = (r: Shape3D) => {
+    const v = Math.abs(measureVolume(r));
+    return Number.isFinite(v) && Math.abs(v0 - v - expect) < expect * 0.03;
+  };
+  // Where the thread starts round the face doesn't matter: if OpenCascade
+  // trips on one start (a groove lining up with the face's seams), another
+  // is tried.
+  for (const phase of [0, 0.37, 0.71]) {
+    const start = lo - pitch * (1 + phase);
+    const turns = Math.ceil((hi - start) / pitch) + 1;
+    // An exact helix (a line wound on a cylinder, not a fitted spline: those
+    // drift over many turns and the sweep fails), through the groove's middle.
+    const base = add(cy.c, scale(a, start));
+    const helix = makeHelix(pitch, pitch * turns, (tip + mouth) / 2, base, a, left);
+    const r0 = sub(helix.startPoint.toTuple() as Vec3, base);
+    const ur = norm(sub(r0, scale(a, dot(r0, a))));
+    const at = (rr: number, t: number): Vec3 => add(add(base, scale(a, t)), scale(ur, rr));
+    const profile = makePolygon([at(mouth, -hm), at(tip, 0), at(mouth, hm)]).outerWire();
+    let cut: Shape3D;
+    try {
+      cut = pipeAlong(profile, helix, a).intersect(slab);
+    } catch {
+      continue;
+    }
+    for (const fuzzy of [true, false]) {
+      try {
+        const res = fuzzy ? fuzzyBoolean("cut", body, cut) : body.cut(cut);
+        if (ok(res)) return res;
+      } catch {
+        // the other way, or the next start
+      }
+    }
+  }
+  throw new Error("The thread couldn't be cut here — try a slightly different pitch");
+}
+
 /**
  * Shell without BRepOffsetAPI_MakeThickSolid: body − (body offset inward by t)
  * leaves a closed skin; each removed flat face then gets a hole cut through
@@ -1285,6 +1394,10 @@ function faceInfo(face: Face): FaceInfo {
   const normal = norm(face.normalAt().toTuple() as Vec3);
   const info: FaceInfo = { center, normal, area: measureArea(face), type: face.geomType };
   if (face.geomType === "PLANE") info.plane = { origin: center, normal, xDir: xDirFor(normal) };
+  if (face.geomType === "CYLINDRE") {
+    const cy = cylinderOf(face);
+    if (cy) info.round = { r: cy.r, hole: cy.s < 0 };
+  }
   return info;
 }
 

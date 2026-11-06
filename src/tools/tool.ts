@@ -33,6 +33,8 @@ export interface AppContext {
   readonly ui: UI;
   readonly result: RegenResult | null;
   readonly selection: Sel[];
+  /** Thread the selected round face. */
+  startThread(): void;
   setSelection(sel: Sel[]): void;
   setHover(h: Sel | null): void;
   /** null returns to the selection tool. */

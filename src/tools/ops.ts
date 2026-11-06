@@ -1,6 +1,8 @@
 // Solid, transform and construction operations. Each is a FeatureOp:
 // pick slots + values + live preview; see featureOp.ts.
 
+import type { ThreadFeature } from "../doc/types";
+import { defaultPitch, threadLabel } from "../kernel/threads";
 import type { AxisFeature, AxisRef, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
 import { add, cross, dot, len, norm, niceStep, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
@@ -1531,6 +1533,57 @@ export class FillToPlaneOp extends FeatureOp<FillToPlaneFeature> {
 
   protected items(): PanelItem[] {
     return [];
+  }
+}
+
+// ------------------------------------------------------------------ thread
+
+/**
+ * Thread a round face: a shank drawn at the nominal size gets an outside
+ * thread, a hole drawn at the tap-drill size an inside one. The pitch starts
+ * at the ISO coarse pitch for the size; the panel shows which size that makes.
+ */
+export class ThreadOp extends FeatureOp<ThreadFeature> {
+  readonly id = "thread";
+
+  private round: { r: number; hole: boolean };
+
+  constructor(app: AppContext, face: FaceRef, round: { r: number; hole: boolean }, existing?: ThreadFeature) {
+    super(app, { ...app.store.newIdentity("thread"), type: "thread", face, pitch: defaultPitch(round.r * 2, round.hole), round }, existing);
+    this.round = existing?.round ?? round;
+  }
+
+  enter(): void {
+    super.enter();
+    this.update();
+  }
+
+  private label(): string {
+    return `${threadLabel(this.round.r * 2, this.round.hole, this.feature.pitch)} ${this.round.hole ? "inside" : "outside"} thread${this.feature.left ? ", left-hand" : ""}`;
+  }
+
+  protected hint(): string {
+    return this.round.hole
+      ? `${this.label()}. Holes are threaded from the tap-drill size (nominal − pitch).`
+      : `${this.label()}. Change the pitch for a fine thread.`;
+  }
+
+  protected items(): PanelItem[] {
+    return [
+      this.num("Pitch", "pitch", "length", { min: 0.05, onInput: (v) => this.setPitch(v) }),
+      { type: "toggle", label: "Left-hand", value: !!this.feature.left, onChange: (v) => ((this.feature.left = v || undefined), this.render(), this.update()) },
+    ];
+  }
+
+  protected ready(): boolean {
+    return this.feature.pitch > 0;
+  }
+
+  private setPitch(v: number): void {
+    if (!(v > 0)) return;
+    this.feature.pitch = v;
+    this.app.ui.updatePanelValues([v]);
+    this.update();
   }
 }
 

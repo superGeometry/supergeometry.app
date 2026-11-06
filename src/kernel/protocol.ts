@@ -11,6 +11,8 @@ export interface FaceInfo {
   type: string;
   /** Set for flat faces: the plane a sketch on this face would use. */
   plane?: PlaneDef;
+  /** Set for round (cylindrical) faces: the radius, and whether it's a hole (material outside it). */
+  round?: { r: number; hole: boolean };
 }
 
 export interface EdgeInfo {

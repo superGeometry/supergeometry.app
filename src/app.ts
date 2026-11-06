@@ -10,8 +10,8 @@ import { settings } from "./settings";
 import { PinLayer } from "./tools/annotate";
 import { MeasureTool } from "./tools/measure";
 import { ItemsPanel } from "./ui/items";
-import { AxisOp, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
-import { toWorld, xDirFor } from "./geom";
+import { AxisOp, EdgeOp, ExtrudeOp, FillToPlaneOp, ThreadOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
+import { add, dist, scale, toWorld, xDirFor } from "./geom";
 import { entityPolylines } from "./sketch/curves";
 import { FreeformTool } from "./tools/freeform";
 import { sectionPlane, SectionTool, type SectionState } from "./tools/section";
@@ -178,6 +178,34 @@ export class App implements AppContext {
   private refreshTools(): void {
     if (this.tool === this.selectTool) this.selectTool.refresh();
     else this.ui.setBottom(this.bottomTools());
+  }
+
+  /** Thread the selected round face (a shank or a hole). */
+  startThread(): void {
+    let s = this.selection[0];
+    // A round edge (a hole's rim): the round face of the same radius it bounds.
+    if (s?.kind === "edge") {
+      const body = this.view.body(s.body);
+      const e = body?.edges[s.edge];
+      if (body && e?.type === "CIRCLE") {
+        const c = scale(add(e.start, e.mid), 0.5);
+        const r = dist(e.start, e.mid) / 2;
+        let best = -1;
+        let bestD = Infinity;
+        body.faces.forEach((f, i) => {
+          if (!f.round || Math.abs(f.round.r - r) > r * 1e-4) return;
+          const d = dist(f.center, c);
+          if (d < bestD) (bestD = d), (best = i);
+        });
+        if (best >= 0) s = { kind: "face", body: s.body, face: best };
+      }
+    }
+    if (s?.kind !== "face") return void this.ui.toast("Threads go on round faces: tap a shank or a hole");
+    const info = this.view.body(s.body)?.faces[s.face];
+    const ref = faceRefOf(this, s);
+    if (!info?.round || !ref) return void this.ui.toast("Threads go on round faces: tap a shank or a hole");
+    this.setSelection([s]);
+    this.setTool(new ThreadOp(this, ref, info.round));
   }
 
   setSection(s: SectionState | null): void {
@@ -450,6 +478,8 @@ export class App implements AppContext {
         return this.setTool(new SplitOp(this, f.body, f as SplitFeature));
       case "fillToPlane":
         return this.setTool(new FillToPlaneOp(this, f.body, f as FillToPlaneFeature));
+      case "thread":
+        return this.setTool(new ThreadOp(this, f.face, f.round ?? { r: 5, hole: false }, f));
       case "plane":
         return this.setTool(new PlaneOp(this, f.plane, f.face, f as PlaneFeature));
       case "transform": {
@@ -600,6 +630,7 @@ export class App implements AppContext {
           { id: "split", label: "Split Body", icon: "split", run: wait("Split Body", ["body", "face"], () => this.setTool(new SplitOp(this, bodiesOf(this.selection)[0]))) },
           { id: "fillToPlane", label: "Fill to Plane", icon: "fill", run: wait("Fill to Plane (tap the surface)", ["body", "face", "edge"], () => this.setTool(new FillToPlaneOp(this, bodiesOf(this.selection)[0]))) },
           { id: "revolve", label: "Revolve", icon: "revolve", run: wait("Revolve", ["profile", "face"], () => src() && this.setTool(new RevolveOp(this, src()!))) },
+          { id: "thread", label: "Thread", icon: "thread", run: wait("Thread (tap a round face or its rim)", ["face", "edge"], () => this.startThread()) },
           { id: "sweep", label: "Sweep", icon: "sweep", run: wait("Sweep", ["profile", "face"], () => src() && this.setTool(new SweepOp(this, src()!))) },
           {
             id: "repair",

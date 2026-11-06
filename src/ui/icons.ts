@@ -36,6 +36,8 @@ export const icons = {
   pointer: svg('<path d="M6 3l12 9-5.5 1L15 19l-2.5 1.2-2.6-5.9L6 18z"/>'),
   extrude: svg('<path d="M4 16l8 4 8-4-8-4z"/><path d="M12 12V3"/><path d="M9 6l3-3 3 3"/>'),
   revolve: svg('<path d="M4 4v16" stroke-dasharray="2 2"/><path d="M8 6h6v12H8"/><path d="M14 9c4 0 6 1.5 6 3s-2 3-6 3"/>'),
+  // A threaded rod seen side on: slanted crests between two edges.
+  thread: svg('<path d="M8 3v18M16 3v18"/><path d="M8 6l8-2M8 10l8-2M8 14l8-2M8 18l8-2"/>'),
   sweep: svg('<circle cx="5" cy="17" r="2.5"/><path d="M7 15c4-8 8-10 13-9"/>'),
   loft: svg('<rect x="3" y="16" width="10" height="5"/><circle cx="16" cy="6" r="3.5"/><path d="M3 16l9.5-11M13 16l6-8"/>'),
   shell: svg('<path d="M4 8v12h16V8"/><path d="M7 8v9h10V8"/>'),

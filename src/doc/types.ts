@@ -333,6 +333,22 @@ export interface FillToPlaneFeature extends FeatureBase {
 }
 
 /**
+ * A screw thread (ISO 60° V) cut into a round face: into a shank drawn at the
+ * nominal diameter (outside thread) or a hole drawn at the tap-drill size
+ * (inside thread), over the face's whole length.
+ */
+export interface ThreadFeature extends FeatureBase {
+  type: "thread";
+  face: FaceRef;
+  /** mm per turn. */
+  pitch: number;
+  /** Left-handed (turns the other way). */
+  left?: boolean;
+  /** The face as it was picked (for the panel when editing: the face itself is threaded by then). */
+  round?: { r: number; hole: boolean };
+}
+
+/**
  * Repair bodies: gaps sewn, missing flat faces filled, hair-thin faces
  * removed, faces fixed and merged, inside-out solids turned — the shape
  * itself stays. Turns loose faces (an imported mesh or STEP surface) into a solid.
@@ -344,6 +360,7 @@ export interface RepairFeature extends FeatureBase {
 
 export type Feature =
   | FillToPlaneFeature
+  | ThreadFeature
   | RepairFeature
   | ScaleFaceFeature
   | ReplaceFaceFeature
