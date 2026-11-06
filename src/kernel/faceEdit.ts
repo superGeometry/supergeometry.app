@@ -9,6 +9,7 @@
 import { assembleWire, basicFaceExtrusion, getOC, loft, makeBSplineApproximation, makeCylinder, makeLine, makePolygon, makeSphere, measureArea, measureVolume, cast, Vector, type Face, type Shape3D } from "replicad";
 import type { PlaneDef, Vec3 } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, xDirFor } from "../geom";
+import { subShapes } from "./health";
 
 interface Cyl {
   c: Vec3;
@@ -130,7 +131,8 @@ export function extendedRegion(body: Shape3D, F: Face, q: Vec3, L: number): Shap
   const big = () => halfSpace({ origin: sub(c, [0, 0, 1.5 * L]), xDir: [1, 0, 0], normal: [0, 0, 1] }, 3 * L);
   const keep: Shape3D[] = [];
   const remove: Shape3D[] = [];
-  for (const g of neighbours(body, F)) {
+  const nb = neighbours(body, F);
+  for (const g of nb) {
     if (g.geomType === "PLANE") {
       const { origin: p, normal: n } = planeOf(g);
       // Keep the side of g's plane that contains q.
@@ -142,8 +144,18 @@ export function extendedRegion(body: Shape3D, F: Face, q: Vec3, L: number): Shap
       const rel = sub(q, cy.c);
       const radial = len(sub(rel, scale(cy.a, dot(rel, cy.a))));
       (radial < cy.r ? keep : remove).push(infiniteCylinder(cy, cy.r, L));
+    } else {
+      // Any other surface (a twisted corner patch where a chamfer meets a
+      // fillet, a lofted side) has no one way to carry on: the flat faces
+      // round it do, and bound the region there. Left open, it would run off
+      // out of the part.
+      for (const h of neighbours(body, g)) {
+        if (h.geomType !== "PLANE" || h.isSame(F) || nb.some((x) => x.isSame(h))) continue;
+        const { origin: hp, normal: hn } = planeOf(h);
+        const hs = dot(sub(q, hp), hn) < 0 ? scale(hn, -1) : hn;
+        keep.push(halfSpace({ origin: hp, normal: hs, xDir: xDirFor(hs) }, L));
+      }
     }
-    // Other surface types are left unbounded (rare next to a face being edited).
   }
   let E = keep.length ? keep[0] : big();
   for (const k of keep.slice(1)) E = E.intersect(k);
@@ -528,7 +540,27 @@ export function offsetFace(body: Shape3D, F: Face, d: number): Shape3D {
   const ring = infiniteCylinder(cy, Math.max(cy.r, r2), L).cut(infiniteCylinder(cy, Math.min(cy.r, r2), L));
   const slab = E.intersect(ring);
   if (isEmpty(slab)) throw new Error("Nothing to offset");
-  return sanity(body, d > 0 ? body.fuse(slab) : body.cut(slab));
+  if (d < 0) return sanity(body, body.cut(slab));
+  let out = body.fuse(slab);
+  // Past where the round face ended there may be no material under it: the
+  // ring added there would leave a hollow groove (its inside, on the old
+  // surface, open to the air). Fill what's under those pieces too.
+  const tol = sizeOf(body) * 1e-6;
+  const onOld = (g: Face) => g.geomType === "CYLINDRE" && samples(g).every((p) => Math.abs(radial(p) - cy.r) < tol * 10);
+  const radial = (p: Vec3) => {
+    const rel = sub(p, cy.c);
+    return len(sub(rel, scale(cy.a, dot(rel, cy.a))));
+  };
+  const left = out.faces.filter(onOld);
+  if (left.length) {
+    const under = E.intersect(infiniteCylinder(cy, cy.r, L)).cut(out);
+    const pieces = isEmpty(under) ? [] : subShapes(under, "SOLID").map((x: any) => cast(x) as Shape3D);
+    for (const piece of pieces) {
+      const touches = piece.faces.some((g) => onOld(g) && left.some((h) => dist(tup(g.center), tup(h.center)) < tol * 100 && Math.abs(measureArea(g) - measureArea(h)) < measureArea(h) * 1e-3 + tol));
+      if (touches) out = out.fuse(piece);
+    }
+  }
+  return sanity(body, out);
 }
 
 /** Remove a face; its neighbours extend to close the gap (fillets, chamfers, holes). */
