@@ -15,7 +15,7 @@ import { FreeformTool } from "./freeform";
 import { isClosed } from "../freeform/cage";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 import { connectEdges } from "../doc/freeformConnect";
-import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, lastExtrude, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
+import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, FillToPlaneOp, lastExtrude, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
 
@@ -482,6 +482,8 @@ export class SelectTool implements Tool {
     const app = this.app;
     const bodies = bodiesOf(app.selection);
     const multi = bodies.length >= 2;
+    // An open surface (it has open edges: a sheet, not a solid).
+    const openSurface = bodies.length === 1 && !!app.view.bodyList.find((b) => b.id === bodies[0])?.openEdges?.length;
     const boolean = (op: "union" | "subtract" | "intersect") => () => {
       const f = { ...app.store.newIdentity("boolean", cap(op)), type: "boolean" as const, op, target: bodies[0], tools: bodies.slice(1) };
       // Tried first: one that can't be done (e.g. Union of bodies that don't touch) says why and isn't added.
@@ -519,6 +521,8 @@ export class SelectTool implements Tool {
       { id: "subtract", label: "Subtract", icon: "subtract", disabled: !multi, why: "Select 2+ bodies (first is kept)", run: boolean("subtract") },
       { id: "intersect", label: "Intersect", icon: "intersect", disabled: !multi, why: "Select 2+ bodies", run: boolean("intersect") },
       { id: "split", label: "Split Body", icon: "split", run: () => app.setTool(new SplitOp(app, bodies[0])) },
+      // An open surface (a freeform sheet): filled down to a plane to make it a solid.
+      ...(openSurface ? [{ id: "fillToPlane", label: "Fill to Plane", icon: "fill" as const, run: () => app.setTool(new FillToPlaneOp(app, bodies[0])) }] : []),
       { id: "shell", label: "Shell", icon: "shell", run: () => app.setTool(new ShellOp(app, bodies[0], [])) },
       {
         id: "color",

@@ -14,6 +14,7 @@ import { isCoarse } from "../device";
 import { DragTyping } from "./dragTyping";
 import { Gimbal, GIMBAL_AXES, type GimbalPart } from "./gimbal";
 import { axisDrag } from "./handles";
+import { FillToPlaneOp } from "./ops";
 import type { AppContext, Sel, Tool } from "./tool";
 
 type Pick = { kind: "vert"; i: number } | { kind: "edge"; e: [number, number] } | { kind: "face"; f: number };
@@ -189,6 +190,17 @@ export class FreeformTool implements Tool {
       items.push(
         { type: "number", label: "Thickness", value: this.thickness, kind: "length", min: 0, onInput: (v) => ((this.thickness = Math.max(0, v)), this.panelHint()) },
         { type: "choice", options: [{ id: "up", label: "Up" }, { id: "down", label: "Down" }, { id: "both", label: "Symmetric" }], value: this.thickSide, onChange: (v) => ((this.thickSide = v as typeof this.thickSide), this.panel()) },
+        // Or solid down to a plane (no thickness): finish the surface, then pick the plane.
+        {
+          type: "button",
+          label: "Fill to a plane…",
+          icon: "fill",
+          onClick: () => {
+            this.thickness = 0;
+            const id = this.done();
+            if (id) this.app.setTool(new FillToPlaneOp(this.app, id));
+          },
+        },
       );
     }
     this.uniform = 1;

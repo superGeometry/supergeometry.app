@@ -1,29 +1,7 @@
 // Solid, transform and construction operations. Each is a FeatureOp:
 // pick slots + values + live preview; see featureOp.ts.
 
-import type {
-  AxisFeature,
-  AxisRef,
-  EdgeFeature,
-  EdgeRef,
-  ExtrudeFeature,
-  ExtrudeSource,
-  FaceRef,
-  ImageFeature,
-  LoftFeature,
-  MoveFaceFeature,
-  PathRef,
-  ReplaceFaceFeature,
-  ScaleFaceFeature,
-  PlaneDef,
-  PlaneFeature,
-  RevolveFeature,
-  ShellFeature,
-  SplitFeature,
-  SweepFeature,
-  TransformFeature,
-  Vec3,
-} from "../doc/types";
+import type { AxisFeature, AxisRef, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
 import { add, cross, dot, len, norm, niceStep, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { evaluate, fmtLen } from "../units";
@@ -1492,6 +1470,31 @@ export class SplitOp extends FeatureOp<SplitFeature> {
 
   protected hint(): string {
     return "The body is cut in two along the plane.";
+  }
+
+  protected items(): PanelItem[] {
+    return [];
+  }
+}
+
+// ------------------------------------------------------------ fill to plane
+
+/**
+ * Fill to Plane: an open surface (a freeform sheet) becomes a solid by
+ * filling down to a plane — an origin plane, a construction plane or a flat face.
+ */
+export class FillToPlaneOp extends FeatureOp<FillToPlaneFeature> {
+  readonly id = "fillToPlane";
+  private plane: PlaneDef | null = null;
+
+  constructor(app: AppContext, body: string, existing?: FillToPlaneFeature, plane?: PlaneDef) {
+    super(app, { ...app.store.newIdentity("fillToPlane"), type: "fillToPlane", body, plane: plane ?? { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] } }, existing);
+    this.plane = existing?.plane ?? plane ?? null;
+    this.slots = [planeSlot(app, "Fill to", () => this.plane, (p) => ((this.plane = p), (this.feature.plane = p)))];
+  }
+
+  protected hint(): string {
+    return this.plane ? "The gap from the surface to the plane is filled: sides straight to it, the bottom its outline on the plane." : "Pick the plane to fill to (an origin plane, a construction plane or a flat face).";
   }
 
   protected items(): PanelItem[] {

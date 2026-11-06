@@ -322,6 +322,17 @@ export interface ReplaceFaceFeature extends FeatureBase {
 }
 
 /**
+ * Fill to Plane: an open surface (a freeform sheet) becomes a solid by filling
+ * the gap down to a plane — sides straight down to it (along its normal), the
+ * bottom the surface's outline projected flat onto it.
+ */
+export interface FillToPlaneFeature extends FeatureBase {
+  type: "fillToPlane";
+  body: string;
+  plane: PlaneDef;
+}
+
+/**
  * Repair bodies: gaps sewn, missing flat faces filled, hair-thin faces
  * removed, faces fixed and merged, inside-out solids turned — the shape
  * itself stays. Turns loose faces (an imported mesh or STEP surface) into a solid.
@@ -332,6 +343,7 @@ export interface RepairFeature extends FeatureBase {
 }
 
 export type Feature =
+  | FillToPlaneFeature
   | RepairFeature
   | ScaleFaceFeature
   | ReplaceFaceFeature

@@ -471,6 +471,13 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       return;
     }
 
+    case "fillToPlane": {
+      const sheet = need(bodies, f.body);
+      bodies.set(f.body, fillToPlane(sheet, f.plane));
+      ctx.freeforms.delete(f.body);
+      return;
+    }
+
     case "repair": {
       for (const id of f.bodies) {
         const body = need(bodies, id);
@@ -1525,4 +1532,117 @@ function hash53(str: string, seed: number): string {
   h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/**
+ * An open surface filled down to a plane: the surface swept straight towards
+ * the plane (along its normal) and past it, then everything beyond the plane
+ * cut away — sides straight down, the bottom its outline projected onto the
+ * plane. Parts of the surface beyond the plane are left out.
+ */
+function fillToPlane(sheet: Shape3D, plane: PlaneDef): Shape3D {
+  const oc = getOC();
+  if (subShapes(sheet, "SOLID").length) throw new Error("Fill to Plane fills an open surface — this body is already a solid");
+  if (!sheet.faces.length) throw new Error("This body has no surface to fill from");
+  const n = norm(plane.normal);
+  // Which side the surface is on (most of it): the fill goes from there to the plane.
+  const side = Math.sign(dot(sub(sheet.boundingBox.center as Vec3, plane.origin), n));
+  if (!side) throw new Error("The surface lies across the plane — move the plane to one side of it");
+  // Seen from the plane, the surface must have some area: a plane side-on to it
+  // (facing its edge) has nothing to fill.
+  let facing = 0;
+  let total = 0;
+  // And which way it faces the plane, all over: both ways means it folds back
+  // over itself as seen from the plane (the blocks under it overlap).
+  let up = 0;
+  let down = 0;
+  for (const f of sheet.faces) {
+    const a = measureArea(f);
+    for (const [u, w] of [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]) {
+      let fn: Vec3;
+      try {
+        fn = norm(f.normalAt(f.pointOnSurface(u, w)).toTuple() as Vec3);
+      } catch {
+        continue;
+      }
+      const c = dot(fn, n);
+      facing += (Math.abs(c) * a) / 5;
+      total += a / 5;
+      if (c > 0.02) up += a;
+      else if (c < -0.02) down += a;
+    }
+  }
+  const folds = Math.min(up, down) > Math.max(up, down) * 1e-3;
+  if (facing < total * 0.3) throw new Error("The plane is side-on to the surface (facing its edge) — pick a plane the surface lies over, like the ground under it");
+  const bb = sheet.boundingBox;
+  const reach = (Math.hypot(bb.width, bb.height, bb.depth) + Math.abs(dot(sub(bb.center as Vec3, plane.origin), n))) * 2 + 1;
+  const v = new oc.gp_Vec(-side * n[0] * reach, -side * n[1] * reach, -side * n[2] * reach);
+  const mk = new oc.BRepPrimAPI_MakePrism(sheet.wrapped, v, true, true);
+  let swept: Shape3D;
+  try {
+    swept = cast(mk.Shape()) as Shape3D;
+  } finally {
+    mk.delete();
+    v.delete();
+  }
+  // The surface's side of the plane only — one cut for the whole sweep.
+  const keep = halfSpace(side > 0 ? plane : { ...plane, normal: scale(n, -1) as Vec3 }, swept);
+  const cut = swept.intersect(keep);
+  if (isEmpty(cut)) throw new Error("The surface doesn't reach over the plane (seen along the plane's normal, there's nothing to fill)");
+  // One block per surface patch, side by side: the walls between them (each
+  // shared by two blocks) go, and the outside is sewn into one solid.
+  const blocks = subShapes(cut, "SOLID").map((x) => cast(x) as Shape3D);
+  const seen: { f: Face; n: number }[] = [];
+  for (const b of blocks)
+    for (const f of b.faces) {
+      const had = seen.find((x) => x.f.isSame(f));
+      if (had) had.n++;
+      else seen.push({ f, n: 1 });
+    }
+  const outside = seen.filter((x) => x.n === 1).map((x) => x.f.wrapped);
+  /** The blocks joined by unions (slow, but right where they overlap). */
+  const joinAll = (): Shape3D => {
+    try {
+      // Each patch's sweep cut on its own (cutting them all at once mixes up the overlaps).
+      const own = subShapes(swept, "SOLID").map((x) => (cast(x) as Shape3D).intersect(keep)).filter((x) => !isEmpty(x));
+      const j = own.reduce((a, b) => a.fuse(b));
+      if (isEmpty(j)) throw new Error("empty");
+      return j;
+    } catch {
+      throw new Error(facing < total * 0.6 ? "The plane is too side-on to the surface — pick a plane the surface lies over, like the ground under it" : "The surface folds back over itself as seen from the plane too much to fill — pick a plane it lies flatter over");
+    }
+  };
+  const size = Math.hypot(bb.width, bb.height, bb.depth);
+  const sw = new oc.BRepBuilderAPI_Sewing(size * 1e-7, true, true, true, false);
+  let solid: Shape3D;
+  try {
+    for (const f of outside) sw.Add(f);
+    sw.Perform(new oc.Message_ProgressRange());
+    const shells = subShapes(cast(sw.SewedShape()) as Shape3D, "SHELL");
+    if (shells.length !== 1) solid = joinAll();
+    else {
+      const fix = new oc.ShapeFix_Solid();
+      const made = fix.SolidFromShell(shells[0]);
+      fix.delete();
+      oc.BRepLib.OrientClosedSolid(oc.TopoDS.Solid(made));
+      solid = cast(made) as Shape3D;
+    }
+  } finally {
+    sw.delete();
+  }
+  // The surface folds back over itself as seen from the plane: the blocks
+  // overlap instead of just touching — joined the slow, sure way instead.
+  if (folds) solid = joinAll();
+  // The bottom (one flat piece per patch) and flat sides become whole faces.
+  try {
+    solid = unify(solid);
+  } catch {
+    // keep it as sewn
+  }
+  const v0 = Math.abs(measureVolume(solid));
+  if (!(v0 > reach ** 3 * 1e-12)) throw new Error("There's nothing between the surface and the plane to fill");
+  const r = repairShape(solid);
+  if (!r) throw new Error("The fill didn't come out as a clean solid (the surface folds back over itself as seen from the plane?)");
+  if (r.fixes.length) editNotes.push(`Repaired automatically: ${r.fixes.join(", ")}.`);
+  return r.shape;
 }

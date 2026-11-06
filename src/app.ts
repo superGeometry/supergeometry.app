@@ -1,6 +1,6 @@
 import { CurvePointPlaneOp, EdgeAnglePlaneOp, FacePointPlaneOp, ThreePointPlaneOp } from "./tools/planeOps";
 import { DocStore, parseProject } from "./doc/store";
-import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
+import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
 import { createVariable, editVariables, insertFile, insertImage } from "./io/insert";
 import { freeformBodies } from "./doc/freeformCopies";
@@ -10,7 +10,7 @@ import { settings } from "./settings";
 import { PinLayer } from "./tools/annotate";
 import { MeasureTool } from "./tools/measure";
 import { ItemsPanel } from "./ui/items";
-import { AxisOp, EdgeOp, ExtrudeOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
+import { AxisOp, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
 import { toWorld, xDirFor } from "./geom";
 import { entityPolylines } from "./sketch/curves";
 import { FreeformTool } from "./tools/freeform";
@@ -448,6 +448,8 @@ export class App implements AppContext {
         return this.setTool(new ShellOp(this, f.body, f.faces, f as ShellFeature));
       case "split":
         return this.setTool(new SplitOp(this, f.body, f as SplitFeature));
+      case "fillToPlane":
+        return this.setTool(new FillToPlaneOp(this, f.body, f as FillToPlaneFeature));
       case "plane":
         return this.setTool(new PlaneOp(this, f.plane, f.face, f as PlaneFeature));
       case "transform": {
@@ -596,6 +598,7 @@ export class App implements AppContext {
           { id: "subtract", label: "Subtract", icon: "subtract", run: wait("Subtract (double-tap bodies)", ["body"], () => this.selectTool.refresh()) },
           { id: "intersect", label: "Intersect", icon: "intersect", run: wait("Intersect (double-tap bodies)", ["body"], () => this.selectTool.refresh()) },
           { id: "split", label: "Split Body", icon: "split", run: wait("Split Body", ["body", "face"], () => this.setTool(new SplitOp(this, bodiesOf(this.selection)[0]))) },
+          { id: "fillToPlane", label: "Fill to Plane", icon: "fill", run: wait("Fill to Plane (tap the surface)", ["body", "face", "edge"], () => this.setTool(new FillToPlaneOp(this, bodiesOf(this.selection)[0]))) },
           { id: "revolve", label: "Revolve", icon: "revolve", run: wait("Revolve", ["profile", "face"], () => src() && this.setTool(new RevolveOp(this, src()!))) },
           { id: "sweep", label: "Sweep", icon: "sweep", run: wait("Sweep", ["profile", "face"], () => src() && this.setTool(new SweepOp(this, src()!))) },
           {
