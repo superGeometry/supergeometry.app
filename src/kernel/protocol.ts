@@ -62,6 +62,8 @@ export interface RegenResult {
   planes: ConstructionInfo[];
   axes: ConstructionInfo[];
   errors: FeatureError[];
+  /** Steps that worked but had to give something up (a fillet that no longer fits…). */
+  notes?: FeatureError[];
   ms: number;
 }
 

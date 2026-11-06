@@ -48,7 +48,7 @@ import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "
 import { projectPolyline } from "../sketch/edit";
 import { cageToShape } from "./freeform";
 import { deleteFaces, subdivide } from "../freeform/cage";
-import { deleteFace, offsetFace, planeOf, replaceFacePlane, unify } from "./faceEdit";
+import { deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, unify } from "./faceEdit";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import type { BodyMesh, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
@@ -73,6 +73,8 @@ interface CacheEntry {
   key: string;
   ctx: Ctx;
   error?: string;
+  /** Worked, but had to give something up (shown on the step in History). */
+  note?: string;
 }
 
 const meshCache = new WeakMap<Shape3D, BodyMesh>();
@@ -93,7 +95,7 @@ export async function exportBodies(features: Feature[], format: ExportFormat, on
 
 export async function regenerate(features: Feature[]): Promise<RegenResult> {
   const t0 = performance.now();
-  const { ctx, errors, numbers } = await run(features);
+  const { ctx, errors, numbers, notes } = await run(features);
   const names = bodyNames(features, [...ctx.bodies.keys()], numbers);
   const meshes: BodyMesh[] = [];
   for (const [id, shape] of ctx.bodies) {
@@ -109,7 +111,7 @@ export async function regenerate(features: Feature[]): Promise<RegenResult> {
     sketchPlanes[id] = s.plane;
     if (s.boundary.length) sketchBoundaries[id] = s.boundary;
   }
-  return { bodies: meshes, errors, sketchPlanes, sketchBoundaries, planes: [...ctx.planes.values()], axes: [...ctx.axes.values()], ms: performance.now() - t0 };
+  return { bodies: meshes, errors, notes, sketchPlanes, sketchBoundaries, planes: [...ctx.planes.values()], axes: [...ctx.axes.values()], ms: performance.now() - t0 };
 }
 
 /**
@@ -118,6 +120,7 @@ export async function regenerate(features: Feature[]): Promise<RegenResult> {
  */
 async function run(features: Feature[]) {
   const errors: FeatureError[] = [];
+  const notes: FeatureError[] = [];
   let ctx: Ctx = { bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map() };
   let key = "";
   const next: CacheEntry[] = [];
@@ -136,7 +139,9 @@ async function run(features: Feature[]) {
       entry = { key, ctx: out };
       if (!f.suppressed) {
         try {
+          editNotes.length = 0;
           await apply(f, out);
+          if (editNotes.length) entry.note = [...new Set(editNotes)].join(" ");
           // Anything but a move/scale changing a freeform body makes it an ordinary body.
           if (f.type !== "freeform" && f.type !== "transform") for (const id of [...out.freeforms.keys()]) if (out.bodies.get(id) !== ctx.bodies.get(id)) out.freeforms.delete(id);
         } catch (err) {
@@ -146,6 +151,7 @@ async function run(features: Feature[]) {
       }
     }
     if (entry.error) errors.push({ featureId: f.id, message: entry.error });
+    if (entry.note && !entry.error) notes.push({ featureId: f.id, message: entry.note });
     ctx = entry.ctx;
     next.push(entry);
   }
@@ -154,7 +160,7 @@ async function run(features: Feature[]) {
   // deleted later keeps its number used, so the others don't change names).
   const numbers = new Map<string, number>();
   for (const e of next) for (const id of e.ctx.bodies.keys()) if (!numbers.has(id)) numbers.set(id, numbers.size + 1);
-  return { ctx, errors, numbers };
+  return { ctx, errors, numbers, notes };
 }
 
 async function apply(f: Feature, ctx: Ctx): Promise<void> {
@@ -183,8 +189,9 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           bodies.set(f.target, out);
           return;
         } catch (err) {
-          // Faces whose neighbours don't enclose them still get a straight push.
-          if (face.geomType !== "PLANE") throw err;
+          // Faces whose neighbours don't enclose them still get a straight push —
+          // but not one with a fillet on it (the old fillet would stay standing).
+          if (face.geomType !== "PLANE" || hasBlends(body, face)) throw err;
         }
       }
       const parts = sourceFaces(f.source, ctx).map(({ face, normal }) => basicFaceExtrusion(face, new Vector(normal).multiply(f.distance)));

@@ -1000,6 +1000,16 @@ export class SketchTool implements Tool {
       this.arcBend = { from: uv, m0: this.arcM, x: p.x, y: p.y, moved: false };
       return true;
     }
+    // Phones/tablets/pens, a line under way: the next point follows the finger
+    // while it's down (with its length showing) and is placed where it's lifted.
+    if (this.kind === "line" && this.pts.length && p.type !== "mouse") {
+      const s = this.snap(p);
+      if (!s) return false;
+      this.cursor = s;
+      this.pressPlace = true;
+      this.refreshPreview(p);
+      return true;
+    }
     if (!["line", "rect", "circle", "polygon", "ellipse", "arc"].includes(this.kind) || this.pts.length) return false;
     const s = this.snap(p);
     if (!s) return false;
@@ -1033,6 +1043,19 @@ export class SketchTool implements Tool {
   private _typing: DragTyping | null = null;
   private lockIndex = 0;
   private ignoreUp = false;
+  /** A finger is down placing a line's next point (placed when it lifts). */
+  private pressPlace = false;
+
+  /** A second finger came down to pinch: whatever was being placed isn't. */
+  breakOff(): void {
+    // The first point was being dragged out: it isn't placed either.
+    if (this.dragging && !this.pressPlace && this.pts.length === 1) this.pts = [];
+    this.pressPlace = false;
+    this.dragging = false;
+    this.typing.reset();
+    this.app.ui.setLabel(0, 0, null);
+    this.refreshPreview();
+  }
   /** A value was typed for the shape being drawn (Enter then advances/places it). */
   private typedThisShape = false;
 
@@ -1123,6 +1146,13 @@ export class SketchTool implements Tool {
     this.lockIndex = 0;
     if (this.ignoreUp) {
       this.ignoreUp = false;
+      return;
+    }
+    // The finger lifted: the line's next point goes where it was let go
+    // (the same spot twice in a row ends the chain, like a double-tap).
+    if (this.pressPlace) {
+      this.pressPlace = false;
+      if (this.cursor) this.addPoint(this.cursor.uv, 1);
       return;
     }
     if (!this.pts.length || !this.cursor) return;

@@ -114,18 +114,45 @@ export class Handle {
 }
 
 /** Screen-space drag along a world axis → signed world distance. */
+/**
+ * How far (world units, signed along `dir`) the pointer has dragged along the
+ * line through `origin` in direction `dir`: the point of that line under the
+ * finger, now minus at the start. Exact at any zoom and from any side — the
+ * arrow always follows the finger: drag outward, it goes outward.
+ */
 export function axisDrag(view: Viewport, origin: Vec3, dir: Vec3, from: ToolPointer, to: ToolPointer): number {
+  const dl = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+  const d: Vec3 = [dir[0] / dl, dir[1] / dl, dir[2] / dl];
+  const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  // Where along the line the pointer's ray passes closest.
+  const along = (p: ToolPointer): number | null => {
+    const r = view.pointerRay(p.x, p.y);
+    const w: Vec3 = [origin[0] - r.o[0], origin[1] - r.o[1], origin[2] - r.o[2]];
+    const b = dot3(d, r.d);
+    const den = 1 - b * b;
+    // Looking (almost) straight along the line: no good answer this way.
+    if (den < 0.03) return null;
+    return (b * dot3(r.d, w) - dot3(d, w)) / den;
+  };
+  const t0 = along(from);
+  const t1 = along(to);
+  if (t0 !== null && t1 !== null) return t1 - t0;
+  // Nearly end-on: by the screen direction of a long piece of the line (or,
+  // dead end-on, finger up = towards you).
+  const wpp = view.cam.worldPerPixel(view.height);
+  const L = wpp * 80;
   const o = new Vector3(...origin);
   const a = view.toScreen(o);
-  const b = view.toScreen(o.clone().addScaledVector(new Vector3(...dir), 1));
+  const b = view.toScreen(o.clone().addScaledVector(new Vector3(...d), L));
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   if (a && b) {
     const vx = b[0] - a[0];
     const vy = b[1] - a[1];
     const l2 = vx * vx + vy * vy;
-    // Looking almost straight down the axis: fall back to vertical drag.
-    if (l2 > 0.25) return (dx * vx + dy * vy) / l2;
+    if (l2 > 16) return ((dx * vx + dy * vy) / l2) * L;
   }
-  return -dy * view.cam.worldPerPixel(view.height);
+  const eye = view.pointerRay(view.width / 2, view.height / 2).d;
+  const towardYou = dot3(d, eye) < 0 ? 1 : -1;
+  return -dy * wpp * towardYou;
 }

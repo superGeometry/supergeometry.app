@@ -363,6 +363,7 @@ export class App implements AppContext {
     this.view.setStepHover(null);
     const warnings = new Map<string, string>();
     for (const b of this.openBodies(this.result)) warnings.set(b.id.split(":")[0], `${b.name}: not closed — ${b.openEdges.length} open edge(s)`);
+    for (const n of this.result?.notes ?? []) warnings.set(n.featureId, warnings.has(n.featureId) ? `${warnings.get(n.featureId)} ${n.message}` : n.message);
     this.ui.renderHistory(this.store.doc.features, this.result?.errors ?? [], this.tool.editingId ?? this.tool.activeSketch ?? null, {
       edit: (id) => this.editFeature(id),
       hover: (id) => this.view.setStepHover(id ? this.stepTargets(id) : null),

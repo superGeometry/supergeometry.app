@@ -161,10 +161,13 @@ export function replaceFacePlane(body: Shape3D, F: Face, to: PlaneDef): Shape3D 
   if (F.geomType !== "PLANE") throw new Error("Only flat faces can be moved or tilted");
   const blends = blendsOf(body, F);
   if (blends.length) {
+    // Never straight through a fillet: that leaves its old round face standing
+    // in the body (a tunnel or a wall where the fillet was).
     try {
       return aroundBlends(body, F, blends, to);
     } catch {
-      // Couldn't rebuild the fillets: fall back to editing straight through them.
+      // A fillet running along this face can't be gone through; one that only ends on it can.
+      if (blends.some((b) => b.sides[0] === null)) throw new Error("This face can't be moved cleanly around its fillet — try a smaller value, or remove the fillet first");
     }
   }
   // A face with inward corners moved straight along its normal: edge by edge
@@ -243,9 +246,25 @@ function aroundBlends(body: Shape3D, F: Face, blends: Blend[], to: PlaneDef): Sh
       return on(m, p1) && on(m, p2);
     });
     if (!edges.length) throw new Error("edge lost");
-    b = b.fillet(bl.r, (finder) => finder.inList(edges)) as Shape3D;
+    try {
+      b = b.fillet(bl.r, (finder) => finder.inList(edges)) as Shape3D;
+    } catch {
+      // It doesn't fit any more (the faces got too small for it): the edge stays sharp, and History says so.
+      editNotes.push(`The ${fmtR(bl.r)} fillet next to this face doesn't fit any more, so that edge is sharp now.`);
+    }
   }
   return sanity(body, b);
+}
+
+/** Things an edit had to give up on without failing (shown as a note on the step in History). */
+export const editNotes: string[] = [];
+const fmtR = (r: number) => `R${Math.round(r * 1000) / 1000} mm`;
+
+/** Does F have fillets on it (it's moved around them, never straight through)? */
+export function hasBlends(body: Shape3D, F: Face): boolean {
+  // Only fillets that run along F (F is one of the two faces they round off):
+  // one that just ends on F is fine to push straight past.
+  return F.geomType === "PLANE" && blendsOf(body, F).some((b) => b.sides[0] === null);
 }
 
 /** The face that passes `ok`, nearest a remembered centre (and area). */

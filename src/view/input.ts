@@ -19,6 +19,8 @@ export interface PointerHandler {
   down?(p: ToolPointer): boolean;
   drag?(p: ToolPointer): void;
   up?(p: ToolPointer): void;
+  /** The captured drag was broken off (a second finger came down to pinch): undo it, place nothing. */
+  breakOff?(): void;
   tap?(p: ToolPointer, count: number): void;
   hover?(p: ToolPointer | null): void;
   /** Right-click without dragging (e.g. end a line chain). */
@@ -112,7 +114,10 @@ export class InputRouter {
 
     if (type === "touch" && this.pointers.size === 2) {
       // Second finger: abandon whatever the first finger was doing and pinch.
-      if (this.mode === "captured") this.handler.up?.(this.tp(t));
+      if (this.mode === "captured") {
+        if (this.handler.breakOff) this.handler.breakOff();
+        else this.handler.up?.(this.tp(t));
+      }
       this.mode = "pinch";
       this.lastPinch = this.pinchState();
       return;

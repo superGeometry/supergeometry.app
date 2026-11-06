@@ -1025,6 +1025,13 @@ export class Viewport {
   }
 
   /** Intersection of the pointer ray with a plane, or null if parallel. */
+  /** The ray from the eye through a point of the canvas (origin, unit direction). */
+  pointerRay(x: number, y: number): { o: Vec3; d: Vec3 } {
+    this.setRay(x, y);
+    const r = this.raycaster.ray;
+    return { o: r.origin.toArray() as Vec3, d: r.direction.clone().normalize().toArray() as Vec3 };
+  }
+
   rayToPlane(x: number, y: number, plane: PlaneDef): Vec3 | null {
     this.setRay(x, y);
     const n = new Vector3(...plane.normal);
