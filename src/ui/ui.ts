@@ -313,7 +313,11 @@ export class UI {
     // Colour choices show as a grid of circles.
     this.flyout.classList.toggle("swatch-grid", !!item.children?.length && item.children.every((c) => c.swatch));
     this.flyout.hidden = false;
-    const narrow = window.innerWidth <= 720;
+    // A strip of tools along the bottom (phones, main tools): the options open
+    // above it. A column of tools (the sketch tools, also on phones): beside it.
+    const col = anchor.closest?.("#toolbar, #bottom-left")?.getBoundingClientRect();
+    const strip = !!col && col.width > col.height;
+    const narrow = window.innerWidth <= 720 && (strip || !col);
     if (narrow) {
       // Above the bottom strip and the buttons stacked over it (undo, section…).
       const stack = [this.bottomLeft, document.getElementById("undo-dock")!].filter((e) => e.childElementCount && getComputedStyle(e).display !== "none").map((e) => e.getBoundingClientRect().top);
@@ -323,7 +327,6 @@ export class UI {
       this.flyout.style.bottom = `${window.innerHeight - above + 8}px`;
     } else {
       // Clear of the whole column (it can be wider than its buttons, with a scrollbar).
-      const col = anchor.closest?.("#toolbar, #bottom-left")?.getBoundingClientRect();
       this.flyout.style.left = `${Math.max(r.right, col?.right ?? 0) + 6}px`;
       this.flyout.style.bottom = "";
       // Short screens (phones sideways): within the tool column's height, never over the
