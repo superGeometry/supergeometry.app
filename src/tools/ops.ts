@@ -9,7 +9,8 @@ import type { ToolPointer } from "../view/input";
 import { FeatureOp } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
 import { axisSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
-import { faceIndexOf, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
+import { faceIndexOf, oppositeFace, sourceFrame, sourcesOf, targetOf, type AppContext, type Sel } from "./tool";
+import { arrangement, resolveRegion } from "../sketch/regions";
 import { DimWidget } from "./annotate";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
 import { DragTyping } from "./dragTyping";
@@ -157,6 +158,37 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     this.handle.setHot(on);
     this.app.view.canvas.style.cursor = on ? "grab" : "";
     if (!on) super.hover(p);
+  }
+
+  /**
+   * Another region of the same sketch tapped while the arrow is still at 0
+   * (on a phone a tapped region opens Extrude straight away): it joins the
+   * profile — tapped again, it leaves. So several regions go up together.
+   */
+  tap(p: ToolPointer): void {
+    const src = this.feature.source;
+    if (src.kind === "profile" && this.feature.distance === 0 && !this.existing) {
+      const hit = this.app.view.pick(p.x, p.y, { edgeTolPx: p.tol, profiles: true, planes: false, axes: false, vertices: false });
+      if (hit?.kind === "profile" && hit.sketch === src.sketch) {
+        // The regions it has now (the selection is cleared when Extrude opens).
+        const arr = arrangement(this.app.sketchCurves(src.sketch));
+        const have = src.regions.map((ref) => resolveRegion(arr, ref)).map((r) => (r ? arr.regions.indexOf(r) : -1)).filter((k) => k >= 0);
+        const sel = have.map((region) => ({ kind: "profile" as const, sketch: src.sketch, region }));
+        const i = sel.findIndex((s) => s.region === hit.region);
+        const next = i >= 0 ? sel.filter((_, j) => j !== i) : [...sel, { kind: "profile" as const, sketch: hit.sketch, region: hit.region }];
+        if (!next.length) return void this.app.setTool(null);
+        this.app.setSelection(next);
+        const made = sourcesOf(this.app, next)[0];
+        if (made) {
+          this.feature.source = made;
+          this.frame = sourceFrame(this.app, made);
+          this.app.ui.toast(`${next.length} region${next.length > 1 ? "s" : ""} selected`);
+          this.onDraftChanged();
+        }
+        return;
+      }
+    }
+    super.tap(p);
   }
 
   down(p: ToolPointer): boolean {
