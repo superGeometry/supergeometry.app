@@ -43,7 +43,8 @@ import type { PanelItem, ToolItem } from "../ui/ui";
 import { fmtLen, trim as trimNum } from "../units";
 import type { ToolPointer } from "../view/input";
 import { dotMaterial, sketchToWorld } from "../view/viewport";
-import { hitToSel, type AppContext, type Tool } from "./tool";
+import { hitToSel, sourcesOf, type AppContext, type Tool } from "./tool";
+import { ExtrudeOp, lastExtrude } from "./ops";
 
 export type SketchKind = Kind;
 type Kind =
@@ -1991,7 +1992,8 @@ export class SketchTool implements Tool {
         this.lastLineId = id;
         this.chainFirstId ??= id;
         // Closing the chain on its first point ends it.
-        if (closes || (this.pts.length > 1 && samePt(pt, start))) return this.resetDrawing();
+        // The outline closed: the drawing tool lets go (Select), so the next drag turns the view.
+        if (closes || (this.pts.length > 1 && samePt(pt, start))) return this.shapeClosed();
         // Touch: its length in a box right away, for the numpad.
         if (settings.value.numpad && this.locks.len === undefined) queueMicrotask(() => this.showLineBox(id));
       }
@@ -2034,6 +2036,8 @@ export class SketchTool implements Tool {
         this.typedThisShape = false;
         this.app.ui.setLabel(0, 0, null);
         if (e) this.commitAdd([e], cs);
+        // A closed shape: back to Select (an arc is open — keep drawing them).
+        if (e && e.kind !== "arc") return this.shapeClosed();
       }
     }
     this.updatePanel();
@@ -2050,8 +2054,17 @@ export class SketchTool implements Tool {
   }
 
   private finishSpline(closed: boolean): void {
-    if (this.pts.length >= 2) this.commitAdd([{ id: uid(), kind: "spline", points: this.pts, closed: closed && this.pts.length >= 3, mode: memory.spline }]);
+    const shut = closed && this.pts.length >= 3;
+    if (this.pts.length >= 2) this.commitAdd([{ id: uid(), kind: "spline", points: this.pts, closed: shut, mode: memory.spline }]);
+    if (shut) return this.shapeClosed();
     this.resetDrawing();
+  }
+
+  /** A shape was closed: the drawing tool is put down (Select), ready to turn the view and extrude it. */
+  private shapeClosed(): void {
+    this.resetDrawing();
+    this.setKind("select");
+    this.updateMenu();
   }
 
   /** Arc being drawn: its middle point so far (both ends placed). */
@@ -2673,7 +2686,11 @@ export class SketchTool implements Tool {
     const hit = view.pick(p.x, p.y, { profiles: true, curves: false, bodies: false, planes: false, axes: false, images: false, edgeTolPx: p.tol });
     if (hit?.kind !== "profile") return false;
     this.app.setTool(null);
-    this.app.setSelection([{ kind: "profile", sketch: hit.sketch, region: hit.region }]);
+    const sel = [{ kind: "profile" as const, sketch: hit.sketch, region: hit.region }];
+    this.app.setSelection(sel);
+    // Straight into Extrude on it (Esc / Cancel: back to it just selected).
+    const src = sourcesOf(this.app, sel)[0];
+    if (src) this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { distance: lastExtrude.distance }));
     return true;
   }
 

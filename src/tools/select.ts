@@ -150,6 +150,13 @@ export class SelectTool implements Tool {
       const run = this.pending.run;
       this.pending = null;
       run();
+      return;
+    }
+    // A shape's region tapped (not added with Shift/Ctrl): straight into Extrude on it.
+    const now = this.app.selection;
+    if (s.kind === "profile" && !p.add && count < 2 && now.length && now.every((x) => x.kind === "profile") && now.some((x) => sameSel(x, s!))) {
+      const src = sourcesOf(this.app, now)[0];
+      if (src) this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { distance: lastExtrude.distance }));
     }
   }
 
