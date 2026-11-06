@@ -49,8 +49,7 @@ import type { PanelItem, ToolItem } from "../ui/ui";
 import { fmtLen, trim as trimNum } from "../units";
 import type { ToolPointer } from "../view/input";
 import { dotMaterial, sketchToWorld } from "../view/viewport";
-import { hitToSel, sourcesOf, type AppContext, type Tool } from "./tool";
-import { ExtrudeOp, lastExtrude } from "./ops";
+import { hitToSel, type AppContext, type Tool } from "./tool";
 
 export type SketchKind = Kind;
 type Kind =
@@ -104,6 +103,27 @@ const HINTS: Record<Kind, string> = {
   split: "Tap a line or arc to cut it in two at its midpoint (or at a point you tap on it while holding Shift).",
 };
 
+/**
+ * Does segment from→to run alongside line a–b — nearly the same direction
+ * (within 10°), off its line, and beside it for a good part (not just carrying
+ * on past its end, which is how a line is extended)?
+ */
+function runsAlongside(a: Vec2, b: Vec2, from: Vec2, to: Vec2, minOff: number): boolean {
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (len < 1e-12) return false;
+  const d: Vec2 = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+  const u: Vec2 = [to[0] - from[0], to[1] - from[1]];
+  const lu = Math.hypot(u[0], u[1]);
+  if (lu < 1e-12) return false;
+  if (Math.abs(d[0] * u[1] - d[1] * u[0]) / lu > Math.sin((10 * Math.PI) / 180)) return false;
+  const off = Math.abs((from[0] - a[0]) * d[1] - (from[1] - a[1]) * d[0]);
+  if (off <= minOff) return false;
+  const t0 = (from[0] - a[0]) * d[0] + (from[1] - a[1]) * d[1];
+  const t1 = (to[0] - a[0]) * d[0] + (to[1] - a[1]) * d[1];
+  const overlap = Math.min(Math.max(t0, t1), len) - Math.max(Math.min(t0, t1), 0);
+  return overlap > 0.2 * Math.abs(t1 - t0);
+}
+
 /** The hint for a tool, as its chosen variant works. */
 function hintOf(kind: Kind): string {
   if (kind === "arc" && memory.arc === "center") return "Tap the centre, then where the arc starts, then where it ends.";
@@ -117,6 +137,8 @@ const memory = { arc: "3pt" as "3pt" | "center", circle: "center" as "center" | 
 
 interface Snap {
   uv: Vec2;
+  /** Where the pointer really was (before snapping). */
+  raw?: Vec2;
   label?: string;
   guides?: [Vec2, Vec2][];
   /** Snapped onto an existing sketch point (drawing then adds a Coincident constraint). */
@@ -243,6 +265,8 @@ export class SketchTool implements Tool {
   private startRef: PointRef | null = null;
   /** Where the shape's first point snapped (kept on that curve / middle). */
   private startSnap: Snap | null = null;
+  /** How the first point of what's being drawn snapped (tap or press). */
+  private firstSnap: Snap | null = null;
 
   private get constraints(): SketchConstraint[] {
     return this.sketch?.constraints ?? [];
@@ -1064,6 +1088,10 @@ export class SketchTool implements Tool {
     const s = this.snap(p);
     if (!s) return false;
     this.pts = [s.uv];
+    this.firstSnap = s;
+    // Joined to what it snapped to, like a tapped first point.
+    this.startRef = s.ref ?? null;
+    this.startSnap = s;
     this.cursor = s;
     this.dragging = true;
     this.updatePanel();
@@ -1586,7 +1614,6 @@ export class SketchTool implements Tool {
   tap(p: ToolPointer, count: number): void {
     if (this.phase === "plane") return this.pickPlane(p);
     if (this.edit.picking) return this.pickForEdit(p);
-    if (this.kind === "select" && this.tapSurfaceIn3D(p)) return;
     // A tap on empty space finishes what's waiting for Apply (like elsewhere).
     if (this.isSelectionTool() && this.selected.size && this.transformPending() && !this.curveAt(p) && !p.shift) {
       this.applyTransform();
@@ -1736,6 +1763,15 @@ export class SketchTool implements Tool {
   // -------------------------------------------------------------- snapping
 
   private snap(p: ToolPointer): Snap | null {
+    const s = this.snapAt(p);
+    if (s && !s.raw) {
+      const w = this.plane && this.app.view.rayToPlane(p.x, p.y, this.plane);
+      if (w) s.raw = toPlane(this.plane!, w);
+    }
+    return s;
+  }
+
+  private snapAt(p: ToolPointer): Snap | null {
     const plane = this.plane;
     if (!plane) return null;
     const w = this.app.view.rayToPlane(p.x, p.y, plane);
@@ -1767,8 +1803,19 @@ export class SketchTool implements Tool {
         }
       }
     }
+    // Drawing a line: it mustn't be pulled onto a line it runs alongside (a
+    // parallel line drawn close to another collapsed onto it on phones, where
+    // the snap reach is a fingertip wide) — unless it carries on along that line.
+    const drawFrom = this.kind === "line" && this.pts.length ? this.pts[this.pts.length - 1] : null;
+    const wppPx = view.cam.worldPerPixel(view.height);
+    const alongside = (a: Vec2, b: Vec2, to: Vec2): boolean => !!drawFrom && runsAlongside(a, b, drawFrom, to, wppPx * 2);
+    const lineOf = new Map<string, Extract<SketchEntity, { kind: "line" }>>();
+    for (const e of this.entities) if (e.kind === "line") lineOf.set(e.id, e);
     let best: { p: Vec2; label: string; d: number; ref?: PointRef; mid?: string } | null = null;
     for (const c of cands) {
+      // An end of a line the new one would run alongside: joining it would make a sliver.
+      const owner = c.ref && lineOf.get(c.ref.e);
+      if (owner && alongside(owner.a, owner.b, c.p)) continue;
       const sc = screen(c.p);
       if (!sc) continue;
       const d = Math.hypot(sc[0] - p.x, sc[1] - p.y);
@@ -1810,6 +1857,8 @@ export class SketchTool implements Tool {
       const q = nearestOnLocus(L, raw);
       const d = Math.hypot(q[0] - raw[0], q[1] - raw[1]) / wpp;
       if (d >= lt) continue;
+      // On (or past the end of) a line the new line runs alongside: not a place to land.
+      if (L.kind === "line" && L.seg && alongside(L.seg[0], L.seg[1], q)) continue;
       let label = L.label;
       let ext: Vec2 | undefined;
       if (L.kind === "line" && L.seg) {
@@ -2032,22 +2081,49 @@ export class SketchTool implements Tool {
     this.commit(this.entities, [...cs, { id: uid(), type: "dim", curves: [b.id], prop: "length", value: len }]);
   }
 
+  /** The snapped first point sits on a line the new line (to `end`) runs alongside. */
+  private startedAlongside(s: Snap, end: Vec2, reversed = false): boolean {
+    const raw = s.raw!;
+    if (Math.hypot(raw[0] - s.uv[0], raw[1] - s.uv[1]) < 1e-12) return false;
+    const ids = new Set([...(s.on ?? []), ...(s.ref ? [s.ref.e] : [])]);
+    const wpp = this.app.view.cam.worldPerPixel(this.app.view.height);
+    // (reversed: s is the end, `end` the start — the run is the same either way.)
+    for (const e of this.entities) if (e.kind === "line" && ids.has(e.id) && (reversed ? runsAlongside(e.a, e.b, end, raw, -1) : runsAlongside(e.a, e.b, raw, end, wpp * 2))) return true;
+    return false;
+  }
+
   private addPoint(uv: Vec2, count: number): void {
     // Drawing started: (phones) the tool column shrinks to its icons.
     document.body.classList.add("sketch-compact");
     // The next tap finishes the length being typed for the line before.
     if (this.lineBox) this.closeLineBox();
     const c = this.lockedCursor() ?? uv;
-    const pt = this.pts.length ? c : uv;
+    let pt = this.pts.length ? c : uv;
     const k = this.kind;
     const locked = Object.keys(this.locks).length > 0;
     // A typed size moves the point off whatever it snapped to.
-    const snapRef = locked ? undefined : this.cursor?.ref;
+    let snapRef = locked ? undefined : this.cursor?.ref;
     if (!this.pts.length) this.startRef = snapRef ?? null;
     if (!this.pts.length) this.startSnap = locked ? null : this.cursor;
+    if (!this.pts.length) this.firstSnap = this.cursor;
     if (k === "line") {
       if (count >= 2 || (this.pts.length && samePt(pt, this.pts[this.pts.length - 1]))) return this.resetDrawing();
       if (this.pts.length) {
+        // The first line of a chain: if its start was pulled onto a line it runs
+        // alongside (a parallel line drawn close to another, on a phone), the
+        // start goes back where the finger was — not onto that line.
+        if (this.pts.length === 1 && this.firstSnap?.raw && this.startedAlongside(this.firstSnap, pt)) {
+          this.pts[0] = this.firstSnap.raw;
+          this.startRef = null;
+          this.startSnap = null;
+          // The end too, if it was caught by that line (it looked like carrying on from it).
+          const end = this.cursor;
+          if (!locked && end?.raw && this.startedAlongside({ ...end, raw: end.raw }, this.pts[0], true)) {
+            pt = end.raw;
+            snapRef = undefined;
+            this.cursor = { uv: end.raw };
+          }
+        }
         const start = this.pts[0];
         const a = this.pts[this.pts.length - 1];
         const id = uid();
@@ -2273,6 +2349,7 @@ export class SketchTool implements Tool {
     this.chainFirstId = null;
     this.startRef = null;
     this.startSnap = null;
+    this.firstSnap = null;
     this.typedThisShape = false;
     this.lockIndex = 0;
     this.typing.reset();
@@ -2772,26 +2849,6 @@ export class SketchTool implements Tool {
         : this.constraints;
     const ents = this.withoutBoundary(next);
     this.commit(ents, carryConstraints(this.entities, ents, keep));
-  }
-
-  /**
-   * Camera turned away from the sketch view: tapping a closed region (not a
-   * curve) finishes the sketch and selects that region, with its extrude arrow
-   * ready to drag.
-   */
-  private tapSurfaceIn3D(p: ToolPointer): boolean {
-    const view = this.app.view;
-    const facing = Math.abs(dot(view.cam.viewDir().toArray() as Vec3, this.plane!.normal));
-    if (facing > 0.995 || this.curveAt(p)) return false;
-    const hit = view.pick(p.x, p.y, { profiles: true, curves: false, bodies: false, planes: false, axes: false, images: false, edgeTolPx: p.tol });
-    if (hit?.kind !== "profile") return false;
-    this.app.setTool(null);
-    const sel = [{ kind: "profile" as const, sketch: hit.sketch, region: hit.region }];
-    this.app.setSelection(sel);
-    // Straight into Extrude on it (Esc / Cancel: back to it just selected).
-    const src = sourcesOf(this.app, sel)[0];
-    if (src) this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { distance: lastExtrude.distance }));
-    return true;
   }
 
   /** Modify tools: a tap on a curve uses it; on empty space it cancels, then goes back to Select. */
