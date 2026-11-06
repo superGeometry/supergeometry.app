@@ -111,6 +111,25 @@ function capGrid(verts: Vec3[], faces: Cage["faces"], R: number, N: number, z: n
   }
 }
 
+/**
+ * A new shape at a size: width × depth × height (a cylinder's or sphere's
+ * width is its diameter), `rows` faces up the side. A cylinder is turned so a
+ * face looks straight to the front, back and sides (a spout or a handle starts
+ * from one; its corners used to point there, and it took a 22.5° turn first).
+ */
+export function shapeCage(kind: Exclude<CagePrimitive, "plane">, size: Vec3, rows = 2): Cage {
+  const r = Math.max(1, Math.round(rows));
+  if (kind === "box") return boxCage(size, r);
+  if (kind === "sphere") {
+    const c = sphereCage(size[0]);
+    return { faces: c.faces, verts: c.verts.map((v) => [v[0], (v[1] * size[1]) / size[0], (v[2] * size[2]) / size[0]] as Vec3) };
+  }
+  const c = cylinderCage(size[0], size[2], r);
+  const t = -Math.PI / 8;
+  const sy = size[1] / size[0];
+  return { faces: c.faces, verts: c.verts.map(([x, y, z]) => [x * Math.cos(t) - y * Math.sin(t), (x * Math.sin(t) + y * Math.cos(t)) * sy, z] as Vec3) };
+}
+
 export function primitiveCage(kind: CagePrimitive, at: Vec3 = [0, 0, 0]): Cage {
   switch (kind) {
     case "box":
@@ -493,6 +512,123 @@ export function bridgeFaces(cage: Cage, fa: number, fb: number): Cage | null {
   const without = { verts: cage.verts, faces: cage.faces.filter((_, i) => i !== fa && i !== fb) };
   const out = bridgeLoops(without, loopA, loopB);
   // Same points, same numbers (nothing compacted: every rim point is still used by its neighbours).
+  return out && windingAgrees(out) ? out : null;
+}
+
+/** Turn v the least way that takes direction u onto direction w (both unit). */
+function turnLike(v: Vec3, u: Vec3, w: Vec3): Vec3 {
+  const ax = cross3(u, w);
+  const sn = Math.hypot(...ax);
+  const cs = dot3(u, w);
+  if (sn < 1e-12) {
+    if (cs > 0) return v;
+    // Half a turn: about any line square to u.
+    const p = Math.abs(u[0]) < 0.9 ? cross3(u, [1, 0, 0]) : cross3(u, [0, 1, 0]);
+    const k = mul3(p, 1 / Math.hypot(...p));
+    return sub3(mul3(k, 2 * dot3(k, v)), v);
+  }
+  const k = mul3(ax, 1 / sn);
+  return add3(add3(mul3(v, cs), mul3(cross3(k, v), sn)), mul3(k, dot3(k, v) * (1 - cs)));
+}
+
+const unit3 = (v: Vec3): Vec3 => mul3(v, 1 / (Math.hypot(...v) || 1));
+const faceCentre = (c: Cage, f: number): Vec3 => mul3(c.faces[f].reduce((a, v) => add3(a, c.verts[v]), [0, 0, 0] as Vec3), 0.25);
+
+/**
+ * Pull one face out in `steps` even steps, `length` long in all, bending
+ * `bend` degrees on the way (upwards; negative: down — sideways for a face
+ * that looks up or down) and ending `taper` times its size: a spout or an arm
+ * in one go, with sliders instead of a value per step. Returns the cage and
+ * the end face.
+ */
+export function sweepFace(cage: Cage, face: number, o: { steps: number; length: number; bend: number; taper: number }): { cage: Cage; face: number } | null {
+  const q = cage.faces[face];
+  if (!q) return null;
+  const N = Math.max(1, Math.round(o.steps));
+  const c = faceCentre(cage, face);
+  const n = faceNormal(cage, q);
+  // The way it bends: up, as seen square to the face (sideways for a face looking up or down).
+  let b = sub3([0, 0, 1], mul3(n, n[2]));
+  if (Math.hypot(...b) < 1e-6) b = sub3([1, 0, 0], mul3(n, n[0]));
+  b = unit3(b);
+  const P0 = q.map((v) => sub3(cage.verts[v], c));
+  const th = (o.bend * Math.PI) / 180;
+  let cur = cage;
+  let f = face;
+  for (let k = 1; k <= N; k++) {
+    const ex = extrudeFaces(cur, [f], 1);
+    if (!ex) return null;
+    cur = ex.cage;
+    f = ex.faces[0];
+    const t = k / N;
+    const phi = th * t;
+    // Along a circular arc of the whole length (straight when it doesn't bend).
+    const at: Vec3 = Math.abs(th) < 1e-9 ? add3(c, mul3(n, o.length * t)) : add3(c, add3(mul3(n, (o.length / th) * Math.sin(phi)), mul3(b, (o.length / th) * (1 - Math.cos(phi)))));
+    const dir = unit3(add3(mul3(n, Math.cos(phi)), mul3(b, Math.sin(phi))));
+    const s = 1 + (o.taper - 1) * t;
+    const verts = cur.verts.map((p) => [...p] as Vec3);
+    cur.faces[f].forEach((v, i) => (verts[v] = add3(at, mul3(turnLike(P0[i], n, dir), s))));
+    cur = { verts, faces: cur.faces };
+  }
+  return { cage: cur, face: f };
+}
+
+/**
+ * Bridge two faces with a tube that arches out: it leaves each face along its
+ * normal, `arch` far before turning (a cubic curve), in `segments` pieces —
+ * a handle between two faces on the same side of a body, with one slider.
+ * Arch 0 and one segment: the straight bridge.
+ */
+export function archBridge(cage: Cage, fa: number, fb: number, o: { arch: number; segments: number }): Cage | null {
+  const S = Math.max(1, Math.round(o.segments));
+  if (S === 1) return bridgeFaces(cage, fa, fb);
+  const A = cage.faces[fa];
+  const B = cage.faces[fb];
+  if (!A || !B || fa === fb || A.some((v) => B.includes(v))) return null;
+  const cA = faceCentre(cage, fa);
+  const cB = faceCentre(cage, fb);
+  const nA = faceNormal(cage, A);
+  const nB = faceNormal(cage, B);
+  const h = o.arch;
+  const P = [cA, add3(cA, mul3(nA, h)), add3(cB, mul3(nB, h)), cB];
+  const bez = (t: number): Vec3 => {
+    const u = 1 - t;
+    return add3(add3(mul3(P[0], u * u * u), mul3(P[1], 3 * u * u * t)), add3(mul3(P[2], 3 * u * t * t), mul3(P[3], t * t * t)));
+  };
+  const tan = (t: number): Vec3 => {
+    const u = 1 - t;
+    const d = add3(add3(mul3(sub3(P[1], P[0]), 3 * u * u), mul3(sub3(P[2], P[1]), 6 * u * t)), mul3(sub3(P[3], P[2]), 3 * t * t));
+    return Math.hypot(...d) < 1e-9 ? unit3(sub3(cB, cA)) : unit3(d);
+  };
+  const off = A.map((v) => sub3(cage.verts[v], cA));
+  const rA = off.reduce((a, v) => a + Math.hypot(...v), 0) / 4;
+  const rB = B.reduce((a, v) => a + Math.hypot(...sub3(cage.verts[v], cB)), 0) / 4;
+  // The face's shape carried along the curve, turned a little at a time (so it never flips).
+  let o0 = off;
+  let prev = nA;
+  const verts = cage.verts.map((p) => [...p] as Vec3);
+  const rings: number[][] = [];
+  const fine = 8;
+  for (let k = 1; k < S; k++) {
+    for (let j = 1; j <= fine; j++) {
+      const t = (k - 1 + j / fine) / S;
+      const T = tan(t);
+      o0 = o0.map((v) => turnLike(v, prev, T));
+      prev = T;
+    }
+    const t = k / S;
+    const sc = 1 + (rB / rA - 1) * t;
+    const c = bez(t);
+    rings.push(o0.map((v) => verts.push(add3(c, mul3(v, sc))) - 1));
+  }
+  const faces = cage.faces.filter((_, i) => i !== fa && i !== fb);
+  const loops = [[...A], ...rings];
+  for (let k = 0; k + 1 < loops.length; k++) {
+    const L1 = loops[k];
+    const L2 = loops[k + 1];
+    for (let i = 0; i < 4; i++) faces.push([L1[i], L1[(i + 1) % 4], L2[(i + 1) % 4], L2[i]]);
+  }
+  const out = bridgeLoops({ verts, faces }, rings[rings.length - 1], [...B]);
   return out && windingAgrees(out) ? out : null;
 }
 

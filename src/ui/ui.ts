@@ -46,6 +46,11 @@ export type PanelItem =
   | { type: "slot"; label: string; value: string; active: boolean; filled: boolean; onClick(): void }
   | { type: "choice"; label?: string; options: { id: string; label: string }[]; value: string; onChange(id: string): void; /** Always a drop-down. */ list?: boolean }
   | { type: "toggle"; label: string; value: boolean; onChange(v: boolean): void }
+  /**
+   * Drag to set (no typing, no maths): how much a spout bends, a handle
+   * arches… The value shows beside it (`show` formats it).
+   */
+  | { type: "slider"; label: string; value: number; min: number; max: number; step?: number; show?(v: number): string; onInput(v: number): void }
   | { type: "button"; label: string; icon?: IconName; onClick(): void; /** Blue: the step to take next (Apply). */ primary?: boolean };
 
 /** Kept for older call sites: a numeric field. */
@@ -623,6 +628,25 @@ export class UI {
           b.addEventListener("click", () => it.onChange(o.id));
           g.append(b);
         }
+        row.append(g);
+      } else if (it.type === "slider") {
+        const g = el("label", "field slider-field");
+        g.append(el("span", "field-label", it.label));
+        const r = document.createElement("input");
+        r.type = "range";
+        r.min = String(it.min);
+        r.max = String(it.max);
+        r.step = String(it.step ?? (it.max - it.min) / 100);
+        r.value = String(it.value);
+        const out = el("span", "slider-value", it.show ? it.show(it.value) : String(it.value));
+        r.addEventListener("input", () => {
+          const v = Number(r.value);
+          out.textContent = it.show ? it.show(v) : String(v);
+          it.onInput(v);
+        });
+        // The card's grip and the view must not take the drag.
+        r.addEventListener("pointerdown", (e) => e.stopPropagation());
+        g.append(r, out);
         row.append(g);
       } else if (it.type === "toggle") {
         const b = el("button", `toggle${it.value ? " on" : ""}`, it.label);

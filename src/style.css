@@ -2859,3 +2859,28 @@ html[data-screen="phone"] body #panel.as-list .panel-buttons {
 html[data-screen="phone"] body #panel.as-list .panel-buttons > :first-child {
   margin-left: auto;
 }
+
+/* Card sliders (Freeform's Bend, Taper, Arch…): a full row, easy to drag with a thumb. */
+#panel .slider-field {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#panel .slider-field .field-label {
+  flex: 0 0 auto;
+  min-width: 52px;
+}
+#panel .slider-field input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  accent-color: #3d8bff;
+}
+#panel .slider-field .slider-value {
+  flex: 0 0 auto;
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}

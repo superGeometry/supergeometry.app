@@ -2,7 +2,7 @@
 // extrude, inset), and a part built with them, joined to other bodies.
 import opencascade from "replicad-opencascadejs";
 import { measureVolume, setOC } from "replicad";
-import { boxCage, bridgeFaces, cylinderCage, moveTurnScale, deleteFaces, extrudeFaces, holeLoops, bridgeLoops, boundaryEdges, cageEdgeKey, insertEdgeLoop, insetFaces, isClosed, planeCage, refineCage, selfCrossings, sphereCage, windingAgrees, type Cage } from "../src/freeform/cage";
+import { archBridge, boxCage, bridgeFaces, cylinderCage, moveTurnScale, shapeCage, sweepFace, deleteFaces, extrudeFaces, holeLoops, bridgeLoops, boundaryEdges, cageEdgeKey, insertEdgeLoop, insetFaces, isClosed, planeCage, refineCage, selfCrossings, sphereCage, windingAgrees, type Cage } from "../src/freeform/cage";
 import { cageToShape } from "../src/kernel/freeform";
 import { debugBodies, regenerate, shapeValid } from "../src/kernel/engine";
 import { arrangement, regionRef } from "../src/sketch/regions";
@@ -66,6 +66,39 @@ const faceWith = (c: Cage, test: (n: [number, number, number], m: [number, numbe
   const ground = cylinderCage(40, 40, 2).verts;
   const tall = moveTurnScale(ground, "scale", [1, 1, 5, 1]);
   check("a shape standing on the ground grows up from it", Math.min(...tall.map((p) => p[2])) === 0 && Math.abs(Math.max(...tall.map((p) => p[2])) - 200) < 1e-9);
+}
+
+// ---------------------------------- sized shapes, sweep, arched bridge
+{
+  const cy = shapeCage("cylinder", [160, 160, 200], 4);
+  const front = faceWith(cy, (n) => n[0] > 0.99);
+  const zs = cy.verts.map((v) => v[2]);
+  check("a sized cylinder: 4 rows, standing on the ground, a face straight to the front", front.length === 4 && Math.min(...zs) === 0 && Math.max(...zs) === 200, `${front.length} front faces`);
+  const f = faceWith(cy, (n, m) => n[0] > 0.99 && m[2] > 50 && m[2] < 100)[0];
+  const c0 = faceWith(cy, () => true).length;
+  const sw = sweepFace(cy, f, { steps: 6, length: 150, bend: 60, taper: 0.6 })!;
+  const P = sw.cage.faces[sw.face].map((v) => sw.cage.verts[v]);
+  const end = [0, 1, 2].map((k) => P.reduce((a, p) => a + p[k], 0) / 4);
+  const R = 150 / (Math.PI / 3);
+  const want = [79.8 + R * Math.sin(Math.PI / 3), 0, 75 + R * (1 - Math.cos(Math.PI / 3))];
+  const near = Math.hypot(end[0] - want[0], end[1] - want[1], end[2] - want[2]) < 1;
+  check("sweep: 6 steps along a 60° arc, 150 long — the end face lands where the arc ends", !!sw && sw.cage.faces.length === c0 + 6 * 4 && near, `end at ${end.map((x) => x.toFixed(1))}, want ${want.map((x) => x.toFixed(1))}`);
+  const r = solidOk(sw.cage);
+  check("  …a clean solid that doesn't pass through itself", r.ok && !selfCrossings(sw.cage).length, `vol ${r.v.toFixed(0)}`);
+  const w0 = Math.hypot(...[0, 1, 2].map((k) => cy.verts[cy.faces[f][0]][k] - cy.verts[cy.faces[f][2]][k]));
+  const w1 = Math.hypot(...[0, 1, 2].map((k) => P[0][k] - P[2][k]));
+  check("  …and ends 0.6 times as big", Math.abs(w1 / w0 - 0.6) < 1e-6, `${(w1 / w0).toFixed(3)}`);
+  // A handle: two back faces, inset, bridged with an arch.
+  const up = faceWith(cy, (n, m) => n[0] < -0.99 && m[2] > 150)[0];
+  const lo = faceWith(cy, (n, m) => n[0] < -0.99 && m[2] > 50 && m[2] < 100)[0];
+  const ins = insetFaces(cy, [up, lo], 0.3)!;
+  const h = archBridge(ins.cage, ins.faces[0], ins.faces[1], { arch: 90, segments: 6 });
+  const minX = h ? Math.min(...h.verts.map((v) => v[0])) : 0;
+  check("arched bridge: a closed, consistently wound handle that arches well out", !!h && isClosed(h) && windingAgrees(h) && minX < -130, h ? `${ins.cage.faces.length} → ${h.faces.length} faces, out to x ${minX.toFixed(0)}` : "refused");
+  const hr = h && solidOk(h);
+  check("  …a clean solid that doesn't pass through itself", !!hr?.ok && !selfCrossings(h!).length, hr ? `vol ${hr.v.toFixed(0)}` : "");
+  const flat = archBridge(ins.cage, ins.faces[0], ins.faces[1], { arch: 0, segments: 1 });
+  check("  …arch 0 in one segment is the straight bridge", !!flat && flat.faces.length === ins.cage.faces.length - 2 + 4);
 }
 
 // ------------------------------------------------------------ bridge faces

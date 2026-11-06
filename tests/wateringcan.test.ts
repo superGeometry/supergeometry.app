@@ -7,7 +7,7 @@
 import opencascade from "replicad-opencascadejs";
 import { measureVolume, setOC } from "replicad";
 import { writeFileSync } from "node:fs";
-import { bridgeFaces, cylinderCage, deleteFaces, extrudeFaces, insetFaces, selfCrossings, windingAgrees, type Cage } from "../src/freeform/cage";
+import { boundaryEdges, bridgeFaces, cylinderCage, deleteFaces, extrudeFaces, insetFaces, selfCrossings, windingAgrees, type Cage } from "../src/freeform/cage";
 import { debugBodies, regenerate } from "../src/kernel/engine";
 import { healthOf, isHealthy } from "../src/kernel/repair";
 import type { Vec3 } from "../src/doc/types";
@@ -191,6 +191,33 @@ if (s) {
     const hv = Math.abs(measureVolume(hs));
     check("by hand: hollow, about the same size as by code", hv > 100_000 && hv < Math.PI * (D / 2) ** 2 * H * 0.2 && size[2] > H + 10, `${size.map((x) => x.toFixed(0)).join(" × ")}, ${(hv / 1000).toFixed(0)} cm³ (by code ${(vol / 1000).toFixed(0)})`);
   }
+}
+
+// The same can the way a beginner can make it, with no values worked out
+// (tests/fixtures/wateringcan-beginner.json), 34 actions on a phone-sized
+// screen: Cylinder with Diameter 160, Height 200, Rows slider 4; the four top
+// faces → Delete faces; the front face → Inset (slider), Extrude face with the
+// Length / Bend / Taper / Steps sliders, again short and widening for the
+// rose, Delete face; the two back faces → Inset (slider) → Bridge faces (the
+// handle arches out by itself); Thickness 2, Down, Done.
+{
+  const { readFileSync } = await import("node:fs");
+  const easy = JSON.parse(readFileSync(new URL("./fixtures/wateringcan-beginner.json", import.meta.url), "utf8"));
+  check("no numbers: the cage doesn't pass through itself", !selfCrossings(easy[0].cage).length);
+  const re: any = await regenerate(easy);
+  check("no numbers: it builds", !re.errors.length, re.errors.map((e: any) => `${e.feature}: ${e.message}`).join("; "));
+  const es = debugBodies().get(easy[0].id);
+  check("no numbers: one clean solid", !!es && re.bodies.length === 1 && isHealthy(healthOf(es)), `${es?.faces.length} faces`);
+  if (es) {
+    const bb = es.boundingBox.bounds;
+    const size = [0, 1, 2].map((k) => bb[1][k] - bb[0][k]);
+    const ev = Math.abs(measureVolume(es));
+    check("no numbers: hollow, about the same size as by code", ev > 100_000 && ev < Math.PI * (D / 2) ** 2 * H * 0.2 && size[2] > H + 10, `${size.map((x) => x.toFixed(0)).join(" × ")}, ${(ev / 1000).toFixed(0)} cm³ (by code ${(vol / 1000).toFixed(0)})`);
+  }
+  // The spout's tip clears the rim (water stays in when the can is full).
+  // (The tip's opening: the open edges away from the can's own rim.)
+  const tip = [...new Set(boundaryEdges(easy[0].cage).flat())].map((i) => easy[0].cage.verts[i]).filter((v: number[]) => v[0] > 100);
+  check("no numbers: the spout's tip is above the rim", tip.length > 0 && tip.every((v: number[]) => v[2] > H), `tip from z ${Math.min(...tip.map((v: number[]) => v[2])).toFixed(0)}`);
 }
 
 if (process.argv[2]) writeFileSync(process.argv[2], JSON.stringify({ format: "super", version: 2, name: "Watering can", features: feats, variables: [], views: [], units: "mm", hidden: [], pins: [], names: { can: "Watering can" }, colors: { can: "#3f8f5a" } }));
