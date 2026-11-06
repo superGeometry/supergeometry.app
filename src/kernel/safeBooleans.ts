@@ -5,7 +5,7 @@
 // intersect with the same operations run non-destructively (the inputs are
 // left exactly as they were), with the same tidying of same-surface faces.
 
-import { _3DShape, cast, getOC, isShape3D } from "replicad";
+import { _3DShape, Edge, Face, HASH_CODE_MAX, Shape, cast, getOC, isShape3D } from "replicad";
 
 type Opts = { optimisation?: "none" | "commonFace" | "sameFace"; simplify?: boolean };
 
@@ -48,4 +48,38 @@ export function useSafeBooleans(): void {
   p.intersect = function (this: { wrapped: unknown }, tool: { wrapped: unknown }, opts?: Opts) {
     return run("common", this, tool, opts);
   };
+  // A shape's edges and faces, each once, in the order found: replicad checks
+  // every new one against all found so far (quadratic — 22 s for the 11 000
+  // edges of a ruler with its scale engraved). Same result, by hash first.
+  const q = Shape.prototype as unknown as object;
+  Object.defineProperty(q, "edges", { configurable: true, get(this: { wrapped: unknown }) {
+    const oc = getOC();
+    return unique(this.wrapped, oc.TopAbs_ShapeEnum.TopAbs_EDGE).map((x) => new Edge(oc.TopoDS.Edge(x)));
+  } });
+  Object.defineProperty(q, "faces", { configurable: true, get(this: { wrapped: unknown }) {
+    const oc = getOC();
+    return unique(this.wrapped, oc.TopAbs_ShapeEnum.TopAbs_FACE).map((x) => new Face(oc.TopoDS.Face(x)));
+  } });
+}
+
+/** The sub-shapes of one kind, each once (the same one met again from another face is skipped). */
+function unique(shape: unknown, kind: unknown): any[] {
+  const oc = getOC();
+  const ex = new oc.TopExp_Explorer(shape as never, kind as never, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+  const buckets = new Map<number, any[]>();
+  const out: any[] = [];
+  try {
+    for (; ex.More(); ex.Next()) {
+      const item = ex.Current();
+      const h = oc.ReplicadShapeHasher.HashCode(item, HASH_CODE_MAX);
+      const b = buckets.get(h);
+      if (b?.some((x) => x.IsSame(item))) continue;
+      if (b) b.push(item);
+      else buckets.set(h, [item]);
+      out.push(item);
+    }
+  } finally {
+    ex.delete();
+  }
+  return out;
 }

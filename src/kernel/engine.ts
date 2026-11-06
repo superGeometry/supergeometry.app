@@ -1286,7 +1286,16 @@ function overlapping(solid: Shape3D, ctx: Ctx, skip?: string): string[] {
 
 function fuseAll(parts: Shape3D[]): Shape3D {
   if (!parts.length) throw new Error("Nothing to build");
-  return parts.reduce((a, b) => a.fuse(b));
+  // In pairs, then pairs of those…: each fuse joins two pieces of about the
+  // same size. One by one onto a growing result, the scale of a ruler (170
+  // ticks and digits) took over a minute; this way a few seconds.
+  let level = parts;
+  while (level.length > 1) {
+    const next: Shape3D[] = [];
+    for (let i = 0; i < level.length; i += 2) next.push(i + 1 < level.length ? level[i].fuse(level[i + 1]) : level[i]);
+    level = next;
+  }
+  return level[0];
 }
 
 function transform(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {

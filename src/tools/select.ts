@@ -1,3 +1,4 @@
+import { isTouchDevice } from "../device";
 import { BODY_COLORS, BODY_OPACITY, bodyColor } from "../doc/types";
 import type { DeleteGeomFeature, FreeformFeature, EdgeRef, ExtrudeSource, FaceRef, ImageFeature, PlaneDef, SketchFeature, Vec3 } from "../doc/types";
 import { arrangement } from "../sketch/regions";
@@ -118,7 +119,14 @@ export class SelectTool implements Tool {
   }
 
   tap(p: ToolPointer, count: number): void {
-    const hit = this.tapHit(p);
+    let hit = this.tapHit(p);
+    // A finger on a thin shape (a ruler's tick, a letter) is always on its
+    // outline too: one tap takes the shape under it (to extrude); a double
+    // tap opens the sketch to edit. (A mouse can aim for one or the other.)
+    if (hit?.kind === "curve" && count < 2 && isTouchDevice && !this.pending) {
+      const under = this.app.view.pick(p.x, p.y, { edgeTolPx: 0, curves: false, profiles: true, edges: false, vertices: false });
+      if (under?.kind === "profile" && under.sketch === hit.sketch) hit = under;
+    }
     // Tapping a line/curve/point of a finished sketch opens it for editing, with that piece selected.
     if ((hit?.kind === "curve" || hit?.kind === "point") && !this.pending) {
       const tool = new SketchTool(this.app, { sketchId: hit.sketch });

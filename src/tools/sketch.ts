@@ -133,7 +133,24 @@ function hintOf(kind: Kind): string {
   return HINTS[kind];
 }
 
-const memory = { arc: "3pt" as "3pt" | "center", circle: "center" as "center" | "2pt" | "3pt", corner: "round" as "round" | "chamfer", textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control", sides: 6, fillet: 2, offset: 2, textSize: 10 };
+const memory = { arc: "3pt" as "3pt" | "center", circle: "center" as "center" | "2pt" | "3pt", corner: "round" as "round" | "chamfer", textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control", sides: 6, fillet: 2, offset: 2, textSize: storedTextSize() };
+
+/** The text size survives a reload (a ruler's 3.5 mm numbers came back at 10 mm after one). */
+function storedTextSize(): number {
+  try {
+    const v = Number(localStorage.getItem("sg.textSize"));
+    return v > 0 ? v : 10;
+  } catch {
+    return 10;
+  }
+}
+function storeTextSize(v: number): void {
+  try {
+    localStorage.setItem("sg.textSize", String(v));
+  } catch {
+    /* private window: just this session */
+  }
+}
 
 interface Snap {
   uv: Vec2;
@@ -902,7 +919,7 @@ export class SketchTool implements Tool {
           ui.showPanel({
             title: "Text",
             items: [
-              { type: "number", label: "Size", value: memory.textSize, kind: "length", min: 0.001, onInput: (v) => ((memory.textSize = v), this.refreshPreview()) },
+              { type: "number", label: "Size", value: memory.textSize, kind: "length", min: 0.001, onInput: (v) => ((memory.textSize = v), storeTextSize(v), this.refreshPreview()) },
               // The font: the bundled ones and any imported.
               { type: "choice", label: "Font", list: true, options: FONTS.map((f) => ({ id: f.id, label: f.name })), value: memory.textFont, onChange: (id) => ((memory.textFont = id), this.refreshPreview()) },
               { type: "button", label: "Import font…", icon: "insert", onClick: () => void this.importFontFile() },
@@ -928,6 +945,9 @@ export class SketchTool implements Tool {
         break;
       case "move":
         items.push(
+          // Exact moves (dragging is all a finger can do otherwise).
+          { type: "number", label: "ΔX", value: this.edit.dx, kind: "length", onInput: (v) => ((this.edit.dx = v), this.refreshPreview()) },
+          { type: "number", label: "ΔY", value: this.edit.dy, kind: "length", onInput: (v) => ((this.edit.dy = v), this.refreshPreview()) },
           { type: "number", label: "Rotate", value: this.edit.moveRot, kind: "angle", onInput: (v) => ((this.edit.moveRot = v), this.refreshPreview()) },
           { type: "toggle", label: "Copy", value: this.edit.copy, onChange: (v) => ((this.edit.copy = v), this.updatePanel()) },
           apply(`Apply (${selCount})`, () => this.applyTransform()),
@@ -948,8 +968,10 @@ export class SketchTool implements Tool {
         };
         items.push(
           { type: "number", label: "Count", value: this.edit.count, kind: "int", min: 2, onInput: (v) => ((this.edit.count = v), this.refreshPreview()) },
-          { type: "number", label: "Spacing", value: spacing, kind: "length", onInput: (v) => setPolar(v, dirDeg) },
-          { type: "number", label: "Direction", value: dirDeg, kind: "angle", onInput: (v) => setPolar(Math.hypot(this.edit.dx, this.edit.dy), v) },
+          // Each from the values as they are now (not as when the panel opened:
+          // a spacing typed after the direction used to put the old direction back).
+          { type: "number", label: "Spacing", value: spacing, kind: "length", onInput: (v) => setPolar(v, Math.hypot(this.edit.dx, this.edit.dy) > 1e-12 ? (Math.atan2(this.edit.dy, this.edit.dx) * 180) / Math.PI : (this.patDirDeg ?? dirDeg)) },
+          { type: "number", label: "Direction", value: dirDeg, kind: "angle", onInput: (v) => ((this.patDirDeg = v), setPolar(Math.hypot(this.edit.dx, this.edit.dy), v)) },
           apply(`Apply (${selCount})`, () => this.applyTransform()),
         );
         break;
@@ -1803,7 +1825,10 @@ export class SketchTool implements Tool {
     const screen = (uv: Vec2) => view.toScreen(sketchToWorld(plane, uv));
     const tol = p.tol * 1.4;
 
-    const cands: { p: Vec2; label: string; ref?: PointRef; mid?: string }[] = [{ p: [0, 0], label: "Origin" }];
+    // The origin is a guide point like the others: with them switched off it
+    // must not pull taps either (numbers placed along a ruler near the origin
+    // all jumped onto it — a fingertip's reach is ~20 px on a phone).
+    const cands: { p: Vec2; label: string; ref?: PointRef; mid?: string }[] = s.guidePoints ? [{ p: [0, 0], label: "Origin" }] : [];
     if (s.guidePoints) {
       for (const e of this.entities) {
         // Named points first (they can be constrained), then midpoints etc.
@@ -1849,7 +1874,7 @@ export class SketchTool implements Tool {
     const wpp = view.cam.worldPerPixel(view.height);
     const loci: Locus[] = [];
     if (s.guideLines) {
-      for (const c of cands) {
+      for (const c of s.guidePoints ? cands : [{ p: [0, 0] as Vec2 }]) {
         loci.push({ kind: "line", p: c.p, d: [0, 1], label: "Vertical", guide: c.p, axis: 0 });
         loci.push({ kind: "line", p: c.p, d: [1, 0], label: "Horizontal", guide: c.p, axis: 1 });
       }
@@ -2423,6 +2448,8 @@ export class SketchTool implements Tool {
     this.patGimbal.setCenter(sketchToWorld(plane, c).toArray() as Vec3);
   }
   private patAng = 0;
+  /** The pattern direction typed (kept while the spacing is 0). */
+  private patDirDeg: number | null = null;
 
   private startPatternDrag(p: ToolPointer): boolean {
     const part = this.patGimbal?.hit(p);

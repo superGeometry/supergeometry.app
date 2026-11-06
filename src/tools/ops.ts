@@ -12,7 +12,7 @@ import { FeatureOp } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
 import { axisSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
 import { faceIndexOf, oppositeFace, sourceFrame, sourcesOf, targetOf, type AppContext, type Sel } from "./tool";
-import { arrangement, resolveRegion } from "../sketch/regions";
+import { arrangement, materialRegions, regionRef, resolveRegion } from "../sketch/regions";
 import { DimWidget } from "./annotate";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
 import { DragTyping } from "./dragTyping";
@@ -139,10 +139,26 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
   }
 
   protected items(): PanelItem[] {
+    const src = this.feature.source;
     return [
       this.num("Distance", "distance", "length", { onInput: (v) => this.setDistance(v), inBox: true }),
       modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render()),
+      // Every shape in the sketch at once (a scale, lettering: hundreds of them,
+      // far too many to tap) — holes stay holes.
+      ...(src.kind === "profile" && !this.existing ? [{ type: "button" as const, label: "All shapes", onClick: () => this.allShapes() }] : []),
     ];
+  }
+
+  private allShapes(): void {
+    const src = this.feature.source;
+    if (src.kind !== "profile") return;
+    const regs = materialRegions(arrangement(this.app.sketchCurves(src.sketch)));
+    if (!regs.length) return;
+    this.feature.source = { ...src, regions: regs.map(regionRef) };
+    this.frame = sourceFrame(this.app, this.feature.source);
+    this.app.setSelection(regs.map((r) => ({ kind: "profile" as const, sketch: src.sketch, region: r.index })));
+    this.app.ui.toast(`${regs.length} shapes`);
+    this.onDraftChanged();
   }
 
   protected ready(): boolean {

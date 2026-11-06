@@ -388,3 +388,41 @@ export function closestOnEntity(e: SketchEntity, q: Vec2): { t: number; d: numbe
   });
   return best;
 }
+
+function insidePoly(P: Vec2[], q: Vec2): boolean {
+  let c = false;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) if (P[i][1] > q[1] !== P[j][1] > q[1] && q[0] < ((P[j][0] - P[i][0]) * (q[1] - P[i][1])) / (P[j][1] - P[i][1]) + P[i][0]) c = !c;
+  return c;
+}
+
+/** A point truly inside a region (its centroid may be in a hole: a ring, a "0"). */
+export function pointInRegion(r: Region): Vec2 {
+  const ok = (q: Vec2) => insidePoly(r.outer.poly, q) && !r.holes.some((h) => insidePoly(h.poly, q));
+  if (ok(r.centroid)) return r.centroid;
+  const P = r.outer.poly;
+  for (let i = 0; i < P.length; i++) {
+    const a = P[i];
+    const b = P[(i + 1) % P.length];
+    const d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const m: Vec2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    for (const s of [1e-4 * d, -1e-4 * d, 1e-3, -1e-3]) {
+      const q: Vec2 = [m[0] - ((b[1] - a[1]) / d) * s, m[1] + ((b[0] - a[0]) / d) * s];
+      if (ok(q)) return q;
+    }
+  }
+  return r.centroid;
+}
+
+/**
+ * The regions that are material when the sketch is read the usual way: inside
+ * an even number of other regions' outlines (a "0" is its ring; the island in
+ * its middle is the hole, not a part). Every shape of a scale or a lettering.
+ */
+export function materialRegions(arr: Arrangement): Region[] {
+  return arr.regions.filter((r) => {
+    const q = pointInRegion(r);
+    let depth = 0;
+    for (const o of arr.regions) if (o !== r && insidePoly(o.outer.poly, q)) depth++;
+    return depth % 2 === 0;
+  });
+}
