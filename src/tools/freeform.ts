@@ -4,7 +4,7 @@
 
 import { BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
 import type { Feature, FreeformFeature, PlaneDef, TransformFeature, Vec3 } from "../doc/types";
-import { borderChains, bridgeChains, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, fillHole, holeLoops, isClosed, limitPoints, previewMesh, primitiveCage, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
+import { borderChains, bridgeChains, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, limitPoints, previewMesh, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
 import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
@@ -164,7 +164,16 @@ export class FreeformTool implements Tool {
     const items: PanelItem[] = [];
     if (n) items.push({ type: "number", label: "Scale", value: 1, kind: "number", min: 0.01, onInput: (v) => this.scaleSelection(v) });
     const faces = this.picks.filter((p) => p.kind === "face").length;
+    if (faces && !this.placing) {
+      items.push(
+        { type: "button", label: `Extrude face${faces > 1 ? "s" : ""}`, icon: "extrude", onClick: () => this.extrudeSelected() },
+        { type: "button", label: "Inset", icon: "offset", onClick: () => this.insetSelected() },
+      );
+    }
     if (faces) items.push({ type: "button", label: `Delete face${faces > 1 ? "s" : ""}`, icon: "trash", onClick: () => this.deleteSelectedFaces() });
+    // One edge picked: a new loop of points across the faces it runs through.
+    const edges = this.picks.filter((p) => p.kind === "edge");
+    if (edges.length === 1 && !faces && !this.placing) items.push({ type: "button", label: "Add edge loop", icon: "splitLine", onClick: () => this.addEdgeLoop(edges[0].e) });
     // Rim edges of holes picked: one hole → Fill, two facing holes → Bridge.
     // (Not while the whole shape is being placed: then every point is picked.)
     const loops = this.placing ? [] : this.pickedLoops();
@@ -186,7 +195,11 @@ export class FreeformTool implements Tool {
     this.app.ui.showPanel({
       title: `Freeform${n ? ` · ${n} point${n > 1 ? "s" : ""}` : ""}`,
       items,
-      actions: [{ id: "all", label: "Select all", icon: "pointer", run: () => ((this.picks = this.cage.verts.map((_, i) => ({ kind: "vert" as const, i }))), this.selectionChanged()) }],
+      actions: [
+        { id: "all", label: "Select all", icon: "pointer", run: () => ((this.picks = this.cage.verts.map((_, i) => ({ kind: "vert" as const, i }))), this.selectionChanged()) },
+        // Twice as many cage points everywhere, same shape (for finer shaping).
+        { id: "refine", label: "Add detail", icon: "patternLinear", run: () => this.addDetail() },
+      ],
       onDone: () => this.done(),
       onCancel: () => this.cancel(),
     });
@@ -224,6 +237,56 @@ export class FreeformTool implements Tool {
     this.rebuild();
     this.selectionChanged();
     this.panelHint();
+  }
+
+  /** A cage change: the new cage, what's picked after it, and a fresh preview. */
+  private changeCage(next: Cage, picks: Pick[]): void {
+    this.cage = next;
+    this.picks = picks;
+    this.rebuild();
+    this.selectionChanged();
+    this.panelHint();
+  }
+
+  /** Typical cage edge length (for default sizes). */
+  private edgeSize(): number {
+    const es = cageEdges(this.cage);
+    const t = es.reduce((s, [a, b]) => s + len(sub(this.cage.verts[a], this.cage.verts[b])), 0);
+    return t / Math.max(1, es.length);
+  }
+
+  private pickedFaces(): number[] {
+    return this.picks.flatMap((p) => (p.kind === "face" ? [p.f] : []));
+  }
+
+  /** The picked faces lift out a little, with new side faces; they stay picked to drag further. */
+  private extrudeSelected(): void {
+    const out = extrudeFaces(this.cage, this.pickedFaces(), this.edgeSize() * 0.4);
+    if (!out) return;
+    this.changeCage(out.cage, out.faces.map((f) => ({ kind: "face" as const, f })));
+    this.app.ui.toast("Extruded — drag the gimbal to pull the faces further (or push them in)");
+  }
+
+  /** A smaller face inside each picked one (ringed by new faces), picked to shape on its own. */
+  private insetSelected(): void {
+    const out = insetFaces(this.cage, this.pickedFaces(), 0.3);
+    if (!out) return;
+    this.changeCage(out.cage, out.faces.map((f) => ({ kind: "face" as const, f })));
+  }
+
+  /** A new loop of points across every face the edge's ring runs through; the new points get picked. */
+  private addEdgeLoop(e: [number, number]): void {
+    const before = this.cage.verts.length;
+    const next = insertEdgeLoop(this.cage, e[0], e[1]);
+    if (!next) return this.app.ui.toast("No clean loop runs through this edge (its ring of faces crosses itself) — try a neighbouring edge");
+    this.changeCage(next, next.verts.slice(before).map((_, k) => ({ kind: "vert" as const, i: before + k })));
+    this.app.ui.toast("Edge loop added — its new points are picked (drag or scale them)");
+  }
+
+  /** The whole cage twice as fine: the shape doesn't change, there's just more to pull. */
+  private addDetail(): void {
+    if (this.cage.faces.length > 600) return this.app.ui.toast("The cage is fine enough already (it would get slow)");
+    this.changeCage(refineCage(this.cage), []);
   }
 
   private deleteSelectedFaces(): void {
@@ -585,7 +648,30 @@ export class FreeformTool implements Tool {
 
   // --------------------------------------------------------------- drawing
 
+  private crossing = false;
+  private crossTimer = 0;
+  private crossAt = 0;
+
+  /** Does the shape pass through itself? Red surface + a hint if so (kept cheap while dragging). */
+  private checkCrossing(): void {
+    const run = () => {
+      this.crossAt = performance.now();
+      this.crossTimer = 0;
+      const was = this.crossing;
+      this.crossing = selfCrossings(this.cage, this.cage.faces.length > 150 ? 1 : 2, 1).length > 0;
+      (this.surface.material as MeshStandardMaterial).color.setHex(this.crossing ? 0xe06c6c : 0xb9c6dc);
+      if (this.crossing !== was) {
+        if (this.crossing) this.app.ui.setHint("The shape passes through itself here — pull the point back (it can't become a body like this).");
+        else this.hint();
+      }
+      this.app.view.requestRender();
+    };
+    if (performance.now() - this.crossAt > 150) return run();
+    if (!this.crossTimer) this.crossTimer = window.setTimeout(run, 150);
+  }
+
   private rebuild(): void {
+    this.checkCrossing();
     // The same smooth surface the body will have (points on the limit surface).
     const sub3 = subdivide(this.cage, 3);
     const m = previewMesh({ ...sub3, points: limitPoints(sub3) });
@@ -643,6 +729,10 @@ export class FreeformTool implements Tool {
 
   /** Save and close; returns the body id. */
   private done(): string | null {
+    if (selfCrossings(this.cage, 2, 1).length) {
+      this.app.ui.toast("The shape passes through itself (shown red) — pull the point back first", "error");
+      return null;
+    }
     // Stored where it was made: later move steps in History still apply on top.
     const cage = { faces: structuredClone(this.cage.faces), verts: this.cage.verts.map(this.place.inv) };
     const open = !isClosed(cage);

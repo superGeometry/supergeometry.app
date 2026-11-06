@@ -577,3 +577,288 @@ export function borderEdgeMids(cage: Cage): { e: [number, number]; at: Vec3 }[] 
 }
 
 export { ekey as cageEdgeKey };
+
+// ------------------------------------------------------ self-crossing
+
+/**
+ * Does the smooth surface pass through itself (a cage point pulled through the
+ * body, a face folded over)? Checked on a lighter subdivision: triangles that
+ * share no point must not cross. Returns the crossing spots (empty: clean).
+ */
+export function selfCrossings(cage: Cage, levels = 2, most = 24): Vec3[] {
+  if (!cage.faces.length) return [];
+  const s = subdivide(cage, levels);
+  const P = limitPoints(s);
+  const tris: [number, number, number][] = [];
+  for (const g of s.grids)
+    for (let i = 0; i < s.n; i++)
+      for (let j = 0; j < s.n; j++) {
+        const a = g[i][j];
+        const b = g[i + 1][j];
+        const c = g[i + 1][j + 1];
+        const d = g[i][j + 1];
+        tris.push([a, b, c], [a, c, d]);
+      }
+  // Bucket triangles by the cells their boxes touch.
+  let edge = 0;
+  for (const t of tris) edge += dist(P[t[0]], P[t[1]]);
+  const cell = Math.max(1e-9, (edge / tris.length) * 2);
+  const grid = new Map<string, number[]>();
+  const box = tris.map((t) => {
+    const lo = [0, 1, 2].map((k) => Math.min(P[t[0]][k], P[t[1]][k], P[t[2]][k]));
+    const hi = [0, 1, 2].map((k) => Math.max(P[t[0]][k], P[t[1]][k], P[t[2]][k]));
+    return { lo, hi };
+  });
+  box.forEach(({ lo, hi }, ti) => {
+    const a = lo.map((v) => Math.floor(v / cell));
+    const b = hi.map((v) => Math.floor(v / cell));
+    // A huge triangle (a point pulled far away) would fill many cells: cap it.
+    if ((b[0] - a[0] + 1) * (b[1] - a[1] + 1) * (b[2] - a[2] + 1) > 4096) {
+      const k = "big";
+      grid.set(k, [...(grid.get(k) ?? []), ti]);
+      return;
+    }
+    for (let x = a[0]; x <= b[0]; x++) for (let y = a[1]; y <= b[1]; y++) for (let z = a[2]; z <= b[2]; z++) {
+      const k = `${x},${y},${z}`;
+      const l = grid.get(k);
+      if (l) l.push(ti);
+      else grid.set(k, [ti]);
+    }
+  });
+  const big = grid.get("big") ?? [];
+  const tested = new Set<number>();
+  const out: Vec3[] = [];
+  const pair = (i: number, j: number) => {
+    if (i === j) return;
+    const key = i < j ? i * tris.length + j : j * tris.length + i;
+    if (tested.has(key)) return;
+    tested.add(key);
+    const A = tris[i];
+    const B = tris[j];
+    if (A.some((v) => B.includes(v))) return;
+    const ba = box[i];
+    const bb = box[j];
+    for (let k = 0; k < 3; k++) if (ba.hi[k] < bb.lo[k] || bb.hi[k] < ba.lo[k]) return;
+    const hit = trisCross(A.map((v) => P[v]) as [Vec3, Vec3, Vec3], B.map((v) => P[v]) as [Vec3, Vec3, Vec3]);
+    if (hit) out.push(hit);
+  };
+  for (const [k, l] of grid) {
+    if (k === "big") continue;
+    for (let a = 0; a < l.length && out.length < most; a++) for (let b = a + 1; b < l.length; b++) pair(l[a], l[b]);
+  }
+  for (const i of big) for (let j = 0; j < tris.length && out.length < most; j++) pair(i, j);
+  return out;
+}
+
+const dist = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+/** Where two triangles cross (an edge of one through the inside of the other), or null. */
+function trisCross(A: [Vec3, Vec3, Vec3], B: [Vec3, Vec3, Vec3]): Vec3 | null {
+  for (const [T, U] of [[A, B], [B, A]] as const)
+    for (let k = 0; k < 3; k++) {
+      const h = segTri(T[k], T[(k + 1) % 3], U);
+      if (h) return h;
+    }
+  return null;
+}
+
+/** Segment pq through the inside of triangle t (Möller–Trumbore, strictly inside). */
+function segTri(p: Vec3, q: Vec3, t: [Vec3, Vec3, Vec3]): Vec3 | null {
+  const e1 = sub3(t[1], t[0]);
+  const e2 = sub3(t[2], t[0]);
+  const d = sub3(q, p);
+  const h = cross3(d, e2);
+  const a = dot3(e1, h);
+  const scaleA = Math.hypot(...e1) * Math.hypot(...e2) * Math.hypot(...d);
+  if (Math.abs(a) < 1e-12 * scaleA) return null;
+  const f = 1 / a;
+  const s = sub3(p, t[0]);
+  const u = f * dot3(s, h);
+  const eps = 1e-6;
+  if (u < eps || u > 1 - eps) return null;
+  const qv = cross3(s, e1);
+  const v = f * dot3(d, qv);
+  if (v < eps || u + v > 1 - eps) return null;
+  const w = f * dot3(e2, qv);
+  if (w < eps || w > 1 - eps) return null;
+  return [p[0] + d[0] * w, p[1] + d[1] * w, p[2] + d[2] * w];
+}
+
+const sub3 = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+// ------------------------------------------------- adding cage detail
+
+type Quad = Cage["faces"][number];
+
+/** Faces using each edge. */
+function edgeFaceMap(cage: Cage): Map<string, number[]> {
+  const m = new Map<string, number[]>();
+  cage.faces.forEach((f, i) => {
+    for (let k = 0; k < 4; k++) {
+      const key = ekey(f[k], f[(k + 1) % 4]);
+      const l = m.get(key);
+      if (l) l.push(i);
+      else m.set(key, [i]);
+    }
+  });
+  return m;
+}
+
+/**
+ * Add an edge loop: every face in the ring of quads that crosses edge a–b is
+ * cut in two, with a new point on each edge it crosses (at `t` along it, from
+ * the side `a` is on). The loop runs round the shape, or from border to border.
+ * Returns null where the ring can't be followed cleanly (it comes back across
+ * a face it already cut the other way).
+ */
+export function insertEdgeLoop(cage: Cage, a: number, b: number, t = 0.5): Cage | null {
+  const efs = edgeFaceMap(cage);
+  if (!efs.has(ekey(a, b))) return null;
+  // Walk across faces: each step enters a face over one edge and leaves over the opposite one.
+  // Crossed edges, each as [vertex on the a side, vertex on the b side].
+  type Step = { face: number; enter: [number, number]; leave: [number, number] };
+  const walk = (from: [number, number], face: number): { steps: Step[]; closed: boolean } | null => {
+    const steps: Step[] = [];
+    const seen = new Set<number>();
+    let edge = from;
+    let f = face;
+    for (;;) {
+      if (seen.has(f)) return null;
+      seen.add(f);
+      const q = cage.faces[f];
+      const ia = q.indexOf(edge[0]);
+      const ib = q.indexOf(edge[1]);
+      if (ia < 0 || ib < 0) return null;
+      // The opposite edge: a's neighbour away from b, and b's away from a.
+      const na = (ia + 2) % 4 === ib ? -1 : ib === (ia + 1) % 4 ? (ia + 3) % 4 : (ia + 1) % 4;
+      const nb = ib === (ia + 1) % 4 ? (ib + 1) % 4 : (ib + 3) % 4;
+      if (na < 0) return null;
+      const leave: [number, number] = [q[na], q[nb]];
+      steps.push({ face: f, enter: edge, leave });
+      const next = (efs.get(ekey(leave[0], leave[1])) ?? []).filter((x) => x !== f);
+      if (!next.length) return { steps, closed: false };
+      if (next[0] === face) return { steps, closed: true };
+      edge = leave;
+      f = next[0];
+    }
+  };
+  const [f0, f1] = efs.get(ekey(a, b))!;
+  const fwd = walk([a, b], f0);
+  if (!fwd) return null;
+  let steps = fwd.steps;
+  if (!fwd.closed && f1 !== undefined) {
+    // From border to border: also walk the other way from the picked edge.
+    const back = walk([a, b], f1);
+    if (!back || back.closed) return null;
+    const used = new Set(steps.map((s) => s.face));
+    if (back.steps.some((s) => used.has(s.face))) return null;
+    steps = [...back.steps.reverse(), ...steps];
+  }
+  const verts = [...cage.verts];
+  const mids = new Map<string, number>();
+  const mid = ([p, q]: [number, number]): number => {
+    const key = ekey(p, q);
+    const had = mids.get(key);
+    if (had !== undefined) return had;
+    const P = cage.verts[p];
+    const Q = cage.verts[q];
+    const i = verts.push([P[0] + (Q[0] - P[0]) * t, P[1] + (Q[1] - P[1]) * t, P[2] + (Q[2] - P[2]) * t]) - 1;
+    mids.set(key, i);
+    return i;
+  };
+  const cut = new Map<number, Quad[]>();
+  for (const s of steps) {
+    const q = cage.faces[s.face];
+    // Turn the face so its first edge is the one entered by.
+    let r = 0;
+    while (!(new Set([q[r], q[(r + 1) % 4]]).has(s.enter[0]) && new Set([q[r], q[(r + 1) % 4]]).has(s.enter[1]))) r++;
+    const f: Quad = [q[r], q[(r + 1) % 4], q[(r + 2) % 4], q[(r + 3) % 4]];
+    const m1 = mid(s.enter);
+    const m2 = mid(s.leave);
+    cut.set(s.face, [
+      [f[0], m1, m2, f[3]],
+      [m1, f[1], f[2], m2],
+    ]);
+  }
+  const faces: Quad[] = cage.faces.flatMap((f, i) => cut.get(i) ?? [f]);
+  return { verts, faces };
+}
+
+/** Outward normal of a face (from its winding; the cage's faces face out). */
+function faceNormal(cage: Cage, f: Quad): Vec3 {
+  const [p, q, r, s] = f.map((i) => cage.verts[i]);
+  const u = sub3(r, p);
+  const v = sub3(s, q);
+  const n = cross3(u, v);
+  const l = Math.hypot(...n) || 1;
+  return [n[0] / l, n[1] / l, n[2] / l];
+}
+
+/**
+ * Extrude faces: the picked faces lift off by `dist` along their normals (a
+ * patch of them moves together) and a wall of new faces joins them to where
+ * they were. Returns the new cage and the indices of the moved faces.
+ */
+export function extrudeFaces(cage: Cage, faces: number[], dist: number): { cage: Cage; faces: number[] } | null {
+  const sel = new Set(faces.filter((i) => i >= 0 && i < cage.faces.length));
+  if (!sel.size) return null;
+  // Normals averaged at each point of the patch.
+  const nAt = new Map<number, Vec3>();
+  for (const i of sel) {
+    const n = faceNormal(cage, cage.faces[i]);
+    for (const v of cage.faces[i]) nAt.set(v, add3(nAt.get(v) ?? [0, 0, 0], n));
+  }
+  const verts = [...cage.verts];
+  const copy = new Map<number, number>();
+  for (const [v, n] of nAt) {
+    const l = Math.hypot(...n) || 1;
+    copy.set(v, verts.push(add3(cage.verts[v], mul3(n, dist / l))) - 1);
+  }
+  // Edges on the rim of the patch (one picked face uses them), as that face winds them.
+  const count = new Map<string, number>();
+  for (const i of sel) for (let k = 0; k < 4; k++) count.set(ekey(cage.faces[i][k], cage.faces[i][(k + 1) % 4]), (count.get(ekey(cage.faces[i][k], cage.faces[i][(k + 1) % 4])) ?? 0) + 1);
+  const walls: Quad[] = [];
+  for (const i of sel) {
+    const f = cage.faces[i];
+    for (let k = 0; k < 4; k++) {
+      const a = f[k];
+      const b = f[(k + 1) % 4];
+      if (count.get(ekey(a, b)) === 1) walls.push([a, b, copy.get(b)!, copy.get(a)!]);
+    }
+  }
+  const moved = cage.faces.map((f, i) => (sel.has(i) ? (f.map((v) => copy.get(v)!) as Quad) : f));
+  // A border of an open sheet inside the patch: its old points are left with nothing — drop them.
+  const out = compact({ verts, faces: [...moved, ...walls] });
+  // compact keeps faces in order: the moved ones keep their indices.
+  return { cage: out, faces: [...sel] };
+}
+
+/**
+ * Inset faces: inside each picked face (or patch of them) a smaller copy, `f`
+ * of the way in towards its middle, ringed by new faces — a place to pull out
+ * a detail without dragging the rest. Returns the cage and the inner faces.
+ */
+export function insetFaces(cage: Cage, faces: number[], f = 0.3): { cage: Cage; faces: number[] } | null {
+  const ex = extrudeFaces(cage, faces, 0);
+  if (!ex) return null;
+  const c = ex.cage;
+  // Each new inner point moves towards the middle of the picked faces it belongs to.
+  const centre = new Map<number, { s: Vec3; n: number }>();
+  for (const i of ex.faces) {
+    const q = c.faces[i];
+    const m = mul3(q.reduce((s, v) => add3(s, c.verts[v]), [0, 0, 0] as Vec3), 0.25);
+    for (const v of q) {
+      const e = centre.get(v) ?? { s: [0, 0, 0] as Vec3, n: 0 };
+      centre.set(v, { s: add3(e.s, m), n: e.n + 1 });
+    }
+  }
+  const verts = c.verts.map((p, v) => {
+    const e = centre.get(v);
+    if (!e) return p;
+    const m = mul3(e.s, 1 / e.n);
+    return add3(p, mul3(sub3(m, p), f));
+  });
+  return { cage: { verts, faces: c.faces }, faces: ex.faces };
+}

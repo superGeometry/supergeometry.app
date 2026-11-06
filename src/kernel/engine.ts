@@ -47,7 +47,7 @@ import type {
 import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "../geom";
 import { projectPolyline } from "../sketch/edit";
 import { cageToShape } from "./freeform";
-import { deleteFaces, subdivide } from "../freeform/cage";
+import { deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
 import { deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, unify } from "./faceEdit";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
@@ -168,7 +168,10 @@ async function run(features: Feature[]) {
           if (GUARDED.has(f.type)) {
             for (const [id, after] of [...out.bodies]) {
               const before = ctx.bodies.get(id);
-              if (after === before || out.freeforms.has(id) || ctx.freeforms.has(id)) continue;
+              if (after === before) continue;
+              // A freeform left as an open surface (a sheet) isn't a solid to check; a solid
+              // freeform is — its edits are checked like any body's.
+              if (before && (out.freeforms.has(id) || ctx.freeforms.has(id)) && !subShapes(before, "SOLID").length) continue;
               // Offsetting a face of the body itself is a face move: it doesn't split it either.
               const inPlace = f.type === "extrude" && f.source.kind === "face" && f.mode !== "new" && f.target === f.source.face.body;
               const kept = guardEdit(before, after, !NO_SPLIT.has(f.type) && !inPlace);
@@ -568,7 +571,28 @@ function freeformShape(f: Extract<Feature, { type: "freeform" }>, m: Affine): Sh
   const cage = { faces: f.cage.faces, verts: f.cage.verts.map((v) => applyAffine(m, v)) };
   const det = Math.abs(m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8]));
   const thicken = f.thickness ? { thickness: f.thickness * Math.cbrt(det || 1), side: f.thickSide ?? "up" } : undefined;
-  return cageToShape(cage, 3, thicken);
+  return checkedFreeform(cage, thicken);
+}
+
+/**
+ * A freeform's body, only if it's a clean one: a surface that passes through
+ * itself (a cage point pulled through the body) or collapses (points on top
+ * of each other) would make a solid every later edit trips over.
+ */
+function checkedFreeform(cage: { verts: Vec3[]; faces: [number, number, number, number][] }, thicken?: { thickness: number; side: "up" | "down" | "both" }): Shape3D {
+  if (selfCrossings(cage, 2, 1).length) throw new Error("This freeform passes through itself (a cage point pulled through the body, or faces folded over) — pull it back; it shows red while you edit it");
+  let shape: Shape3D;
+  try {
+    shape = cageToShape(cage, 3, thicken);
+  } catch (e) {
+    if (thicken) throw new Error("That thickness doesn't fit this surface (it folds into itself) — try a thinner one, or the other side");
+    throw e;
+  }
+  const closed = isClosed(cage) || !!thicken;
+  const degenerate = "This freeform has collapsed somewhere (cage points on top of each other, or a face squashed flat) — move those points apart";
+  if (!shapeValid(shape)) throw new Error(thicken ? "That thickness doesn't fit this surface (it folds into itself) — try a thinner one, or the other side" : degenerate);
+  if (closed && (subShapes(shape, "SOLID").length !== 1 || !(measureVolume(shape) > 0))) throw new Error(degenerate);
+  return shape;
 }
 
 /**
