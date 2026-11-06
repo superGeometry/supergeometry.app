@@ -11,8 +11,8 @@ import type { ToolPointer } from "../view/input";
 import { FeatureOp } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
 import { axisSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
-import { faceIndexOf, oppositeFace, sourceFrame, sourcesOf, targetOf, type AppContext, type Sel } from "./tool";
-import { arrangement, drawnRegions, regionRef, resolveRegion } from "../sketch/regions";
+import { faceIndexOf, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
+import { arrangement, drawnRegions, regionRef } from "../sketch/regions";
 import { DimWidget } from "./annotate";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
 import { DragTyping } from "./dragTyping";
@@ -160,6 +160,13 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
       // Every shape in the sketch at once (a scale, lettering: hundreds of them,
       // far too many to tap) — holes stay holes.
       ...(src.kind === "profile" && !this.existing ? [{ type: "button" as const, label: "All shapes", onClick: () => this.allShapes() }] : []),
+      // A tap on a shape opens Extrude: the same shapes can be turned or swept instead.
+      ...(!this.existing
+        ? [
+            { type: "button" as const, label: "Revolve instead", onClick: () => this.app.setTool(new RevolveOp(this.app, this.feature.source)) },
+            { type: "button" as const, label: "Sweep instead", onClick: () => this.app.setTool(new SweepOp(this.app, this.feature.source)) },
+          ]
+        : []),
       // Lean the sides in towards a smaller end (a spire, a pyramid) — no angle to work out.
       {
         type: "slider" as const,
@@ -215,29 +222,12 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
    * profile — tapped again, it leaves. So several regions go up together.
    */
   tap(p: ToolPointer): void {
-    const src = this.feature.source;
-    if (src.kind === "profile" && this.feature.distance === 0 && !this.existing) {
-      const hit = this.app.view.pick(p.x, p.y, { edgeTolPx: p.tol, profiles: true, planes: false, axes: false, vertices: false });
-      if (hit?.kind === "profile" && hit.sketch === src.sketch) {
-        // The regions it has now (the selection is cleared when Extrude opens).
-        const arr = arrangement(this.app.sketchCurves(src.sketch));
-        const have = src.regions.map((ref) => resolveRegion(arr, ref)).map((r) => (r ? arr.regions.indexOf(r) : -1)).filter((k) => k >= 0);
-        const sel = have.map((region) => ({ kind: "profile" as const, sketch: src.sketch, region }));
-        const i = sel.findIndex((s) => s.region === hit.region);
-        const next = i >= 0 ? sel.filter((_, j) => j !== i) : [...sel, { kind: "profile" as const, sketch: hit.sketch, region: hit.region }];
-        if (!next.length) return void this.app.setTool(null);
-        this.app.setSelection(next);
-        const made = sourcesOf(this.app, next)[0];
-        if (made) {
-          this.feature.source = made;
-          this.frame = sourceFrame(this.app, made);
-          this.app.ui.toast(`${next.length} region${next.length > 1 ? "s" : ""} selected`);
-          this.onDraftChanged();
-        }
-        return;
-      }
-    }
+    if (this.feature.distance === 0 && this.regionTap(p)) return;
     super.tap(p);
+  }
+
+  protected regionsChanged(): void {
+    this.frame = sourceFrame(this.app, this.feature.source);
   }
 
   down(p: ToolPointer): boolean {
@@ -492,6 +482,7 @@ export class RevolveOp extends FeatureOp<RevolveFeature> {
   constructor(app: AppContext, source: ExtrudeSource, existing?: RevolveFeature) {
     super(app, { ...app.store.newIdentity("revolve"), type: "revolve", source, axis: { origin: [0, 0, 0], dir: [0, 0, 1] }, angle: 360, mode: "auto", target: targetOf(app, source) }, existing);
     this.axisSet = !!existing;
+    this.moreRegions = true;
     this.slots = [axisSlot(app, "Axis", () => (this.axisSet ? this.feature.axis : null), (a) => ((this.feature.axis = a), (this.axisSet = true)))];
   }
 
@@ -609,6 +600,7 @@ export class SweepOp extends FeatureOp<SweepFeature> {
   constructor(app: AppContext, source: ExtrudeSource, existing?: SweepFeature) {
     super(app, { ...app.store.newIdentity("sweep"), type: "sweep", source, path: { kind: "sketch", sketch: "", entities: [] }, mode: "auto", target: targetOf(app, source) }, existing);
     if (existing) this.path = existing.path;
+    this.moreRegions = true;
     this.slots = [pathSlot(app, () => this.path, (p) => ((this.path = p), (this.feature.path = p)))];
   }
 

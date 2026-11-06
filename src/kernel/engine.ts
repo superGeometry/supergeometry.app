@@ -391,6 +391,26 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "boolean": {
       let target = need(bodies, f.target);
+      const solidsIn = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;
+      // Subtract: every tool at once — joined, then one tolerant cut checked by
+      // its volume. Cut one by one, eight vents round a lamp shade left it with
+      // no solid after the sixth, and the message blamed an "open surface".
+      if (f.op === "subtract" && f.tools.length) {
+        const tools = f.tools.map((t) => need(bodies, t));
+        if (!solidsIn(target) || tools.some((t) => !solidsIn(t)))
+          throw new Error("One of these is an open surface (e.g. a freeform with a hole), not a solid. Close it first: tap an edge of the hole → Fill hole, or give it a Thickness — then Union.");
+        const all = fuseAll(tools.map((t) => t.clone()));
+        let out = fuzzyBoolean("cut", target, all);
+        if (!solidsIn(out) || !booleanVolumeOk("cut", target, all, out)) {
+          const plain = target.cut(all);
+          if (solidsIn(plain) && booleanVolumeOk("cut", target, all, plain)) out = plain;
+          else if (isEmpty(out) && isEmpty(plain)) throw new Error("The result is empty");
+          else throw new Error("Subtracting these didn't work out — the geometry engine lost the shape. Try the tools one or two at a time");
+        }
+        for (const t of f.tools) bodies.delete(t);
+        bodies.set(f.target, out);
+        return;
+      }
       for (const t of f.tools) {
         const tool = need(bodies, t);
         const solids = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;

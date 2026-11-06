@@ -1,7 +1,9 @@
 // Reusable pick slots: axis, plane, direction, path, faces, profiles.
 
 import type { AxisRef, EdgeRef, ExtrudeSource, FaceRef, PathRef, PlaneDef, SketchFeature, Vec3 } from "../doc/types";
-import { norm, sub, toWorld } from "../geom";
+import { cross, dot, len, norm, scale, sub, add, toPlane, toWorld } from "../geom";
+import { closestOnPrim, entityPrims } from "../sketch/curves";
+import { explode } from "../sketch/edit";
 import { arrangement, regionRef } from "../sketch/regions";
 import { Vector3 } from "three";
 import type { Slot } from "./featureOp";
@@ -28,15 +30,34 @@ export function axisSlot(app: AppContext, label: string, get: () => AxisRef | nu
         const s = app.store.find<SketchFeature>(hit.sketch);
         const e = s?.entities.find((x) => x.id === hit.entity);
         const plane = app.sketchPlane(hit.sketch);
-        if (!s || !plane || e?.kind !== "line") return false;
-        const a = toWorld(plane, e.a);
-        set({ origin: a, dir: norm(sub(toWorld(plane, e.b), a)), ref: { kind: "sketchLine", sketch: s.id, entity: e.id } });
-        name = "Sketch line";
+        if (!s || !plane || !e) return false;
+        if (e.kind === "line") {
+          const a = toWorld(plane, e.a);
+          set({ origin: a, dir: norm(sub(toWorld(plane, e.b), a)), ref: { kind: "sketchLine", sketch: s.id, entity: e.id } });
+          name = "Sketch line";
+        } else if ((e.kind === "rect" || e.kind === "polygon" || e.kind === "polyline") && hit.point) {
+          // The side of a shape that was tapped (a profile drawn against the axis).
+          const at = toPlane(plane, hit.point);
+          const side = explode(e).reduce((m, x) => (closestOnPrim(entityPrims(x)[0], at).d < closestOnPrim(entityPrims(m)[0], at).d ? x : m));
+          if (side.kind !== "line") return false;
+          const a = toWorld(plane, side.a);
+          set({ origin: a, dir: norm(sub(toWorld(plane, side.b), a)) });
+          name = "Side of the shape";
+        } else return false;
       } else if (hit.kind === "edge") {
         const info = app.view.body(hit.body)?.edges[hit.edge];
-        if (!info || info.type !== "LINE") return false;
-        set({ origin: info.start, dir: info.dir });
-        name = "Edge";
+        if (!info) return false;
+        if (info.type === "LINE") {
+          set({ origin: info.start, dir: info.dir });
+          name = "Edge";
+        } else if (info.type === "CIRCLE") {
+          // A round edge: the line through its centre, square to it — what a
+          // circular pattern round a lamp shade or a flange turns about.
+          const ax = circleAxis(info.start, info.mid, info.end, info.dir);
+          if (!ax) return false;
+          set(ax);
+          name = "Centre of round edge";
+        } else return false;
       } else if (hit.kind === "axis") {
         const ax = app.view.axisOf(hit.id);
         if (!ax) return false;
@@ -146,7 +167,15 @@ export function pathSlot(app: AppContext, get: () => PathRef | null, set: (p: Pa
         if (p?.kind === "sketch" && p.sketch === hit.sketch) {
           const has = p.entities.includes(hit.entity);
           set({ ...p, entities: has ? p.entities.filter((e) => e !== hit.entity) : [...p.entities, hit.entity] });
-        } else set({ kind: "sketch", sketch: hit.sketch, entities: [hit.entity] });
+        } else {
+          // The first tap takes the whole run the curve is part of (a stem
+          // drawn as line, arc, line: one tap, not three — the short pieces
+          // are hard to hit with a finger). Tapping a piece again drops it.
+          const ents = app.store.find<SketchFeature>(hit.sketch)?.entities ?? [];
+          const run = chainThrough(ents, hit.entity);
+          set({ kind: "sketch", sketch: hit.sketch, entities: run });
+          if (run.length > 1) app.ui.toast(`${run.length} joined curves — tap one to leave it out`);
+        }
         return true;
       }
       if (hit.kind === "edge") {
@@ -275,4 +304,65 @@ export function pointSlot(app: AppContext, label: string, get: () => Vec3 | null
       return true;
     },
   };
+}
+
+type Ent = SketchFeature["entities"][number];
+
+/** The two ends of an open curve (null for closed shapes). */
+function endsOf(e: Ent): [[number, number], [number, number]] | null {
+  if (e.kind === "line" || e.kind === "arc") return [e.a as [number, number], e.b as [number, number]];
+  if (e.kind === "spline" && !e.closed && e.points.length > 1) return [e.points[0] as [number, number], e.points[e.points.length - 1] as [number, number]];
+  if (e.kind === "polyline" && !e.closed && e.points.length > 1) return [e.points[0] as [number, number], e.points[e.points.length - 1] as [number, number]];
+  return null;
+}
+
+/**
+ * The curves joined end to end with `id`, in order along the run — stopping
+ * where three or more curves meet (a branch: which way would it go?).
+ */
+export function chainThrough(entities: Ent[], id: string): string[] {
+  const open = entities.filter((e) => !e.construction && endsOf(e));
+  const key = (p: [number, number]) => `${Math.round(p[0] * 1e4)},${Math.round(p[1] * 1e4)}`;
+  const at = new Map<string, string[]>();
+  for (const e of open) for (const p of endsOf(e)!) at.set(key(p), [...(at.get(key(p)) ?? []), e.id]);
+  const byId = new Map(open.map((e) => [e.id, e]));
+  if (!byId.has(id)) return [id];
+  const used = new Set([id]);
+  const walk = (from: [number, number]): string[] => {
+    const out: string[] = [];
+    let p = from;
+    for (;;) {
+      const there = at.get(key(p)) ?? [];
+      if (there.length !== 2) break;
+      const next = there.find((x) => !used.has(x));
+      if (!next) break;
+      used.add(next);
+      out.push(next);
+      const [a, b] = endsOf(byId.get(next)!)!;
+      p = key(a) === key(p) ? b : a;
+    }
+    return out;
+  };
+  const [a, b] = endsOf(byId.get(id)!)!;
+  const back = walk(a);
+  const ahead = walk(b);
+  return [...back.reverse(), id, ...ahead];
+}
+
+/** The axis of a circle or arc through three of its points (`tangent` at `mid`, for a full circle). */
+export function circleAxis(start: Vec3, mid: Vec3, end: Vec3, tangent: Vec3): AxisRef | null {
+  const full = len(sub(start, end)) < 1e-6;
+  if (full) {
+    const c = scale(add(start, mid), 0.5);
+    const n = cross(sub(mid, c), tangent);
+    return len(n) < 1e-12 ? null : { origin: c, dir: norm(n) };
+  }
+  // Circumcentre of start, mid, end.
+  const a = sub(start, mid);
+  const b = sub(end, mid);
+  const n = cross(a, b);
+  const nn = dot(n, n);
+  if (nn < 1e-18) return null;
+  const c = add(mid, scale(add(scale(cross(n, a), dot(b, b)), scale(cross(b, n), dot(a, a))), 1 / (2 * nn)));
+  return { origin: c, dir: norm(n) };
 }

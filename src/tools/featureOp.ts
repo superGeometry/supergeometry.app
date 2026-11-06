@@ -3,7 +3,7 @@ import type { ExtrudeSource, Feature, SketchFeature } from "../doc/types";
 import type { FieldKind, PanelItem, ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import type { PickHit, PickOptions } from "../view/viewport";
-import { hitToSel, type AppContext, type Sel, type Tool } from "./tool";
+import { hitToSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
 import { arrangement, drawnRegions, resolveRegion } from "../sketch/regions";
 
 /** Something the user has to point at (an axis, a path, faces to remove, …). */
@@ -102,10 +102,48 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
   /** What hover highlighted: a tap at the same spot takes exactly that. */
   private lastHover: { x: number; y: number; hit: PickHit | null } | null = null;
 
+  /** Tools turning / sweeping a sketch profile: tapping another shape of it adds it (or takes it out). */
+  protected moreRegions = false;
+
+  /**
+   * Another region of the profile's sketch tapped (on a phone a tapped region
+   * opens the tool straight away): it joins the profile — tapped again, it
+   * leaves. So several regions go together. True when the tap was used.
+   */
+  protected regionTap(p: ToolPointer): boolean {
+    const f = this.feature as unknown as { source?: ExtrudeSource };
+    const src = f.source;
+    if (src?.kind !== "profile" || this.existing) return false;
+    const hit = this.app.view.pick(p.x, p.y, { edgeTolPx: p.tol, profiles: true, planes: false, axes: false, vertices: false });
+    if (hit?.kind !== "profile" || hit.sketch !== src.sketch) return false;
+    const arr = arrangement(this.app.sketchCurves(src.sketch));
+    const have = src.regions.map((ref) => resolveRegion(arr, ref)).map((r) => (r ? arr.regions.indexOf(r) : -1)).filter((k) => k >= 0);
+    const sel = have.map((region) => ({ kind: "profile" as const, sketch: src.sketch, region }));
+    const i = sel.findIndex((s) => s.region === hit.region);
+    const next = i >= 0 ? sel.filter((_, j) => j !== i) : [...sel, { kind: "profile" as const, sketch: hit.sketch, region: hit.region }];
+    if (!next.length) {
+      this.app.setTool(null);
+      return true;
+    }
+    const made = sourcesOf(this.app, next)[0];
+    if (!made) return false;
+    f.source = made;
+    this.regionsChanged();
+    this.app.ui.toast(`${next.length} region${next.length > 1 ? "s" : ""} selected`);
+    this.render();
+    this.app.setSelection([...next, ...this.slots.flatMap((s) => s.shows?.() ?? [])]);
+    this.update();
+    return true;
+  }
+
+  /** After regionTap changed the profile (e.g. Extrude moves its arrow). */
+  protected regionsChanged(): void {}
+
   tap(p: ToolPointer): void {
     const slot = this.slots[this.active];
     const h = this.lastHover;
     const hit = h?.hit && Math.hypot(h.x - p.x, h.y - p.y) < 6 ? h.hit : this.app.view.pick(p.x, p.y, { edgeTolPx: p.tol, ...(slot?.pick ?? {}) });
+    if (this.moreRegions && (!slot || !hit || hit.kind === "plane" || hit.kind === "profile") && this.regionTap(p)) return;
     // Tapping empty space ends the tool: keep the result if it's complete.
     if (!hit) {
       if (this.ready()) this.done();
@@ -114,6 +152,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     }
     if (!slot) return;
     if (!slot.accept(hit)) {
+      if (this.moreRegions && this.regionTap(p)) return;
       if (slot.rejectHint) this.app.ui.toast(slot.rejectHint);
       return;
     }

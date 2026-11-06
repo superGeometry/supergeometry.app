@@ -1,3 +1,4 @@
+import { isTouchDevice } from "../device";
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
 import { dot, GROUND, niceStep as niceStepOf, planeY, toPlane } from "../geom";
@@ -167,6 +168,8 @@ interface Snap {
   mid?: string;
   /** The line being drawn runs parallel / at right angles to this line. */
   dir?: { type: "parallel" | "perpendicular"; curve: string };
+  /** A point of the model (a corner, a round end's centre): drawing there stays there. */
+  model?: boolean;
 }
 
 /** Something the cursor can slide along: a line (through p, along d) or a circle. */
@@ -856,6 +859,14 @@ export class SketchTool implements Tool {
    */
   private pickTool(kind: Kind): void {
     if (kind === this.kind && this.phase === "draw") {
+      // Something under way: tapping its tool again ends it (the next tap
+      // starts a new line — "double-tap to stop" is hard to hit on a phone).
+      if (this.pts.length) {
+        this.resetDrawing();
+        this.refreshPreview();
+        this.updatePanel();
+        return;
+      }
       document.body.classList.toggle("sketch-compact");
       return;
     }
@@ -868,6 +879,12 @@ export class SketchTool implements Tool {
     this.kind = kind;
     this.pts = [];
     this.locks = {};
+    // A new tool starts a new chain: a line drawn after an arc was tied to the
+    // end of the line before the arc (and the solver dragged both across).
+    this.lastLineId = this.chainFirstId = null;
+    this.startRef = this.startSnap = this.firstSnap = null;
+    this.arcM = this.arcBend = null;
+    this.typedThisShape = false;
     this.edit.picking = kind === "mirror" ? undefined : this.edit.picking;
     this.edit.offsetOf = undefined;
     this.edit.extendFrom = this.edit.alignFrom = undefined;
@@ -930,7 +947,11 @@ export class SketchTool implements Tool {
       case "line":
         // With the numpad, the length is typed in the box by the line itself.
         // (Already in the box on the line: not repeated in the list beside it.)
-        if (this.pts.length && !settings.value.numpad) items.push({ ...lock("len", "Length"), inBox: true } as PanelItem);
+        if (this.pts.length && !settings.value.numpad && !isTouchDevice) items.push({ ...lock("len", "Length"), inBox: true } as PanelItem);
+        // A finger can't hover: after the first tap there's no line to type a
+        // length on (and the next point is often off the screen) — so the card
+        // takes the length and the direction (0° right, 90° up), Done places it.
+        else if (this.pts.length && isTouchDevice) items.push(lock("len", "Length"), lock("ang", "Angle", "angle"));
         break;
       case "rect":
         if (this.pts.length === 1 && memory.rect !== "3pt") items.push(lock("w", "Width"), lock("h", "Height"));
@@ -1175,6 +1196,7 @@ export class SketchTool implements Tool {
     const s = this.snap(p);
     if (!s) return false;
     this.pts = [s.uv];
+    this.downAt = { x: p.x, y: p.y };
     this.firstSnap = s;
     // Joined to what it snapped to, like a tapped first point.
     this.startRef = s.ref ?? null;
@@ -1337,10 +1359,22 @@ export class SketchTool implements Tool {
       return;
     }
     if (!this.pts.length || !this.cursor) return;
-    const a = this.app.view.toScreen(sketchToWorld(this.plane!, this.pts[0]));
-    // A drag places the second point; a tap waits for it.
-    if (a && Math.hypot(a[0] - p.x, a[1] - p.y) > 12) this.addPoint(this.cursor.uv, 1);
+    // A drag places the second point; a tap waits for it. (Measured from where
+    // the finger went down, not from the point it snapped to: a tap a fingertip
+    // from a corner snapped there and counted as a drag back to the finger —
+    // a line of no length, and nothing could be drawn near that corner.)
+    const a = this.downAt ?? this.app.view.toScreen(sketchToWorld(this.plane!, this.pts[0]));
+    this.downAt = null;
+    const ax = Array.isArray(a) ? a[0] : a?.x;
+    const ay = Array.isArray(a) ? a[1] : a?.y;
+    if (ax !== undefined && ay !== undefined && Math.hypot(ax - p.x, ay - p.y) > 12) this.addPoint(this.cursor.uv, 1);
   }
+
+  /** What an arc's second tap (its other end) snapped to. */
+  private secondRef: PointRef | null = null;
+
+  /** Where the finger / pointer went down for the shape being started. */
+  private downAt: { x: number; y: number } | null = null;
 
   // ------------------------------------------- drag points / curves / gimbal
 
@@ -1900,7 +1934,7 @@ export class SketchTool implements Tool {
     // The origin is a guide point like the others: with them switched off it
     // must not pull taps either (numbers placed along a ruler near the origin
     // all jumped onto it — a fingertip's reach is ~20 px on a phone).
-    const cands: { p: Vec2; label: string; ref?: PointRef; mid?: string }[] = s.guidePoints ? [{ p: [0, 0], label: "Origin" }] : [];
+    const cands: { p: Vec2; label: string; ref?: PointRef; mid?: string; model?: boolean }[] = s.guidePoints ? [{ p: [0, 0], label: "Origin" }] : [];
     if (s.guidePoints) {
       for (const e of this.entities) {
         // Named points first (they can be constrained), then midpoints etc.
@@ -1915,7 +1949,15 @@ export class SketchTool implements Tool {
         for (const e of b.edges) {
           for (const v of [e.start, e.end]) {
             const off = Math.abs((v[0] - plane.origin[0]) * plane.normal[0] + (v[1] - plane.origin[1]) * plane.normal[1] + (v[2] - plane.origin[2]) * plane.normal[2]);
-            if (off < 1e-4 || s.distantEdges) cands.push({ p: toPlane(plane, v), label: "3D point" });
+            if (off < 1e-4 || s.distantEdges) cands.push({ p: toPlane(plane, v), label: "3D point", model: off < 1e-4 });
+          }
+          // A full circle's centre (the end of a round rod, a hole): only its
+          // rim used to snap, so a line started "at the end of the stem" began
+          // on its side.
+          if (e.type === "CIRCLE" && Math.hypot(e.start[0] - e.end[0], e.start[1] - e.end[1], e.start[2] - e.end[2]) < 1e-6) {
+            const c: Vec3 = [(e.start[0] + e.mid[0]) / 2, (e.start[1] + e.mid[1]) / 2, (e.start[2] + e.mid[2]) / 2];
+            const off = Math.abs((c[0] - plane.origin[0]) * plane.normal[0] + (c[1] - plane.origin[1]) * plane.normal[1] + (c[2] - plane.origin[2]) * plane.normal[2]);
+            if (off < 1e-4 || s.distantEdges) cands.push({ p: toPlane(plane, c), label: "Center", model: off < 1e-4 });
           }
         }
       }
@@ -1928,7 +1970,7 @@ export class SketchTool implements Tool {
     const alongside = (a: Vec2, b: Vec2, to: Vec2): boolean => !!drawFrom && runsAlongside(a, b, drawFrom, to, wppPx * 2);
     const lineOf = new Map<string, Extract<SketchEntity, { kind: "line" }>>();
     for (const e of this.entities) if (e.kind === "line") lineOf.set(e.id, e);
-    let best: { p: Vec2; label: string; d: number; ref?: PointRef; mid?: string } | null = null;
+    let best: { p: Vec2; label: string; d: number; ref?: PointRef; mid?: string; model?: boolean } | null = null;
     for (const c of cands) {
       // An end of a line the new one would run alongside: joining it would make a sliver.
       const owner = c.ref && lineOf.get(c.ref.e);
@@ -1938,7 +1980,7 @@ export class SketchTool implements Tool {
       const d = Math.hypot(sc[0] - p.x, sc[1] - p.y);
       if (d < tol && (!best || d < best.d)) best = { ...c, d };
     }
-    if (best) return { uv: [...best.p] as Vec2, label: best.label, ref: best.ref, mid: best.mid };
+    if (best) return { uv: [...best.p] as Vec2, label: best.label, ref: best.ref, mid: best.mid, model: best.model };
 
     // Nothing to land on: lines and curves to slide along — straight across from
     // a point, on a curve, a line's extension, parallel or square to a line. Near
@@ -2080,6 +2122,9 @@ export class SketchTool implements Tool {
     if (!s || !settings.value.autoConstrain) return [];
     const cs: SketchConstraint[] = [];
     if (s.mid) cs.push({ id: uid(), type: "midpoint", pts: [at], curves: [s.mid] });
+    // Started on the model (the centre of a socket, a corner): held there — a
+    // radius typed later slid the whole drawing a millimetre off it.
+    if (s.model) cs.push({ id: uid(), type: "fix", pts: [at], at: [...s.uv] as Vec2 });
     for (const c of s.on ?? []) cs.push({ id: uid(), type: "coincident", pts: [at], curves: [c] });
     return cs;
   }
@@ -2281,6 +2326,8 @@ export class SketchTool implements Tool {
       this.pts = [pt];
     } else {
       // Arc, third point: through where it was tapped (or the bend dragged to).
+      // (An arc's second tap is its other end: what it snapped to is kept.)
+      if (this.pts.length === 1) this.secondRef = snapRef ?? null;
       this.pts.push(pt);
       // (Centre arcs have no bend: their third tap is where they end.)
       if (k === "arc" && memory.arc === "3pt" && this.pts.length === 2) this.arcM = this.defaultArcMid(this.pts[0], this.pts[1]);
@@ -2306,6 +2353,13 @@ export class SketchTool implements Tool {
           if (settings.value.autoConstrain && centred && this.startRef) {
             cs.push({ id: uid(), type: "coincident", pts: [{ e: e.id, p: "c" }, this.startRef] });
           } else if (centred && e.kind !== "rect") cs.push(...this.snapKeeps(this.startSnap, { e: e.id, p: "c" }));
+          // An arc between two points it was tapped on stays joined to them (it
+          // came loose when its radius was typed: nothing tied its ends).
+          if (e.kind === "arc" && memory.arc === "3pt" && settings.value.autoConstrain) {
+            if (this.startRef) cs.push({ id: uid(), type: "coincident", pts: [{ e: e.id, p: "a" }, this.startRef] });
+            if (this.secondRef) cs.push({ id: uid(), type: "coincident", pts: [{ e: e.id, p: "b" }, this.secondRef] });
+          }
+          this.secondRef = null;
         }
         this.pts = [];
         this.locks = {};
@@ -2465,6 +2519,14 @@ export class SketchTool implements Tool {
         return pts.length >= 2 ? { id, kind: "spline", points: pts, closed: false, mode: memory.spline } : null;
     }
     return null;
+  }
+
+  /**
+   * Undo / Redo while drawing: the shape under way stops — a line chain went
+   * on from the point of the line just undone (and was tied to that line).
+   */
+  stopDrawing(): void {
+    if (this.pts.length) this.resetDrawing();
   }
 
   private resetDrawing(): void {

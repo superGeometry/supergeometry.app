@@ -510,7 +510,17 @@ export class SelectTool implements Tool {
         app.setSelection([{ kind: "body", body: bodies[0] }]);
       });
     };
+    // A body of a pattern picked: the rest of it in one tap (eight vents to
+    // subtract were eight double-taps on small targets).
+    const chosen = new Set(bodies);
+    const ids = app.view.bodyList.map((b) => b.id);
+    const pattern = app.store.features
+      .flatMap((f) => (f.type === "transform" && (f.op.kind === "linear" || f.op.kind === "circular") && !f.suppressed ? f.bodies.map((b) => [b, ...ids.filter((id) => id.startsWith(`${f.id}:${b}:`))]) : []))
+      .find((g) => g.length > 1 && g.some((id) => chosen.has(id)) && !g.every((id) => chosen.has(id)));
     return [
+      ...(pattern
+        ? [{ id: "wholePattern", label: "Whole Pattern", icon: "patternCircular" as const, sub: `${pattern.length} bodies`, run: () => app.setSelection([...app.selection, ...pattern.filter((id) => !chosen.has(id)).map((body) => ({ kind: "body" as const, body }))]) }]
+        : []),
       { id: "move", label: "Move/Rotate", icon: "move", shortcut: "M", active: true, run: () => app.setTool(new TransformOp(app, "move", bodies)) },
       {
         id: "scale",

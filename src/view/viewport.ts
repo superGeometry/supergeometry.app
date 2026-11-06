@@ -626,6 +626,7 @@ export class Viewport {
   }
 
   private planeSizes = new Map<string, number>();
+  private planeCentres = new Map<string, Vec3>();
 
   /** History hover: what a step works on, as dashed lines seen through everything. */
   private stepGroup = new Group();
@@ -686,13 +687,26 @@ export class Viewport {
       // grow and shrink while the model is edited.
       // Origin planes: big enough to hit easily (fingers, headsets), even with a body in front.
       let size = m.userData.origin ? wpp * 120 : this.planeSizes.get(id);
-      if (size === undefined) {
-        size = Math.max(wpp * 160, this.bounds().getSize(new Vector3()).length() * 0.6);
+      let mid = m.userData.origin ? undefined : this.planeCentres.get(id);
+      if (size === undefined || (!m.userData.origin && mid === undefined)) {
+        const box = this.bounds();
+        size = Math.max(wpp * 160, box.getSize(new Vector3()).length() * 0.6);
         this.planeSizes.set(id, size);
+        mid = box.isEmpty() ? p.origin : (box.getCenter(new Vector3()).toArray() as Vec3);
+        this.planeCentres.set(id, mid);
+      }
+      // Centred where the middle of the model (as it was) falls on the plane — a
+      // plane 92 mm across through a lamp shade 150 mm up was drawn around the
+      // floor below it. (Projected each time: the plane may have moved since.)
+      let at = p.origin;
+      if (mid) {
+        const n = new Vector3(...p.normal).normalize();
+        const c = new Vector3(...mid);
+        at = c.addScaledVector(n, -c.clone().sub(new Vector3(...p.origin)).dot(n)).toArray() as Vec3;
       }
       // Origin planes sit in their quadrant (like a corner), the rest are centred.
       const off = m.userData.origin ? size / 2 : 0;
-      const mm = planeMatrix({ ...p, origin: p.origin }).multiply(new Matrix4().makeTranslation(off, off, 0)).multiply(new Matrix4().makeScale(size, size, 1));
+      const mm = planeMatrix({ ...p, origin: at }).multiply(new Matrix4().makeTranslation(off, off, 0)).multiply(new Matrix4().makeScale(size, size, 1));
       m.matrix.copy(mm);
       m.matrixWorldNeedsUpdate = true;
     }
@@ -1048,7 +1062,7 @@ export class Viewport {
   }
 
   private pickVertex(x: number, y: number, tolPx: number, faceDist: number): PickHit | null {
-    let best: { d: number; body: string; vertex: number; p: Vector3 } | null = null;
+    const cands: { d: number; body: string; vertex: number; p: Vector3 }[] = [];
     const proj = this.projector();
     const s = new Float64Array(2);
     for (const [id, b] of this.bodies) {
@@ -1057,17 +1071,24 @@ export class Viewport {
         if (this.clip && this.clip.distanceToPoint(v) < 0) return;
         if (!proj(v.x, v.y, v.z, s)) return;
         const d = Math.hypot(s[0] - x, s[1] - y);
-        if (d > tolPx || (best && d >= best.d)) return;
+        if (d > tolPx) return;
         if (this.depthOf(v) > faceDist + this.cam.distance * 0.01) return;
-        best = { d, body: id, vertex: i, p: v };
+        cands.push({ d, body: id, vertex: i, p: v });
       });
     }
-    const hit = best as { d: number; body: string; vertex: number; p: Vector3 } | null;
+    if (!cands.length) return null;
+    cands.sort((a, b) => a.d - b.d);
+    // The nearest corner nothing covers: the depth allowance above lets a
+    // point just behind a thin wall through (the end of a stem 2 mm above the
+    // inside of a lamp shade was picked through it).
+    const hit = cands.slice(0, 6).find((c) => this.uncovered(c.p)) ?? null;
+    this.setRay(x, y);
     return hit ? { kind: "vertex", body: hit.body, vertex: hit.vertex, point: hit.p.toArray() as Vec3 } : null;
   }
 
   private pickEdge(x: number, y: number, tolPx: number, faceDist: number): PickHit | null {
-    let best: { d: number; body: string; edge: number; point: Vector3 } | null = null;
+    // The nearest point of each edge near the pointer.
+    const per = new Map<string, { d: number; body: string; edge: number; point: Vector3 }>();
     const a = new Vector3();
     const b = new Vector3();
     const camPos = this.camera.position;
@@ -1092,16 +1113,32 @@ export class Viewport {
           if (this.clip && this.clip.distanceToPoint(a) < 0 && this.clip.distanceToPoint(b) < 0) continue;
           const t = segParam(x, y, sa, sb);
           const d = Math.hypot(sa[0] + (sb[0] - sa[0]) * t - x, sa[1] + (sb[1] - sa[1]) * t - y);
-          if (d > tolPx || (best && d >= best.d)) continue;
+          const key = `${id} ${g.edge}`;
+          const was = per.get(key);
+          if (d > tolPx || (was && d >= was.d)) continue;
           const w = a.clone().lerp(b, t);
           // Hidden edges (behind the face under the pointer) are not pickable.
           const depth = this.cam.ortho ? w.clone().sub(camPos).dot(viewDir) : w.distanceTo(camPos);
           if (depth > faceDist + this.cam.distance * 0.01) continue;
-          best = { d, body: id, edge: g.edge, point: w };
+          per.set(key, { d, body: id, edge: g.edge, point: w });
         }
       }
     }
+    // The nearest one nothing covers (the allowance above lets an edge just
+    // behind a thin wall through).
+    const best = [...per.values()].sort((p, q) => p.d - q.d).slice(0, 6).find((c) => this.uncovered(c.point));
+    this.setRay(x, y);
     return best ? { kind: "edge", body: best.body, edge: best.edge, point: best.point.toArray() as Vec3 } : null;
+  }
+
+  /** Nothing drawn lies in front of this point (a few pixels' slack). Moves the ray. */
+  private uncovered(p: Vector3): boolean {
+    if (settings.value.shader === "wireframe") return true;
+    const q = this.toScreen(p);
+    if (!q) return false;
+    this.setRay(q[0], q[1]);
+    const front = this.raycaster.intersectObjects(this.visibleBodies().map((b) => b.mesh), false).find((h) => !this.clip || this.clip.distanceToPoint(h.point) >= 0);
+    return !front || front.distance >= this.raycaster.ray.origin.distanceTo(p) - this.cam.worldPerPixel(this.height) * 2;
   }
 
   /** Intersection of the pointer ray with a plane, or null if parallel. */

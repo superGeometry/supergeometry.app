@@ -897,7 +897,8 @@ export class App implements AppContext {
       if (!this.tool.undo()) this.ui.toast("Nothing to undo in this edit yet (Cancel leaves it unchanged)");
       return this.updateUndo();
     }
-    if (this.tool !== this.selectTool && !(this.tool instanceof SketchTool)) this.setTool(null);
+    if (this.tool instanceof SketchTool) this.tool.stopDrawing();
+    else if (this.tool !== this.selectTool) this.setTool(null);
     this.store.undo();
   }
   private redo(): void {
@@ -905,7 +906,8 @@ export class App implements AppContext {
       this.tool.redo();
       return this.updateUndo();
     }
-    if (this.tool !== this.selectTool && !(this.tool instanceof SketchTool)) this.setTool(null);
+    if (this.tool instanceof SketchTool) this.tool.stopDrawing();
+    else if (this.tool !== this.selectTool) this.setTool(null);
     this.store.redo();
   }
   refreshUndo(): void {
