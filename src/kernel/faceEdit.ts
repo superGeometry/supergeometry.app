@@ -228,7 +228,12 @@ function aroundBlends(body: Shape3D, F: Face, blends: Blend[], to: PlaneDef): Sh
   for (const bl of blends) {
     const g = findFace(b, (h) => h.geomType === "CYLINDRE", bl.sig.center, bl.sig.area);
     if (!g) throw new Error("blend lost");
-    b = takeOffBlend(b, g);
+    try {
+      b = takeOffBlend(b, g);
+    } catch {
+      // That way can't (a fillet between faces at an odd angle): as if it was never there.
+      b = deleteFaces(b, [g]);
+    }
   }
   // 2. Move the face, now bounded by flat neighbours only.
   const F1 = findFace(b, (h) => h.geomType === "PLANE" && Math.abs(dot(planeOf(h).normal, fp.normal)) > 1 - 1e-9 && Math.abs(dot(sub(planeOf(h).origin, fp.origin), fp.normal)) < sizeOf(b) * 1e-7, tup(F.center), measureArea(F));
@@ -691,11 +696,17 @@ export function deleteFaces(body: Shape3D, S: Face[]): Shape3D {
       ]),
       new Vector([0, 0, b[2] - a[2]]),
     );
-  const within = boxOf(lo.map((v) => v - pad), hi.map((v) => v + pad));
   // Near S: its own box, a little bigger.
   const sLo = [0, 1, 2].map((k) => Math.min(...S.map((f) => f.boundingBox.bounds[0][k])) - size * 1e-3);
   const sHi = [0, 1, 2].map((k) => Math.max(...S.map((f) => f.boundingBox.bounds[1][k])) + size * 1e-3);
   const nearS = boxOf(sLo, sHi);
+  // The corner a fillet rounded can stick out past the body's box (faces
+  // meeting at an angle other than 90°): S's own size of room round it.
+  const room = Math.hypot(sHi[0] - sLo[0], sHi[1] - sLo[1], sHi[2] - sLo[2]);
+  const within = boxOf(
+    lo.map((v, k) => Math.min(v - pad, sLo[k] - room)),
+    hi.map((v, k) => Math.max(v + pad, sHi[k] + room)),
+  );
 
   const meet = (parts: (Shape3D | null)[]): Shape3D | null => {
     let r: Shape3D | null = null;
@@ -723,11 +734,51 @@ export function deleteFaces(body: Shape3D, S: Face[]): Shape3D {
   // Faces S runs smoothly into (a fillet's walls) — not the ones it ends on.
   const tangent = new Set(N.filter((g) => S.some((f) => tangentAlong(f, g))));
   const single = S.length === 1 ? S[0] : null;
-  const airOfS = () => (single ? inFront(single, L) ?? nearS : nearS);
-  const matOfS = () => (single ? behind(single, L) ?? nearS : nearS);
+  // A round fillet's corner lies beyond its chord — the plane through the two
+  // lines where it meets its walls — on the side away from its axis: the
+  // space it rounded off is between the fillet and that corner, nowhere else.
+  const chord = (): Shape3D | null => {
+    if (!single || single.geomType !== "CYLINDRE") return null;
+    const cy = cylinderOf(single);
+    const walls = [...tangent].filter((g) => g.geomType === "PLANE");
+    if (!cy || walls.length !== 2) return null;
+    const on = walls.map((g) => single.edges.find((e) => g.edges.some((x) => x.isSame(e))));
+    if (on.some((e) => !e)) return null;
+    const p1 = tup(on[0]!.pointAt(0.5));
+    const p2 = tup(on[1]!.pointAt(0.5));
+    let n = cross(cy.a, sub(p2, p1));
+    if (len(n) < 1e-12) return null;
+    n = norm(n);
+    // Away from the axis.
+    if (dot(sub(cy.c, p1), n) > 0) n = scale(n, -1);
+    return halfSpace({ origin: p1, normal: n, xDir: xDirFor(n) }, L);
+  };
+  const airOfS = () => (single ? meet([inFront(single, L) ?? nearS, chord()]) : nearS);
+  const matOfS = () => (single ? meet([behind(single, L) ?? nearS, chord()]) : nearS);
   const fill = (e: Shape3D | null, bound: Shape3D | null) => (e && bound ? body.fuse(meet([e, bound])!) : null);
   const cut = (e: Shape3D | null, bound: Shape3D | null) => (e && bound ? body.cut(meet([e, bound])!) : null);
+  // Each neighbour bounded on the side S itself is on: a fillet's walls from
+  // behind (or in front, for an inside one), its end faces towards it —
+  // whichever way they face (one may be a pocket's wall facing the fillet).
+  const mid = tup(S[0].pointOnSurface(0.5, 0.5));
+  const bySide = () => {
+    let r: Shape3D = within;
+    for (const g of N) {
+      const b = behind(g, L);
+      if (!b) continue;
+      let front = false;
+      if (g.geomType === "PLANE") {
+        const { origin, normal } = planeOf(g);
+        front = dot(sub(mid, origin), normal) > tol;
+      }
+      r = front ? r.cut(b) : r.intersect(b);
+      if (isEmpty(r)) return null;
+    }
+    return r;
+  };
   const candidates: { name: string; make: () => Shape3D | null }[] = [
+    { name: "fill by side", make: () => fill(bySide(), airOfS()) },
+    { name: "cut by side", make: () => cut(bySide(), matOfS()) },
     // Fill: behind every neighbour, on the air side of S (a fillet's wedge, a chamfer, a hole).
     { name: "fill", make: () => fill(behindAll(), airOfS()) },
     { name: "fill near", make: () => fill(behindAll(), nearS) },
@@ -776,7 +827,7 @@ export function deleteFaces(body: Shape3D, S: Face[]): Shape3D {
     // Only what was round S changed: what was added or taken away lies within
     // S's own box (a "delete" that carves off half the part isn't one).
     try {
-      const reach = size * 1e-3;
+      const reach = room;
       for (const d of [out.cut(body), body.cut(out)]) {
         if (isEmpty(d) || Math.abs(measureVolume(d)) < v0 * 1e-9) continue;
         const db = d.boundingBox.bounds;
