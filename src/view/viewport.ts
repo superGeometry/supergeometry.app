@@ -1,3 +1,4 @@
+import { uniqueEnds } from "./corners";
 import { isHeadset } from "../device";
 import {
   CanvasTexture,
@@ -343,13 +344,7 @@ export class Viewport {
       hidden.computeLineDistances();
       hidden.renderOrder = 5;
       this.bodiesGroup.add(mesh, cap, edges, hidden);
-      const vertices: Vector3[] = [];
-      for (const e of data.edges) {
-        for (const p of [e.start, e.end]) {
-          const v = new Vector3(...p);
-          if (!vertices.some((q) => q.distanceToSquared(v) < 1e-12)) vertices.push(v);
-        }
-      }
+      const vertices = uniqueEnds(data.edges);
       this.bodies.set(data.id, { data, mesh, cap, edges, hidden, vertices });
       // Open (non-watertight) edges stand out in orange.
       if (data.openEdges?.length) {
@@ -929,10 +924,11 @@ export class Viewport {
       const only = typeof curves === "string" ? curves : undefined;
       // Points first: endpoints sit on curves, and are what you usually mean.
       let bestPt: { d: number; q: { sketch: string; entity: string; p: string; pos: Vector3 } } | null = null;
+      const proj = this.projector();
+      const s = new Float64Array(2);
       for (const q of this.sketchPoints) {
         if (only && q.sketch !== only) continue;
-        const s = this.toScreen(q.pos);
-        if (!s) continue;
+        if (!proj(q.pos.x, q.pos.y, q.pos.z, s)) continue;
         const d = Math.hypot(s[0] - x, s[1] - y);
         if (d < edgeTolPx && (!bestPt || d < bestPt.d)) bestPt = { d, q };
       }
@@ -1007,12 +1003,19 @@ export class Viewport {
 
   private pickCurve(x: number, y: number, tol: number, onlySketch?: string): PickHit | null {
     let best: { d: number; c: { sketch: string; entity: string; pts: Vector3[] }; p: Vector3 } | null = null;
+    const proj = this.projector();
+    const S = new Float64Array(2);
+    const sa: [number, number] = [0, 0];
+    const sb: [number, number] = [0, 0];
     for (const c of this.curveLines) {
       if (onlySketch && c.sketch !== onlySketch) continue;
       for (let i = 0; i < c.pts.length - 1; i++) {
-        const sa = this.toScreen(c.pts[i]);
-        const sb = this.toScreen(c.pts[i + 1]);
-        if (!sa || !sb) continue;
+        const A = c.pts[i];
+        const B = c.pts[i + 1];
+        if (!proj(A.x, A.y, A.z, S)) continue;
+        ((sa[0] = S[0]), (sa[1] = S[1]));
+        if (!proj(B.x, B.y, B.z, S)) continue;
+        ((sb[0] = S[0]), (sb[1] = S[1]));
         const d = distToSeg(x, y, sa, sb);
         if (d < tol && (!best || d < best.d)) best = { d, c, p: c.pts[i] };
       }
@@ -1025,14 +1028,34 @@ export class Viewport {
     return this.cam.ortho ? w.clone().sub(this.camera.position).dot(this.cam.viewDir()) : w.distanceTo(this.camera.position);
   }
 
+  /**
+   * World → screen for many points at once: one matrix, the canvas size read
+   * once, nothing allocated (picking projects every corner and edge piece of
+   * every body — 10–14 ms a pick for a ruler's 11 000 edges).
+   */
+  private projector(): (x: number, y: number, z: number, out: Float64Array) => boolean {
+    const m = new Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).elements;
+    const W = this.width;
+    const H = this.height;
+    return (x, y, z, out) => {
+      const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+      const pz = (m[2] * x + m[6] * y + m[10] * z + m[14]) / w;
+      if (pz > 1 || pz < -1) return false;
+      out[0] = (((m[0] * x + m[4] * y + m[8] * z + m[12]) / w + 1) / 2) * W;
+      out[1] = ((1 - (m[1] * x + m[5] * y + m[9] * z + m[13]) / w) / 2) * H;
+      return true;
+    };
+  }
+
   private pickVertex(x: number, y: number, tolPx: number, faceDist: number): PickHit | null {
     let best: { d: number; body: string; vertex: number; p: Vector3 } | null = null;
+    const proj = this.projector();
+    const s = new Float64Array(2);
     for (const [id, b] of this.bodies) {
       if (this.hiddenIds.has(id)) continue;
       b.vertices.forEach((v, i) => {
         if (this.clip && this.clip.distanceToPoint(v) < 0) return;
-        const s = this.toScreen(v);
-        if (!s) return;
+        if (!proj(v.x, v.y, v.z, s)) return;
         const d = Math.hypot(s[0] - x, s[1] - y);
         if (d > tolPx || (best && d >= best.d)) return;
         if (this.depthOf(v) > faceDist + this.cam.distance * 0.01) return;
@@ -1049,17 +1072,24 @@ export class Viewport {
     const b = new Vector3();
     const camPos = this.camera.position;
     const viewDir = this.cam.viewDir();
+    const proj = this.projector();
+    const S = new Float64Array(2);
+    const sa: [number, number] = [0, 0];
+    const sb: [number, number] = [0, 0];
     for (const [id, { data }] of this.bodies) {
       if (this.hiddenIds.has(id)) continue;
       const p = data.edgePositions;
       for (const g of data.edgeGroups) {
         for (let i = g.start; i < g.start + g.count; i += 2) {
+          if (!proj(p[i * 3], p[i * 3 + 1], p[i * 3 + 2], S)) continue;
+          ((sa[0] = S[0]), (sa[1] = S[1]));
+          if (!proj(p[i * 3 + 3], p[i * 3 + 4], p[i * 3 + 5], S)) continue;
+          ((sb[0] = S[0]), (sb[1] = S[1]));
+          // Nowhere near the pointer: skip before anything else.
+          if ((sa[0] < x - tolPx && sb[0] < x - tolPx) || (sa[0] > x + tolPx && sb[0] > x + tolPx) || (sa[1] < y - tolPx && sb[1] < y - tolPx) || (sa[1] > y + tolPx && sb[1] > y + tolPx)) continue;
           a.set(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
           b.set(p[i * 3 + 3], p[i * 3 + 4], p[i * 3 + 5]);
           if (this.clip && this.clip.distanceToPoint(a) < 0 && this.clip.distanceToPoint(b) < 0) continue;
-          const sa = this.toScreen(a);
-          const sb = this.toScreen(b);
-          if (!sa || !sb) continue;
           const t = segParam(x, y, sa, sb);
           const d = Math.hypot(sa[0] + (sb[0] - sa[0]) * t - x, sa[1] + (sb[1] - sa[1]) * t - y);
           if (d > tolPx || (best && d >= best.d)) continue;
@@ -1208,3 +1238,4 @@ function hatched<M extends MeshBasicMaterial>(m: M): M {
   m.customProgramCacheKey = () => "hatched";
   return m;
 }
+

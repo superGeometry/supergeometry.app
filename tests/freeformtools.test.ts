@@ -2,7 +2,7 @@
 // extrude, inset), and a part built with them, joined to other bodies.
 import opencascade from "replicad-opencascadejs";
 import { measureVolume, setOC } from "replicad";
-import { archBridge, boxCage, bridgeFaces, cylinderCage, moveTurnScale, shapeCage, sweepFace, deleteFaces, extrudeFaces, holeLoops, bridgeLoops, boundaryEdges, cageEdgeKey, insertEdgeLoop, insetFaces, isClosed, planeCage, refineCage, selfCrossings, sphereCage, windingAgrees, type Cage } from "../src/freeform/cage";
+import { applyPlan, archBridge, boxCage, limitPoints, subdivide, subdivisionPlan, bridgeFaces, cylinderCage, moveTurnScale, shapeCage, sweepFace, deleteFaces, extrudeFaces, holeLoops, bridgeLoops, boundaryEdges, cageEdgeKey, insertEdgeLoop, insetFaces, isClosed, planeCage, refineCage, selfCrossings, sphereCage, windingAgrees, type Cage } from "../src/freeform/cage";
 import { cageToShape } from "../src/kernel/freeform";
 import { debugBodies, regenerate, shapeValid } from "../src/kernel/engine";
 import { arrangement, regionRef } from "../src/sketch/regions";
@@ -53,6 +53,32 @@ const faceWith = (c: Cage, test: (n: [number, number, number], m: [number, numbe
   const side = faceWith(cy, (n) => Math.abs(n[2]) < 0.3)[0];
   const cl = insertEdgeLoop(cy, cy.faces[side][0], cy.faces[side][1]);
   check("edge loop round a cylinder (a new ring of points)", !!cl && isClosed(cl) && solidOk(cl).ok, cl ? `${cy.faces.length} → ${cl.faces.length}` : "refused");
+}
+
+// ------------------------------------------------- subdivision plan
+{
+  // The precomputed weights give exactly the points subdivide + limitPoints do,
+  // for closed, open, holed and uneven cages (spheres have 3-edge corners).
+  const { readFileSync } = await import("node:fs");
+  const fx = (f: string) => JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8"))[0].cage;
+  const cyl = shapeCage("cylinder", [160, 160, 200], 4);
+  const cases: [string, Cage][] = [
+    ["box", boxCage([40, 30, 20], 2)],
+    ["sphere", sphereCage(40)],
+    ["sheet", planeCage([60, 40], 3)],
+    ["open cylinder", deleteFaces(cyl, faceWith(cyl, (n) => n[2] > 0.9))],
+    ["watering can (hand)", fx("wateringcan-hand.json")],
+    ["watering can (no numbers)", fx("wateringcan-beginner.json")],
+  ];
+  for (const [name, c] of cases) {
+    const want = limitPoints(subdivide(c, 3));
+    const plan = subdivisionPlan(c, 3);
+    const got = applyPlan(plan, c.verts);
+    let worst = 0;
+    want.forEach((p, i) => (worst = Math.max(worst, Math.abs(p[0] - got[3 * i]), Math.abs(p[1] - got[3 * i + 1]), Math.abs(p[2] - got[3 * i + 2]))));
+    const g = subdivide(c, 3).grids;
+    check(`subdivision plan = subdivide + limitPoints: ${name}`, got.length === want.length * 3 && worst < 1e-3 && JSON.stringify(g) === JSON.stringify(plan.grids), `${want.length} points, worst ${worst.toExponential(1)}`);
+  }
 }
 
 // ---------------------------------------------- exact Move / Turn / Scale

@@ -287,6 +287,277 @@ export function limitPoints(s: Subdivided): Vec3[] {
   });
 }
 
+// ------------------------------------------------------- subdivision plan
+//
+// Catmull–Clark and the limit points are fixed weighted sums of the cage
+// points: which points and how much depends only on how the faces connect.
+// Dragging points or moving a slider (Length, Bend…) keeps that the same, so
+// the weights are worked out once per cage layout and every redraw is just
+// the sums (~1 ms instead of ~13 for the watering can: 97 faces, 6254 points).
+
+/** Weighted sums: point k of the result = Σ w[j]·src[idx[j]] for j in ptr[k]…ptr[k+1]. */
+interface Rows {
+  ptr: Int32Array;
+  idx: Int32Array;
+  w: Float64Array;
+}
+
+export interface SubdivPlan {
+  /** Layout this plan was made for (same faces → same plan). */
+  key: string;
+  verts: number;
+  /** The final grids per cage face, and their size. */
+  grids: number[][][];
+  n: number;
+  /** Cage points → smooth (limit) points, all levels folded into one table. */
+  rows: Rows;
+}
+
+class RowBuilder {
+  private ptr: number[] = [0];
+  private idx: number[] = [];
+  private w: number[] = [];
+  add(terms: Map<number, number>): void {
+    for (const [i, w] of terms) if (w !== 0) (this.idx.push(i), this.w.push(w));
+    this.ptr.push(this.idx.length);
+  }
+  done(): Rows {
+    return { ptr: Int32Array.from(this.ptr), idx: Int32Array.from(this.idx), w: Float64Array.from(this.w) };
+  }
+}
+
+/** Fold two tables: (b after a) as one, in cage-point terms. */
+function compose(a: Rows, b: Rows): Rows {
+  const out = new RowBuilder();
+  const n = b.ptr.length - 1;
+  for (let k = 0; k < n; k++) {
+    const m = new Map<number, number>();
+    for (let j = b.ptr[k]; j < b.ptr[k + 1]; j++) {
+      const i = b.idx[j];
+      const wb = b.w[j];
+      for (let q = a.ptr[i]; q < a.ptr[i + 1]; q++) m.set(a.idx[q], (m.get(a.idx[q]) ?? 0) + wb * a.w[q]);
+    }
+    out.add(m);
+  }
+  return out.done();
+}
+
+/** The layout key of a cage: its faces (positions don't matter). */
+export function layoutKey(cage: Cage): string {
+  return `${cage.verts.length}|${cage.faces.join(";")}`;
+}
+
+/**
+ * The weights that take a cage's points to its smooth surface points, the
+ * same as limitPoints(subdivide(cage, levels)) — exactly the same rules,
+ * recorded instead of applied.
+ */
+export function subdivisionPlan(cage: Cage, levels = 3): SubdivPlan {
+  const P0 = cage.verts.length;
+  // Identity to start with: every point is itself.
+  let acc: Rows = { ptr: Int32Array.from({ length: P0 + 1 }, (_, i) => i), idx: Int32Array.from({ length: P0 }, (_, i) => i), w: new Float64Array(P0).fill(1) };
+  let count = P0;
+  let grids = cage.faces.map((f) => [
+    [f[0], f[3]],
+    [f[1], f[2]],
+  ]);
+  let n = 1;
+  const addTo = (m: Map<number, number>, i: number, w: number) => m.set(i, (m.get(i) ?? 0) + w);
+  for (let lvl = 0; lvl < levels; lvl++) {
+    const quads: number[][] = [];
+    for (const g of grids) for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) quads.push([g[i][j], g[i + 1][j], g[i + 1][j + 1], g[i][j + 1]]);
+    const ekey = (a: number, b: number) => (a < b ? a * count + b : b * count + a);
+    // Edges in first-seen order (subdivide numbers its edge points that way).
+    const edgeFaces = new Map<number, number[]>();
+    quads.forEach((q, qi) => {
+      for (let k = 0; k < 4; k++) {
+        const key = ekey(q[k], q[(k + 1) % 4]);
+        const l = edgeFaces.get(key);
+        if (l) l.push(qi);
+        else edgeFaces.set(key, [qi]);
+      }
+    });
+    const vFaces: number[][] = Array.from({ length: count }, () => []);
+    const vEdges: number[][] = Array.from({ length: count }, () => []);
+    quads.forEach((q, qi) => q.forEach((v) => vFaces[v].push(qi)));
+    for (const key of edgeFaces.keys()) {
+      const a = Math.floor(key / count);
+      const b = key % count;
+      vEdges[a].push(key);
+      vEdges[b].push(key);
+    }
+    const ends = (key: number): [number, number] => [Math.floor(key / count), key % count];
+    const step = new RowBuilder();
+    // Moved old points.
+    for (let v = 0; v < count; v++) {
+      const es = vEdges[v];
+      const fs = vFaces[v];
+      const m = new Map<number, number>();
+      if (!es.length || !fs.length) {
+        m.set(v, 1);
+      } else {
+        const boundary = es.filter((k) => edgeFaces.get(k)!.length === 1);
+        if (boundary.length >= 2) {
+          if (fs.length === 1) m.set(v, 1);
+          else {
+            addTo(m, v, 0.75);
+            for (const k of boundary.slice(0, 2)) {
+              const [a, b] = ends(k);
+              addTo(m, a === v ? b : a, 0.125);
+            }
+          }
+        } else {
+          const mm = es.length;
+          // F: the average of the face points; R: of the edge midpoints.
+          for (const f of fs) for (const q of quads[f]) addTo(m, q, 1 / (4 * fs.length * mm));
+          for (const k of es) {
+            const [a, b] = ends(k);
+            addTo(m, a, 1 / mm / mm);
+            addTo(m, b, 1 / mm / mm);
+          }
+          addTo(m, v, (mm - 3) / mm);
+        }
+      }
+      step.add(m);
+    }
+    // Edge points.
+    for (const [key, fs] of edgeFaces) {
+      const [a, b] = ends(key);
+      const m = new Map<number, number>();
+      if (fs.length === 2) {
+        addTo(m, a, 0.25);
+        addTo(m, b, 0.25);
+        for (const f of fs) for (const q of quads[f]) addTo(m, q, 0.0625);
+      } else {
+        addTo(m, a, 0.5);
+        addTo(m, b, 0.5);
+      }
+      step.add(m);
+    }
+    // Face points.
+    for (const q of quads) {
+      const m = new Map<number, number>();
+      for (const v of q) addTo(m, v, 0.25);
+      step.add(m);
+    }
+    acc = compose(acc, step.done());
+    // New grids, twice as fine (same numbering as subdivide).
+    const edgeIdx = new Map<number, number>();
+    let e = count;
+    for (const key of edgeFaces.keys()) edgeIdx.set(key, e++);
+    let qi = 0;
+    const N = 2 * n;
+    const faceBase = e;
+    grids = grids.map((g) => {
+      const ng: number[][] = Array.from({ length: N + 1 }, () => new Array<number>(N + 1));
+      for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) ng[2 * i][2 * j] = g[i][j];
+      for (let i = 0; i <= n; i++) for (let j = 0; j < n; j++) ng[2 * i][2 * j + 1] = edgeIdx.get(ekey(g[i][j], g[i][j + 1]))!;
+      for (let i = 0; i < n; i++) for (let j = 0; j <= n; j++) ng[2 * i + 1][2 * j] = edgeIdx.get(ekey(g[i][j], g[i + 1][j]))!;
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) ng[2 * i + 1][2 * j + 1] = faceBase + qi++;
+      return ng;
+    });
+    count = faceBase + quads.length;
+    n = N;
+  }
+  // The limit points (as limitPoints does).
+  const quads: number[][] = [];
+  for (const g of grids) for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) quads.push([g[i][j], g[i + 1][j], g[i + 1][j + 1], g[i][j + 1]]);
+  const ek = (a: number, b: number) => (a < b ? a * count + b : b * count + a);
+  const edgeCount = new Map<number, number>();
+  for (const q of quads) for (let k = 0; k < 4; k++) edgeCount.set(ek(q[k], q[(k + 1) % 4]), (edgeCount.get(ek(q[k], q[(k + 1) % 4])) ?? 0) + 1);
+  const nbE = Array.from({ length: count }, () => new Set<number>());
+  const nbF: number[][] = Array.from({ length: count }, () => []);
+  const border: number[][] = Array.from({ length: count }, () => []);
+  const faces = new Int32Array(count);
+  for (const q of quads)
+    for (let k = 0; k < 4; k++) {
+      const v = q[k];
+      const a = q[(k + 1) % 4];
+      const b = q[(k + 3) % 4];
+      nbE[v].add(a).add(b);
+      nbF[v].push(q[(k + 2) % 4]);
+      faces[v]++;
+      if (edgeCount.get(ek(v, a)) === 1) border[v].push(a);
+      if (edgeCount.get(ek(v, b)) === 1) border[v].push(b);
+    }
+  const lim = new RowBuilder();
+  for (let v = 0; v < count; v++) {
+    const m = new Map<number, number>();
+    const bd = [...new Set(border[v])];
+    const nE = nbE[v].size;
+    if (!faces[v] || (bd.length && (faces[v] === 1 || bd.length !== 2)) || (!bd.length && nE !== faces[v])) m.set(v, 1);
+    else if (bd.length) {
+      addTo(m, bd[0], 1 / 6);
+      addTo(m, v, 4 / 6);
+      addTo(m, bd[1], 1 / 6);
+    } else {
+      const d = nE * (nE + 5);
+      addTo(m, v, (nE * nE) / d);
+      for (const e of nbE[v]) addTo(m, e, 4 / d);
+      for (const f of nbF[v]) addTo(m, f, 1 / d);
+    }
+    lim.add(m);
+  }
+  return { key: layoutKey(cage), verts: P0, grids, n, rows: compose(acc, lim.done()) };
+}
+
+/** The smooth points for these cage positions (into `out` when given: no new arrays while dragging). */
+export function applyPlan(plan: SubdivPlan, verts: Vec3[], out?: Float32Array): Float32Array {
+  const { ptr, idx, w } = plan.rows;
+  const n = ptr.length - 1;
+  const res = out && out.length === n * 3 ? out : new Float32Array(n * 3);
+  for (let k = 0; k < n; k++) {
+    let x = 0, y = 0, z = 0;
+    for (let j = ptr[k]; j < ptr[k + 1]; j++) {
+      const p = verts[idx[j]];
+      const c = w[j];
+      x += c * p[0];
+      y += c * p[1];
+      z += c * p[2];
+    }
+    res[3 * k] = x;
+    res[3 * k + 1] = y;
+    res[3 * k + 2] = z;
+  }
+  return res;
+}
+
+/** The preview's triangles for a plan's grids (they only change with the layout). */
+export function planIndices(plan: SubdivPlan): Uint32Array {
+  const idx: number[] = [];
+  for (const g of plan.grids)
+    for (let i = 0; i < plan.n; i++)
+      for (let j = 0; j < plan.n; j++) {
+        const a = g[i][j];
+        const b = g[i + 1][j];
+        const c = g[i + 1][j + 1];
+        const d = g[i][j + 1];
+        idx.push(a, b, c, a, c, d);
+      }
+  return new Uint32Array(idx);
+}
+
+/** Smooth normals (area-weighted) for positions and triangles, into `out` when given. */
+export function smoothNormals(pos: Float32Array, tri: Uint32Array, out?: Float32Array): Float32Array {
+  const nrm = out && out.length === pos.length ? out.fill(0) : new Float32Array(pos.length);
+  for (let t = 0; t < tri.length; t += 3) {
+    const a = tri[t] * 3, b = tri[t + 1] * 3, c = tri[t + 2] * 3;
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+    const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    nrm[a] += nx; nrm[a + 1] += ny; nrm[a + 2] += nz;
+    nrm[b] += nx; nrm[b + 1] += ny; nrm[b + 2] += nz;
+    nrm[c] += nx; nrm[c + 1] += ny; nrm[c + 2] += nz;
+  }
+  for (let k = 0; k < nrm.length; k += 3) {
+    const l = Math.hypot(nrm[k], nrm[k + 1], nrm[k + 2]) || 1;
+    nrm[k] /= l;
+    nrm[k + 1] /= l;
+    nrm[k + 2] /= l;
+  }
+  return nrm;
+}
+
 /** Triangles of the subdivided surface (for the live preview). */
 export function previewMesh(s: Subdivided): { positions: Float32Array; normals: Float32Array; indices: Uint32Array } {
   const positions = new Float32Array(s.points.flat());
@@ -768,12 +1039,16 @@ export { ekey as cageEdgeKey };
  */
 export function selfCrossings(cage: Cage, levels = 2, most = 24): Vec3[] {
   if (!cage.faces.length) return [];
-  const s = subdivide(cage, levels);
-  const P = limitPoints(s);
+  // Run every few frames while a point is dragged: the weights are kept per
+  // layout, and the triangles bucketed with number keys (it took ~11 ms).
+  const plan = cachedPlan(cage, levels);
+  const F = applyPlan(plan, cage.verts);
+  const P: Vec3[] = [];
+  for (let i = 0; i < F.length; i += 3) P.push([F[i], F[i + 1], F[i + 2]]);
   const tris: [number, number, number][] = [];
-  for (const g of s.grids)
-    for (let i = 0; i < s.n; i++)
-      for (let j = 0; j < s.n; j++) {
+  for (const g of plan.grids)
+    for (let i = 0; i < plan.n; i++)
+      for (let j = 0; j < plan.n; j++) {
         const a = g[i][j];
         const b = g[i + 1][j];
         const c = g[i + 1][j + 1];
@@ -784,51 +1059,67 @@ export function selfCrossings(cage: Cage, levels = 2, most = 24): Vec3[] {
   let edge = 0;
   for (const t of tris) edge += dist(P[t[0]], P[t[1]]);
   const cell = Math.max(1e-9, (edge / tris.length) * 2);
-  const grid = new Map<string, number[]>();
-  const box = tris.map((t) => {
-    const lo = [0, 1, 2].map((k) => Math.min(P[t[0]][k], P[t[1]][k], P[t[2]][k]));
-    const hi = [0, 1, 2].map((k) => Math.max(P[t[0]][k], P[t[1]][k], P[t[2]][k]));
-    return { lo, hi };
-  });
-  box.forEach(({ lo, hi }, ti) => {
-    const a = lo.map((v) => Math.floor(v / cell));
-    const b = hi.map((v) => Math.floor(v / cell));
-    // A huge triangle (a point pulled far away) would fill many cells: cap it.
-    if ((b[0] - a[0] + 1) * (b[1] - a[1] + 1) * (b[2] - a[2] + 1) > 4096) {
-      const k = "big";
-      grid.set(k, [...(grid.get(k) ?? []), ti]);
-      return;
+  const T = tris.length;
+  const lo = new Float64Array(T * 3);
+  const hi = new Float64Array(T * 3);
+  for (let t = 0; t < T; t++)
+    for (let k = 0; k < 3; k++) {
+      const x = P[tris[t][0]][k], y = P[tris[t][1]][k], z = P[tris[t][2]][k];
+      lo[3 * t + k] = Math.min(x, y, z);
+      hi[3 * t + k] = Math.max(x, y, z);
     }
-    for (let x = a[0]; x <= b[0]; x++) for (let y = a[1]; y <= b[1]; y++) for (let z = a[2]; z <= b[2]; z++) {
-      const k = `${x},${y},${z}`;
-      const l = grid.get(k);
-      if (l) l.push(ti);
-      else grid.set(k, [ti]);
+  const grid = new Map<number, number[]>();
+  const big: number[] = [];
+  // Cell coordinates packed into one number.
+  const K = 1 << 16; // ±65536 cells a side: the packed key stays under 2^51, exact in a double
+  const key = (x: number, y: number, z: number) => ((x + K) * 2 * K + (y + K)) * 2 * K + (z + K);
+  for (let t = 0; t < T; t++) {
+    const ax = Math.floor(lo[3 * t] / cell), ay = Math.floor(lo[3 * t + 1] / cell), az = Math.floor(lo[3 * t + 2] / cell);
+    const bx = Math.floor(hi[3 * t] / cell), by = Math.floor(hi[3 * t + 1] / cell), bz = Math.floor(hi[3 * t + 2] / cell);
+    // A huge triangle (a point pulled far away) would fill many cells: tested against all.
+    if ((bx - ax + 1) * (by - ay + 1) * (bz - az + 1) > 4096) {
+      big.push(t);
+      continue;
     }
-  });
-  const big = grid.get("big") ?? [];
+    for (let x = ax; x <= bx; x++)
+      for (let y = ay; y <= by; y++)
+        for (let z = az; z <= bz; z++) {
+          const k = key(x, y, z);
+          const l = grid.get(k);
+          if (l) l.push(t);
+          else grid.set(k, [t]);
+        }
+  }
   const tested = new Set<number>();
   const out: Vec3[] = [];
   const pair = (i: number, j: number) => {
     if (i === j) return;
-    const key = i < j ? i * tris.length + j : j * tris.length + i;
-    if (tested.has(key)) return;
-    tested.add(key);
+    const k = i < j ? i * T + j : j * T + i;
+    if (tested.has(k)) return;
+    tested.add(k);
+    for (let q = 0; q < 3; q++) if (hi[3 * i + q] < lo[3 * j + q] || hi[3 * j + q] < lo[3 * i + q]) return;
     const A = tris[i];
     const B = tris[j];
-    if (A.some((v) => B.includes(v))) return;
-    const ba = box[i];
-    const bb = box[j];
-    for (let k = 0; k < 3; k++) if (ba.hi[k] < bb.lo[k] || bb.hi[k] < ba.lo[k]) return;
-    const hit = trisCross(A.map((v) => P[v]) as [Vec3, Vec3, Vec3], B.map((v) => P[v]) as [Vec3, Vec3, Vec3]);
+    if (A[0] === B[0] || A[0] === B[1] || A[0] === B[2] || A[1] === B[0] || A[1] === B[1] || A[1] === B[2] || A[2] === B[0] || A[2] === B[1] || A[2] === B[2]) return;
+    const hit = trisCross([P[A[0]], P[A[1]], P[A[2]]], [P[B[0]], P[B[1]], P[B[2]]]);
     if (hit) out.push(hit);
   };
-  for (const [k, l] of grid) {
-    if (k === "big") continue;
-    for (let a = 0; a < l.length && out.length < most; a++) for (let b = a + 1; b < l.length; b++) pair(l[a], l[b]);
-  }
-  for (const i of big) for (let j = 0; j < tris.length && out.length < most; j++) pair(i, j);
+  for (const l of grid.values()) for (let a = 0; a < l.length && out.length < most; a++) for (let b = a + 1; b < l.length; b++) pair(l[a], l[b]);
+  for (const i of big) for (let j = 0; j < T && out.length < most; j++) pair(i, j);
   return out;
+}
+
+/** A few recent plans (the cage being dragged keeps its layout). */
+const planCache = new Map<string, SubdivPlan>();
+export function cachedPlan(cage: Cage, levels: number): SubdivPlan {
+  const k = `${levels}#${layoutKey(cage)}`;
+  let p = planCache.get(k);
+  if (!p) {
+    p = subdivisionPlan(cage, levels);
+    if (planCache.size >= 6) planCache.delete(planCache.keys().next().value!);
+    planCache.set(k, p);
+  }
+  return p;
 }
 
 const dist = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);

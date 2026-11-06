@@ -6,7 +6,7 @@
 
 import { Box3, BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
 import type { Feature, FreeformFeature, PlaneDef, TransformFeature, Vec3 } from "../doc/types";
-import { archBridge, borderChains, bridgeChains, bridgeFaces, moveTurnScale, shapeCage, sweepFace, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, limitPoints, previewMesh, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
+import { applyPlan, archBridge, borderChains, cachedPlan, planIndices, smoothNormals, type SubdivPlan, bridgeChains, bridgeFaces, moveTurnScale, shapeCage, sweepFace, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
 import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
@@ -965,6 +965,8 @@ export class FreeformTool implements Tool {
 
   // --------------------------------------------------------------- drawing
 
+  /** The plan the preview mesh was last built from (same layout: refill in place). */
+  private shownPlan: SubdivPlan | null = null;
   private crossing = false;
   private crossTimer = 0;
   private crossAt = 0;
@@ -989,13 +991,27 @@ export class FreeformTool implements Tool {
 
   private rebuild(): void {
     this.checkCrossing();
-    // The same smooth surface the body will have (points on the limit surface).
-    const sub3 = subdivide(this.cage, 3);
-    const m = previewMesh({ ...sub3, points: limitPoints(sub3) });
+    // The same smooth surface the body will have (points on the limit surface),
+    // from weights kept per layout: while points are dragged or a slider moves,
+    // the buffers are refilled in place (~0.3 ms, it was ~21 ms for a
+    // watering can — 70–100 ms a finger move on a phone).
+    const plan = cachedPlan(this.cage, 3);
     const g = this.surface.geometry;
-    g.setAttribute("position", new BufferAttribute(m.positions, 3));
-    g.setAttribute("normal", new BufferAttribute(m.normals, 3));
-    g.setIndex(new BufferAttribute(m.indices, 1));
+    if (plan !== this.shownPlan) {
+      this.shownPlan = plan;
+      const pos = applyPlan(plan, this.cage.verts);
+      const tri = planIndices(plan);
+      g.setAttribute("position", new BufferAttribute(pos, 3));
+      g.setAttribute("normal", new BufferAttribute(smoothNormals(pos, tri), 3));
+      g.setIndex(new BufferAttribute(tri, 1));
+    } else {
+      const pa = g.getAttribute("position") as BufferAttribute;
+      const na = g.getAttribute("normal") as BufferAttribute;
+      applyPlan(plan, this.cage.verts, pa.array as Float32Array);
+      smoothNormals(pa.array as Float32Array, g.getIndex()!.array as Uint32Array, na.array as Float32Array);
+      pa.needsUpdate = true;
+      na.needsUpdate = true;
+    }
     g.computeBoundingSphere();
     const edges = cageEdges(this.cage).flatMap(([a, b]) => [...this.cage.verts[a], ...this.cage.verts[b]]);
     setPositions(this.lines, edges);
