@@ -207,7 +207,14 @@ export class DocStore {
 
   remove(id: string): void {
     this.commit((d) => {
+      const gone = d.features.find((f) => f.id === id);
       d.features = d.features.filter((f) => f.id !== id);
+      // Its sketches, now used by nothing, come back into view to be used again
+      // (they were hidden once used: deleting a cut left its sketch invisible).
+      const used = (f: Feature) => sketchesOf(f);
+      const still = new Set(d.features.flatMap(used));
+      const free = gone ? used(gone).filter((s) => !still.has(s)) : [];
+      if (free.length) d.hidden = d.hidden.filter((h) => !free.includes(h));
     });
   }
 
@@ -280,6 +287,12 @@ function hashText(t: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 0x01000193);
   return `${t.length}:${(h >>> 0).toString(36)}`;
+}
+
+/** The sketches a step makes something from (its profiles). */
+function sketchesOf(f: Feature): string[] {
+  const srcs = f.type === "extrude" || f.type === "revolve" || f.type === "sweep" ? [f.source] : f.type === "loft" ? f.sections : [];
+  return srcs.flatMap((s) => (s.kind === "profile" ? [s.sketch] : []));
 }
 
 export function newId(prefix: string): string {

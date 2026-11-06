@@ -3,7 +3,7 @@
 
 import type { ThreadFeature } from "../doc/types";
 import { defaultPitch, threadLabel } from "../kernel/threads";
-import type { AxisFeature, AxisRef, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
+import type { AxisFeature, AxisRef, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
 import { add, cross, dot, len, norm, niceStep, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { evaluate, fmtLen } from "../units";
@@ -12,7 +12,7 @@ import { FeatureOp } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
 import { axisSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
 import { faceIndexOf, oppositeFace, sourceFrame, sourcesOf, targetOf, type AppContext, type Sel } from "./tool";
-import { arrangement, materialRegions, regionRef, resolveRegion } from "../sketch/regions";
+import { arrangement, drawnRegions, regionRef, resolveRegion } from "../sketch/regions";
 import { DimWidget } from "./annotate";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
 import { DragTyping } from "./dragTyping";
@@ -142,17 +142,47 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     const src = this.feature.source;
     return [
       this.num("Distance", "distance", "length", { onInput: (v) => this.setDistance(v), inBox: true }),
-      modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render()),
+      modeChoice(
+        () => this.feature.mode,
+        (m) => {
+          this.feature.mode = m;
+          // A new body from a face (a spire on a tower): its own height is what's typed,
+          // not the total through the body — 68 typed came out 102 down into the tower.
+          if (m === "new" && this.measure === "total") {
+            this.measure = "offset";
+            this.dim?.setMode("offset");
+            this.dim?.setValue(this.shown());
+          }
+          this.update();
+        },
+        () => this.render(),
+      ),
       // Every shape in the sketch at once (a scale, lettering: hundreds of them,
       // far too many to tap) — holes stay holes.
       ...(src.kind === "profile" && !this.existing ? [{ type: "button" as const, label: "All shapes", onClick: () => this.allShapes() }] : []),
+      // Lean the sides in towards a smaller end (a spire, a pyramid) — no angle to work out.
+      {
+        type: "slider" as const,
+        label: "Taper",
+        value: this.feature.taper ?? 1,
+        min: 0,
+        max: 2,
+        step: 0.01,
+        show: (v: number) => (Math.abs(v - 1) < 1e-9 ? "none" : v < 0.01 ? "to a point" : `end ${Math.round(v * 100)}%`),
+        onInput: (v: number) => {
+          this.feature.taper = Math.abs(v - 1) < 1e-9 ? undefined : v;
+          this.onDraftChanged();
+        },
+      },
     ];
   }
 
   private allShapes(): void {
     const src = this.feature.source;
     if (src.kind !== "profile") return;
-    const regs = materialRegions(arrangement(this.app.sketchCurves(src.sketch)));
+    // What was drawn (not the outline of the face the sketch is on).
+    const drawn = this.app.store.find<SketchFeature>(src.sketch)?.entities ?? [];
+    const regs = drawnRegions(arrangement(this.app.sketchCurves(src.sketch)), arrangement(drawn));
     if (!regs.length) return;
     this.feature.source = { ...src, regions: regs.map(regionRef) };
     this.frame = sourceFrame(this.app, this.feature.source);

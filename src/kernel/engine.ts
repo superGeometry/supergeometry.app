@@ -24,6 +24,7 @@ import {
   makePolygon,
   makeSolid,
   measureArea,
+  measureDistanceBetween,
   measureVolume,
   revolution,
   Vector,
@@ -226,6 +227,26 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       if (Math.abs(f.distance) < 1e-6) throw new Error("Distance is zero");
       // Pushing/pulling a face of its own body offsets it: the neighbouring faces
       // extend along their own surfaces (a round side stays round).
+      const tapered = f.taper !== undefined && Math.abs(f.taper - 1) > 1e-9;
+      if (tapered) {
+        // Sides leaning in (or out): each shape's outline to a scaled copy at the far end.
+        const parts = sourceFaces(f.source, ctx).map(({ face, normal }) => {
+          // (replicad's outerWire() and innerWires() free the face they're asked
+          // of: they're asked of copies.)
+          const c = face.center.toTuple() as Vec3;
+          if (face.clone().innerWires().length) throw new Error("Taper works on shapes without holes");
+          const w0 = face.clone().outerWire();
+          const k = Math.max(0.002, f.taper!);
+          const w1 = w0.clone().scale(k, c).translate(scale(normal, f.distance));
+          try {
+            return loft([w0, w1], { ruled: true }) as Shape3D;
+          } catch {
+            throw new Error("This shape can't be tapered");
+          }
+        });
+        combine(f.id, f.mode, f.target, fuseAll(parts), f.distance < 0, ctx);
+        return;
+      }
       if (f.source.kind === "face" && f.mode !== "new" && f.target === f.source.face.body) {
         const body = need(bodies, f.target);
         const face = resolveFace(body, f.source.face);
@@ -1192,6 +1213,21 @@ function resolveAxis(a: AxisRef, ctx: Ctx): { origin: Vec3; dir: Vec3 } {
 /** Put a new solid into the model: new body, or join/cut a target. */
 function combine(id: string, mode: string, target: string | undefined, solid: Shape3D, negative: boolean, ctx: Ctx): void {
   const m = mode === "auto" ? (target ? (negative ? "cut" : "join") : "new") : mode;
+  // Add or Cut picked, with no body named (drawn on the floor, not on a face):
+  // it acts on what it runs into — Add on the body it touches, Cut on every
+  // body it overlaps. (It used to make a separate body: a nave "added" to its
+  // tower stood beside it as Body 2.)
+  if (!target && m === "cut") {
+    for (const hit of overlapping(solid, ctx)) {
+      const t = ctx.bodies.get(hit)!;
+      const out = fuzzyBoolean("cut", t, solid);
+      if (isEmpty(out)) ctx.bodies.delete(hit);
+      else ctx.bodies.set(hit, out);
+      ctx.freeforms.delete(hit);
+    }
+    return;
+  }
+  if (!target && m === "join") target = touching(solid, ctx)[0];
   if (m === "new" || !target) {
     ctx.bodies.set(id, solid);
     return;
@@ -1282,6 +1318,27 @@ function overlapping(solid: Shape3D, ctx: Ctx, skip?: string): string[] {
     }
   }
   return out;
+}
+
+/** Bodies the solid overlaps or touches, the most overlapped first. */
+function touching(solid: Shape3D, ctx: Ctx): string[] {
+  const over = overlapping(solid, ctx);
+  const sb = solid.boundingBox;
+  const size = Math.max(1e-9, ...[0, 1, 2].map((k) => (sb.bounds[1] as number[])[k] - (sb.bounds[0] as number[])[k]));
+  const tol = size * 1e-6 + 1e-7;
+  const near: string[] = [];
+  for (const [id, body] of ctx.bodies) {
+    if (over.includes(id)) continue;
+    const bb = body.boundingBox;
+    const apart = [0, 1, 2].some((k) => (bb.bounds[1] as number[])[k] < (sb.bounds[0] as number[])[k] - tol || (bb.bounds[0] as number[])[k] > (sb.bounds[1] as number[])[k] + tol);
+    if (apart) continue;
+    try {
+      if (measureDistanceBetween(body, solid) <= tol) near.push(id);
+    } catch {
+      // can't tell: not counted
+    }
+  }
+  return [...over, ...near];
 }
 
 function fuseAll(parts: Shape3D[]): Shape3D {

@@ -1,10 +1,10 @@
 import { getPath, setPath } from "../doc/params";
-import type { ExtrudeSource, Feature } from "../doc/types";
+import type { ExtrudeSource, Feature, SketchFeature } from "../doc/types";
 import type { FieldKind, PanelItem, ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import type { PickHit, PickOptions } from "../view/viewport";
 import { hitToSel, type AppContext, type Sel, type Tool } from "./tool";
-import { arrangement, resolveRegion } from "../sketch/regions";
+import { arrangement, drawnRegions, resolveRegion } from "../sketch/regions";
 
 /** Something the user has to point at (an axis, a path, faces to remove, …). */
 export interface Slot {
@@ -260,7 +260,10 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
 function allRegionsUsed(app: AppContext, sketch: string, features: Feature[]): boolean {
   try {
     const arr = arrangement(app.sketchCurves(sketch));
-    if (arr.regions.length <= 1) return true;
+    // Only what was drawn counts (not the outline of the face it's on: window
+    // sketches on a wall stayed in view after every window was cut).
+    const drawn = new Set(drawnRegions(arr, arrangement(app.store.find<SketchFeature>(sketch)?.entities ?? [])).map((r) => arr.regions.indexOf(r)));
+    if (drawn.size <= 1 && arr.regions.length <= 1) return true;
     const used = new Set<number>();
     const add = (s: ExtrudeSource) => {
       if (s.kind !== "profile" || s.sketch !== sketch) return;
@@ -273,7 +276,7 @@ function allRegionsUsed(app: AppContext, sketch: string, features: Feature[]): b
       if (g.type === "extrude" || g.type === "revolve" || g.type === "sweep") add(g.source);
       else if (g.type === "loft") g.sections.forEach(add);
     }
-    return used.size >= arr.regions.length;
+    return [...drawn].every((i) => used.has(i));
   } catch {
     return true;
   }

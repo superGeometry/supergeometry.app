@@ -140,6 +140,7 @@ export class DimWidget {
       sel.value = opts.mode ?? opts.modes[0].id;
       sel.addEventListener("change", () => opts.onMode?.(sel.value));
       this.box.append(sel);
+      this.modeSel = sel;
     }
     this.input.inputMode = "decimal";
     numpadInput(this.input);
@@ -223,6 +224,12 @@ export class DimWidget {
     this.mid.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
     this.layout();
     this.view.requestRender();
+  }
+
+  private modeSel: HTMLSelectElement | null = null;
+  /** Show another of its modes (the tool switched it). */
+  setMode(id: string): void {
+    if (this.modeSel) this.modeSel.value = id;
   }
 
   setValue(v: number): void {

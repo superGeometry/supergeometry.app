@@ -376,6 +376,37 @@ export class SketchTool implements Tool {
         else xDir[(k + 1) % 3] = 1;
         this.plane = { origin: [0, 0, 0], normal, xDir };
         this.phase = "draw";
+        // A flat face of the model right in front, facing the camera: sketch on
+        // that (looking at the back wall from Back, the sketch went on the
+        // origin plane through the middle of the building instead).
+        // The one seen most over the screen (the middle can be a roof slope or
+        // empty sky: from Right, the sketch went through the middle of the nave).
+        const view = this.app.view;
+        const ins = view.coveredInsets();
+        const count = new Map<string, { n: number; body: string; face: number }>();
+        for (let i = 0; i < 9; i++)
+          for (let j = 0; j < 9; j++) {
+            const x = view.width * (ins.left + ((1 - ins.left - ins.right) * (i + 0.5)) / 9);
+            const y = view.height * (ins.top + ((1 - ins.top - ins.bottom) * (j + 0.5)) / 9);
+            const hit = view.pick(x, y, { edges: false, vertices: false, planes: false, profiles: false, axes: false, images: false, edgeTolPx: 0 });
+            if (hit?.kind !== "face") continue;
+            const k = `${hit.body}#${hit.face}`;
+            const c = count.get(k) ?? { n: 0, body: hit.body, face: hit.face };
+            c.n++;
+            count.set(k, c);
+          }
+        const best = [...count.values()]
+          .filter((c) => {
+            const f = view.body(c.body)?.faces[c.face];
+            return !!f?.plane && dot(f.normal, normal) > 0.9999;
+          })
+          .sort((a, b) => b.n - a.n)[0];
+        const info = best && view.body(best.body)?.faces[best.face];
+        if (best && info?.plane) {
+          this.plane = { origin: info.plane.origin, normal: info.plane.normal, xDir };
+          this.attachedTo = { body: best.body, center: info.center, normal: info.normal, area: info.area };
+          this.app.ui.toast("Sketching on the face in front of you");
+        } else this.app.ui.toast("Sketching on the origin plane (tap Exit and pick a face to sketch on one)");
       }
     }
     if (this.phase === "plane") {
@@ -1022,7 +1053,11 @@ export class SketchTool implements Tool {
         }
         break;
     }
-    ui.showPanel(items.length ? { title: k === "fillet" && memory.corner === "chamfer" ? "Chamfer" : titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined } : null);
+    // A shape being drawn with a size typed in the card: Enter (or Done) puts it
+    // there — typing Width 100, Height 150 and pressing Enter did nothing; it
+    // still waited for a second tap, which on a phone lands wherever the finger is.
+    const typed = this.pts.length > 0 && ["rect", "circle", "polygon", "ellipse", "line"].includes(k);
+    ui.showPanel(items.length ? { title: k === "fillet" && memory.corner === "chamfer" ? "Chamfer" : titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined, onDone: typed ? () => this.finishTyped() : undefined } : null);
   }
 
   /** Pick a .ttf / .otf / .woff file and use it for the text. */
@@ -2258,9 +2293,10 @@ export class SketchTool implements Tool {
           const L = this.locks;
           const dim = (prop: string, value?: number) => value !== undefined && cs.push({ id: uid(), type: "dim", curves: [e.id], prop, value });
           if (e.kind === "rect") {
-            const f = memory.rect === "center" ? 1 : 1;
-            dim("w", L.w !== undefined ? L.w * (memory.rect === "center" ? 2 : 1) * f : undefined);
-            dim("h", L.h !== undefined ? L.h * (memory.rect === "center" ? 2 : 1) : undefined);
+            // The typed Width and Height are the whole rectangle's, in every mode
+            // (a centre rectangle typed 100 × 150 used to come out 200 × 300).
+            dim("w", L.w);
+            dim("h", L.h);
           }
           if (e.kind === "circle") dim("diameter", L.r);
           if (e.kind === "polygon") dim("radius", L.r);
@@ -2282,6 +2318,15 @@ export class SketchTool implements Tool {
     }
     this.updatePanel();
     this.refreshPreview();
+  }
+
+  /** Done / Enter in the card: the shape at its typed size (the first point is where it was tapped). */
+  private finishTyped(): void {
+    if (!this.pts.length) return;
+    if (!Object.keys(this.locks).length) return this.app.ui.toast("Type a size first (or tap where it should end)");
+    // No pointer to go by (a phone): the typed size from the first point, up and to the right.
+    if (!this.cursor) this.cursor = { uv: [...this.pts[0]] as Vec2 };
+    this.addPoint(this.cursor!.uv, 1);
   }
 
   private finishByKey(): void {
@@ -3202,7 +3247,20 @@ export class SketchTool implements Tool {
     }
     const keepOriginals = this.kind === "patternLinear" || this.kind === "patternCircular" || ((this.kind === "mirror" ? this.edit.mirrorCopy : this.edit.copy));
     const base = keepOriginals ? this.entities : this.entities.filter((e) => !this.selected.has(e.id));
-    this.commit([...base, ...results]);
+    // Moved (not copied): ties between what moves and what stays let go, and
+    // so do pins holding the moved curves in place — an arch's circle snapped
+    // to its window's corner dragged the window along when moved to the middle.
+    let cons = this.constraints;
+    if (!keepOriginals) {
+      const moved = new Set(results.map((e) => e.id));
+      cons = cons.filter((c) => {
+        const ids = [...(c.curves ?? []), ...(c.pts ?? []).map((q) => q.e)];
+        const inMoved = ids.some((i) => moved.has(i));
+        if (c.type === "fix") return !inMoved;
+        return !(inMoved && ids.some((i) => !moved.has(i)));
+      });
+    }
+    this.commit([...base, ...results], cons);
     if (!keepOriginals) {
       this.selected = new Set(results.map((e) => e.id));
       this.showSelection();

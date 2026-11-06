@@ -128,6 +128,11 @@ export interface ExtrudeFeature extends FeatureBase {
   /** auto: join `target` when distance > 0, cut it when < 0; new body without a target. */
   mode: "auto" | "new" | "join" | "cut";
   target?: string;
+  /**
+   * How big the far end is, as a fraction of the shape (1 or missing: straight
+   * sides; 0.5: half size; near 0: to a point — a spire, a pyramid, a cone).
+   */
+  taper?: number;
 }
 
 export interface EdgeFeature extends FeatureBase {
