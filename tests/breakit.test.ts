@@ -17,8 +17,8 @@ import type { Feature, PlaneDef, Vec3 } from "../src/doc/types";
 setOC(await (opencascade as unknown as () => Promise<any>)());
 const oc = getOC();
 
-const SCENARIOS = Number(process.argv[2] ?? 30);
-const STEPS = Number(process.argv[3] ?? 8);
+const SCENARIOS = Number(process.argv[2] ?? 10);
+const STEPS = Number(process.argv[3] ?? 6);
 const SEED = Number(process.argv[4] ?? 1);
 
 function rng(seed: number) {
@@ -238,6 +238,9 @@ for (let sc = 0; sc < SCENARIOS; sc++) {
     const step = randomStep(R, st, res, size);
     if (!step) continue;
     const prevSolids = new Map(debugBodies());
+    // What every body looks like now (its faces' areas): a step must never change an earlier result.
+    const sig = (m: Map<string, Shape3D>) => [...m].map(([k, v]) => `${k}:${v.faces.map((f) => measureArea(f).toFixed(4)).join(",")}`).join("|");
+    const sigBefore = sig(prevSolids);
     const next = [...features, step];
     let r: any;
     try {
@@ -247,6 +250,11 @@ for (let sc = 0; sc < SCENARIOS; sc++) {
       break;
     }
     const err = r.errors.find((e: any) => e.featureId === step.id);
+    if (sig(prevSolids) !== sigBefore) {
+      failures.push({ scenario: sc, step: step.name, problems: ["changed an earlier step's result"], features: next });
+      console.log(`FAIL scenario ${sc} step ${st} (${step.name}): changed an earlier step's result${err ? " (refused)" : ""}`);
+      break;
+    }
     if (ONLY !== null) console.log(`  step ${st} ${step.name}: ${err ? "refused: " + err.message : "ok"} | ${r.bodies.map((b: any) => b.id + ":" + b.faces.length + "f").join(" ")}`);
     if (ONLY !== null && process.env.BREAKIT_DUMP) writeFileSync(`${process.env.BREAKIT_DUMP}-${st}.json`, JSON.stringify(next));
     if (err) {

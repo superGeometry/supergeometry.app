@@ -157,7 +157,7 @@ async function run(features: Feature[]) {
             for (const id of touchedBodies(f, ctx)) {
               const b = out.bodies.get(id);
               if (!b || out.freeforms.has(id)) continue;
-              const c = b.clone() as Shape3D;
+              const c = deepCopy(b);
               copies.set(id, c);
               out.bodies.set(id, c);
             }
@@ -1362,6 +1362,23 @@ const GUARDED = new Set<string>(["extrude", "revolve", "sweep", "loft", "boolean
 /** Edits that must not break a body into pieces (cuts and booleans may). */
 const NO_SPLIT = new Set<string>(["fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom"]);
 
+/**
+ * A real copy: its own topology and its own curves and surfaces (replicad's
+ * clone() only wraps the same shape again). Made by "moving" it nowhere with
+ * copying on.
+ */
+function deepCopy(s: Shape3D): Shape3D {
+  const oc = getOC();
+  const t = new oc.gp_Trsf();
+  const mk = new oc.BRepBuilderAPI_Transform(s.wrapped, t, true, false);
+  try {
+    return cast(mk.ModifiedShape(s.wrapped)) as Shape3D;
+  } finally {
+    mk.delete();
+    t.delete();
+  }
+}
+
 function subShapes(s: Shape3D, kind: "SOLID" | "SHELL"): any[] {
   const oc = getOC();
   const ex = new oc.TopExp_Explorer(s.wrapped, kind === "SOLID" ? oc.TopAbs_ShapeEnum.TopAbs_SOLID : oc.TopAbs_ShapeEnum.TopAbs_SHELL, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
@@ -1423,7 +1440,7 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
   // Inside out (negative volume): turn it right — on a copy (its faces may be
   // shared with earlier steps' results, which must never change).
   if (measureVolume(after) < 0) {
-    after = after.clone() as Shape3D;
+    after = deepCopy(after);
     solids = subShapes(after, "SOLID");
     for (const x of solids) oc.BRepLib.OrientClosedSolid(x);
     if (measureVolume(after) < 0) throw new Error("That edit would turn the body inside out");
