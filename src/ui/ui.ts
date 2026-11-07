@@ -506,8 +506,20 @@ export class UI {
     return new Promise((resolve) => {
       const back = el("div", "dialog-back");
       const box = el("form", "dialog");
-      box.append(el("div", "panel-title", title));
+      // The title with a close X (a long list can push Cancel off a phone's screen).
+      const head = el("div", "library-head");
+      head.append(el("div", "panel-title", title));
+      const x = el("button", "icon-btn library-close");
+      x.type = "button";
+      x.title = "Close";
+      x.innerHTML = icons.close;
+      x.addEventListener("click", () => close(null));
+      head.append(x);
+      box.append(head);
       if (note) box.append(el("div", "dialog-note", note));
+      // The fields scroll inside the window; the title and the buttons stay in sight.
+      const list = el("div", "dialog-list");
+      box.append(list);
       const inputs = fields.map((f) => {
         const l = el("label", "dialog-field");
         l.append(el("span", "field-label", f.label));
@@ -517,7 +529,7 @@ export class UI {
         i.autocomplete = "off";
         i.spellcheck = false;
         l.append(i);
-        box.append(l);
+        list.append(l);
         return i;
       });
       const row = el("div", "panel-buttons");
@@ -538,6 +550,7 @@ export class UI {
         e.stopPropagation();
       });
       back.append(box);
+      back.addEventListener("pointerdown", (e) => e.target === back && close(null));
       document.body.append(back);
       inputs[0]?.focus();
     });

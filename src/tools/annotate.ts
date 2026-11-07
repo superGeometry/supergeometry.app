@@ -78,7 +78,8 @@ export interface DimWidgetOptions {
   modes?: { id: string; label: string }[];
   mode?: string;
   onMode?(id: string): void;
-  onInput?(v: number): void;
+  /** The value typed (and the text, for a formula with variables). */
+  onInput?(v: number, text: string): void;
   onCommit?(): void;
   onPin?(): void;
   /** Text to restore into the input (when another tool takes over while typing). */
@@ -154,7 +155,7 @@ export class DimWidget {
       const v = evaluate(this.input.value, this.angle ? "angle" : "length");
       this.input.classList.toggle("invalid", v === null);
       // Key by key into this box: one undo step for the value typed.
-      if (v !== null) mergingCommits(this, () => opts.onInput?.(v));
+      if (v !== null) mergingCommits(this, () => opts.onInput?.(v, this.input.value));
     });
     this.input.addEventListener("keydown", (e) => {
       e.stopPropagation();

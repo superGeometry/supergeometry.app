@@ -5,6 +5,7 @@ import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, Sketc
 import { dot, GROUND, niceStep as niceStepOf, originOnPlane, planeY, toPlane } from "../geom";
 import { addStrict, constraintError, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
+import { nearestSnap } from "../sketch/snapPick";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, buttonEnabled, CONSTRAINT_BUTTONS, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
 import { settings } from "../settings";
@@ -248,6 +249,8 @@ export class SketchTool implements Tool {
   private cursor: Snap | null = null;
   private dragging = false;
   private locks: Record<string, number> = {};
+  /** The length typed while drawing as a formula (with variables), for the value it gave. */
+  private lenExpr: { v: number; text: string } | null = null;
   private selected = new Set<string>();
   private construction = false;
   private edit: {
@@ -665,21 +668,26 @@ export class SketchTool implements Tool {
     const existing = existingConstraints("distance", this.constraints, pts, curves)[0];
     const w = (q: Vec2) => sketchToWorld(this.plane!, q, 0.02).toArray() as Vec3;
     let typed: number | null = null;
+    let text: string | undefined = existing?.expr;
     this.distDim = new DimWidget(this.app.view, {
       value: existing?.value ?? v,
+      typed: existing?.expr,
       boxAt: "side",
-      onInput: (x) => (typed = x > 0 ? x : null),
-      onCommit: () => this.setDistance(typed ?? existing?.value ?? v),
+      onInput: (x, t) => {
+        typed = x > 0 ? x : null;
+        text = t;
+      },
+      onCommit: () => this.setDistance(typed ?? existing?.value ?? v, text && isExpression(text) ? text : undefined),
     });
     this.distDim.set(w(a), w(b));
   }
 
   /** Upsert the Distance constraint of the selection; the first-picked side stays put. */
-  private setDistance(value: number): void {
+  private setDistance(value: number, expr?: string): void {
     const curves = this.pickedCurves();
     const pts = [...this.selPts];
     const old = new Set(existingConstraints("distance", this.constraints, pts, curves).map((c) => c.id));
-    const c: SketchConstraint = { id: uid(), type: "distance", pts, ...(curves.length ? { curves: curves.map((e) => e.id) } : {}), value };
+    const c: SketchConstraint = { id: uid(), type: "distance", pts, ...(curves.length ? { curves: curves.map((e) => e.id) } : {}), value, ...(expr ? { expr } : {}) };
     const first = this.firstPicked();
     const res = addStrict(this.entities, this.constraints.filter((x) => !old.has(x.id)), [c], first ? { fixed: new Set([first]) } : {});
     if (!res.ok) return this.refused();
@@ -2097,7 +2105,8 @@ export class SketchTool implements Tool {
     // The origin is a guide point like the others: with them switched off it
     // must not pull taps either (numbers placed along a ruler near the origin
     // all jumped onto it - a fingertip's reach is ~20 px on a phone).
-    const cands: { p: Vec2; label: string; ref?: PointRef; mid?: string; model?: boolean }[] = s.guidePoints ? [{ p: [0, 0], label: "Origin" }] : [];
+    // Drawn on it: held there (a line from the origin, sized later, slid its start off it).
+    const cands: { p: Vec2; label: string; ref?: PointRef; mid?: string; model?: boolean }[] = s.guidePoints ? [{ p: [0, 0], label: "Origin", model: true }] : [];
     if (s.guidePoints) {
       for (const e of this.entities) {
         // Named points first (they can be constrained), then midpoints etc.
@@ -2133,16 +2142,17 @@ export class SketchTool implements Tool {
     const alongside = (a: Vec2, b: Vec2, to: Vec2): boolean => !!drawFrom && runsAlongside(a, b, drawFrom, to, wppPx * 2);
     const lineOf = new Map<string, Extract<SketchEntity, { kind: "line" }>>();
     for (const e of this.entities) if (e.kind === "line") lineOf.set(e.id, e);
-    let best: { p: Vec2; label: string; d: number; ref?: PointRef; mid?: string; model?: boolean } | null = null;
+    const reach: { p: Vec2; label: string; d: number; ref?: PointRef; mid?: string; model?: boolean }[] = [];
     for (const c of cands) {
       // An end of a line the new one would run alongside: joining it would make a sliver.
       const owner = c.ref && lineOf.get(c.ref.e);
       if (owner && alongside(owner.a, owner.b, c.p)) continue;
       const sc = screen(c.p);
       if (!sc) continue;
-      const d = Math.hypot(sc[0] - p.x, sc[1] - p.y);
-      if (d < tol && (!best || d < best.d)) best = { ...c, d };
+      reach.push({ ...c, d: Math.hypot(sc[0] - p.x, sc[1] - p.y) });
     }
+    // (Two on one spot: the one a drawing there can be kept on.)
+    const best = nearestSnap(reach, tol);
     if (best) return { uv: [...best.p] as Vec2, label: best.label, ref: best.ref, mid: best.mid, model: best.model };
 
     // Nothing to land on: lines and curves to slide along - straight across from
@@ -2363,7 +2373,7 @@ export class SketchTool implements Tool {
    * Touch screens (numpad on): after a line's second tap, its length in a box
    * by it - type it on the numpad; the line keeps its direction.
    */
-  private lineBox: { id: string; widget: DimWidget; value: number; edited: boolean } | null = null;
+  private lineBox: { id: string; widget: DimWidget; value: number; edited: boolean; expr?: string } | null = null;
 
   private showLineBox(id: string): void {
     this.closeLineBox();
@@ -2374,7 +2384,12 @@ export class SketchTool implements Tool {
       value: len,
       boxAt: "side",
       focus: true,
-      onInput: (v) => v > 0 && this.resizeLine(id, v),
+      onInput: (v, text) => {
+        if (v <= 0) return;
+        this.resizeLine(id, v);
+        // A formula (with variables) stays linked to them.
+        this.lineBox!.expr = isExpression(text) ? text.trim() : undefined;
+      },
       onCommit: () => this.closeLineBox(),
     });
     this.lineBox = { id, widget, value: len, edited: false };
@@ -2422,7 +2437,7 @@ export class SketchTool implements Tool {
     const len = Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1]);
     const cs = this.constraints.filter((c) => !(c.type === "dim" && c.prop === "length" && c.curves?.length === 1 && c.curves[0] === b.id));
     this.opLabel = "Line length";
-    this.commit(this.entities, [...cs, { id: uid(), type: "dim", curves: [b.id], prop: "length", value: len }]);
+    this.commit(this.entities, [...cs, { id: uid(), type: "dim", curves: [b.id], prop: "length", value: len, ...(b.expr ? { expr: b.expr } : {}) }]);
   }
 
   /** The snapped first point sits on a line the new line (to `end`) runs alongside. */
@@ -2490,7 +2505,11 @@ export class SketchTool implements Tool {
           this.locks.len = Math.hypot(pt[0] - a[0], pt[1] - a[1]);
           this.locks.ang = (Math.atan2(pt[1] - a[1], pt[0] - a[0]) * 180) / Math.PI;
         }
-        if (this.locks.len !== undefined) cs.push({ id: uid(), type: "dim", curves: [id], prop: "length", value: this.locks.len });
+        if (this.locks.len !== undefined) {
+          const expr = this.lenExpr?.v === this.locks.len ? this.lenExpr.text : undefined;
+          cs.push({ id: uid(), type: "dim", curves: [id], prop: "length", value: this.locks.len, ...(expr ? { expr } : {}) });
+        }
+        this.lenExpr = null;
         if (this.locks.ang !== undefined && !cs.some((x) => x.type === "horizontal" || x.type === "vertical")) cs.push({ id: uid(), type: "dim", curves: [id], prop: "angle", value: this.locks.ang });
         this.commitAdd([{ id, kind: "line", a, b: pt }], cs);
         this.lastLineId = id;
@@ -2977,9 +2996,10 @@ export class SketchTool implements Tool {
       solidColor: 0xffc23d,
       boxAt: "side",
       value: len,
-      onInput: (v) => {
+      onInput: (v, text) => {
         if (v <= 0) return;
         this.locks.len = v;
+        this.lenExpr = isExpression(text) ? { v, text: text.trim() } : null;
         this.typedThisShape = true;
         this.refreshPreview();
       },
@@ -3836,8 +3856,13 @@ export class SketchTool implements Tool {
       const w = (q: Vec2) => sketchToWorld(this.plane!, q, 0.02).toArray() as Vec3;
       this.sizeDim = new DimWidget(this.app.view, {
         value: field.value,
+        // A size set by a formula shows it (and keeps it: typed with variables, it stays linked to them).
+        typed: field.expr,
         boxAt: "beyond",
-        onInput: (v) => field.onInput(v),
+        onInput: (v, text) => {
+          field.onExpr?.(text);
+          field.onInput(v);
+        },
         onCommit: () => this.clearSelection(),
       });
       const start = e.kind === "circle" ? ([2 * c.c[0] - through[0], 2 * c.c[1] - through[1]] as Vec2) : c.c;

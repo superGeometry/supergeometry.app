@@ -77,6 +77,8 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     }
     this.measure = this.thick ? (opts.measure ?? "total") : "offset";
     if (opts.expr && !existing) this.feature.exprs = { distance: opts.expr };
+    // Typed (on the face, before the tool started) as a formula: kept as one.
+    else if (opts.typed && !existing) this.typedInto("distance", opts.typed, (t) => (this.thick && this.measure === "total" ? `${t} - ${Math.round(this.thick.distance * 1e6) / 1e6}mm` : t));
   }
 
   /** A variable picked for the value: total thickness = that variable (or the offset, in Offset mode). */
@@ -126,7 +128,11 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
         this.dim?.setValue(this.shown());
         this.onDraftChanged();
       },
-      onInput: (v) => this.setDistance(this.measure === "total" && this.thick ? v - this.thick.distance : v),
+      onInput: (v, text) => {
+        const total = this.measure === "total" && this.thick;
+        this.typedInto("distance", text, (t) => (total ? `${t} - ${Math.round(this.thick!.distance * 1e6) / 1e6}mm` : t));
+        this.setDistance(total ? v - this.thick!.distance : v);
+      },
       onCommit: () => this.done(),
       onPin: () => this.pin(),
       variables: this.app.store.doc.variables.map((v) => v.name),
@@ -202,8 +208,13 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
         value: Math.round((this.feature.taper ?? 1) * 1000) / 10,
         kind: "number" as const,
         min: 0,
+        // With variables (a shade's mouth over its neck: "shadeR / neckR * 100"): kept as the
+        // fraction it stands for ("(…) / 100"), shown as typed.
+        expr: /^\((.*)\) \/ 100$/.exec(this.feature.exprs?.taper ?? "")?.[1] ?? (this.feature.exprs?.taper ? `(${this.feature.exprs.taper}) * 100` : undefined),
+        onExpr: (x: string | null) => this.typedInto("taper", x ?? "", (t) => `(${t}) / 100`),
         onInput: (v: number) => {
-          const t = Math.min(300, v) / 100;
+          // Up to 10 times as big (a lamp shade from a narrow neck flares more than 3 times).
+          const t = Math.min(1000, v) / 100;
           this.feature.taper = Math.abs(t - 1) < 1e-9 ? undefined : t;
           this.onDraftChanged();
         },
@@ -315,6 +326,7 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     const { d0, from } = this.dragging;
     const raw = d0 + axisDrag(this.app.view, add(this.frame.base, scale(this.frame.normal, d0)), this.frame.normal, from, p);
     const step = niceStep(this.app.view.cam.worldPerPixel(this.app.view.height) * 4);
+    this.typedInto("distance", "");
     this.setDistance(Math.round(raw / step) * step);
     this.app.ui.setLabel(p.x, p.y, `${this.measure === "total" && this.thick ? "Total " : ""}${fmtLen(this.shown())}  · type a value`);
   }
@@ -411,7 +423,11 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
       boxGap: 40,
       dir: this.axis,
       value: this.feature.radius,
-      onInput: (v) => v > 0 && this.setRadius(v),
+      onInput: (v, text) => {
+        if (!(v > 0)) return;
+        this.typedInto("radius", text);
+        this.setRadius(v);
+      },
       onCommit: () => this.done(),
       variables: this.app.store.doc.variables.map((v) => v.name),
       onVariable: (name) => {
@@ -495,6 +511,7 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
       this.feature.name = this.names[kind];
       this.render();
     }
+    this.typedInto("radius", "");
     this.setRadius(Math.max(step, Math.round(Math.abs(raw) / step) * step));
     this.app.ui.setLabel(p.x, p.y, `${kind === "fillet" ? "Fillet" : "Chamfer"} ${fmtLen(this.feature.radius)}  · type a value`);
   }
@@ -604,7 +621,7 @@ export class RevolveOp extends FeatureOp<RevolveFeature> {
     const travel = this.feature.travel ?? 0;
     if (!this.handle) {
       this.handle = new Handle(this.app.view, "arrow");
-      this.dim = new DimWidget(this.app.view, { boxAt: "beyond", boxGap: 96, dir: d, value: travel, onInput: (v) => this.setTravel(v), onCommit: () => this.done() });
+      this.dim = new DimWidget(this.app.view, { boxAt: "beyond", boxGap: 96, dir: d, value: travel, onInput: (v, text) => (this.typedInto("travel", text), this.setTravel(v)), onCommit: () => this.done() });
     }
     const tip = add(base, scale(d, travel));
     this.handle.set(tip, travel < 0 ? scale(d, -1) : d);
@@ -639,6 +656,7 @@ export class RevolveOp extends FeatureOp<RevolveFeature> {
     const d = norm(this.feature.axis.dir);
     const raw = dr.t0 + axisDrag(this.app.view, add(this.axisBase(), scale(d, dr.t0)), d, dr.from, p);
     const step = niceStep(this.app.view.cam.worldPerPixel(this.app.view.height) * 4);
+    this.typedInto("travel", "");
     this.setTravel(Math.round(raw / step) * step);
     this.app.ui.setLabel(p.x, p.y, `Travel ${fmtLen(this.feature.travel ?? 0)}  · type a value`);
   }
@@ -767,7 +785,11 @@ export class ShellOp extends FeatureOp<ShellFeature> {
     this.dim ??= new DimWidget(this.app.view, {
       noLine: true,
       value: this.feature.thickness,
-      onInput: (v) => this.setThickness(v),
+      onInput: (v, text) => {
+        if (!(v > 0)) return;
+        this.typedInto("thickness", text);
+        this.setThickness(v);
+      },
       onCommit: () => this.done(),
     });
     // Just inside the face: the wall goes inwards from it.
@@ -950,14 +972,24 @@ export class TransformOp extends FeatureOp<TransformFeature> {
         return [];
       case "move":
         if (this.kind === "translate") return [...deltas(), ...copy];
-        if (this.kind === "rotate") return [{ type: "number", label: "Angle", value: o.rotate?.angle ?? 0, kind: "angle", onInput: (v) => ((o.rotate = { ...(o.rotate ?? { origin: [0, 0, 0], axis: [0, 0, 1] }), angle: v }), up()) }, ...copy];
-        return [
-          ...deltas(),
-          o.rotate
-            ? this.num(`Rotate ${axisName(o.rotate.axis)}`, "op.rotate.angle", "angle")
-            : { type: "number", label: "Rotate Z", value: 0, kind: "angle", onInput: (v) => ((o.rotate = { origin: this.center, axis: [0, 0, 1], angle: v }), up()) },
-          ...copy,
-        ];
+        {
+          // The angle and the point it turns about can use variables (a joint
+          // that turns by "a2" about "p2" high, and moves up when an arm gets
+          // longer) - set when it's made, and when it's opened again from History.
+          const pivot = (): PanelItem[] => (["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Pivot ${l}`, `op.rotate.origin.${i}`, "length"));
+          if (this.kind === "rotate") {
+            o.rotate ??= { origin: this.center, axis: [0, 0, 1], angle: 0 };
+            return [this.num("Angle", "op.rotate.angle", "angle"), ...(this.axis ? pivot() : []), ...copy];
+          }
+          return [
+            ...deltas(),
+            o.rotate
+              ? this.num(`Rotate ${axisName(o.rotate.axis)}`, "op.rotate.angle", "angle")
+              : { type: "number", label: "Rotate Z", value: 0, kind: "angle", onInput: (v) => ((o.rotate = { origin: this.center, axis: [0, 0, 1], angle: v }), up()) },
+            ...(this.existing && o.rotate?.angle ? pivot() : []),
+            ...copy,
+          ];
+        }
       case "scale":
         return [this.num("Factor", "op.factor", "number", { min: 0.0001 }), ...copy];
       case "mirror":
@@ -1843,7 +1875,7 @@ export class PlaneOp extends FeatureOp<PlaneFeature> {
         boxGap: 96,
         dir: b.normal,
         value: this.feature.offset,
-        onInput: (v) => this.setOffset(v),
+        onInput: (v, text) => (this.typedInto("offset", text), this.setOffset(v)),
         onCommit: () => this.done(),
       });
     }
@@ -1880,6 +1912,7 @@ export class PlaneOp extends FeatureOp<PlaneFeature> {
     if (this.typing.active) return;
     const raw = dr.d0 + axisDrag(this.app.view, add(b.origin, scale(b.normal, dr.d0)), b.normal, dr.from, p);
     const step = niceStep(this.app.view.cam.worldPerPixel(this.app.view.height) * 4);
+    this.typedInto("offset", "");
     this.setOffset(Math.round(raw / step) * step);
     this.app.ui.setLabel(p.x, p.y, `${fmtLen(this.feature.offset)}  · type a value`);
   }

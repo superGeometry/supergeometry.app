@@ -1,6 +1,7 @@
 import { getPath, setPath } from "../doc/params";
 import type { ExtrudeSource, Feature, SketchFeature, Vec2 } from "../doc/types";
 import type { FieldKind, PanelItem, ToolItem } from "../ui/ui";
+import { isExpression } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import type { PickHit, PickOptions } from "../view/viewport";
 import { hitToSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
@@ -272,6 +273,18 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
         else this.update();
       },
     };
+  }
+
+  /**
+   * Text typed into a value box at the model: a formula with variables keeps
+   * the value linked to them (as the panel's field does); a plain number unlinks it.
+   */
+  protected typedInto(path: string, text: string, wrap: (t: string) => string = (t) => t): void {
+    const f = this.feature as Feature;
+    const exprs = { ...(f.exprs ?? {}) };
+    if (isExpression(text)) exprs[path] = wrap(text.trim());
+    else delete exprs[path];
+    f.exprs = Object.keys(exprs).length ? exprs : undefined;
   }
 
   protected featuresWith(): Feature[] {

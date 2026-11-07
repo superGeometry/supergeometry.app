@@ -1487,6 +1487,30 @@ body.items-open #bottom-left {
 .dialog .panel-buttons {
   justify-content: flex-end;
 }
+/* The fields: as tall as the screen allows, then they scroll (with a bar always shown). */
+form.dialog {
+  max-height: calc(100dvh - 24px - var(--safe-t) - var(--safe-b));
+}
+.dialog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-right: -8px;
+  padding-right: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 210, 230, 0.5) transparent;
+}
+.dialog-list::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+}
+.dialog-list::-webkit-scrollbar-thumb {
+  background: rgba(200, 210, 230, 0.5);
+  border-radius: 3px;
+}
 
 /* Color → Custom…: the body shows each colour as it's chosen, so the view stays clear behind. */
 .dialog-back.see-through {

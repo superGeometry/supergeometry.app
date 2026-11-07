@@ -123,11 +123,15 @@ class Parser {
     throw new Error("Expected a number");
   }
 
-  /** Apply an optional unit suffix; no suffix = current unit. */
+  /**
+   * Apply an optional unit suffix; no suffix = current unit. In a plain
+   * number (a count, a ratio) a length is in mm: "shadeR / 16 mm" is the
+   * ratio of two lengths - a variable like "55 mm" was refused there.
+   */
   private unit(v: number): number {
     this.ws();
     const m = /^(mm|cm|m|in|ft|"|')(?![a-z])/i.exec(this.s.slice(this.i));
-    if (m && this.lengths) {
+    if (m) {
       this.i += m[0].length;
       const u = m[0] === '"' ? "in" : m[0] === "'" ? "ft" : (m[0].toLowerCase() as Units);
       return v * UNIT_MM[u];

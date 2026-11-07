@@ -249,7 +249,12 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const tapered = f.taper !== undefined && Math.abs(f.taper - 1) > 1e-9;
       if (tapered) {
         // Sides leaning in (or out): each shape's outline to a scaled copy at the far end.
-        const parts = sourceFaces(f.source, ctx).map(({ face, normal }) => {
+        // Pieces that meet are one shape first: a circle drawn on a small face
+        // is split by the face's outline into a disc and a ring round it (the
+        // ring was refused as "a shape with a hole", and each piece would have
+        // shrunk towards its own middle).
+        const src = sourceFaces(f.source, ctx);
+        const parts = mergedFaces(src.map((s) => s.face), src[0]?.normal ?? [0, 0, 1]).map((face) => ({ face, normal: src[0].normal })).map(({ face, normal }) => {
           // (replicad's outerWire() and innerWires() free the face they're asked
           // of: they're asked of copies.)
           const c = face.center.toTuple() as Vec3;
@@ -1501,6 +1506,26 @@ function booleanVolumeOk(op: "fuse" | "cut", a: Shape3D, b: Shape3D, r: Shape3D)
     return op === "fuse" ? v >= Math.max(va, vb) - tol && v <= va + vb + tol : v <= va + tol && v >= va - vb - tol;
   } catch {
     return true; // can't tell: leave it to the usual checks
+  }
+}
+
+/**
+ * Flat pieces of one plane that meet, joined into one face each (pieces apart
+ * stay apart): each lifted into a thin slab, the slabs joined, and the joined
+ * slab's top brought back down (OpenCascade doesn't merge loose faces).
+ */
+function mergedFaces(faces: Face[], normal: Vec3): Face[] {
+  if (faces.length < 2) return faces;
+  try {
+    const n = norm(normal);
+    const h = Math.max(1e-3, Math.max(...faces.map((f) => sizeOf(f as unknown as Shape3D))) * 0.01);
+    const slab = unify(fuseAll(faces.map((f) => basicFaceExtrusion(f, new Vector(scale(n, h))))));
+    const top = slab.faces.filter((f) => f.geomType === "PLANE" && dot(norm(f.normalAt().toTuple() as Vec3), n) > 0.9999);
+    const level = Math.max(...top.map((f) => dot(f.center.toTuple() as Vec3, n)));
+    const out = top.filter((f) => Math.abs(dot(f.center.toTuple() as Vec3, n) - level) < h * 0.01).map((f) => f.translate(scale(n, -h)) as Face);
+    return out.length ? out : faces;
+  } catch {
+    return faces;
   }
 }
 

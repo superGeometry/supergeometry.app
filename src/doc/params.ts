@@ -7,9 +7,13 @@ import type { Feature, ProjectDoc } from "./types";
 
 /** Kind of value stored at a path (for units: lengths are mm, angles degrees). */
 export function kindOfPath(path: string): "length" | "angle" | "number" {
-  const last = path.split(".").pop() ?? "";
-  if (/angle|rot/i.test(last) || /rotate/.test(path)) return "angle";
-  if (/count|factor|sides|opacity/i.test(last)) return "number";
+  // The value's own name (a number at the end is a place in a list: a point's X / Y / Z).
+  const keys = path.split(".");
+  const last = [...keys].reverse().find((k) => !/^\d+$/.test(k)) ?? "";
+  // A turn's pivot point is a length (only its angle is an angle): a pivot
+  // driven by a variable ("p1") was refused as "can't be evaluated".
+  if (/angle|rot/i.test(last) && !/origin|translate|center/i.test(last)) return "angle";
+  if (/count|factor|sides|opacity|taper/i.test(last)) return "number";
   return "length";
 }
 

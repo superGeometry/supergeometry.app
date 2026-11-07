@@ -33,6 +33,10 @@ export interface Region {
   holes: Loop[];
   area: number;
   centroid: Vec2;
+  /** The ids of the curves round it (outline and holes), sorted. */
+  curves: string[];
+  /** For each of those, where along that curve the outline runs (its pieces' middles, averaged). */
+  spots: number[];
 }
 
 export interface Arrangement {
@@ -42,10 +46,8 @@ export interface Arrangement {
   regions: Region[];
 }
 
-export interface RegionRef {
-  c: Vec2;
-  a: number;
-}
+export type { RegionRef } from "../doc/types";
+import type { RegionRef } from "../doc/types";
 
 const cache = new Map<string, Arrangement>();
 
@@ -61,19 +63,38 @@ export function arrangement(entities: SketchEntity[]): Arrangement {
 }
 
 export function regionRef(r: Region): RegionRef {
-  return { c: r.centroid, a: r.area };
+  return { c: r.centroid, a: r.area, k: r.curves, s: r.spots };
 }
 
-/** The region best matching a stored reference (survives edits that move it a bit). */
+/**
+ * The region best matching a stored reference (survives edits that move it a
+ * bit). Outlined by the same curves: the closest of those, however far it
+ * moved - a sketch driven by variables can move a piece a long way (an arm's
+ * round end, 40 mm up when the arm was made longer, was "no longer there").
+ */
 export function resolveRegion(arr: Arrangement, ref: RegionRef): Region | null {
+  const scale = Math.sqrt(Math.max(ref.a, 1e-9));
+  const score = (r: Region) => Math.hypot(r.centroid[0] - ref.c[0], r.centroid[1] - ref.c[1]) / scale + Math.abs(Math.log((r.area + 1e-12) / (ref.a + 1e-12)));
+  if (ref.k?.length) {
+    const key = ref.k.join(",");
+    const same = arr.regions.filter((r) => r.curves.join(",") === key);
+    // Several outlined by the same curves (a circle's half inside a strip and
+    // the half outside it): which stretch of those curves, then size, then place.
+    if (same.length === 1) return same[0];
+    if (same.length > 1) {
+      const along = (r: Region) => (ref.s?.length === r.spots.length ? r.spots.reduce((t, v, i) => t + Math.abs(v - ref.s![i]), 0) : 0);
+      return same.reduce((a, b) => (along(b) * 10 + sizeScore(b, ref) + score(b) * 0.1 < along(a) * 10 + sizeScore(a, ref) + score(a) * 0.1 ? b : a));
+    }
+  }
   let best: { r: Region; s: number } | null = null;
   for (const r of arr.regions) {
-    const scale = Math.sqrt(Math.max(ref.a, 1e-9));
-    const s = Math.hypot(r.centroid[0] - ref.c[0], r.centroid[1] - ref.c[1]) / scale + Math.abs(Math.log((r.area + 1e-12) / (ref.a + 1e-12)));
+    const s = score(r);
     if (!best || s < best.s) best = { r, s };
   }
   return best && best.s < 3 ? best.r : null;
 }
+
+const sizeScore = (r: Region, ref: RegionRef) => Math.abs(Math.log((r.area + 1e-12) / (ref.a + 1e-12)));
 
 function compute(entities: SketchEntity[]): Arrangement {
   const prims = entities.flatMap(entityPrims);
@@ -276,6 +297,14 @@ function compute(entities: SketchEntity[]): Arrangement {
     pieces: c.hs.map((h) => ({ piece: h >> 1, reversed: h % 2 === 1 })),
     poly: c.poly,
   });
+  // Each primitive's place among its curve's own (a rectangle's four sides: 0-3).
+  const seenOf = new Map<string, number>();
+  const primOrdinal = prims.map((p) => {
+    const k = p.src ?? "";
+    const i = seenOf.get(k) ?? 0;
+    seenOf.set(k, i + 1);
+    return i;
+  });
   const regions: Region[] = faces.map((f, index) => {
     const hs = holes.get(f) ?? [];
     const holeArea = hs.reduce((s, o) => s + Math.abs(o.area), 0);
@@ -289,7 +318,16 @@ function compute(entities: SketchEntity[]): Arrangement {
       cx -= ch[0] * Math.abs(o.area);
       cy -= ch[1] * Math.abs(o.area);
     }
-    return { index, outer: toLoop(f), holes: hs.map(toLoop), area, centroid: [cx / area, cy / area] };
+    const outer = toLoop(f);
+    const inner = hs.map(toLoop);
+    const loopPieces = [outer, ...inner].flatMap((l) => l.pieces.map((p) => pieces[p.piece]));
+    const curves = [...new Set(loopPieces.map((p) => prims[p.prim].src ?? ""))].filter(Boolean).sort();
+    // Where along each curve: which of its parts (a rectangle's side, …) plus how far along that part.
+    const spots = curves.map((id) => {
+      const ps = loopPieces.filter((p) => prims[p.prim].src === id);
+      return ps.reduce((t, p) => t + primOrdinal[p.prim] + (p.t0 + p.t1) / 2, 0) / ps.length;
+    });
+    return { index, outer, holes: inner, area, centroid: [cx / area, cy / area], curves, spots };
   });
   return { prims, nodes, pieces, regions };
 }

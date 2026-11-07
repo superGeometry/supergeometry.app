@@ -36,6 +36,17 @@ export type EntityKind = SketchEntity["kind"];
 export interface RegionRef {
   c: Vec2;
   a: number;
+  /**
+   * The curves round it (their ids, sorted): a shape moved far by a variable
+   * (an arm made 40 mm longer) is still found by what outlines it.
+   */
+  k?: string[];
+  /**
+   * Along each of those curves, where the outline runs (which side of the
+   * curve, as a place along it): the two halves of a circle split by a strip
+   * have the same curves and the same area, but not the same stretch of circle.
+   */
+  s?: number[];
 }
 
 /**
