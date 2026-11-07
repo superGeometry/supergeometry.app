@@ -459,7 +459,6 @@ export class SelectTool implements Tool {
     const flat = !!info?.plane;
     const one = sel.length === 1;
     const src = sourcesOf(app, sel)[0];
-    const bodies = bodiesOf(sel);
     const faceRefs = sel.flatMap((x) => (x.kind === "face" ? [faceRefOf(app, x)!] : []));
     const needFlat = { disabled: !flat || !one, why: "Needs one flat face" };
     const ref = faceRefOf(app, s);
@@ -478,30 +477,15 @@ export class SelectTool implements Tool {
       { id: "shell", label: "Shell", icon: "shell", run: () => app.setTool(new ShellOp(app, s.body, faceRefs)) },
       { id: "axis", label: "Axis – Perp. to Face", icon: "axis", run: () => info && app.setTool(new AxisOp(app, info.center, info.normal)) },
       { id: "plane", label: "Plane – Offset", icon: "plane", ...needFlat, run: () => info?.plane && app.setTool(new PlaneOp(app, info.plane, faceRefOf(app, s)!)) },
-      { id: "patl", label: "Pattern – Linear", icon: "patternLinear", run: () => app.setTool(new TransformOp(app, "linear", bodies)) },
-      { id: "patc", label: "Pattern – Circular", icon: "patternCircular", run: () => app.setTool(new TransformOp(app, "circular", bodies)) },
-      { id: "translate", label: "Translate", icon: "translate", shortcut: "N", run: () => app.setTool(new TransformOp(app, "translate", bodies)) },
-      { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: () => app.setTool(new TransformOp(app, "rotate", bodies)) },
-      { id: "mirror", label: "Mirror", icon: "mirror", run: () => app.setTool(new TransformOp(app, "mirror", bodies)) },
       { id: "loft", label: "Loft", icon: "loft", ...needFlat, run: () => app.setTool(new LoftOp(app, sourcesOf(app, sel).flatMap(splitRegions), sel)) },
       { id: "split", label: "Split Body", icon: "split", disabled: !flat || app.view.bodyList.length < 2, why: "Needs another body to split", run: () => this.splitWith(info!.plane!, s.body) },
       { id: "revolve", label: "Revolve", icon: "revolve", ...needFlat, run: () => src && app.setTool(new RevolveOp(app, src)) },
       { id: "sweep", label: "Sweep", icon: "sweep", ...needFlat, run: () => src && app.setTool(new SweepOp(app, src)) },
       { id: "fill", label: "Fill", icon: "fill", disabled: true, why: SOON },
-      {
-        id: "more",
-        label: "More",
-        icon: "more",
-        children: [
-          { id: "replace", label: "Replace Face", icon: "replaceFace", ...needFlat, run: () => ref && app.setTool(new ReplaceFaceOp(app, ref)) },
-          { id: "offsetEdge", label: "Offset Edge", icon: "offset", ...needFlat, run: () => this.projectFace("offset") },
-          { id: "projs", label: "Project as Sketch", icon: "project", ...needFlat, run: () => this.projectFace("select") },
-          { id: "proje", label: "Project as Edge", icon: "projectEdge", disabled: true, why: SOON },
-          { id: "text", label: "Text", icon: "text", ...needFlat, run: () => this.sketchOnFace("text") },
-          { id: "moveBody", label: "Move/Rotate Body", icon: "move", run: () => app.setTool(new TransformOp(app, "move", bodies)) },
-          { id: "deleteBody", label: "Delete Body", icon: "trash", run: () => this.deleteBodies(bodies) },
-        ],
-      },
+      // What else works on the face itself (patterns, mirror, translate, move
+      // body are body tools: they're offered when the body is selected).
+      { id: "replace", label: "Replace Face", icon: "replaceFace", ...needFlat, run: () => ref && app.setTool(new ReplaceFaceOp(app, ref)) },
+      { id: "projs", label: "Project as Sketch", icon: "project", ...needFlat, run: () => this.projectFace("select") },
       // The neighbours extend to close the gap (fillets, chamfers, holes).
       { id: "delete", label: "Delete Face", icon: "trash", shortcut: "Del", run: () => this.deleteGeom(s.body, { faces: faceRefs.filter((f) => f.body === s.body) }) },
     ];

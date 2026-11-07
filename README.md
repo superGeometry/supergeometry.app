@@ -229,7 +229,9 @@ sketch. A sketch stays in view until every region of it is used.
   fillet that can't be made leaves the edge sharp with a note in History.
 - **Faces** - drag the arrow to push/pull a face: its neighbours follow,
   curved ones included; fillets next to it are kept. **Move/Rotate Face**
-  moves it every way and turns it about its normal. Scale, Replace (onto
+  (a gimbal on the face) moves it every way and turns it about its normal. A
+  picked face lists only what works on the face; body tools (patterns,
+  mirror, translate, move body) come with a picked body. Scale, Replace (onto
   another face's plane) or **Delete** a face, fillet or chamfer: the
   neighbours carry on along their own surfaces until they meet, as if it was
   never there.
