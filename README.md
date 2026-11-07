@@ -336,7 +336,7 @@ can't be rebuilt after a change, it's marked and the reason is shown.
   carry on with it, or **Open file…** for any `.super` file (it joins the
   gallery); with many, the row scrolls side to side. Each card can be saved
   as a file or deleted. They live in the
-  browser's storage for this site: **Reset cache & update** keeps them, but
+  browser's storage for this site: **More → Update** keeps them, but
   clearing the site's data in the browser's settings deletes them.
 - **File → Save project** downloads a `.super` file (keep it as a backup or
   move it to another device).
@@ -400,7 +400,7 @@ can't be rebuilt after a change, it's marked and the reason is shown.
   take a moment. **Stop** next to it drops the work and takes back the change
   that started it (like an undo).
 - **A change you expected isn't there yet**: when a newer version is out, a
-  notice offers to update. **More → Reset cache & update** loads the newest
+  notice offers to update. **More → Update** loads the newest
   version right away (your project is kept).
 
 ---

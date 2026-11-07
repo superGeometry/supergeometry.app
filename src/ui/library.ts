@@ -132,7 +132,7 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
   );
   grid.dataset.ownBar = "";
   box.append(grid);
-  box.append(el("div", "dialog-note library-note", "Kept in this browser on this device (Reset cache & update keeps them). Clearing this site's data in the browser's settings deletes them - save the ones that matter as files too."));
+  box.append(el("div", "dialog-note library-note", "Kept in this browser on this device (Update keeps them). Clearing this site's data in the browser's settings deletes them - save the ones that matter as files too."));
   back.append(box);
   back.addEventListener("pointerdown", (ev) => ev.target === back && close());
   window.addEventListener("keydown", onKey, true);

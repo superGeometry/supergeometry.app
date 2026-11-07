@@ -835,7 +835,7 @@ export class App implements AppContext {
       document.getElementById("view")?.addEventListener("pointerdown", away, { once: true, capture: true });
     }
     // Help and Tutorial: placeholders for now.
-    // A newer build out? A notice offers to update; More → Reset cache does it now.
+    // A newer build out? A notice offers to update; More → Update does it now.
     this.updates = new Updates(() => this.store.flush());
     moreItem("m-update", () => void this.confirmReset());
     // Phones and tablets: an offer to add the app to the home screen (More → Install app too).
@@ -991,14 +991,14 @@ export class App implements AppContext {
 
   private updates!: Updates;
 
-  /** More → Reset cache & update: asked first (it reloads the app), with the option to save a copy. */
+  /** More → Update: asked first (it reloads the app), with the option to save a copy. */
   private async confirmReset(): Promise<void> {
     const choice = await this.ui.ask(
-      "Reset cache & update?",
+      "Update?",
       "The app reloads with its newest version. Your project stays on this device - you can also save a copy to a file first.",
       [
-        { id: "reset", label: "Yes, reset" },
-        { id: "save", label: "Save a copy & reset", primary: true },
+        { id: "reset", label: "Yes, update" },
+        { id: "save", label: "Save a copy & update", primary: true },
       ],
     );
     if (!choice) return;

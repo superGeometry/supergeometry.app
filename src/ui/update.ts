@@ -1,6 +1,6 @@
 // Newer version available? The page checks the site now and then (and when
 // you come back to it); if a new build is out, a notice offers to update.
-// Updating - or More → Reset cache - clears the browser's stored copies of
+// Updating - or More → Update - clears the browser's stored copies of
 // the app's files and reloads. Your project is saved first and stays.
 
 import { el } from "./ui";
@@ -34,10 +34,10 @@ export class Updates {
     this.banner.append(text, now);
     this.banner.addEventListener("pointerdown", (e) => e.stopPropagation());
     document.body.append(this.banner);
-    // No "Later": a click or tap on the workspace puts it away (More → Reset
-    // cache & update is always there).
-    // Put away with an update still waiting: More pulses, and its Reset cache &
-    // update item carries a pulsing NEW, until it's done.
+    // No "Later": a click or tap on the workspace puts it away (More → Update
+    // is always there).
+    // Put away with an update still waiting: More pulses, and its Update item
+    // carries a pulsing NEW, until it's done.
     document.getElementById("view")?.addEventListener(
       "pointerdown",
       () => {
@@ -54,7 +54,7 @@ export class Updates {
     document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && void this.check());
   }
 
-  /** More pulses; its Reset cache & update item gets a NEW badge. */
+  /** More pulses; its Update item gets a NEW badge. */
   private markPending(): void {
     document.body.classList.add("update-pending");
     const item = document.getElementById("m-update");

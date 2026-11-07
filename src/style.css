@@ -292,7 +292,7 @@ kbd {
   color: var(--muted);
 }
 /* An update waiting (its notice put away): More pulses, and so does NEW on
-   Reset cache & update. */
+   Update. */
 @keyframes update-pulse {
   0%,
   100% {

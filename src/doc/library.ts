@@ -1,6 +1,6 @@
 // The projects kept on this device (File → Open shows them). Each one is its
 // whole document, saved as it's worked on, with a small picture of it. They
-// live in the browser's storage for this site: Reset cache & update leaves
+// live in the browser's storage for this site: More → Update leaves
 // them alone; clearing the site's data in the browser's settings removes them.
 
 import { idbDel, idbGet, idbSet } from "./store";
