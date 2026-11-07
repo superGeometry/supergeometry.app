@@ -50,7 +50,7 @@ export function xDirFor(normal: Vec3): Vec3 {
 /**
  * The same plane with its origin where the model's origin falls on it: a
  * sketch on a face then measures X / Y from the model's origin (a face's own
- * centre moves as things are added to it — the pole typed at 0, 0 on a base
+ * centre moves as things are added to it - the pole typed at 0, 0 on a base
  * with letters and buttons landed at -0.9, 1.2).
  */
 export function originOnPlane(p: PlaneDef): PlaneDef {

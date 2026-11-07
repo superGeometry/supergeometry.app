@@ -1,4 +1,4 @@
-// Run: node --expose-gc --import tsx tests/perf.test.ts (or npx tsx) — rebuild memory and speed on a long project.
+// Run: node --expose-gc --import tsx tests/perf.test.ts (or npx tsx) - rebuild memory and speed on a long project.
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";
 import { regenerate } from "../src/kernel/engine";

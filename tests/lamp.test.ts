@@ -1,9 +1,9 @@
-// Run: npx tsx tests/lamp.test.ts [out.json] — a desk arc lamp, made with the
+// Run: npx tsx tests/lamp.test.ts [out.json] - a desk arc lamp, made with the
 // tools the other build tests don't use: a base revolved from a profile with a
 // rounded (Fillet) top rim and a chamfered foot (Chamfer); a 12 mm stem swept
 // along a path that rises, arches over and drops (Sweep); a shade revolved as
 // a solid cone and hollowed open at the bottom (Shell); eight vents round the
-// shade — one cylinder, Pattern Circular, Subtract; a bulb (Revolve).
+// shade - one cylinder, Pattern Circular, Subtract; a bulb (Revolve).
 import opencascade from "replicad-opencascadejs";
 import { measureVolume, setOC } from "replicad";
 import { readFileSync, writeFileSync } from "node:fs";

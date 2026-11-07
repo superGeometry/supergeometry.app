@@ -201,9 +201,9 @@ export function splineSpans(d: SplineDef): number {
 /**
  * Point i of a spline's list, past the ends too: closed splines wrap; an open
  * spline gets a mirrored point beyond each end, so it starts and ends exactly
- * on its first and last point (control-point splines too — no gap at the
+ * on its first and last point (control-point splines too - no gap at the
  * ends) and leaves them heading towards the neighbour (a repeated end point
- * would leave it at a tangent of its own making — e.g. along a revolve axis,
+ * would leave it at a tangent of its own making - e.g. along a revolve axis,
  * which can't revolve).
  */
 function pointAt(pts: Vec2[], i: number, closed: boolean, _mode: "fit" | "control"): Vec2 {

@@ -27,7 +27,7 @@ export const isTouchDevice =
 
 /**
  * Three kinds of screen, by the page's size in CSS pixels (what the browser
- * reports, after display scaling) — the layout adapts to each:
+ * reports, after display scaling) - the layout adapts to each:
  *   phone   – phones upright (360–440 wide) or sideways (≤ 500 tall), flip
  *             phones, a folded foldable: one thing at a time, fixed places.
  *   tablet  – tablets (iPad 768–1024, iPad Pro up to 1366) and small laptops

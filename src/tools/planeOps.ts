@@ -141,7 +141,7 @@ export class ThreePointPlaneOp extends PlaneFromPicks {
     return { origin: a, normal: norm(n), xDir: norm(sub(b, a)) };
   }
   protected hint(): string {
-    return this.pts.every(Boolean) && !this.make() ? "⚠ The three points are on one line — pick another" : "Tap three points (corners, edge points, sketch points): the plane goes through all of them.";
+    return this.pts.every(Boolean) && !this.make() ? "⚠ The three points are on one line - pick another" : "Tap three points (corners, edge points, sketch points): the plane goes through all of them.";
   }
 }
 

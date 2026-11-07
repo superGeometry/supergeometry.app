@@ -1,5 +1,5 @@
 // Items panel: every body, sketch, plane, axis and image, with visibility
-// toggles — plus folders (at the bottom) to group any of them.
+// toggles - plus folders (at the bottom) to group any of them.
 
 import type { DocStore } from "../doc/store";
 import type { Feature, ItemFolder } from "../doc/types";

@@ -143,7 +143,7 @@ function crossings(p: Prim, others: Prim[]): number[] {
 
 /**
  * Newton on P(t) = Q(s): a crossing found between samples, moved exactly onto
- * both curves (round curves are only approximated by their samples — a cut
+ * both curves (round curves are only approximated by their samples - a cut
  * there would leave a hair-thin gap). Straight pieces are exact already.
  */
 function refineCrossing(p: Prim, q: Prim, t: number, s: number): [number, number] {
@@ -757,7 +757,7 @@ export function offsetChain(entities: SketchEntity[], id: string, d: number): Sk
   for (const e of pieces) for (const k of ["a", "b"] as const) size = Math.max(size, Math.abs(endOf(e, k)[0]), Math.abs(endOf(e, k)[1]));
   // Pieces that would shrink past nothing (a fillet offset inward beyond its
   // radius, a side squeezed out between its neighbours) drop out, and their
-  // neighbours meet straight away — like a CAD offset, not an inside-out loop.
+  // neighbours meet straight away - like a CAD offset, not an inside-out loop.
   let alive = pieces.map((_, i) => i);
   let out: Piece[] = [];
   for (let round = 0; round <= pieces.length; round++) {
@@ -1170,7 +1170,7 @@ function mid(l: LineE): Vec2 {
  * Constraints after an edit changed curves (trim, extend, …): ones on points
  * that are still there follow them (to whichever piece now has that point),
  * ones on a curve that was cut go to the pieces of it, and any that no longer
- * hold are dropped — an old length would pull an extended line back, a join
+ * hold are dropped - an old length would pull an extended line back, a join
  * to a trimmed-away end would drag it out again.
  */
 export function carryConstraints(before: SketchEntity[], after: SketchEntity[], cs: SketchConstraint[]): SketchConstraint[] {
@@ -1231,7 +1231,7 @@ export function carryConstraints(before: SketchEntity[], after: SketchEntity[], 
 
 /**
  * Arc by its centre: from `start` round to the direction of `toward`, the
- * short way — or anticlockwise (angles typed: 90° to 270° is the left half,
+ * short way - or anticlockwise (angles typed: 90° to 270° is the left half,
  * where the short way can't tell a half circle's sides apart).
  */
 export function centreArc(id: string, c: Vec2, start: Vec2, toward: Vec2, anticlockwise = false): SketchEntity | null {

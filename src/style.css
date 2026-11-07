@@ -1929,7 +1929,7 @@ body.history-open #viewcube-host {
     right: calc(384px + var(--safe-r));
   }
 }
-/* Short screens (phones sideways): too low for cube above column — the cube sits left of it. */
+/* Short screens (phones sideways): too low for cube above column - the cube sits left of it. */
 @media (max-height: 600px) {
   #viewcube-host {
     right: calc(64px + var(--safe-r));
@@ -2299,7 +2299,7 @@ body.history-open #topbar {
 }
 
 /* Phones upright, sketching: the sketch tools as a column on the left (like
-   the other tool lists), with their names until one is picked — then icons only. */
+   the other tool lists), with their names until one is picked - then icons only. */
 @media (max-width: 720px) and (orientation: portrait) {
   body.sketching #toolbar {
     flex-direction: column;
@@ -2342,7 +2342,7 @@ body.history-open #topbar {
 
 /* ------------------------------------------------------------------------
    A tool's values as a short list (like a right-click menu), each name with
-   its box after it — hung under the value box on the model, or by the
+   its box after it - hung under the value box on the model, or by the
    pointer. Placed from script (left/top); never the wide bar at the bottom. */
 body #panel.as-list {
   left: 0;
@@ -2451,7 +2451,7 @@ html[data-screen="phone"] body.tool-cancel-dock #undo-dock {
   }
 }
 
-/* Phones: the options and Done on one row (✕ beside undo cancels), no title —
+/* Phones: the options and Done on one row (✕ beside undo cancels), no title -
    the hint under it says what the tool does. Wraps if it can't fit. */
 html[data-screen="phone"] body #panel.as-list {
   flex-direction: row;
@@ -2485,8 +2485,8 @@ html[data-screen="phone"] #panel.as-list .panel-buttons:empty {
   display: none;
 }
 
-/* ---------- The top bar is one group — app name (or icon), project name, File,
-   Items, More — always centred at the top, on every screen. It never runs
+/* ---------- The top bar is one group - app name (or icon), project name, File,
+   Items, More - always centred at the top, on every screen. It never runs
    under the view cube: the space it may use is the same on both sides. */
 html body #topbar,
 html body.history-open #topbar,
@@ -2509,7 +2509,7 @@ html body #topbar .project-name {
     width: auto;
   }
 }
-/* Phones upright: the view cube is below the bar — the whole width is free. */
+/* Phones upright: the view cube is below the bar - the whole width is free. */
 @media (max-width: 720px) {
   html body #topbar,
   html body.history-open #topbar,
@@ -2550,7 +2550,7 @@ html body #topbar .project-name {
   }
 }
 /* Phones sideways with History open: the view cube and its column move left,
-   into the middle — they start under the top bar there, not beside it. */
+   into the middle - they start under the top bar there, not beside it. */
 @media (max-height: 500px), (max-width: 1100px) {
   html body.history-open #viewcube-host {
     top: calc(50px + var(--safe-t)) !important;
@@ -2623,7 +2623,7 @@ html[data-screen="phone"] .numpad .np-grip {
     max-height: calc(100vh - 194px - var(--safe-t) - var(--safe-b));
   }
 }
-/* Full screen on phones: the browser's bars are gone, so the edges come in —
+/* Full screen on phones: the browser's bars are gone, so the edges come in -
    a little margin left for rounded screen corners, and at the top for the
    camera (that's what the top inset is). */
 html[data-screen="phone"] body.is-fullscreen {
@@ -2637,7 +2637,7 @@ html[data-screen="phone"] body.is-fullscreen {
   gap: 8px;
   padding: 6px 8px 6px 14px;
 }
-/* Small phones (320 px): one line doesn't fit — the question goes above its buttons. */
+/* Small phones (320 px): one line doesn't fit - the question goes above its buttons. */
 @media (max-width: 360px) {
   .fs-banner {
     flex-wrap: wrap;
@@ -2704,7 +2704,7 @@ html[data-screen="phone"] body.is-fullscreen {
 }
 
 /* Constraint marks (H, V, ∥, ⟂, ●…): just the symbol, small and faint, in the
-   background — they never cover or catch a tap meant for the drawing (the
+   background - they never cover or catch a tap meant for the drawing (the
    sketch picks one when a tap finds nothing else). Dimensions keep their box. */
 .cglyph:not(.dim) {
   pointer-events: none;
@@ -2725,7 +2725,7 @@ html[data-screen="phone"] body.is-fullscreen {
 }
 
 /* Constraint marks: one colour per kind, so they're told apart at a glance
-   (still faint — they stay in the background). */
+   (still faint - they stay in the background). */
 .cglyph:not(.dim)[data-type="horizontal"],
 .cglyph:not(.dim)[data-type="vertical"] { color: rgba(255, 196, 90, 0.75); }
 .cglyph:not(.dim)[data-type="parallel"] { color: rgba(110, 200, 255, 0.8); }
@@ -2769,8 +2769,8 @@ html[data-screen="phone"] body.is-fullscreen {
   background: var(--accent-soft);
 }
 
-/* Phones: value fields side by side and small — name, a short box, the
-   unit — so three of them (ΔX ΔY ΔZ) and Done fit on one or two rows. */
+/* Phones: value fields side by side and small - name, a short box, the
+   unit - so three of them (ΔX ΔY ΔZ) and Done fit on one or two rows. */
 html[data-screen="phone"] #panel.as-list .field {
   flex: 0 0 auto;
   gap: 3px;
@@ -2809,13 +2809,13 @@ html[data-screen="phone"] #panel.as-list .panel-buttons .text-btn {
   min-height: 34px;
 }
 /* Phones: nothing in the card wider than it needs. The unit is the one in
-   the right column (mm…), ƒx is on the numpad — so a value is its name and box. */
+   the right column (mm…), ƒx is on the numpad - so a value is its name and box. */
 html[data-screen="phone"] #panel.as-list .field-unit,
 html[data-screen="phone"] #panel.as-list .fx-btn {
   display: none;
 }
 /* Picks (From point, To point…) as small chips: the name, and what's picked
-   only once it's picked — what to tap is in the hint text under the card. */
+   only once it's picked - what to tap is in the hint text under the card. */
 html[data-screen="phone"] #panel.as-list .slot {
   width: auto !important;
   flex: 0 0 auto;

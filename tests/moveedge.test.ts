@@ -1,4 +1,4 @@
-// Run: npx tsx tests/moveedge.test.ts — a user's part (tests/fixtures/moveedge.json):
+// Run: npx tsx tests/moveedge.test.ts - a user's part (tests/fixtures/moveedge.json):
 // the bottom edge of a face with a notch cut into it (an L-shaped face, a fillet
 // along its top) moved out. Tilting a face with inward corners used to move only
 // its convex part, so the fillet couldn't be put back and the move was refused.

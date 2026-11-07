@@ -1,4 +1,4 @@
-// Run: npx tsx tests/faceeditcases.test.ts — face edits found by comparing
+// Run: npx tsx tests/faceeditcases.test.ts - face edits found by comparing
 // random cases before and after the concave-face / delete changes
 // (tests/fixtures/faceeditcases.json), each checked against what it must be.
 import opencascade from "replicad-opencascadejs";

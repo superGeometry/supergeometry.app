@@ -1,5 +1,5 @@
 // Move or copy a whole finished sketch to another plane: a gimbal on the
-// sketch (its blue arrow goes along the sketch's normal — a parallel plane —
+// sketch (its blue arrow goes along the sketch's normal - a parallel plane -
 // the red and green ones slide it within its plane). With Copy on, the
 // original stays and the copy is a new sketch; tap empty space or Done.
 

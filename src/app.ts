@@ -62,13 +62,13 @@ export class App implements AppContext {
     this.selectTool = new SelectTool(this);
     this.tool = this.selectTool;
     this.input.handler = this.tool;
-    // Headsets: bigger targets everywhere (CSS) — aiming a controller is less precise than a mouse.
+    // Headsets: bigger targets everywhere (CSS) - aiming a controller is less precise than a mouse.
     if (isHeadset) document.body.classList.add("headset");
     // A spinner while the geometry engine works on something that takes a moment.
     const busy = document.createElement("div");
     busy.id = "busy";
     busy.hidden = true;
-    busy.innerHTML = `<span class="spinner"></span><span>Working…</span><button type="button" class="busy-stop" title="Stop — takes back the last change">Stop</button>`;
+    busy.innerHTML = `<span class="spinner"></span><span>Working…</span><button type="button" class="busy-stop" title="Stop - takes back the last change">Stop</button>`;
     document.body.append(busy);
     busy.querySelector(".busy-stop")!.addEventListener("click", () => this.stopWork());
     let busyTimer = 0;
@@ -90,7 +90,7 @@ export class App implements AppContext {
     settings.onChange(() => this.showPins());
     this.items = new ItemsPanel(this.store, {
       // A phone: like taps in the view, each body tapped in Items joins the
-      // selection (tapped again, it leaves) — Subtract needs two bodies, and
+      // selection (tapped again, it leaves) - Subtract needs two bodies, and
       // the second one replaced the first.
       selectBody: (id) => {
         if (this.tool === this.selectTool && this.selectTool.pickFromList({ kind: "body", body: id })) return;
@@ -172,7 +172,7 @@ export class App implements AppContext {
 
   /**
    * Section View button: on → off (remembered); off → the remembered section,
-   * or a new one — straight from a selected flat face if there is one.
+   * or a new one - straight from a selected flat face if there is one.
    */
   private toggleSection(): void {
     if (this.section) {
@@ -292,7 +292,7 @@ export class App implements AppContext {
     if (this.tool !== this.selectTool && !(this.tool instanceof SketchTool)) this.setTool(null);
     if (committed && this.store.canUndo) this.store.undo();
     else void this.regenerate();
-    this.ui.toast("Stopped — the last change was taken back");
+    this.ui.toast("Stopped - the last change was taken back");
   }
 
   async preview(features: Feature[]): Promise<RegenResult | null> {
@@ -357,14 +357,14 @@ export class App implements AppContext {
     const open = this.openBodies(r);
     this.ui.setWarning(
       open.length
-        ? `⚠ ${open.length === 1 ? (this.store.doc.names?.[open[0].id] ?? open[0].name) : `${open.length} bodies`} not closed — ${open.reduce((s, b) => s + b.openEdges.length, 0)} open edge(s) shown in orange`
+        ? `⚠ ${open.length === 1 ? (this.store.doc.names?.[open[0].id] ?? open[0].name) : `${open.length} bodies`} not closed - ${open.reduce((s, b) => s + b.openEdges.length, 0)} open edge(s) shown in orange`
         : this.store.problems[0]
           ? `⚠ ${this.store.problems[0]}`
           : null,
     );
     const errs = r.errors.map((e) => e.featureId + e.message).join();
     if (errs && errs !== this.shownErrors && this.tool === this.selectTool) {
-      this.ui.toast(`${r.errors.length} step${r.errors.length > 1 ? "s" : ""} failed to rebuild — see History`, "error");
+      this.ui.toast(`${r.errors.length} step${r.errors.length > 1 ? "s" : ""} failed to rebuild - see History`, "error");
     }
     this.shownErrors = errs;
   }
@@ -394,7 +394,7 @@ export class App implements AppContext {
   // ------------------------------------------------------------ history
 
   /**
-   * Bodies with open edges — except freeform surfaces that are meant to be
+   * Bodies with open edges - except freeform surfaces that are meant to be
    * open sheets (not thickened): those aren't a problem.
    */
   private openBodies(r: RegenResult | null) {
@@ -411,7 +411,7 @@ export class App implements AppContext {
     // The rows are rebuilt: a hover on an old row is over.
     this.view.setStepHover(null);
     const warnings = new Map<string, string>();
-    for (const b of this.openBodies(this.result)) warnings.set(b.id.split(":")[0], `${b.name}: not closed — ${b.openEdges.length} open edge(s)`);
+    for (const b of this.openBodies(this.result)) warnings.set(b.id.split(":")[0], `${b.name}: not closed - ${b.openEdges.length} open edge(s)`);
     for (const n of this.result?.notes ?? []) warnings.set(n.featureId, warnings.has(n.featureId) ? `${warnings.get(n.featureId)} ${n.message}` : n.message);
     this.ui.renderHistory(this.store.doc.features, this.result?.errors ?? [], this.tool.editingId ?? this.tool.activeSketch ?? null, {
       edit: (id) => this.editFeature(id),
@@ -679,7 +679,7 @@ export class App implements AppContext {
               const ids = bodiesOf(this.selection);
               if (!ids.length) return;
               this.store.add({ ...this.store.newIdentity("repair"), type: "repair", bodies: ids });
-              this.ui.toast("Repair added to History — it notes what it fixed");
+              this.ui.toast("Repair added to History - it notes what it fixed");
             }),
           },
           { id: "fill", label: "Fill", icon: "fill", disabled: true, why: SOON },
@@ -696,7 +696,7 @@ export class App implements AppContext {
       { id: "section", label: "Section View", icon: "section", sub: this.section ? "On" : this.lastSection ? "Off · tap to show" : "Off", active: !!this.section, run: () => this.toggleSection() },
       { id: "measure", label: "Measure", icon: "measure", run: () => this.setTool(new MeasureTool(this)) },
       this.isolated
-        ? { id: "isolate", label: "Isolate", icon: "isolate", sub: "On — tap to show all", active: true, run: () => this.isolate(null) }
+        ? { id: "isolate", label: "Isolate", icon: "isolate", sub: "On - tap to show all", active: true, run: () => this.isolate(null) }
         : {
             id: "isolate",
             label: "Isolate",
@@ -758,8 +758,8 @@ export class App implements AppContext {
     const on = (id: string, fn: () => void) => document.getElementById(id)!.addEventListener("click", fn);
     const menu = document.getElementById("file-menu")!;
     const more = document.getElementById("more-menu")!;
-    // Phones: one thing open at a time at the left — a menu closes Items.
-    // Phones: one thing open at a time — a menu takes the place of Items and of History.
+    // Phones: one thing open at a time at the left - a menu closes Items.
+    // Phones: one thing open at a time - a menu takes the place of Items and of History.
     const phoneItemsAway = () => {
       if (window.innerWidth > 720) return;
       if (document.getElementById("items")!.classList.contains("open")) this.items.toggle(false);
@@ -923,7 +923,7 @@ export class App implements AppContext {
 
   /**
    * Undo: a tool with steps of its own (a freeform cage being shaped) takes
-   * those back, and leaves the project alone while it's open — Ctrl+Z used to
+   * those back, and leaves the project alone while it's open - Ctrl+Z used to
    * throw the whole cage edit away and undo the step before it too.
    */
   private undo(): void {
@@ -962,7 +962,7 @@ export class App implements AppContext {
   private async confirmReset(): Promise<void> {
     const choice = await this.ui.ask(
       "Reset cache & update?",
-      "The app reloads with its newest version. Your project stays on this device — you can also save a copy to a file first.",
+      "The app reloads with its newest version. Your project stays on this device - you can also save a copy to a file first.",
       [
         { id: "reset", label: "Yes, reset" },
         { id: "save", label: "Save a copy & reset", primary: true },
@@ -980,7 +980,7 @@ export class App implements AppContext {
   /**
    * New project: the current one can be saved (downloaded) or discarded
    * first. Then the app checks for a newer version and, if there is one,
-   * clears its cached files and reloads — a new project starts on the latest.
+   * clears its cached files and reloads - a new project starts on the latest.
    */
   private async newProject(): Promise<void> {
     if (this.store.features.length) {
@@ -1008,14 +1008,14 @@ export class App implements AppContext {
 
   /**
    * Hand a made file over: download it, or share it (phones and tablets:
-   * the system share sheet — mail, messages, a slicer app…).
+   * the system share sheet - mail, messages, a slicer app…).
    */
   private async deliver(blob: Blob, name: string, how: Delivery): Promise<void> {
     if (how === "download") return download(blob, name);
     const ext = name.split(".").pop()!.toLowerCase();
     const file = new File([blob], name, { type: MIME[ext] ?? (blob.type || "application/octet-stream") });
     if (!canShare(file)) {
-      this.ui.toast(`This browser can't share .${ext} files — downloaded instead`, "error");
+      this.ui.toast(`This browser can't share .${ext} files - downloaded instead`, "error");
       return download(blob, name);
     }
     const share = () => navigator.share({ files: [file], title: name });
@@ -1025,7 +1025,7 @@ export class App implements AppContext {
       const why = (err as Error).name;
       if (why === "AbortError") return; // closed the share sheet
       if (why !== "NotAllowedError") {
-        this.ui.toast("Sharing didn't work here — downloaded instead", "error");
+        this.ui.toast("Sharing didn't work here - downloaded instead", "error");
         return download(blob, name);
       }
       // Making the file took a moment and the browser no longer counts this as a
@@ -1041,7 +1041,7 @@ export class App implements AppContext {
           await again;
         } catch (e) {
           if ((e as Error).name === "AbortError") return;
-          this.ui.toast("Sharing isn't available here — downloaded instead", "error");
+          this.ui.toast("Sharing isn't available here - downloaded instead", "error");
           download(blob, name);
         }
       } else if (go === "dl") download(blob, name);

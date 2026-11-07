@@ -349,7 +349,7 @@ export function layoutKey(cage: Cage): string {
 
 /**
  * The weights that take a cage's points to its smooth surface points, the
- * same as limitPoints(subdivide(cage, levels)) — exactly the same rules,
+ * same as limitPoints(subdivide(cage, levels)) - exactly the same rules,
  * recorded instead of applied.
  */
 export function subdivisionPlan(cage: Cage, levels = 3): SubdivPlan {
@@ -621,7 +621,7 @@ export function isClosed(cage: Cage): boolean {
 /**
  * Freeform's exact values on picked points: Move by [x, y, z] (mm); Turn by
  * x°, y°, z° about X, then Y, then Z through the points' middle; or Scale by
- * all × [x, y, z] about the middle — about the ground instead, upwards, when
+ * all × [x, y, z] about the middle - about the ground instead, upwards, when
  * the points stand on it (a cylinder made 5× taller sank 80 mm below the floor).
  */
 export function moveTurnScale(pts: Vec3[], mode: "move" | "turn" | "scale", [x, y, z, all]: [number, number, number, number]): Vec3[] {
@@ -674,7 +674,7 @@ export function boundaryEdges(cage: Cage): [number, number][] {
 
 /**
  * Closed loops among the chosen boundary edges, each walked the opposite way
- * to the face it borders — the winding a new face filling it needs.
+ * to the face it borders - the winding a new face filling it needs.
  */
 export function holeLoops(cage: Cage, chosen: Set<string>): number[][] {
   const edges = boundaryEdges(cage).filter(([a, b]) => chosen.has(ekey(a, b)));
@@ -723,7 +723,7 @@ export function refineCage(cage: Cage): Cage {
 /**
  * Fill a hole with any number of edges. An odd hole can't be closed with
  * quads alone (every quad adds an even number of edge ends), so the cage is
- * first made twice as fine — same shape, and the hole then has twice as many
+ * first made twice as fine - same shape, and the hole then has twice as many
  * edges. Returns the new cage and whether it had to be refined.
  */
 export function fillHole(cage: Cage, loop: number[]): { cage: Cage; refined: boolean } | null {
@@ -807,7 +807,7 @@ const faceCentre = (c: Cage, f: number): Vec3 => mul3(c.faces[f].reduce((a, v) =
 
 /**
  * Pull one face out in `steps` even steps, `length` long in all, bending
- * `bend` degrees on the way (upwards; negative: down — sideways for a face
+ * `bend` degrees on the way (upwards; negative: down - sideways for a face
  * that looks up or down) and ending `taper` times its size: a spout or an arm
  * in one go, with sliders instead of a value per step. Returns the cage and
  * the end face.
@@ -846,7 +846,7 @@ export function sweepFace(cage: Cage, face: number, o: { steps: number; length: 
 
 /**
  * Bridge two faces with a tube that arches out: it leaves each face along its
- * normal, `arch` far before turning (a cubic curve), in `segments` pieces —
+ * normal, `arch` far before turning (a cubic curve), in `segments` pieces -
  * a handle between two faces on the same side of a body, with one slider.
  * Arch 0 and one segment: the straight bridge.
  */
@@ -1301,7 +1301,7 @@ export function extrudeFaces(cage: Cage, faces: number[], dist: number): { cage:
     }
   }
   const moved = cage.faces.map((f, i) => (sel.has(i) ? (f.map((v) => copy.get(v)!) as Quad) : f));
-  // A border of an open sheet inside the patch: its old points are left with nothing — drop them.
+  // A border of an open sheet inside the patch: its old points are left with nothing - drop them.
   const out = compact({ verts, faces: [...moved, ...walls] });
   // compact keeps faces in order: the moved ones keep their indices.
   return { cage: out, faces: [...sel] };
@@ -1309,7 +1309,7 @@ export function extrudeFaces(cage: Cage, faces: number[], dist: number): { cage:
 
 /**
  * Inset faces: inside each picked face (or patch of them) a smaller copy, `f`
- * of the way in towards its middle, ringed by new faces — a place to pull out
+ * of the way in towards its middle, ringed by new faces - a place to pull out
  * a detail without dragging the rest. Returns the cage and the inner faces.
  */
 export function insetFaces(cage: Cage, faces: number[], f = 0.3): { cage: Cage; faces: number[] } | null {
@@ -1337,7 +1337,7 @@ export function insetFaces(cage: Cage, faces: number[], f = 0.3): { cage: Cage; 
 
 /**
  * Extend a surface from points on its open border: every border edge with
- * both ends picked gets a new face beyond it — outwards, in the surface's own
+ * both ends picked gets a new face beyond it - outwards, in the surface's own
  * direction there, as long as the edges are. Returns the new outer points
  * (picked next, to drag on), or null when no border edge has both ends picked.
  */

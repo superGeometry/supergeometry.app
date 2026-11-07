@@ -1,4 +1,4 @@
-// Run: npx tsx tests/iofuzz.test.ts — the file readers fed junk, truncated and
+// Run: npx tsx tests/iofuzz.test.ts - the file readers fed junk, truncated and
 // absurd files: they refuse with a message or read what makes sense, never
 // hang, and never hand the sketch NaN or infinite numbers. DXF out → in is exact.
 (globalThis as any).window ??= globalThis;

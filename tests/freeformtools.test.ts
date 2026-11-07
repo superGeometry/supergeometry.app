@@ -1,4 +1,4 @@
-// Run: npx tsx tests/freeformtools.test.ts — adding cage detail (edge loops,
+// Run: npx tsx tests/freeformtools.test.ts - adding cage detail (edge loops,
 // extrude, inset), and a part built with them, joined to other bodies.
 import opencascade from "replicad-opencascadejs";
 import { measureVolume, setOC } from "replicad";
@@ -108,7 +108,7 @@ const faceWith = (c: Cage, test: (n: [number, number, number], m: [number, numbe
   const R = 150 / (Math.PI / 3);
   const want = [79.8 + R * Math.sin(Math.PI / 3), 0, 75 + R * (1 - Math.cos(Math.PI / 3))];
   const near = Math.hypot(end[0] - want[0], end[1] - want[1], end[2] - want[2]) < 1;
-  check("sweep: 6 steps along a 60° arc, 150 long — the end face lands where the arc ends", !!sw && sw.cage.faces.length === c0 + 6 * 4 && near, `end at ${end.map((x) => x.toFixed(1))}, want ${want.map((x) => x.toFixed(1))}`);
+  check("sweep: 6 steps along a 60° arc, 150 long - the end face lands where the arc ends", !!sw && sw.cage.faces.length === c0 + 6 * 4 && near, `end at ${end.map((x) => x.toFixed(1))}, want ${want.map((x) => x.toFixed(1))}`);
   const r = solidOk(sw.cage);
   check("  …a clean solid that doesn't pass through itself", r.ok && !selfCrossings(sw.cage).length, `vol ${r.v.toFixed(0)}`);
   const w0 = Math.hypot(...[0, 1, 2].map((k) => cy.verts[cy.faces[f][0]][k] - cy.verts[cy.faces[f][2]][k]));

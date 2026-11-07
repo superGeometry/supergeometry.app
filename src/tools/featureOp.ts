@@ -52,7 +52,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
   /** What was selected when the tool started (Esc / Cancel goes back to it). */
   private startSelection: Sel[];
 
-  /** Esc / Cancel: one step back — the tool goes, what was selected before is selected again. */
+  /** Esc / Cancel: one step back - the tool goes, what was selected before is selected again. */
   protected cancel(): void {
     const back = this.startSelection;
     this.app.setTool(null);
@@ -112,7 +112,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
 
   /**
    * Another region of the profile's sketch tapped (on a phone a tapped region
-   * opens the tool straight away): it joins the profile — tapped again, it
+   * opens the tool straight away): it joins the profile - tapped again, it
    * leaves. So several regions go together. True when the tap was used.
    */
   protected regionTap(p: ToolPointer): boolean {
@@ -326,9 +326,9 @@ function allRegionsUsed(app: AppContext, sketch: string, features: Feature[]): b
       else if (g.type === "loft") g.sections.forEach(add);
     }
     // Every shape drawn has been made into something. (Matched shape by shape,
-    // not piece by piece: where the drawing meets an edge in its plane — the
+    // not piece by piece: where the drawing meets an edge in its plane - the
     // corner of a rounded button and the same corner of the body made from
-    // it, sampled a little differently — slivers are left that no one would
+    // it, sampled a little differently - slivers are left that no one would
     // use; the sketch stayed in view and its face-wide region took every later
     // tap on that face.)
     const inside = (m: Region, q: Vec2) => pointInPoly(q, m.outer.poly) && !m.holes.some((h) => pointInPoly(q, h.poly));

@@ -3,7 +3,7 @@
 // A Move/Copy step copies a body; for a freeform that copy would still be
 // built from the original's cage, so editing either one changed both. Unless
 // the copy is linked, it becomes an independent freeform feature with its own
-// (moved) cage — edits on it stay on it.
+// (moved) cage - edits on it stay on it.
 
 import type { Feature, FreeformFeature, ProjectDoc, TransformFeature, Vec3 } from "./types";
 

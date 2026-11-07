@@ -1,4 +1,4 @@
-// Run: npx tsx tests/closet.test.ts [out.json] — a flat-pack closet built the
+// Run: npx tsx tests/closet.test.ts [out.json] - a flat-pack closet built the
 // way it's made: every board its own body (two sides, top, bottom, plinth,
 // three shelves, a hardboard back, two doors), 18 mm boards, 800 × 500 × 1800.
 // Checked: each board is a clean solid of the right size, and no two boards

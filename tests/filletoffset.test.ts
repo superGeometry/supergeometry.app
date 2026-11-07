@@ -1,6 +1,6 @@
-// Run: npx tsx tests/filletoffset.test.ts — offsetting faces next to a fillet.
+// Run: npx tsx tests/filletoffset.test.ts - offsetting faces next to a fillet.
 // The fillet goes with the face (taken off, the face moved, put back at the same
-// radius) — never a stray round face left in the body where the fillet was. When
+// radius) - never a stray round face left in the body where the fillet was. When
 // it no longer fits, the edge stays sharp and the step carries a note.
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";
@@ -43,6 +43,6 @@ for (const c of cases) {
     !!c.note !== !!r.notes?.length ? `note: ${JSON.stringify(r.notes ?? [])}` : "",
   ].filter(Boolean);
   if (problems.length) failed++;
-  console.log(`${problems.length ? "FAIL" : "ok  "} ${c.name}${problems.length ? " — " + problems.join(", ") : ""}`);
+  console.log(`${problems.length ? "FAIL" : "ok  "} ${c.name}${problems.length ? " - " + problems.join(", ") : ""}`);
 }
 if (failed) process.exit(1);

@@ -1,9 +1,9 @@
 // Run: npx tsx tests/projectfuzz.test.ts [projects] [steps] [seed]
 //
-// Whole projects built at random from everything there is — sketches (with
+// Whole projects built at random from everything there is - sketches (with
 // constraints) on the ground and on faces, extrudes joined / cut / new,
 // revolves, freeforms, booleans, fillets, shells, face moves, moves, scales,
-// patterns, mirrors, splits, repairs — and then abused like a user would:
+// patterns, mirrors, splits, repairs - and then abused like a user would:
 // earlier History steps deleted or changed, the project saved and loaded,
 // exported. After every step: every body a clean solid, a saved-and-loaded
 // project rebuilding to exactly the same bodies, nothing thrown.
@@ -26,7 +26,7 @@ const SEED = Number(process.argv[4] ?? 1);
 const sig = (m: Map<string, Shape3D>) => [...m].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}:${v.faces.length}:${v.faces.map((f) => measureArea(f)).reduce((a, b) => a + b, 0).toFixed(3)}`).join("|");
 
 function sketchOn(R: () => number, id: string, plane: PlaneDef, size: number): Feature[] {
-  // A rectangle of lines with joins, H/V and a size — solved like the sketch tool does — or a circle.
+  // A rectangle of lines with joins, H/V and a size - solved like the sketch tool does - or a circle.
   const w = r2(size * (0.2 + R() * 0.5));
   const h = r2(size * (0.2 + R() * 0.5));
   const cx = r2((R() - 0.5) * size * 0.3);

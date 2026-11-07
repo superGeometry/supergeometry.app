@@ -1,4 +1,4 @@
-// Run: npx tsx tests/offsetcurved.test.ts — Offset Face on flat faces bordered by curved
+// Run: npx tsx tests/offsetcurved.test.ts - Offset Face on flat faces bordered by curved
 // (sloped) faces: the curved neighbours carry on, it isn't a straight extrude.
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";

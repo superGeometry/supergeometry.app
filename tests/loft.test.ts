@@ -1,4 +1,4 @@
-// Run: npx tsx tests/loft.test.ts — lofts in many arrangements, and a spline revolve.
+// Run: npx tsx tests/loft.test.ts - lofts in many arrangements, and a spline revolve.
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";
 import type { ExtrudeSource, Feature, PlaneDef } from "../src/doc/types";

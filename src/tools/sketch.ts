@@ -97,7 +97,7 @@ const HINTS: Record<Kind, string> = {
   patternLinear: "Tap curves to select, then set count and spacing.",
   patternCircular: "Tap curves to select (double-tap for a whole shape), then tap the centre to turn them around.",
   rotate: "Tap curves to select, set the pivot and angle.",
-  mirror: "Tap a shape to select it (Shift+tap: single curves), then tap the line to mirror it across — any line, even one of its own edges.",
+  mirror: "Tap a shape to select it (Shift+tap: single curves), then tap the line to mirror it across - any line, even one of its own edges.",
   trim: "Tap the part of a curve to cut away (between crossings), or swipe across several. Join mode: tap a line to merge it with the line on the same axis it touches.",
   align: "Tap the line to move, then the line it should line up with (the first one moves onto the second one's axis).",
   extend: "Tap the half of a line or arc whose end should move, then the half of the curve it should meet. Tap the same half twice to extend to the next curve.",
@@ -106,7 +106,7 @@ const HINTS: Record<Kind, string> = {
 };
 
 /**
- * Does segment from→to run alongside line a–b — nearly the same direction
+ * Does segment from→to run alongside line a–b - nearly the same direction
  * (within 10°), off its line, and beside it for a good part (not just carrying
  * on past its end, which is how a line is extended)?
  */
@@ -511,7 +511,7 @@ export class SketchTool implements Tool {
     const left = pop.hidden ? col.left : Math.min(col.left, pop.getBoundingClientRect().left);
     bar.style.right = `${window.innerWidth - left + GAP}px`;
     // Beside the column like the other windows, growing upwards from its button
-    // (its bottom lines up with the button's) — so it stays clear of the panel below.
+    // (its bottom lines up with the button's) - so it stays clear of the panel below.
     const bottom = btn ? btn.bottom : col.bottom;
     const top = bottom - bar.offsetHeight;
     // Keep it on screen when the window is short.
@@ -606,7 +606,7 @@ export class SketchTool implements Tool {
     // Typing a value digit by digit: say it once, not on every key.
     if (performance.now() - this.refusedAt < 2000) return;
     this.refusedAt = performance.now();
-    this.app.ui.toast("That contradicts constraints already on the sketch — remove one first (Constraints → tap it → Delete)", "error");
+    this.app.ui.toast("That contradicts constraints already on the sketch - remove one first (Constraints → tap it → Delete)", "error");
   }
 
   private removeConstraints(list: SketchConstraint[]): void {
@@ -678,7 +678,7 @@ export class SketchTool implements Tool {
 
   /**
    * Selected curves in the order they were picked (the first one is the
-   * reference: it stays put; the others adapt to it) — by the pick order kept
+   * reference: it stays put; the others adapt to it) - by the pick order kept
    * for each tap, not by how the selection happens to be stored.
    */
   private pickedCurves(): SketchEntity[] {
@@ -696,7 +696,7 @@ export class SketchTool implements Tool {
     if (!cs.length) return this.app.ui.toast("That constraint doesn't fit the selection");
     // The first thing picked is the reference: it stays, the others adapt to it.
     const first = this.firstPicked();
-    // Equal: a size dimension on the curves picked after the first would fight it — drop those.
+    // Equal: a size dimension on the curves picked after the first would fight it - drop those.
     const others = new Set(curves.slice(1).map((e) => e.id));
     const kept = type === "equal" ? this.constraints.filter((c) => !(c.type === "dim" && c.curves?.length === 1 && others.has(c.curves[0]) && ["length", "radius", "diameter"].includes(c.prop ?? ""))) : this.constraints;
     // Strict: a constraint that contradicts the ones already there isn't added.
@@ -866,12 +866,12 @@ export class SketchTool implements Tool {
 
   /**
    * A tool tapped in the column. The one already in use: (phones) its names
-   * come back, or go again — what you're drawing carries on. Another: switch.
+   * come back, or go again - what you're drawing carries on. Another: switch.
    */
   private pickTool(kind: Kind): void {
     if (kind === this.kind && this.phase === "draw") {
       // Something under way: tapping its tool again ends it (the next tap
-      // starts a new line — "double-tap to stop" is hard to hit on a phone).
+      // starts a new line - "double-tap to stop" is hard to hit on a phone).
       if (this.pts.length) {
         this.resetDrawing();
         this.refreshPreview();
@@ -985,7 +985,7 @@ export class SketchTool implements Tool {
         // (Already in the box on the line: not repeated in the list beside it.)
         if (this.pts.length && !settings.value.numpad && !isTouchDevice) items.push({ ...lock("len", "Length"), inBox: true } as PanelItem);
         // A finger can't hover: after the first tap there's no line to type a
-        // length on (and the next point is often off the screen) — so the card
+        // length on (and the next point is often off the screen) - so the card
         // takes the length and the direction (0° right, 90° up), Done places it.
         // Or how far across and up it goes: a slope ("in 10, up 12") with no angle to work out.
         else if (this.pts.length && isTouchDevice) items.push(...firstAt(), lock("len", "Length"), lock("ang", "Angle", "angle"), lock("dx", "Across"), lock("dy", "Up"));
@@ -993,7 +993,7 @@ export class SketchTool implements Tool {
       case "arc":
         // By its centre, on a phone: where the centre is, the radius and where
         // it starts, then where it ends (degrees, 0° right, round anticlockwise)
-        // — a nacelle's lip round a centre at 257 snapped to 260.
+        // - a nacelle's lip round a centre at 257 snapped to 260.
         if (isTouchDevice && memory.arc === "center") {
           if (this.pts.length === 1) items.push(...firstAt(), lock("r", "Radius"), lock("a0", "Start angle", "angle"));
           else if (this.pts.length === 2) items.push(lock("a1", "End angle", "angle"));
@@ -1138,7 +1138,7 @@ export class SketchTool implements Tool {
         break;
     }
     // A shape being drawn with a size typed in the card: Enter (or Done) puts it
-    // there — typing Width 100, Height 150 and pressing Enter did nothing; it
+    // there - typing Width 100, Height 150 and pressing Enter did nothing; it
     // still waited for a second tap, which on a phone lands wherever the finger is.
     const typed = this.pts.length > 0 && (["rect", "circle", "polygon", "ellipse", "line"].includes(k) || (k === "arc" && memory.arc === "center"));
     ui.showPanel(items.length ? { title: k === "fillet" && memory.corner === "chamfer" ? "Chamfer" : titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined, onDone: k === "spline" && this.pts.length >= 2 ? () => this.finishSpline(false) : typed ? () => this.finishTyped() : undefined } : null);
@@ -1235,7 +1235,7 @@ export class SketchTool implements Tool {
     if (this.phase !== "draw") return false;
     if (this.kind === "patternLinear" && this.startPatternDrag(p)) return true;
     // Drags (the gimbal's too) start once the pointer moves (dragStart): a
-    // gimbal grabbed on the press took every tap near it — with a point picked
+    // gimbal grabbed on the press took every tap near it - with a point picked
     // by mistake, Move/Rotate could select nothing (Apply (0)).
     if (this.kind === "select") return false;
     if (this.kind === "scale" && this.startScaleDrag(p)) return true;
@@ -1425,7 +1425,7 @@ export class SketchTool implements Tool {
     if (!this.pts.length || !this.cursor) return;
     // A drag places the second point; a tap waits for it. (Measured from where
     // the finger went down, not from the point it snapped to: a tap a fingertip
-    // from a corner snapped there and counted as a drag back to the finger —
+    // from a corner snapped there and counted as a drag back to the finger -
     // a line of no length, and nothing could be drawn near that corner.)
     const a = this.downAt ?? this.app.view.toScreen(sketchToWorld(this.plane!, this.pts[0]));
     this.downAt = null;
@@ -1594,7 +1594,7 @@ export class SketchTool implements Tool {
     this.dragBase ??= base;
     const r = solve(base, this.constraints, { drag: refs.map((d) => ({ ref: d.ref, to: to(d.at) })) });
     // Somewhere the constraints can't follow: stay at the last good place
-    // (unless the sketch was already off before the drag — then just follow).
+    // (unless the sketch was already off before the drag - then just follow).
     if (!r.ok && constraintError(base, this.constraints) < r.error) return;
     const id = this.sketchId;
     this.app.store.transient((doc) => {
@@ -1665,7 +1665,7 @@ export class SketchTool implements Tool {
     this.dragBase = null;
     this.typing.reset();
     this.app.ui.setLabel(0, 0, null);
-    // Dropped onto another point: they're joined (Coincident) — if the constraints allow it.
+    // Dropped onto another point: they're joined (Coincident) - if the constraints allow it.
     if (drop && moved.length === 1) {
       const c: SketchConstraint = { id: uid(), type: "coincident", pts: [moved[0].ref, drop] };
       const res = addStrict(this.entities, this.constraints, [c]);
@@ -1683,7 +1683,7 @@ export class SketchTool implements Tool {
   private scaleGimbal: Gimbal | null = null;
   private scaleDrag: { from: ToolPointer; part: GimbalPart; f0: number; center: Vec2; size: number } | null = null;
 
-  /** Scale tool: cube handles on the selection — drag one out or in to scale (or type the factor). */
+  /** Scale tool: cube handles on the selection - drag one out or in to scale (or type the factor). */
   private refreshScaleGimbal(): void {
     const sel = this.entities.filter((e) => this.selected.has(e.id));
     const show = this.kind === "scale" && this.phase === "draw" && sel.length > 0 && !this.scaleDrag;
@@ -1758,7 +1758,7 @@ export class SketchTool implements Tool {
 
   /**
    * Left-drag on empty space: window selection of the curves entirely inside
-   * the box (a drag never orbits in a sketch — that's the right button).
+   * the box (a drag never orbits in a sketch - that's the right button).
    */
   box(a: { x: number; y: number }, b: { x: number; y: number }, final: boolean, add: boolean): void {
     if (!final || this.phase !== "draw" || !this.plane || this.pts.length) return;
@@ -1866,7 +1866,7 @@ export class SketchTool implements Tool {
   key(e: KeyboardEvent): boolean {
     if (e.ctrlKey || e.metaKey) return false;
     // Text placed, its box not focused yet (typed straight after the tap): the
-    // keys are the text, not shortcuts — "1" then Enter used to be lost.
+    // keys are the text, not shortcuts - "1" then Enter used to be lost.
     if (this.kind === "text" && this.pts.length === 1) {
       const box = document.querySelector<HTMLInputElement>("#panel .text-input");
       if (box && document.activeElement !== box) {
@@ -1914,7 +1914,7 @@ export class SketchTool implements Tool {
           show: this.kind === "line" ? (text, bad) => this.lineDim?.setText(text, bad) : undefined,
           apply: (v) => this.applyLock(key, v),
           commit: () => {
-            // Enter moves on to the next size — except the polygon's side count (Tab only).
+            // Enter moves on to the next size - except the polygon's side count (Tab only).
             if (this.lockIndex < keys.length - 1 && keys[this.lockIndex + 1] !== "sides") {
               this.lockIndex++;
               this.setHint(`Now type the ${{ ang: "angle", h: "height", sides: "number of sides" }[keys[this.lockIndex]] ?? "next value"} (or Enter to keep it), then Enter.`);
@@ -2000,14 +2000,14 @@ export class SketchTool implements Tool {
     const view = this.app.view;
     const screen = (uv: Vec2) => view.toScreen(sketchToWorld(plane, uv));
     // A finger covers what it lands on and can't nudge: on touch screens snap
-    // reach stays near a fingertip's own error (~14 px), not 25 — placing text
+    // reach stays near a fingertip's own error (~14 px), not 25 - placing text
     // beside a ruler's ticks, every tap jumped onto a tick end.
     const touch = p.type === "touch";
     const tol = touch ? p.tol * 0.8 : p.tol * 1.4;
 
     // The origin is a guide point like the others: with them switched off it
     // must not pull taps either (numbers placed along a ruler near the origin
-    // all jumped onto it — a fingertip's reach is ~20 px on a phone).
+    // all jumped onto it - a fingertip's reach is ~20 px on a phone).
     const cands: { p: Vec2; label: string; ref?: PointRef; mid?: string; model?: boolean }[] = s.guidePoints ? [{ p: [0, 0], label: "Origin" }] : [];
     if (s.guidePoints) {
       for (const e of this.entities) {
@@ -2038,7 +2038,7 @@ export class SketchTool implements Tool {
     }
     // Drawing a line: it mustn't be pulled onto a line it runs alongside (a
     // parallel line drawn close to another collapsed onto it on phones, where
-    // the snap reach is a fingertip wide) — unless it carries on along that line.
+    // the snap reach is a fingertip wide) - unless it carries on along that line.
     const drawFrom = this.kind === "line" && this.pts.length ? this.pts[this.pts.length - 1] : null;
     const wppPx = view.cam.worldPerPixel(view.height);
     const alongside = (a: Vec2, b: Vec2, to: Vec2): boolean => !!drawFrom && runsAlongside(a, b, drawFrom, to, wppPx * 2);
@@ -2056,7 +2056,7 @@ export class SketchTool implements Tool {
     }
     if (best) return { uv: [...best.p] as Vec2, label: best.label, ref: best.ref, mid: best.mid, model: best.model };
 
-    // Nothing to land on: lines and curves to slide along — straight across from
+    // Nothing to land on: lines and curves to slide along - straight across from
     // a point, on a curve, a line's extension, parallel or square to a line. Near
     // two of them: where they cross.
     const wpp = view.cam.worldPerPixel(view.height);
@@ -2161,11 +2161,11 @@ export class SketchTool implements Tool {
     return out;
   }
 
-  /** The sketch's curves as things to slide along — built once per change of the sketch, not on every move. */
+  /** The sketch's curves as things to slide along - built once per change of the sketch, not on every move. */
   private lociCache: { ents: SketchEntity[]; bnd: unknown; loci: Locus[] } | null = null;
   private curveLoci(): Locus[] {
     const c = this.lociCache;
-    // (The face outline is rebuilt as a new list each time: compare what's in it — it's short.)
+    // (The face outline is rebuilt as a new list each time: compare what's in it - it's short.)
     const bndSrc = JSON.stringify(this.boundary);
     if (c && c.ents === this.entities && c.bnd === bndSrc) return c.loci;
     const loci: Locus[] = [];
@@ -2199,7 +2199,7 @@ export class SketchTool implements Tool {
     if (!s || !settings.value.autoConstrain) return [];
     const cs: SketchConstraint[] = [];
     if (s.mid) cs.push({ id: uid(), type: "midpoint", pts: [at], curves: [s.mid] });
-    // Started on the model (the centre of a socket, a corner): held there — a
+    // Started on the model (the centre of a socket, a corner): held there - a
     // radius typed later slid the whole drawing a millimetre off it.
     if (s.model) cs.push({ id: uid(), type: "fix", pts: [at], at: [...s.uv] as Vec2 });
     for (const c of s.on ?? []) cs.push({ id: uid(), type: "coincident", pts: [at], curves: [c] });
@@ -2272,7 +2272,7 @@ export class SketchTool implements Tool {
 
   /**
    * Touch screens (numpad on): after a line's second tap, its length in a box
-   * by it — type it on the numpad; the line keeps its direction.
+   * by it - type it on the numpad; the line keeps its direction.
    */
   private lineBox: { id: string; widget: DimWidget; value: number; edited: boolean } | null = null;
 
@@ -2342,7 +2342,7 @@ export class SketchTool implements Tool {
     if (Math.hypot(raw[0] - s.uv[0], raw[1] - s.uv[1]) < 1e-12) return false;
     const ids = new Set([...(s.on ?? []), ...(s.ref ? [s.ref.e] : [])]);
     const wpp = this.app.view.cam.worldPerPixel(this.app.view.height);
-    // (reversed: s is the end, `end` the start — the run is the same either way.)
+    // (reversed: s is the end, `end` the start - the run is the same either way.)
     for (const e of this.entities) if (e.kind === "line" && ids.has(e.id) && (reversed ? runsAlongside(e.a, e.b, end, raw, -1) : runsAlongside(e.a, e.b, raw, end, wpp * 2))) return true;
     return false;
   }
@@ -2366,7 +2366,7 @@ export class SketchTool implements Tool {
       if (this.pts.length) {
         // The first line of a chain: if its start was pulled onto a line it runs
         // alongside (a parallel line drawn close to another, on a phone), the
-        // start goes back where the finger was — not onto that line.
+        // start goes back where the finger was - not onto that line.
         if (this.pts.length === 1 && this.firstSnap?.raw && this.startedAlongside(this.firstSnap, pt)) {
           this.pts[0] = this.firstSnap.raw;
           this.startRef = null;
@@ -2463,7 +2463,7 @@ export class SketchTool implements Tool {
         this.typedThisShape = false;
         this.app.ui.setLabel(0, 0, null);
         if (e) this.commitAdd([e], cs);
-        // A closed shape: back to Select (an arc is open — keep drawing them).
+        // A closed shape: back to Select (an arc is open - keep drawing them).
         if (e && e.kind !== "arc") return this.shapeClosed();
       }
     }
@@ -2619,7 +2619,7 @@ export class SketchTool implements Tool {
   }
 
   /**
-   * Undo / Redo while drawing: the shape under way stops — a line chain went
+   * Undo / Redo while drawing: the shape under way stops - a line chain went
    * on from the point of the line just undone (and was tied to that line).
    */
   stopDrawing(): void {
@@ -2802,7 +2802,7 @@ export class SketchTool implements Tool {
         label = dimLabel(e, pts);
       } else if (e?.kind === "line" && this.kind === "line" && phoneScreen() && !this.dragging && this.pts.length >= 1) {
         // Touch, a line just placed and its length being typed: no next segment
-        // trailing to where the finger was (it only gets in the way) — the next tap places it.
+        // trailing to where the finger was (it only gets in the way) - the next tap places it.
         this.hideLineDim();
       } else if (e?.kind === "line") this.showLineDim(e.a, e.b);
       else {
@@ -2880,7 +2880,7 @@ export class SketchTool implements Tool {
     const plane = this.plane!;
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (len < 1e-9) return this.hideLineDim();
-    // The next line is under way: only its length shows — the box of the line
+    // The next line is under way: only its length shows - the box of the line
     // before goes (unless something was typed into it).
     if (this.lineBox && !this.lineBox.edited) this.closeLineBox();
     const w = (q: Vec2) => sketchToWorld(plane, q, 0.02).toArray() as Vec3;
@@ -3054,7 +3054,7 @@ export class SketchTool implements Tool {
 
   private curveAt(p: ToolPointer): { id: string; uv: Vec2 } | null {
     const hit = this.app.view.pick(p.x, p.y, { curves: this.sketchId ?? true, profiles: false, bodies: false, planes: false, axes: false, edgeTolPx: p.tol });
-    // A point (end, centre…) stands for its curve here — small shapes are mostly points when zoomed out.
+    // A point (end, centre…) stands for its curve here - small shapes are mostly points when zoomed out.
     if ((hit?.kind !== "curve" && hit?.kind !== "point") || hit.sketch !== this.sketchId) return null;
     const w = this.app.view.rayToPlane(p.x, p.y, this.plane!);
     return { id: hit.entity, uv: w ? toPlane(this.plane!, w) : [0, 0] };
@@ -3062,7 +3062,7 @@ export class SketchTool implements Tool {
 
   /**
    * Extend in two taps: the half of the first curve, then the half of the
-   * second — both picked ends run along their own line/circle until they meet.
+   * second - both picked ends run along their own line/circle until they meet.
    */
   private tapAlign(id: string): void {
     const all = [...this.entities, ...this.boundary];
@@ -3258,12 +3258,12 @@ export class SketchTool implements Tool {
 
   private tapSelect(p: ToolPointer, count = 1): void {
     if (this.selConstraint) this.deselectConstraint();
-    // Points can be picked in the Select tool (for constraints and dragging) — but a
+    // Points can be picked in the Select tool (for constraints and dragging) - but a
     // double tap is always "the whole shape", even when it lands near a corner.
     if (this.kind === "select" && count < 2) {
       const hit = this.app.view.pick(p.x, p.y, { curves: this.sketchId ?? true, profiles: false, bodies: false, planes: false, axes: false, images: false, edgeTolPx: p.tol });
       // A finger lands roughly: a point near the end of a line only counts when
-      // the tap is right on it (else it's the line — picking two lines to set
+      // the tap is right on it (else it's the line - picking two lines to set
       // their angle shouldn't turn into picking their shared corner).
       const onPoint = (() => {
         if (hit?.kind !== "point") return false;
@@ -3282,7 +3282,7 @@ export class SketchTool implements Tool {
     }
     const c = this.curveAt(p);
     // Mirror: with something selected, the next line tapped (even one of the
-    // selection) is the mirror axis — Shift+tap adds to the selection instead.
+    // selection) is the mirror axis - Shift+tap adds to the selection instead.
     // (Anything else tapped joins the selection: on a phone, with no Shift, a
     // second circle to mirror was refused as "not a straight line".)
     const tappedLine = c && [...this.entities, ...this.boundary].find((x) => x.id === c.id && x.kind === "line");
@@ -3428,7 +3428,7 @@ export class SketchTool implements Tool {
     if (this.kind === "patternCircular" && !this.edit.pivot) return this.app.ui.toast("Tap the centre of the pattern first");
     if (this.kind === "mirror" && !this.edit.mirrorLine) return this.app.ui.toast("Pick the mirror line");
     let results = this.transformed(false);
-    // Mirroring across one of the shape's own edges: that edge maps onto itself — don't double it.
+    // Mirroring across one of the shape's own edges: that edge maps onto itself - don't double it.
     const ml = this.edit.mirrorLine;
     if (this.kind === "mirror" && ml) {
       const d: Vec2 = [ml[1][0] - ml[0][0], ml[1][1] - ml[0][1]];
@@ -3439,7 +3439,7 @@ export class SketchTool implements Tool {
     const keepOriginals = this.kind === "patternLinear" || this.kind === "patternCircular" || ((this.kind === "mirror" ? this.edit.mirrorCopy : this.edit.copy));
     const base = keepOriginals ? this.entities : this.entities.filter((e) => !this.selected.has(e.id));
     // Moved (not copied): ties between what moves and what stays let go, and
-    // so do pins holding the moved curves in place — an arch's circle snapped
+    // so do pins holding the moved curves in place - an arch's circle snapped
     // to its window's corner dragged the window along when moved to the middle.
     let cons = this.constraints;
     if (!keepOriginals) {
@@ -3489,11 +3489,11 @@ export class SketchTool implements Tool {
   }
 
   /**
-   * Fillet like Extend: tap the halves of two lines (they needn't touch) — or
+   * Fillet like Extend: tap the halves of two lines (they needn't touch) - or
    * tap right on a corner. The rounded corner appears; type its radius, Enter.
    */
   private tapFillet(p: ToolPointer): void {
-    // A tap while the last one's radius is showing keeps it — and, on another
+    // A tap while the last one's radius is showing keeps it - and, on another
     // corner, rounds that one too (four corners took eight taps).
     const kept = !!this.filletEdit;
     if (kept) this.finishFillet();
@@ -3715,7 +3715,7 @@ export class SketchTool implements Tool {
         break;
       case "ellipse":
         // Turned by an angle typed (a blade section 30° to the flow): the
-        // rectangle had one, the ellipse didn't — and Move/Rotate is a long way round.
+        // rectangle had one, the ellipse didn't - and Move/Rotate is a long way round.
         items.push(dimField("Length", "dx"), dimField("Width", "dy"), {
           type: "number",
           label: "Angle",
@@ -3737,7 +3737,7 @@ export class SketchTool implements Tool {
       { type: "button", label: "Delete", icon: "trash", onClick: () => this.deleteSelected() },
     );
     this.app.ui.showPanel({ title: titleOf(e.kind as Kind), items, onDone: () => this.clearSelection() });
-    // An arc or circle: its radius (diameter for a circle) in a box right by it — type to change it.
+    // An arc or circle: its radius (diameter for a circle) in a box right by it - type to change it.
     if ((e.kind === "arc" || e.kind === "circle") && this.plane) {
       const c = e.kind === "circle" ? { c: e.center, r: e.radius } : arcFrom3(e.a, e.m, e.b);
       if (!c) return;
@@ -3762,7 +3762,7 @@ export class SketchTool implements Tool {
 
   /**
    * Two lines selected (not on one axis): their angle in a box where they meet
-   * — type a new angle (the second line turns), or pin it as a measurement.
+   * - type a new angle (the second line turns), or pin it as a measurement.
    */
   private showAngleBox(l1: Extract<SketchEntity, { kind: "line" }>, l2: Extract<SketchEntity, { kind: "line" }>): void {
     if (!this.plane) return;

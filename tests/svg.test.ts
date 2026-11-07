@@ -1,4 +1,4 @@
-// Run: npx tsx tests/svg.test.ts — SVG → sketch curves.
+// Run: npx tsx tests/svg.test.ts - SVG → sketch curves.
 import assert from "node:assert/strict";
 import { parseSVG } from "../src/io/svg";
 import { arrangement } from "../src/sketch/regions";
@@ -44,10 +44,10 @@ const checks: [string, () => string][] = [
 let failed = 0;
 for (const [name, fn] of checks) {
   try {
-    console.log("ok  ", name, "—", fn());
+    console.log("ok  ", name, "-", fn());
   } catch (e) {
     failed++;
-    console.log("FAIL", name, "—", e instanceof Error ? e.message : e);
+    console.log("FAIL", name, "-", e instanceof Error ? e.message : e);
   }
 }
 process.exit(failed ? 1 : 0);

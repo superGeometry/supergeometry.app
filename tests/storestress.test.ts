@@ -1,4 +1,4 @@
-// Run: npx tsx tests/storestress.test.ts — the project store under abuse: long
+// Run: npx tsx tests/storestress.test.ts - the project store under abuse: long
 // random runs of edits, undo, redo and live drags checked against a record of
 // every state; damaged project files; big projects (an imported model inside).
 (globalThis as any).window ??= globalThis;
@@ -16,7 +16,7 @@ const R = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
 // ------------------------------------------ undo / redo against a record
 {
   const store = new DocStore();
-  // What the document must be after each undo (and redo) — kept independently.
+  // What the document must be after each undo (and redo) - kept independently.
   const past: string[] = [];
   const future: string[] = [];
   const now = () => JSON.stringify(store.doc);
@@ -33,7 +33,7 @@ const R = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
     } else if (r < 0.52 && store.features.length) {
       store.remove(store.features[Math.floor(R() * store.features.length)].id);
     } else if (r < 0.6 && store.features.length) {
-      // A drag: many live changes, then one commit — one undo step.
+      // A drag: many live changes, then one commit - one undo step.
       const f = store.features[Math.floor(R() * store.features.length)];
       for (let k = 0; k < 5; k++) store.transient((d) => ((d.features.find((x) => x.id === f.id) as any).distance = k));
       store.update(f.id, { distance: 7 } as Partial<Feature>);

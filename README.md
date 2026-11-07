@@ -1,6 +1,6 @@
 # supergeometry.app
 
-**A free 3D design (CAD) app that runs in your web browser** — on a computer,
+**A free 3D design (CAD) app that runs in your web browser** - on a computer,
 an iPad or Android tablet, a phone, or a VR headset like the Meta Quest 3.
 No account, no download, no subscription. Your work stays on your device.
 
@@ -38,14 +38,14 @@ Inside the app, **More → Help** shows what every button does.
 
 Almost everything follows the same rhythm:
 
-1. **Draw a flat shape** — a *sketch* — on a plane or on a face of a part.
-2. **Turn it into a solid** — pull it up (*Extrude*), spin it around an axis
+1. **Draw a flat shape** - a *sketch* - on a plane or on a face of a part.
+2. **Turn it into a solid** - pull it up (*Extrude*), spin it around an axis
    (*Revolve*), or move it along a path (*Sweep*).
-3. **Select something and change it** — tap a face, an edge or a whole body:
+3. **Select something and change it** - tap a face, an edge or a whole body:
    only the tools that make sense for it appear on the left. Drag the arrow or
    type a number.
 4. **Every step is remembered** in *History*, so you can go back and change a
-   size later — everything after it updates.
+   size later - everything after it updates.
 
 There's no wrong order. Undo (bottom left) is always one tap away.
 
@@ -59,12 +59,12 @@ There's no wrong order. Undo (bottom left) is always one tap away.
    type a number for an exact size (e.g. `40`, Tab, `30`).
 3. Tap **Circle**, tap a centre inside the rectangle, tap again for the size
    (or type `8`).
-4. Tap **Exit Sketch** (top left of the tools) — or just tap an empty spot
+4. Tap **Exit Sketch** (top left of the tools) - or just tap an empty spot
    while looking at it from the side.
 5. Tap inside the rectangle (but outside the circle): that region turns blue
    and an **arrow** appears. Drag the arrow up, or type `20`. You now have a
    box with a round hole.
-6. Tap the top face of the box. Drag its arrow to make it taller — the hole
+6. Tap the top face of the box. Drag its arrow to make it taller - the hole
    follows. Tap an edge and drag the dot **outward** for a rounded edge
    (*fillet*) or **inward** for a bevel (*chamfer*).
 7. **File → Export STL** to 3D-print it.
@@ -87,12 +87,12 @@ There's no wrong order. Undo (bottom left) is always one tap away.
 | | Mouse | Touch / pen | Headset controller |
 |---|---|---|---|
 | Turn the view | left-drag empty space | one-finger drag | drag with the trigger |
-| Move the view | right or middle-drag | two-finger drag | — (use the view cube) |
+| Move the view | right or middle-drag | two-finger drag | - (use the view cube) |
 | Zoom | mouse wheel | pinch | thumbstick / pinch |
 | Select | click | tap | point and trigger |
 | Select a whole body | double-click | double-tap | double-trigger |
 | Deselect | Esc or click empty space | tap empty space | tap empty space |
-| Step back | right-click or Esc | — | — |
+| Step back | right-click or Esc | - | - |
 
 - **Right-click steps back**: first what's half done or picked, then the
   drawing tool, then out of the sketch; in other tools it backs out. With
@@ -102,7 +102,7 @@ There's no wrong order. Undo (bottom left) is always one tap away.
 - **Fit** (right column) zooms so everything is on screen.
 - **View cube** (top right): tap a face for a straight-on view (Top, Front…);
   ⟲ ⟳ at its top corners turn the view by 90°.
-- **Orbit centre** (the cube's bottom-left button): tap it, then tap a point —
+- **Orbit centre** (the cube's bottom-left button): tap it, then tap a point -
   the view now turns around that point. Fit resets it.
 - **Views** (the cube's bottom-right button): standard and saved views, and
   how the view looks; tap again to close.
@@ -113,27 +113,27 @@ There's no wrong order. Undo (bottom left) is always one tap away.
 
 ## The screen, piece by piece
 
-**Top bar** (top centre) — the project name (tap to rename), **File** (new / open / save /
+**Top bar** (top centre) - the project name (tap to rename), **File** (new / open / save /
 export), **Items** (a list of everything, with eyes to hide or show and
-folders to group; each kind — Bodies, Sketches, Planes & axes, Images — folds
+folders to group; each kind - Bodies, Sketches, Planes & axes, Images - folds
 away under its heading, and a plane's icon shows how it was made), **More**
 (fullscreen, Help, About, support). On tablets and computers Items runs the
 full height of the screen, like History.
 
-**Left column** — the tools. With nothing selected you get the ones that
+**Left column** - the tools. With nothing selected you get the ones that
 *make* things (Sketch, Freeform, Extrude, Revolve, Transform, Construct,
 Insert…). With something selected you only see what can be done with it,
 in groups (picking, moving and patterns, making, combining, construction,
 colour, delete) apart with a dim line.
 
-**Right column** (middle of the right edge) — Fit, Snapping, Units & grid,
+**Right column** (middle of the right edge) - Fit, Snapping, Units & grid,
 Display mode, Screenshot, Numpad (on / off), History, and in a sketch,
 Constraints.
 
-**Bottom left** — Undo / Redo, Section View (cut the view open), Measure and
+**Bottom left** - Undo / Redo, Section View (cut the view open), Measure and
 Isolate (show only the selected bodies).
 
-**The tool card** — the values for whatever you're doing (sizes, counts,
+**The tool card** - the values for whatever you're doing (sizes, counts,
 options), its own actions, and Cancel / Done, each apart with a dim line. It
 keeps clear of what you're drawing; drag it by its grip where you want it
 (remembered per screen type), double-tap the grip to let it place itself.
@@ -149,10 +149,10 @@ straight-on view (Front, Top…) Sketch goes on the face you're looking at.
 Sketches on a face measure X / Y from the model's origin.
 
 **Drawing tools:** Line (keeps going from the last point; tap the first point
-to close), Arc (two ends, then the bend — or by centre), Spline (smooth curve through points;
+to close), Arc (two ends, then the bend - or by centre), Spline (smooth curve through points;
 *Fit* or *Control* points), Rectangle (diagonal / centre / 3 points), Circle
-(centre, 2 points or 3 points), Ellipse (with an Angle), Polygon, Text (pick a font — Sans, Serif, Mono, Narrow, Bold caps,
-Script — or **Import font…** a .ttf / .otf / .woff of your own), Project
+(centre, 2 points or 3 points), Ellipse (with an Angle), Polygon, Text (pick a font - Sans, Serif, Mono, Narrow, Bold caps,
+Script - or **Import font…** a .ttf / .otf / .woff of your own), Project
 (copies body edges or other sketches' curves here).
 
 **Exact points on touch screens:** right after the first tap of a line,
@@ -170,7 +170,7 @@ another joins them.
 **Edit tools:** Offset Edge (parallel copy; whole outlines too), Fillet and
 Chamfer (round or bevel a corner where lines or arcs meet; tap the next corner
 to go on), Mirror (the selected shapes, across a line or an axis), Trim (cut
-away between crossings — tap, or swipe across several — or *Join* two lines
+away between crossings - tap, or swipe across several - or *Join* two lines
 on one axis), Align (put a line onto another line's axis), Extend (arcs carry
 on along their circle), Split, Move/Rotate (gimbal, or Rotate About a tapped
 centre), Scale, Pattern (linear with an arrow you drag, or circular around a
@@ -191,7 +191,7 @@ lines).
 perpendicular, tangent, equal, coincident, lock, distance, angle and size
 dimensions. Select one or two things, then tap a constraint (the first thing
 picked stays put, the others adapt to it). Constraints are strict: one that
-contradicts those already there isn't added — remove the old one first, or
+contradicts those already there isn't added - remove the old one first, or
 switch **Auto constrain** off; a typed value that can't be met is refused
 rather than bending the sketch. Their marks are small and faint, a colour per
 kind, and never catch a tap meant for the drawing. Toggle the column with the
@@ -199,7 +199,7 @@ kind, and never catch a tap meant for the drawing. Toggle the column with the
 
 Any closed shape becomes a **region** (blue when selected) you can extrude,
 revolve, sweep or loft. Overlapping shapes split into separate regions.
-Tapping a region shows Extrude's arrow — drag it, or type a height — and
+Tapping a region shows Extrude's arrow - drag it, or type a height - and
 Revolve, Sweep and Loft beside it in the column for the same shape. While the
 arrow is still at 0, tapping more regions of the same sketch adds them;
 **All shapes** takes every shape at once. Double-tap a shape to open its
@@ -209,58 +209,58 @@ sketch. A sketch stays in view until every region of it is used.
 
 ## Making and changing solids
 
-- **Extrude** — pull a region or a face. Negative distances cut. In *Auto*
+- **Extrude** - pull a region or a face. Negative distances cut. In *Auto*
   mode an extrusion that runs into another body cuts through it; choose *New*
   for a separate body. **Taper** shrinks the far end, down to a point: a
   spire, a pyramid or a cone in one step. Extrude starts at the last distance.
-- **Revolve** — spin a region around an axis (a separate line, a side of a
+- **Revolve** - spin a region around an axis (a separate line, a side of a
   rectangle or outline, a round edge, or one of your axes by name);
   **Travel** moves it along the axis at the same time (threads, springs).
-- **Sweep** — move a region along a path (one tap takes the whole joined run
-  of lines and arcs; tap a piece again to drop it). **Loft** — blend between
+- **Sweep** - move a region along a path (one tap takes the whole joined run
+  of lines and arcs; tap a piece again to drop it). **Loft** - blend between
   profiles.
-- **Shell** — hollow a body; tapped faces become openings (Clear empties the
+- **Shell** - hollow a body; tapped faces become openings (Clear empties the
   list).
-- **Fillet / Chamfer** — tap edges, drag the dot (outward rounds, inward
+- **Fillet / Chamfer** - tap edges, drag the dot (outward rounds, inward
   bevels) or type a size in the box on the model; variables work too. A
   fillet that can't be made leaves the edge sharp with a note in History.
-- **Faces** — drag the arrow to push/pull a face: its neighbours follow,
+- **Faces** - drag the arrow to push/pull a face: its neighbours follow,
   curved ones included; fillets next to it are kept. **Move/Rotate Face**
   moves it every way and turns it about its normal. Scale, Replace (onto
   another face's plane) or **Delete** a face, fillet or chamfer: the
   neighbours carry on along their own surfaces until they meet, as if it was
   never there.
-- **Edges and corners** — a straight edge picked shows its Move/Rotate
+- **Edges and corners** - a straight edge picked shows its Move/Rotate
   gimbal; the faces around it tilt to follow (Fillet / Chamfer are in the
   list). Every edit is checked: one that would tear the body open stops with a
   message instead.
-- **Transform** — Move/Rotate (gimbal, with a Copy switch: after a drag the
+- **Transform** - Move/Rotate (gimbal, with a Copy switch: after a drag the
   panel stays for exact values; copies are independent bodies, **Link** keeps a
   freeform copy following its original), Scale (uniform,
   or X/Y/Z on freeform bodies), Translate (from a point to a point), Mirror,
   Rotate Around Axis (a round edge gives an axis through its centre),
   Patterns. A body of a pattern picked: **Whole Pattern** selects the rest.
-- **Union / Subtract / Intersect** — combine bodies (they need to touch to
+- **Union / Subtract / Intersect** - combine bodies (they need to touch to
   unite), cut one from another, or keep the overlap. Subtract and Intersect
   open a tool: tap the body to change (marked **+**), then the bodies to cut
   with (marked **−**); **Keep modified body** / **Keep subtracted bodies**
   leave copies. Two overlapping bodies picked: all three are in the list.
   Many tools at once are one checked cut.
-- **Split Body** — by a plane (yours, by name) or a face.
-- **Thread** — tap a round face or a hole's rim: a shank at the nominal size
+- **Split Body** - by a plane (yours, by name) or a face.
+- **Thread** - tap a round face or a hole's rim: a shank at the nominal size
   gets an outside thread, a hole at the tap-drill size an inside one. The
   pitch starts at the ISO coarse pitch (the card says what it makes, e.g.
   M10 × 1.5); left-hand as an option.
-- **Repair Body** — fixes an imported or broken body (gaps, bad faces,
+- **Repair Body** - fixes an imported or broken body (gaps, bad faces,
   slivers, inside-out) without changing its shape or size.
-- **Fill to Plane** — an open freeform surface becomes a solid by filling
+- **Fill to Plane** - an open freeform surface becomes a solid by filling
   the gap down (or up, or across) to a plane.
-- **Freeform** — organic shapes: start from a box, sphere, cylinder or plane
+- **Freeform** - organic shapes: start from a box, sphere, cylinder or plane
   (its size and rows in the card) and pull its cage points, edges and faces.
   Tap picks the closest point, edge or face (tap a face again for the one
   behind it); press on empty space and drag a box to pick the points inside.
   Move / Turn / Scale take exact X, Y, Z values in the card. Cage tools:
-  **Extrude faces** (Length, Bend, Taper and Steps sliders — a spout in one
+  **Extrude faces** (Length, Bend, Taper and Steps sliders - a spout in one
   go), **Bridge faces** (two faces become a tube; two looking the same way
   arch into a handle, with Arch and Segments), **Inset**, **Add edge loop**,
   **Add detail**. **Symmetry** mirrors every move across X / Y / Z, across a
@@ -272,37 +272,37 @@ sketch. A sketch stays in view until every region of it is used.
   an edge of a hole → **Fill hole** to close it again, or **Thickness…** to
   turn the open shape into a solid wall. A hole with an odd number of edges
   is closed by making the cage twice as fine first (the shape doesn't change).
-  **Connect**: pick border edges (Shift adds) on one surface or on two — two
+  **Connect**: pick border edges (Shift adds) on one surface or on two - two
   edges get a face between them, two rows a strip, two hole rims a tube; two
   surfaces become one, ready for a Thickness. Both sides need the same number
   of edges.
-- **Copy a sketch to another plane** — tap a region of a finished sketch →
+- **Copy a sketch to another plane** - tap a region of a finished sketch →
   **Copy to Plane**: drag the blue arrow to a parallel plane, or type the
   distance (Copy off moves it instead).
-- **Construct** — helper planes: offset (drag its arrow), midplane, through
+- **Construct** - helper planes: offset (drag its arrow), midplane, through
   3 points, on a curve at a point, perpendicular to an edge at a point,
   through an edge at an angle, parallel to a face at a point. Each kind has
   its own small mark at the plane's corner (⇡ ⇹ ∴ ∿ ⊥ ∠ ∥) and on its icon.
   Axes from a face or edge, or along X / Y / Z through a point you type.
-- **Colour** — ten soft colours or **Custom…** for any colour; and how
+- **Colour** - ten soft colours or **Custom…** for any colour; and how
   see-through a body is.
-- **Section View** — cut the view (not the part) to look inside; the cut
+- **Section View** - cut the view (not the part) to look inside; the cut
   shows as a solid face with a thick outline.
-- **Measure** — distances and angles; pin a measurement to keep it.
+- **Measure** - distances and angles; pin a measurement to keep it.
 
 ---
 
 ## Exact sizes, variables and the numpad
 
 - Every drag shows a **value box** by the pointer that stays when you let go:
-  tap it to type. While dragging or drawing, **just type a number** — it goes
+  tap it to type. While dragging or drawing, **just type a number** - it goes
   into that box. Enter confirms. **Press on any value box and drag left or
   right** to turn the value down or up like a wheel. Units come from **Units & grid** (mm, cm, m, in, ft);
   you can also type units (`2in`, `5cm`) and maths (`40/3 + 2`).
 - **Variables** (Insert → Variables → New Variable / Edit Variables) are named sizes like `wall = 3`.
   Type them into any field (`wall * 2`) or pick them from the **ƒx** menu
   next to a value. Change the variable later and everything using it updates.
-- The **on-screen numpad** (the keypad button in the right column — tap it
+- The **on-screen numpad** (the keypad button in the right column - tap it
   on or off) replaces the system keyboard for value boxes. It's on by default
   on phones, tablets and headsets. Tapping a box selects its value, so typing
   replaces it; nothing is applied until you press ↵. After the second tap of
@@ -331,7 +331,7 @@ can't be rebuilt after a change, it's marked and the reason is shown.
   names and colours), **Export STEP** for other CAD programs. With bodies
   selected (or isolated), only those are exported. On phones and tablets the
   **share mark** next to each export (and Save) sends the file straight to
-  another app — mail, messages, a slicer…
+  another app - mail, messages, a slicer…
 - **File → Export DXF (sketch)** saves a sketch's curves as a 2D drawing for
   laser cutters, CNC and drawing programs: open **Items**, tap the sketch, then
   File → Export DXF. Construction lines go on their own layer.
@@ -372,11 +372,11 @@ can't be rebuilt after a change, it's marked and the reason is shown.
   Often a size became too big or a face it used was removed.
 - **"Overlap them more"**: a union or cut that the geometry engine can't do
   reliably (two bodies only just touching) is refused instead of giving a
-  wrong shape — move them so they overlap a little more.
+  wrong shape - move them so they overlap a little more.
 - **An imported body won't edit**: try **Tools → Repair Body** first.
 - **"Not closed" warning**: a body has a gap (open edges shown in orange). A
   freeform surface without thickness is open on purpose.
-- **Can't find a tool**: tools only show when they can be used — select the
+- **Can't find a tool**: tools only show when they can be used - select the
   right kind of thing first (a face, an edge, a body, a region).
 - **Something is hidden**: check the eyes in **Items**, and whether
   **Isolate** is on.
@@ -465,7 +465,7 @@ and `supergeometry.result` holds the last rebuild (`bodies`, `errors`).
 ```bash
 npm install
 npm run dev      # local dev server (add --host to open it from a tablet)
-npm run build    # static site in dist/ — host it anywhere
+npm run build    # static site in dist/ - host it anywhere
 npx tsx tests/engine.test.ts   # one of the test suites in tests/
 ```
 

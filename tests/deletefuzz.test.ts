@@ -2,7 +2,7 @@
 //
 // Random parts, a random edge filleted or chamfered, then that fillet deleted
 // again: if the delete is accepted, the part must be exactly what it was
-// before the fillet (same volume, a clean solid) — "as if it was never there".
+// before the fillet (same volume, a clean solid) - "as if it was never there".
 import opencascade from "replicad-opencascadejs";
 import { measureVolume, setOC } from "replicad";
 import { debugBodies, regenerate } from "../src/kernel/engine";

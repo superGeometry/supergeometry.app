@@ -1,4 +1,4 @@
-// Run: npx tsx tests/rotatedface.test.ts — a user's part (tests/fixtures/rotatedface.json):
+// Run: npx tsx tests/rotatedface.test.ts - a user's part (tests/fixtures/rotatedface.json):
 // a block with notches and three fillets, then faces turned. Turning the face a
 // fillet ends on used to leave little pieces of the fillet's cylinder behind,
 // and Fillet 01 couldn't be deleted.

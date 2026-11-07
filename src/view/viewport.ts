@@ -109,7 +109,7 @@ export interface PickOptions {
   curves?: boolean | string;
   planes?: boolean;
   axes?: boolean;
-  /** The world X/Y/Z axes count as axes (ids "X", "Y", "Z") — for axis/direction slots. */
+  /** The world X/Y/Z axes count as axes (ids "X", "Y", "Z") - for axis/direction slots. */
   worldAxes?: boolean;
   vertices?: boolean;
   images?: boolean;
@@ -202,7 +202,7 @@ export class Viewport {
 
     this.bodyMat = new MeshStandardMaterial({ color: COLORS.body, metalness: 0.05, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, side: FrontSide });
     // Section caps: a plane on the cut, drawn only where the body is cut (a
-    // stencil marks the inside) — solid: what's behind it doesn't show through
+    // stencil marks the inside) - solid: what's behind it doesn't show through
     // (the far wall's inside was drawn flat before, its edges and all).
     this.capMat = hatched(new MeshBasicMaterial({ color: COLORS.cap, side: DoubleSide, stencilWrite: true, stencilRef: 0, stencilFunc: NotEqualStencilFunc, stencilFail: ReplaceStencilOp, stencilZFail: ReplaceStencilOp, stencilZPass: ReplaceStencilOp }));
     this.stencilMats = [BackSide, FrontSide].map(
@@ -463,7 +463,7 @@ export class Viewport {
   /**
    * How much of each side of the canvas the tool columns and bars cover: a
    * column hugging the left or right edge, a bar along the top or bottom.
-   * Panels that cover most of the screen (History on a phone) don't count —
+   * Panels that cover most of the screen (History on a phone) don't count -
    * the model would have nowhere left to go.
    */
   coveredInsets(): Insets {
@@ -481,7 +481,7 @@ export class Viewport {
       const t = r.top - cv.top, b = cv.bottom - r.bottom;
       // A column: clearly taller than wide (a tablet's tool menu is under a quarter of the height).
       const wide = r.width > W * 0.5, tall = r.height > Math.min(H * 0.25, r.width * 1.8);
-      // A panel over most of the screen (History on a phone): nowhere left to put the model — ignored.
+      // A panel over most of the screen (History on a phone): nowhere left to put the model - ignored.
       if (wide && r.height > H * 0.6) continue;
       if (tall && !wide) cols.push(r);
       // Bars: wide along the top or bottom (a phone's tool card can be tall as well as wide).
@@ -808,7 +808,7 @@ export class Viewport {
         mid = box.isEmpty() ? p.origin : (box.getCenter(new Vector3()).toArray() as Vec3);
         this.planeCentres.set(id, mid);
       }
-      // Centred where the middle of the model (as it was) falls on the plane — a
+      // Centred where the middle of the model (as it was) falls on the plane - a
       // plane 92 mm across through a lamp shade 150 mm up was drawn around the
       // floor below it. (Projected each time: the plane may have moved since.)
       let at = p.origin;
@@ -1158,7 +1158,7 @@ export class Viewport {
   /**
    * World → screen for many points at once: one matrix, the canvas size read
    * once, nothing allocated (picking projects every corner and edge piece of
-   * every body — 10–14 ms a pick for a ruler's 11 000 edges).
+   * every body - 10–14 ms a pick for a ruler's 11 000 edges).
    */
   private projector(): (x: number, y: number, z: number, out: Float64Array) => boolean {
     const m = new Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).elements;
@@ -1391,7 +1391,7 @@ function hatched<M extends MeshBasicMaterial>(m: M): M {
 
 /**
  * A plane's mark: a small outline symbol for how it was made (and the
- * symmetry plane's) — like the view cube's buttons, no badge behind it.
+ * symmetry plane's) - like the view cube's buttons, no badge behind it.
  */
 const PLANE_MARKS: Record<string, string> = { offset: "⇡", mid: "⇹", "3pt": "∴", curve: "∿", perp: "⊥", angle: "∠", parallel: "∥", symmetry: "⧖" };
 /** Its size, as a part of the plane's width. */

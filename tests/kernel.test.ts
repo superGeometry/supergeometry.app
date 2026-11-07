@@ -1,4 +1,4 @@
-// Run: npx tsx tests/kernel.test.ts — checks sketch regions become valid solids.
+// Run: npx tsx tests/kernel.test.ts - checks sketch regions become valid solids.
 import opencascade from "replicad-opencascadejs";
 import { basicFaceExtrusion, measureArea, setOC, Vector } from "replicad";
 import type { PlaneDef, SketchEntity } from "../src/doc/types";

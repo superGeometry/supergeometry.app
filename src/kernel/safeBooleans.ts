@@ -1,7 +1,7 @@
 // OpenCascade's booleans may adjust the shapes they're given (tolerances,
-// edges, even the surfaces underneath — shared between a shape and its copies).
-// Every earlier step's result is kept and built on, so an edit — even one that
-// fails — must never change them. These replace replicad's fuse / cut /
+// edges, even the surfaces underneath - shared between a shape and its copies).
+// Every earlier step's result is kept and built on, so an edit - even one that
+// fails - must never change them. These replace replicad's fuse / cut /
 // intersect with the same operations run non-destructively (the inputs are
 // left exactly as they were), with the same tidying of same-surface faces.
 
@@ -49,7 +49,7 @@ export function useSafeBooleans(): void {
     return run("common", this, tool, opts);
   };
   // A shape's edges and faces, each once, in the order found: replicad checks
-  // every new one against all found so far (quadratic — 22 s for the 11 000
+  // every new one against all found so far (quadratic - 22 s for the 11 000
   // edges of a ruler with its scale engraved). Same result, by hash first.
   const q = Shape.prototype as unknown as object;
   Object.defineProperty(q, "edges", { configurable: true, get(this: { wrapped: unknown }) {

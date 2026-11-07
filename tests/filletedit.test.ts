@@ -1,4 +1,4 @@
-// Run: npx tsx tests/filletedit.test.ts — moving faces next to big fillets keeps the fillets
+// Run: npx tsx tests/filletedit.test.ts - moving faces next to big fillets keeps the fillets
 // (no tunnels carved through the body by an extended fillet cylinder).
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";

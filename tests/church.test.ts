@@ -1,4 +1,4 @@
-// Run: npx tsx tests/church.test.ts [out.json] — a small church inside
+// Run: npx tsx tests/church.test.ts [out.json] - a small church inside
 // 250 × 250 × 250 mm: a nave (100 × 150, walls 90 high) with a 45° gable, a
 // 50 × 50 tower at the front 170 high, a pitched roof 6 mm thick with
 // overhangs, a spire (a loft from a square to a point) and a cross on top;
@@ -154,7 +154,7 @@ if (stone && roof) {
   check("  …and an O drawn there keeps its hole", Math.abs(oa - Math.PI * (100 - 36)) < 2, `${oa.toFixed(1)} mm²`);
 }
 
-// Extrude with Taper: a spire straight up from a square, to (nearly) a point —
+// Extrude with Taper: a spire straight up from a square, to (nearly) a point -
 // a frustum's volume, h/3·(A + a + √(A·a)).
 {
   const sq = [rect(0, 0, 50, 50)];
@@ -210,7 +210,7 @@ if (stone && roof) {
   const after = Math.abs(measureVolume(debugBodies().get("extrude-mw5j163h-sfkc")!));
   const archArea = (w: number, h: number) => w * h + (Math.PI * (w / 2) ** 2) / 2;
   const want = archArea(20, 32) * 5 + 6 * archArea(14, 28) * 4 + 3 * archArea(16, 20) * 6 + Math.PI * 11 ** 2 * 4;
-  check("by hand: exactly the openings cut — door, 6 windows, 3 belfry arches, round window", Math.abs(before - after - want) < want * 2e-3, `${(before - after).toFixed(1)} mm³, want ${want.toFixed(1)} (by code the same)`);
+  check("by hand: exactly the openings cut - door, 6 windows, 3 belfry arches, round window", Math.abs(before - after - want) < want * 2e-3, `${(before - after).toFixed(1)} mm³, want ${want.toFixed(1)} (by code the same)`);
 }
 
 if (process.argv[2]) writeFileSync(process.argv[2], JSON.stringify({ format: "super", version: 2, name: "Church", features: feats, variables: [], views: [], units: "mm", hidden: feats.filter((f) => f.type === "sketch").map((f) => f.id), pins: [], names: { stone: "Stone", roof: "Roof" }, colors: { stone: "#d9cfbf", roof: "#7a4a3a" } }));

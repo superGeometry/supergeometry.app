@@ -508,7 +508,7 @@ function solveGroup(entities: SketchEntity[], live: SketchConstraint[], opts: So
   // A change can land on a flipped solution (a corner folded the other way, an
   // arc turned inside out); made in small steps it keeps its shape: redo it so.
   // (Not while dragging: each frame goes on from the last, so a flip there is
-  // the pointer's doing — and a frame must stay quick.)
+  // the pointer's doing - and a frame must stay quick.)
   if (!drags.length && !sameTurns(t0, turnsOf(build(xs), live))) {
     const xg = gradually(1 / 16, 60);
     if (xg && errorAt(xg) <= Math.max(errorAt(xs), tol)) xs = xg;
@@ -560,7 +560,7 @@ function solveGroup(entities: SketchEntity[], live: SketchConstraint[], opts: So
       const rowD = ev.dr.map((_, di) => row + di * 2);
       const nRes = r.length;
       // Numeric Jacobian, column by column, from only the rows that parameter
-      // touches — kept as the few non-zeros of each row.
+      // touches - kept as the few non-zeros of each row.
       const rows: { j: number; v: number }[][] = Array.from({ length: nRes }, () => []);
       const get = (id: string) => m.get(id);
       for (let i = 0; i < movers.length; i++) {
@@ -662,7 +662,7 @@ function turnsOf(m: Map<string, SketchEntity>, cs: SketchConstraint[]): Map<stri
     if (a) out.set(e.id, Math.sign(a.sweep));
   }
   // Corners: two lines joined end to end (by a coincident constraint). Legs
-  // that are next to nothing don't count — they can tip either way.
+  // that are next to nothing don't count - they can tip either way.
   let size = 0;
   for (const e of m.values()) if (e.kind === "line") size = Math.max(size, Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]));
   for (const c of cs) {
@@ -850,7 +850,7 @@ function curveSize(e: SketchEntity): number {
 
 /**
  * Solve, and only call it met if no curve had to shrink to nothing for it
- * (a line of zero length "is" horizontal and vertical at once — that's not a sketch).
+ * (a line of zero length "is" horizontal and vertical at once - that's not a sketch).
  */
 export function solveFine(entities: SketchEntity[], constraints: SketchConstraint[], opts: SolveOptions = {}): SolveResult {
   const r = solve(entities, constraints, opts);

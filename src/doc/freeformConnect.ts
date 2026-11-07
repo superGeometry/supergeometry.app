@@ -57,7 +57,7 @@ export function connectEdges(doc: ProjectDoc, picks: PickedEdge[]): ConnectResul
   const bodies = [...new Set(picks.map((p) => p.body))];
   if (bodies.length > 2) return { error: "Pick edges on one or two freeform surfaces" };
   const parts = bodies.map((b) => worldCage(doc, b));
-  if (parts.some((p) => !p)) return { error: "Connect works on freeform surfaces — edit the shape's cage first" };
+  if (parts.some((p) => !p)) return { error: "Connect works on freeform surfaces - edit the shape's cage first" };
   const [P, Q] = parts as NonNullable<(typeof parts)[number]>[];
   // One cage holding everything, and the chosen border edges in it.
   let cage = P.cage;
@@ -92,7 +92,7 @@ export function connectEdges(doc: ProjectDoc, picks: PickedEdge[]): ConnectResul
   const ib = doc.features.indexOf(Q.feature);
   const [keep, drop, mKeep] = ia < ib ? [Q.feature, P.feature, Q.m] : [P.feature, Q.feature, P.m];
   const users = doc.features.filter((f) => f !== drop && JSON.stringify(f).includes(`"${drop.id}`) && !(f.type === "transform" && !f.copy && ["move", "scale", "mirror", "scaleXYZ"].includes(f.op.kind)));
-  if (users.length) return { error: `“${drop.name}” is used by “${users[0].name}” later on — it can't be merged into the other surface` };
+  if (users.length) return { error: `“${drop.name}” is used by “${users[0].name}” later on - it can't be merged into the other surface` };
   const out = store(doc, keep, next, mKeep, { surface: !!(keep.surface || drop.surface) });
   // The dropped one's own moves go with it (they are already in the merged cage).
   out.features = out.features

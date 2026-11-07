@@ -36,7 +36,7 @@ export class DragTyping {
 
   // ------------------------------------------------- floating value box
   // A drag's value in a box by the pointer that stays after letting go: tap
-  // it to type (the numpad on a phone) — every drag gets one, like the
+  // it to type (the numpad on a phone) - every drag gets one, like the
   // extrude arrow's. (It also shows what's typed during the drag: no second
   // "Enter ↵ apply" label.)
   private boxEl: HTMLDivElement | null = null;

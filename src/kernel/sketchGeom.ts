@@ -89,7 +89,7 @@ function pieceEdge(arr: Arrangement, pc: Piece, plane: PlaneDef): Edge {
 
 /**
  * The spline exactly as drawn, from parameter t0 to t1: each span of the
- * sketch spline is a cubic, so it becomes one Bezier piece of a C1 B-spline —
+ * sketch spline is a cubic, so it becomes one Bezier piece of a C1 B-spline -
  * no fitting, so no ripples (in revolves and lofts especially).
  * `a`/`b` pin the ends onto the arrangement's nodes so neighbours meet.
  */
@@ -140,7 +140,7 @@ function exactSpline(p: Prim, t0: number, t1: number, plane: PlaneDef, a?: Vec2,
     });
     // Knots spaced like the spline's own parameter (centripetal for fit
     // points): then the pieces join smoothly in parameter too, and the
-    // repeated joins can be thinned to C1 — revolves need a smooth profile.
+    // repeated joins can be thinned to C1 - revolves need a smooth profile.
     const ctrl = p.ctrl;
     const n = ctrl.points.length;
     const at = (i: number) => ctrl.points[ctrl.closed ? ((i % n) + n) % n : Math.max(0, Math.min(n - 1, i))];

@@ -1,7 +1,7 @@
 // Run: npx tsx tests/freeformstress.test.ts [rounds] [seed]
 //
 // Pushes freeforms to the limit: random cage pulls (small, huge, through the
-// body, onto each other), refined cages, holes filled, sheets thickened — and
+// body, onto each other), refined cages, holes filled, sheets thickened - and
 // the results combined with boxes, cylinders and other freeforms. A step may
 // be refused with a message; one that's accepted must leave valid, closed,
 // single solids (or a clean sheet for an open surface).
@@ -148,7 +148,7 @@ for (let k = 0; k < ROUNDS; k++) {
   try {
     res = await regenerate(features);
   } catch (e) {
-    fails.push(`round ${k}: threw ${(e as Error).message} — ${trail.join(", ")}`);
+    fails.push(`round ${k}: threw ${(e as Error).message} - ${trail.join(", ")}`);
     continue;
   }
   const dt = performance.now() - t0;
@@ -162,7 +162,7 @@ for (let k = 0; k < ROUNDS; k++) {
     const info = (res.bodies ?? []).find((x: any) => x.id === id);
     const bad = problems(s, !isSheet, info?.openEdges?.length ?? 0, features.some((f) => f.type === "boolean" && (f as any).op !== "union"));
     if (bad.length) {
-      fails.push(`round ${k}: body ${id}: ${bad.join(", ")} — ${trail.join(", ")}`);
+      fails.push(`round ${k}: body ${id}: ${bad.join(", ")} - ${trail.join(", ")}`);
       if (process.env.FF_DUMP) (await import("node:fs")).writeFileSync(process.env.FF_DUMP, JSON.stringify(features));
       break;
     }

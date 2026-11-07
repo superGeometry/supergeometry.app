@@ -1,4 +1,4 @@
-// Run: npx tsx tests/fan.test.ts [out.json] — a desk fan, made with every tool
+// Run: npx tsx tests/fan.test.ts [out.json] - a desk fan, made with every tool
 // there is: variables (blade count, guard size); sketches with lines, arcs,
 // circles, rectangles, an ellipse, a polygon, a spline, text, sketch fillets,
 // offset, mirror and pattern; Extrude (with taper), Revolve, Sweep, Loft,

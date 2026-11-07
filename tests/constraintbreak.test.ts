@@ -263,7 +263,7 @@ function step(st: State, n: number): { label: string; next: State | null; opts: 
     const res = timed(`add ${type}`, () => addStrict(st.es, st.cs, cs, opts));
     const label = `add ${type} (${pts.map((p) => p.e + "." + p.p).join(",")} ${curves.map((e) => e.kind + ":" + e.id).join(",")})`;
     if (!res.ok) {
-      if (already && constraintError(st.es, st.cs) < 1e-9 * scaleOf(st.es) && !wouldCollapse(st, cs)) return { label: label + " — refused although already true", next: { es: [], cs: [] }, opts: {} };
+      if (already && constraintError(st.es, st.cs) < 1e-9 * scaleOf(st.es) && !wouldCollapse(st, cs)) return { label: label + " - refused although already true", next: { es: [], cs: [] }, opts: {} };
       return { label, next: null, opts: {} };
     }
     return { label, next: { es: res.result.entities, cs: res.constraints }, opts: { fixed: type === "fix" ? undefined : first } };
@@ -378,7 +378,7 @@ for (let s = 0; s < SCEN; s++) {
       continue;
     }
     trail.push(label);
-    const bad = next.es.length === 0 ? label.split(" — ")[1] : check(label, st, next, opts);
+    const bad = next.es.length === 0 ? label.split(" - ")[1] : check(label, st, next, opts);
     if (bad) {
       const kind = label.startsWith("drag") ? "drag " + label.split(" ")[1].split(":")[0] : label.split(" ")[0] + " " + (label.split(" ")[1] ?? "");
       why.set(`${kind}: ${bad.replace(/[\d.e+-]+/g, "#")}`, (why.get(`${kind}: ${bad.replace(/[\d.e+-]+/g, "#")}`) ?? 0) + 1);

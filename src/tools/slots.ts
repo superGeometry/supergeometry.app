@@ -58,7 +58,7 @@ export function axisSlot(app: AppContext, label: string, get: () => AxisRef | nu
           set({ origin: info.start, dir: info.dir });
           name = "Edge";
         } else if (info.type === "CIRCLE") {
-          // A round edge: the line through its centre, square to it — what a
+          // A round edge: the line through its centre, square to it - what a
           // circular pattern round a lamp shade or a flange turns about.
           const ax = circleAxis(info.start, info.mid, info.end, info.dir);
           if (!ax) return false;
@@ -181,12 +181,12 @@ export function pathSlot(app: AppContext, get: () => PathRef | null, set: (p: Pa
           set({ ...p, entities: has ? p.entities.filter((e) => e !== hit.entity) : [...p.entities, hit.entity] });
         } else {
           // The first tap takes the whole run the curve is part of (a stem
-          // drawn as line, arc, line: one tap, not three — the short pieces
+          // drawn as line, arc, line: one tap, not three - the short pieces
           // are hard to hit with a finger). Tapping a piece again drops it.
           const ents = app.store.find<SketchFeature>(hit.sketch)?.entities ?? [];
           const run = chainThrough(ents, hit.entity);
           set({ kind: "sketch", sketch: hit.sketch, entities: run });
-          if (run.length > 1) app.ui.toast(`${run.length} joined curves — tap one to leave it out`);
+          if (run.length > 1) app.ui.toast(`${run.length} joined curves - tap one to leave it out`);
         }
         return true;
       }
@@ -240,7 +240,7 @@ export function sectionsSlot(app: AppContext, get: () => ExtrudeSource[], set: (
   return {
     label: "Profiles",
     multi: true,
-    describe: () => `${get().length} picked${get().length < 2 ? " — tap more" : ""}`,
+    describe: () => `${get().length} picked${get().length < 2 ? " - tap more" : ""}`,
     filled: () => get().length >= 2,
     pick: { edges: false, planes: false, axes: false },
     shows: () => picked,
@@ -334,7 +334,7 @@ function endsOf(e: Ent): [[number, number], [number, number]] | null {
 }
 
 /**
- * The curves joined end to end with `id`, in order along the run — stopping
+ * The curves joined end to end with `id`, in order along the run - stopping
  * where three or more curves meet (a branch: which way would it go?).
  */
 export function chainThrough(entities: Ent[], id: string): string[] {

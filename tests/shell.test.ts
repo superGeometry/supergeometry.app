@@ -1,4 +1,4 @@
-// Run: npx tsx tests/shell.test.ts — Shell on shapes with many faces.
+// Run: npx tsx tests/shell.test.ts - Shell on shapes with many faces.
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";
 import type { Feature, PlaneDef } from "../src/doc/types";

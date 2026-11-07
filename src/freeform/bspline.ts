@@ -1,7 +1,7 @@
 // Uniform cubic B-spline interpolation of a point grid (pure math).
 //
 // Every freeform patch is an equal-sized grid with the same uniform
-// parameters, so the knots and the interpolation matrix are shared — and two
+// parameters, so the knots and the interpolation matrix are shared - and two
 // patches with the same border points get exactly the same border curve.
 
 import type { Vec3 } from "../doc/types";

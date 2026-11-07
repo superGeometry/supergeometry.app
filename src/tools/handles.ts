@@ -19,7 +19,7 @@ export class Handle {
   private base = new Vector3();
   private dir = new Vector3(0, 0, 1);
   // Transparent (at full opacity) so it's drawn in the last pass, over see-through
-  // selection highlights — three.js draws all opaque things before those.
+  // selection highlights - three.js draws all opaque things before those.
   private mat = new MeshBasicMaterial({ color: COLOR, depthTest: false, transparent: true });
   private head: Mesh;
   private shaft: LineSegments2 | null = null;
@@ -117,7 +117,7 @@ export class Handle {
 /**
  * How far (world units, signed along `dir`) the pointer has dragged along the
  * line through `origin` in direction `dir`: the point of that line under the
- * finger, now minus at the start. Exact at any zoom and from any side — the
+ * finger, now minus at the start. Exact at any zoom and from any side - the
  * arrow always follows the finger: drag outward, it goes outward.
  */
 export function axisDrag(view: Viewport, origin: Vec3, dir: Vec3, from: ToolPointer, to: ToolPointer): number {

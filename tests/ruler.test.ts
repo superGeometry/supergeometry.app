@@ -1,4 +1,4 @@
-// Run: npx tsx tests/ruler.test.ts [out.json] — a 160 × 30 × 3 mm ruler, 0–15 cm,
+// Run: npx tsx tests/ruler.test.ts [out.json] - a 160 × 30 × 3 mm ruler, 0–15 cm,
 // with its scale cut into the top: a tick every mm (4 mm long, 6 at each half
 // centimetre, 9 at each centimetre, 0.3 wide) and the numbers 0–15, engraved
 // 0.6 mm deep. The text is the app's own (same font, same layout).

@@ -110,7 +110,7 @@ export function textOutlines(
   }
   // Points closer than this are one point: fonts repeat a point where a curve
   // meets a line (an "8" in Roboto), and a zero-length edge can't be made into
-  // a face — the text then fails to extrude or cut.
+  // a face - the text then fails to extrude or cut.
   const tiny = size * 1e-3;
   return contours
     .map((raw) => {

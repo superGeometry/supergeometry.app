@@ -1,4 +1,4 @@
-// Run: npx tsx tests/wateringcan.test.ts [out.json] — a watering can made as one
+// Run: npx tsx tests/wateringcan.test.ts [out.json] - a watering can made as one
 // freeform: a cylinder cage with its top taken off (the opening), a spout
 // pulled out of an inset face low on the front (rising past the rim, flared at
 // the tip, left open), a handle on the back (an inset face arched round and
@@ -77,8 +77,8 @@ let cage = cylinderCage(D, H, ROWS);
   cage = deleteFaces(cage, top);
 }
 // 3. The spout: inset the front face of row 2 (z 40–80), then pull the inner
-//    face out and up six times — turned 45° up at first, then a little more each time,
-//    a little narrower — and flare the last one (the rose). Its end stays open.
+//    face out and up six times - turned 45° up at first, then a little more each time,
+//    a little narrower - and flare the last one (the rose). Its end stays open.
 {
   const f = faceAt(cage, [1, 0, 0], 60);
   const ins = insetFaces(cage, [f], 0.45)!;
@@ -128,7 +128,7 @@ let cage = cylinderCage(D, H, ROWS);
   const pivot: Vec3 = [(cu[0] + cl[0]) / 2, 0, (cu[2] + cl[2]) / 2];
   const lower = [...ringOf(cage, fl)];
   // Each ring placed from the first one (in order round the face): turned k·30°
-  // about the pivot, swung out a little — a D-shaped grip.
+  // about the pivot, swung out a little - a D-shaped grip.
   const first = [...ringOf(cage, fu)].map((v) => [...cage.verts[v]] as Vec3);
   let end = fu;
   for (let k = 1; k <= 5; k++) {

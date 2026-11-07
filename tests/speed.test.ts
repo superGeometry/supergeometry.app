@@ -1,4 +1,4 @@
-// Run: npx tsx tests/speed.test.ts — the faster ways give exactly what the
+// Run: npx tsx tests/speed.test.ts - the faster ways give exactly what the
 // slow ones did, and stay fast: a body's corners (found by position, not by
 // comparing every pair), on a ruler with 11 000 edges and on smaller bodies.
 import opencascade from "replicad-opencascadejs";
@@ -55,7 +55,7 @@ for (const [name, feats] of fixtures) {
     n += fast.length;
     if (fast.length !== slow.length || fast.some((v, i) => !v.equals(slow[i]))) same = false;
   }
-  check(`corners: same points in the same order — ${name}`, same, `${n} corners, ${tFast.toFixed(1)} ms (was ${tSlow.toFixed(1)} ms)`);
+  check(`corners: same points in the same order - ${name}`, same, `${n} corners, ${tFast.toFixed(1)} ms (was ${tSlow.toFixed(1)} ms)`);
   if (name === "ruler") check("  …the ruler's corners in well under 50 ms", tFast < 50, `${tFast.toFixed(1)} ms`);
 }
 process.exit(failed ? 1 : 0);

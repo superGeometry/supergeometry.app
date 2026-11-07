@@ -1,4 +1,4 @@
-// Run: npx tsx tests/faceedit.test.ts — direct face edits on real OpenCascade solids.
+// Run: npx tsx tests/faceedit.test.ts - direct face edits on real OpenCascade solids.
 import opencascade from "replicad-opencascadejs";
 import { basicFaceExtrusion, makeCylinder, makeBox, measureVolume, setOC, Vector, type Shape3D } from "replicad";
 import { deleteFace, offsetFace, replaceFacePlane } from "../src/kernel/faceEdit";
@@ -94,10 +94,10 @@ const checks: [string, () => string][] = [
 let failed = 0;
 for (const [name, fn] of checks) {
   try {
-    console.log("ok  ", name, "—", fn());
+    console.log("ok  ", name, "-", fn());
   } catch (e) {
     failed++;
-    console.log("FAIL", name, "—", e instanceof Error ? e.message : e);
+    console.log("FAIL", name, "-", e instanceof Error ? e.message : e);
   }
 }
 process.exit(failed ? 1 : 0);

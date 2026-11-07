@@ -207,7 +207,7 @@ export class ConstraintGlyphs {
 
   /**
    * The constraint mark (not a dimension) at a screen point, if any. Marks
-   * don't catch taps themselves — the drawing under them always comes first;
+   * don't catch taps themselves - the drawing under them always comes first;
    * the sketch asks here when a tap found nothing else.
    */
   hitAt(x: number, y: number): string | null {

@@ -1,4 +1,4 @@
-// Run: npx tsx tests/threemf.test.ts [out.3mf] — 3MF export: a valid zip with the model and the STEP inside.
+// Run: npx tsx tests/threemf.test.ts [out.3mf] - 3MF export: a valid zip with the model and the STEP inside.
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";
 import { writeFileSync } from "node:fs";

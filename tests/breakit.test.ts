@@ -1,7 +1,7 @@
 // Run: npx tsx tests/breakit.test.ts [scenarios] [steps] [seed]
 //
 // Tries to break the geometry engine: random (but repeatable) sequences of
-// edits on boxes, cylinders, L-shapes, plates with holes and revolved parts —
+// edits on boxes, cylinders, L-shapes, plates with holes and revolved parts -
 // offsets in and out (huge ones too), fillets and chamfers of any size, faces
 // moved and tilted, corners and edges dragged, faces deleted, shells, booleans,
 // face scaling, extrusions from faces. A step may fail with a message (that's
@@ -46,7 +46,7 @@ for (let sc = 0; sc < SCENARIOS; sc++) {
     if (!step) continue;
     const prevSolids = new Map(debugBodies());
     // What every body looks like now (its faces' areas): a step must never change an earlier result.
-    // (A face whose area can't even be measured shows up as "?" — and as a failure below.)
+    // (A face whose area can't even be measured shows up as "?" - and as a failure below.)
     const area = (f: any) => {
       try {
         return measureArea(f).toFixed(4);
@@ -82,7 +82,7 @@ for (let sc = 0; sc < SCENARIOS; sc++) {
       refusedBy[step.name] = (refusedBy[step.name] ?? 0) + 1;
       const why = `${step.name}: ${String(err.message).slice(0, 90)}`;
       refusedWhy[why] = (refusedWhy[why] ?? 0) + 1;
-      continue; // a clear "can't" — fine; try something else
+      continue; // a clear "can't" - fine; try something else
     }
     const solidsNow = new Map(debugBodies());
     const bad: string[] = [];

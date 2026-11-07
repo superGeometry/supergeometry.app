@@ -75,7 +75,7 @@ export interface ValuePanel {
   actions?: ToolItem[];
   /**
    * Enter in a field only applies the value (the card stays open). For cards
-   * whose fields are steps of a longer edit — Freeform's exact moves: Enter
+   * whose fields are steps of a longer edit - Freeform's exact moves: Enter
    * after a ΔZ ended the whole cage edit.
    */
   enterApplies?: boolean;
@@ -792,7 +792,7 @@ export class UI {
 
   /**
    * Phones (upright or sideways): the card goes in one fixed place along the
-   * bottom — the widest clear gap between what's already there (the Items
+   * bottom - the widest clear gap between what's already there (the Items
    * panel, undo/redo, the tool strip, the view column), as low as it fits; if
    * the bottom row is too full, just above it (over the hint text). As wide as
    * its contents, never wider than the gap.
@@ -882,7 +882,7 @@ export class UI {
 
   /**
    * The grip along the card's top (like the numpad's): drag it to put the card
-   * where you want — it opens there from then on, on this kind of screen.
+   * where you want - it opens there from then on, on this kind of screen.
    * Double-tap it: back to finding its own place.
    */
   private panelGrip(): HTMLElement {
@@ -973,7 +973,7 @@ export class UI {
       return;
     }
     // Phones: one fixed place, right above the hint text (or the bottom
-    // buttons) — never chasing the model across a small screen.
+    // buttons) - never chasing the model across a small screen.
     if (screenClass() === "phone") {
       this.placeOnPhone(p);
       this.panelSide = 0;
@@ -1285,7 +1285,7 @@ export class UI {
     const name = el("button", "history-name");
     name.innerHTML = icons.folder;
     name.append(` ${g.name}`, el("span", "history-count", ` ${members.length}`));
-    name.title = bad ? "A step in this group failed — open it to see" : "Fold / unfold";
+    name.title = bad ? "A step in this group failed - open it to see" : "Fold / unfold";
     name.addEventListener("click", fold);
     const eye = iconButton(allOff ? "eyeOff" : "eye", allOff ? "Enable all its steps" : "Suppress all its steps", () => h.suppress(members.map((m) => m.id), !allOff));
     const ren = iconButton("rename", "Rename group", () =>

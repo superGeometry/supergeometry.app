@@ -149,7 +149,7 @@ export class CameraController {
   /**
    * Frame `box`. `free` is the part of the screen not covered by tool columns
    * and bars (fractions of the width/height covered on each side): the model is
-   * fitted into that and centred in it — on a phone the columns cover a fifth
+   * fitted into that and centred in it - on a phone the columns cover a fifth
    * of each side, and a ruler fitted to the whole screen lost both ends.
    */
   fit(box: Box3, animate = true, free: Insets = NO_INSETS): void {
@@ -269,7 +269,7 @@ export class CameraController {
 
   /**
    * Where the view is heading: the end of a move still animating, else where it
-   * is. A new move builds on this — Fit tapped while a turn to Top is still
+   * is. A new move builds on this - Fit tapped while a turn to Top is still
    * animating must keep the Top, not freeze it half way round.
    */
   private aim(): ViewState {

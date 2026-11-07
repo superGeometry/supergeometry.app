@@ -78,7 +78,7 @@ export class SelectTool implements Tool {
   /**
    * The gimbal and the extrude arrow take over only once the pointer moves
    * (dragStart): a click or double-click on top of them still selects what's
-   * under it — e.g. double-clicking a face seen straight on, where the arrow
+   * under it - e.g. double-clicking a face seen straight on, where the arrow
    * points at you and sits right on the face.
    */
   down(): boolean {
@@ -169,7 +169,7 @@ export class SelectTool implements Tool {
       return;
     }
     // A shape's region tapped (not added with Shift/Ctrl): its extrude arrow is
-    // ready — at 0, so nothing is made until the arrow is dragged (or a value typed).
+    // ready - at 0, so nothing is made until the arrow is dragged (or a value typed).
     const now = this.app.selection;
     if (s.kind === "profile" && !p.add && count < 2 && now.length && now.every((x) => x.kind === "profile") && now.some((x) => sameSel(x, s!))) {
       const src = sourcesOf(this.app, now)[0];
@@ -211,7 +211,7 @@ export class SelectTool implements Tool {
       this.app.setSelection([]);
       return true;
     }
-    // A sketch region selected: just type the height — the extrude starts with it.
+    // A sketch region selected: just type the height - the extrude starts with it.
     const sel = this.app.selection;
     if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9.\-]$/.test(e.key) && sel.length && sel.every((x) => x.kind === "profile")) {
       const src = sourcesOf(this.app, sel)[0];
@@ -296,7 +296,7 @@ export class SelectTool implements Tool {
   /** Called by the app when a top-level tool needs a selection first. */
   /**
    * A pick made in Items (a phone's surest way to pick a body): a tool waiting
-   * for one takes it — Repair Body sat on "select body" while the pod was
+   * for one takes it - Repair Body sat on "select body" while the pod was
    * picked in the list. False when nothing waits for it.
    */
   pickFromList(s: Sel): boolean {
@@ -353,13 +353,13 @@ export class SelectTool implements Tool {
             const tool = new FreeformTool(this.app, { feature: own() });
             this.app.setTool(tool);
             if (!tool.fillHoleAt(at)) this.app.ui.toast("No hole there to fill");
-            else this.app.ui.toast("Hole filled — Done keeps it");
+            else this.app.ui.toast("Hole filled - Done keeps it");
           },
         });
       }
       head.push({ id: "thicken", label: "Thickness…", icon: "shell", run: () => this.app.setTool(new FreeformTool(this.app, { feature: own() })) });
     }
-    // A face, edge or point of a freeform: its shape comes from the cage —
+    // A face, edge or point of a freeform: its shape comes from the cage -
     // fillet, chamfer, offset face… don't apply (they were listed all the same).
     if (ff?.type === "freeform" && (first.kind === "face" || first.kind === "edge" || first.kind === "vertex")) {
       const bodies = bodiesOf(sel);
@@ -533,7 +533,7 @@ export class SelectTool implements Tool {
       // Moves just this edge: the faces on it tilt to follow.
       { id: "move", label: "Move/Rotate Edge", icon: "moveEdge", shortcut: "M", disabled: !straight || sel.length !== 1, why: "Needs one straight edge", run: () => ref && app.setTool(new MoveFaceOp(app, { edge: ref })) },
       { id: "moveBody", label: "Move/Rotate Body", icon: "move", run: () => app.setTool(new TransformOp(app, "move", bodies)) },
-      // A round edge (a hole's rim, a shank's end): thread the round face it bounds — in a small hole the rim is what a finger hits.
+      // A round edge (a hole's rim, a shank's end): thread the round face it bounds - in a small hole the rim is what a finger hits.
       ...(info?.type === "CIRCLE" && sel.length === 1 ? [{ id: "thread", label: "Thread", icon: "thread" as const, run: () => app.startThread() }] : []),
       // Along a straight edge; through the centre of a round one (a rim, a hole).
       {
@@ -743,7 +743,7 @@ export class SelectTool implements Tool {
     if (!opp) return;
     const start = (measure: "total" | "offset", distance: number, typed?: string) =>
       this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { measure, distance, typed }));
-    // Shown a moment later, beside the face — never under the pointer while you double-click for the body.
+    // Shown a moment later, beside the face - never under the pointer while you double-click for the body.
     this.dimTimer = window.setTimeout(() => {
       this.dim = new DimWidget(this.app.view, {
         value: opp.distance,
@@ -919,7 +919,7 @@ export class SelectTool implements Tool {
       d.hidden = out.doc.hidden;
     });
     this.app.setSelection([{ kind: "body", body: out.body }]);
-    this.app.ui.toast("Connected — Thickness… makes it a solid");
+    this.app.ui.toast("Connected - Thickness… makes it a solid");
   }
 
   /** The freeform a body is made from (its own, or the one a copy was made of). */

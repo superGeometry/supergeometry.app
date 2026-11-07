@@ -47,7 +47,7 @@ export function resolveDoc(doc: ProjectDoc): string[] {
       const r = solveFine(f.entities, f.constraints);
       // Can't all be met: the sketch stays as it was rather than being bent out of shape.
       // Met already (only rounding noise in the 14th digit): kept exactly as it
-      // was — the noise changed the step, and every change anywhere (a colour,
+      // was - the noise changed the step, and every change anywhere (a colour,
       // a name, an eye in Items) rebuilt everything after the sketch: 20 s a
       // time on a desk fan.
       if (!r.ok) problems.push(`${f.name}: constraints can't all be met`);

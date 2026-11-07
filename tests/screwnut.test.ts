@@ -1,4 +1,4 @@
-// Run: npx tsx tests/screwnut.test.ts — an M10 x 1.5 screw (hex head, threaded
+// Run: npx tsx tests/screwnut.test.ts - an M10 x 1.5 screw (hex head, threaded
 // shank) and nut (internal thread), built as a user would, every step checked.
 // A thread that only just overlaps the core it's joined to used to come out
 // wrong without a word from OpenCascade (then 22 s of repair and a misleading

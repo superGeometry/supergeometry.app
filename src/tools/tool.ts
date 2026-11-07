@@ -145,7 +145,7 @@ export function sourcesOf(app: AppContext, sel: Sel[]): ExtrudeSource[] {
 /**
  * In a sketch on a face, the face's outline cuts what was drawn into pieces. A
  * piece tapped off the face is the whole shape drawn (a flange drawn round a
- * pylon's top came out as a ring — the pylon's top left 6 deep in it); a piece
+ * pylon's top came out as a ring - the pylon's top left 6 deep in it); a piece
  * on the face stays just that piece (a window drawn on a wall).
  */
 function wholeShapes(all: Region[], tapped: Region[], drawnEntities: SketchEntity[], curves: SketchEntity[]): Region[] {
@@ -174,7 +174,7 @@ function wholeShapes(all: Region[], tapped: Region[], drawnEntities: SketchEntit
 }
 
 /**
- * A point on a curved face (its centre is off the face — on a cylinder's axis)
+ * A point on a curved face (its centre is off the face - on a cylinder's axis)
  * and the normal there: the mesh vertex nearest the centre on the side facing the viewer.
  */
 export function faceAnchor(app: AppContext, body: string, face: number): { base: Vec3; normal: Vec3 } | null {
@@ -186,7 +186,7 @@ export function faceAnchor(app: AppContext, body: string, face: number): { base:
   let best: { base: Vec3; normal: Vec3; score: number } | null = null;
   // The way out of the material, from each triangle's winding (the stored
   // vertex normals point the wrong way on faces OpenCascade keeps reversed,
-  // e.g. a hole's wall — the arrow then pointed into the material).
+  // e.g. a hole's wall - the arrow then pointed into the material).
   const P = (i: number): Vec3 => {
     const v = b.indices[i] * 3;
     return [b.positions[v], b.positions[v + 1], b.positions[v + 2]];

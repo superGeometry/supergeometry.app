@@ -1,4 +1,4 @@
-// Run: npx tsx tests/filltoplane.test.ts — an open freeform surface filled
+// Run: npx tsx tests/filltoplane.test.ts - an open freeform surface filled
 // down (or up, or across) to a plane: a solid with straight sides and its
 // outline projected flat on the plane as the bottom.
 import opencascade from "replicad-opencascadejs";

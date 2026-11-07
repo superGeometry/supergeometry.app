@@ -38,7 +38,7 @@ export interface Settings {
   degrees: "decimal" | "fractional";
   /** Value boxes use the on-screen numpad instead of the system keyboard. */
   numpad: boolean;
-  /** The guide text (what to tap next) — switched in More. */
+  /** The guide text (what to tap next) - switched in More. */
   showHints: boolean;
 }
 
@@ -80,7 +80,7 @@ class SettingsStore {
       // Unavailable storage just means defaults.
     }
     this.value = { ...DEFAULTS, ...saved, snap: { ...DEFAULTS.snap, ...(saved.snap ?? {}) } };
-    // v2: orthographic view and the sketch constraint column are on by default —
+    // v2: orthographic view and the sketch constraint column are on by default -
     // also for anyone whose saved preferences still hold the old defaults.
     if ((saved.version ?? 1) < 2) this.value = { ...this.value, ortho: true, showConstraints: true, version: 2 };
     // v3: the on-screen numpad starts on for phones, tablets and headsets (off on computers).

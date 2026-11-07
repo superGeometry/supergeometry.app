@@ -3,7 +3,7 @@ import type { Vec3 } from "../doc/types";
 
 /**
  * The corners of a body: its edges' ends, each once (within 1e-6), in the
- * order first met — selections refer to corners by that number. Found by
+ * order first met - selections refer to corners by that number. Found by
  * position in a grid of cells (comparing each end with every corner so far
  * took 0.3 s for a ruler's 11 000 edges).
  */

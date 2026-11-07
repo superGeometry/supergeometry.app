@@ -1,4 +1,4 @@
-// Run: npx tsx tests/thread.test.ts — the Thread step: an outside thread on a
+// Run: npx tsx tests/thread.test.ts - the Thread step: an outside thread on a
 // shank, an inside one in a nut's hole, left-handed, short faces refused,
 // the head next to the shank left alone.
 import opencascade from "replicad-opencascadejs";

@@ -1,6 +1,6 @@
-// Run: npx tsx tests/jet.test.ts [out.json] — a turbofan jet engine on a
+// Run: npx tsx tests/jet.test.ts [out.json] - a turbofan jet engine on a
 // display stand, cut away to show what's inside, made with every tool: the
-// ones the fan used and the ones no build had used yet — a reference Image to
+// ones the fan used and the ones no build had used yet - a reference Image to
 // trace, Import (an STL sensor pod) and Repair, Delete Face, Delete (a body),
 // Scale per axis, Revolve with travel (a coil), Sweep along a model edge, a
 // thickened Freeform sheet, a polyline, sketch constraints driven by variables.
@@ -106,8 +106,8 @@ void ring;
 feats.push({ id: "ref", name: "Side view", type: "image", plane: XZ(0), src: "data:image/svg+xml;base64," + readFileSync(refFile).toString("base64"), width: 480, height: 320, opacity: 0.5 });
 feats.push({ id: "axis", name: "Centre line", type: "axis", origin: AX, dir: [1, 0, 0] });
 
-// --- 1. The nacelle: its wall in section — the inlet lip (an arc), the outside
-// (a spline), the back edge and the inside (lines) — turned round the centre line.
+// --- 1. The nacelle: its wall in section - the inlet lip (an arc), the outside
+// (a spline), the back edge and the inside (lines) - turned round the centre line.
 const nac = [
   { id: "n1", kind: "arc", a: [0, 250], m: [-7, 257], b: [0, 264] },
   { id: "n2", kind: "spline", points: [[0, 264], [80, 268], [200, 266], [300, 258]], closed: false, mode: "fit" },

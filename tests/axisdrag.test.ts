@@ -1,4 +1,4 @@
-// Run: npx tsx tests/axisdrag.test.ts — dragging an arrow (extrude, offset,
+// Run: npx tsx tests/axisdrag.test.ts - dragging an arrow (extrude, offset,
 // fillet, gimbals…) always goes the way the finger goes: drag towards where the
 // arrow points on screen and the value grows; drag away and it shrinks. At any
 // zoom (it used to flip when zoomed far out) and from any side.

@@ -164,7 +164,7 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
         (m) => {
           this.feature.mode = m;
           // A new body from a face (a spire on a tower): its own height is what's typed,
-          // not the total through the body — 68 typed came out 102 down into the tower.
+          // not the total through the body - 68 typed came out 102 down into the tower.
           if (m === "new" && this.measure === "total") {
             this.measure = "offset";
             this.dim?.setMode("offset");
@@ -175,9 +175,9 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
         () => this.render(),
       ),
       // Every shape in the sketch at once (a scale, lettering: hundreds of them,
-      // far too many to tap) — holes stay holes.
+      // far too many to tap) - holes stay holes.
       ...(src.kind === "profile" && !this.existing ? [{ type: "button" as const, label: "All shapes", onClick: () => this.allShapes() }] : []),
-      // Lean the sides in towards a smaller end (a spire, a pyramid) — no angle to work out.
+      // Lean the sides in towards a smaller end (a spire, a pyramid) - no angle to work out.
       {
         type: "slider" as const,
         label: "Taper",
@@ -229,12 +229,12 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
   /**
    * Another region of the same sketch tapped while the arrow is still at 0
    * (on a phone a tapped region opens Extrude straight away): it joins the
-   * profile — tapped again, it leaves. So several regions go up together.
+   * profile - tapped again, it leaves. So several regions go up together.
    */
   tap(p: ToolPointer, count = 1): void {
     // The second tap of a double tap on a shape: open its sketch to edit it
     // (the first tap already opened Extrude, which took the second as "leave
-    // the profile" — double-tapping to edit a shape worked only now and then).
+    // the profile" - double-tapping to edit a shape worked only now and then).
     if (count >= 2 && this.feature.distance === 0 && this.feature.source.kind === "profile") {
       // On its outline or inside it (the middle of a 7 × 2 blade section is
       // too far from its edges for a finger): the piece of it nearest the tap.
@@ -550,7 +550,7 @@ export class RevolveOp extends FeatureOp<RevolveFeature> {
   private typing = new DragTyping(this.app);
 
   protected hint(): string {
-    return "Set the angle (360° is a full turn). Drag the arrow on the axis to move along it while turning — with more than 360° that makes a thread or a spring.";
+    return "Set the angle (360° is a full turn). Drag the arrow on the axis to move along it while turning - with more than 360° that makes a thread or a spring.";
   }
 
   protected items(): PanelItem[] {
@@ -706,7 +706,7 @@ export class ShellOp extends FeatureOp<ShellFeature> {
 
   /**
    * A face tapped on the preview, as the face of the body it came from: with
-   * one end already open, the next end is seen — and tapped — from inside, on
+   * one end already open, the next end is seen - and tapped - from inside, on
    * the hollowed preview's inner wall (a core cowl's front stayed shut: that
    * face isn't on the body being shelled). The flat face of the body parallel
    * to it, at most a wall away.
@@ -885,7 +885,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
   protected hint(): string {
     switch (this.kind) {
       case "move":
-        return "Drag an arrow, square or arc of the gimbal — or type exact values. Tap empty space when done.";
+        return "Drag an arrow, square or arc of the gimbal - or type exact values. Tap empty space when done.";
       case "mirror":
         return "Mirror creates a copy unless you turn Copy off.";
       case "translate":
@@ -925,7 +925,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     };
     const copy: PanelItem[] = this.feature.copy && !this.existing ? [copyToggle, link] : [copyToggle];
     // ΔX ΔY ΔZ: when changing a step opened from History, and on touch screens
-    // (with a mouse, moving is dragging or typing while dragging — the numbers
+    // (with a mouse, moving is dragging or typing while dragging - the numbers
     // are clutter there; a finger has no keyboard mid-drag, so exact moves need them).
     const deltas = (): PanelItem[] => (this.existing || isTouchDevice ? (["X", "Y", "Z"] as const).map((l, i): PanelItem => this.num(`Δ${l}`, `op.translate.${i}`, "length")) : []);
     switch (o.kind) {
@@ -987,7 +987,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     if (!part || o.kind !== "move") return false;
     // A different rotation axis than the one already used: start from the current angle 0 on that axis.
     if (part.kind === "ring" && o.rotate && o.rotate.angle && axisIndex(o.rotate.axis) !== part.i) {
-      this.app.ui.toast("One rotation axis per move — press Done, then rotate around the next axis");
+      this.app.ui.toast("One rotation axis per move - press Done, then rotate around the next axis");
       return true;
     }
     this.dragging = { from: p, part, t0: [...o.translate] as Vec3, a0: o.rotate?.angle ?? 0, center: add(this.center, o.translate) };
@@ -1149,7 +1149,7 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
   }
 
   protected hint(): string {
-    return "Drag an arrow to move it, an arc to tilt or turn it — or type a value while dragging.";
+    return "Drag an arrow to move it, an arc to tilt or turn it - or type a value while dragging.";
   }
 
   protected items(): PanelItem[] {
@@ -1185,7 +1185,7 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
     if (!part) return false;
     const r = this.feature.rotate;
     if (part.kind === "ring" && r && r.angle && dot(r.axis, this.axes[part.i]) < 0.999) {
-      this.app.ui.toast("One tilt axis per move — press Done, then tilt around the next axis");
+      this.app.ui.toast("One tilt axis per move - press Done, then tilt around the next axis");
       return true;
     }
     this.dragging = { from: p, part, t0: [...this.feature.translate] as Vec3, a0: r?.angle ?? 0, center: add(this.center, this.feature.translate) };
@@ -1331,8 +1331,8 @@ export class ScaleOp extends FeatureOp<TransformFeature> {
 
   protected hint(): string {
     return this.xyz
-      ? "Drag an axis handle to stretch along it, or the centre for all three — type a factor while dragging. Works on freeform bodies."
-      : "Drag a handle (or the centre) to scale — type a factor while dragging (e.g. 2 doubles the size).";
+      ? "Drag an axis handle to stretch along it, or the centre for all three - type a factor while dragging. Works on freeform bodies."
+      : "Drag a handle (or the centre) to scale - type a factor while dragging (e.g. 2 doubles the size).";
   }
 
   protected items(): PanelItem[] {
@@ -1446,7 +1446,7 @@ export class ScaleFaceOp extends FeatureOp<ScaleFaceFeature> {
   }
 
   protected hint(): string {
-    return "Drag a handle to scale the face along it, or the centre for both — type a factor while dragging. The sides tilt to follow.";
+    return "Drag a handle to scale the face along it, or the centre for both - type a factor while dragging. The sides tilt to follow.";
   }
 
   protected items(): PanelItem[] {
@@ -1607,7 +1607,7 @@ export class ImageOp extends FeatureOp<ImageFeature> {
   protected items(): PanelItem[] {
     // Which of the three main planes it stands on, and where its middle is on
     // it (from the origin, as in a sketch there): a side view to trace has to
-    // stand up on the front plane at its real size — dragging couldn't turn it
+    // stand up on the front plane at its real size - dragging couldn't turn it
     // off the floor, nor put it anywhere exactly.
     const pl = this.feature.plane;
     const on = ([["floor", GROUND], ["front", FRONT], ["side", RIGHT]] as const).find(([, q]) => Math.abs(dot(q.normal, pl.normal)) > 0.999)?.[0] ?? "";
@@ -1707,7 +1707,7 @@ export class SplitOp extends FeatureOp<SplitFeature> {
 
 /**
  * Fill to Plane: an open surface (a freeform sheet) becomes a solid by
- * filling down to a plane — an origin plane, a construction plane or a flat face.
+ * filling down to a plane - an origin plane, a construction plane or a flat face.
  */
 export class FillToPlaneOp extends FeatureOp<FillToPlaneFeature> {
   readonly id = "fillToPlane";
@@ -1931,7 +1931,7 @@ export class AxisOp extends FeatureOp<AxisFeature> {
   }
 
   protected hint(): string {
-    return "Construction axis through the point shown — type where it should pass (X / Y / Z). Done to keep it.";
+    return "Construction axis through the point shown - type where it should pass (X / Y / Z). Done to keep it.";
   }
 
   /**

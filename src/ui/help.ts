@@ -13,11 +13,11 @@ interface Entry {
 const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
   {
     title: "Getting around",
-    intro: "Drag with one finger or the left mouse button to turn the view, two fingers or the right button to move it, pinch or scroll to zoom. On touch screens, press and hold a tool to see its name — let go on it to use it, slide off to cancel. Right-click (or Esc) steps back: first what's half done or picked, then the tool, then out of the sketch.",
+    intro: "Drag with one finger or the left mouse button to turn the view, two fingers or the right button to move it, pinch or scroll to zoom. On touch screens, press and hold a tool to see its name - let go on it to use it, slide off to cancel. Right-click (or Esc) steps back: first what's half done or picked, then the tool, then out of the sketch.",
     items: [
       { icon: "fit", name: "Fit", text: "Zooms so everything fits on screen (F)." },
       { icon: "views", name: "View cube", text: "Tap a face of the cube for a straight-on view; ⟲ ⟳ at its top corners turn the view by 90°." },
-      { icon: "pivot", name: "Orbit centre", text: "The cube's bottom-left button: tap it, then tap a point — the view turns around that point. Fit resets it." },
+      { icon: "pivot", name: "Orbit centre", text: "The cube's bottom-left button: tap it, then tap a point - the view turns around that point. Fit resets it." },
       { icon: "views", name: "Views & appearance", text: "The cube's bottom-right button opens (and closes) standard and saved views and the look of the view." },
     ],
   },
@@ -34,16 +34,16 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     intro: "Most work starts with a sketch on a plane or a flat face, then Extrude or Revolve turns it into a solid body.",
     items: [
       { icon: "sketch", name: "Sketch", text: "Pick a plane (tap it, or the XY floor / XZ front / YZ side buttons), one of your construction planes by name, or a flat face, then draw lines, arcs, circles, rectangles… In a straight-on view (Front, Top…) Sketch goes on the face you're looking at. Closed shapes become profiles you can extrude." },
-      { icon: "freeform", name: "Freeform", text: "Smooth organic shapes: start from a box, sphere, cylinder or plane (its size in the card) and pull its control points, edges and faces. Drag a box on empty space to pick the points inside. Cage tools: Extrude faces (Length, Bend, Taper, Steps — a spout in one go), Bridge two faces (a tube, or an arched handle), Inset, Add edge loop, Add detail. Symmetry mirrors every move across X / Y / Z, a tapped edge, or midway between two facing faces picked first; the plane is kept with the shape. A hole: tap its edge → Fill hole, or Thickness… for a solid wall. Points on an open border → Extend surface adds faces beyond them. Connect: pick border edges on one or two surfaces (Shift adds) — two edges get a face between them, two hole rims a tube." },
+      { icon: "freeform", name: "Freeform", text: "Smooth organic shapes: start from a box, sphere, cylinder or plane (its size in the card) and pull its control points, edges and faces. Drag a box on empty space to pick the points inside. Cage tools: Extrude faces (Length, Bend, Taper, Steps - a spout in one go), Bridge two faces (a tube, or an arched handle), Inset, Add edge loop, Add detail. Symmetry mirrors every move across X / Y / Z, a tapped edge, or midway between two facing faces picked first; the plane is kept with the shape. A hole: tap its edge → Fill hole, or Thickness… for a solid wall. Points on an open border → Extend surface adds faces beyond them. Connect: pick border edges on one or two surfaces (Shift adds) - two edges get a face between them, two hole rims a tube." },
       { icon: "extrude", name: "Extrude", text: "Pull a profile or a face straight out into a solid. Drag the arrow or type a distance; negative values cut. Running into another body cuts through it. Taper shrinks the far end (down to a point: a spire, a cone). All shapes takes every shape of the sketch at once. A tapped shape shows Extrude's arrow, with Revolve, Sweep and Loft beside it in the column." },
-      { icon: "revolve", name: "Revolve", text: "Turn a profile around an axis (vases, wheels). Travel moves it along the axis while turning — with more than 360° that makes threads and springs." },
+      { icon: "revolve", name: "Revolve", text: "Turn a profile around an axis (vases, wheels). Travel moves it along the axis while turning - with more than 360° that makes threads and springs." },
       { icon: "sweep", name: "Sweep", text: "Move a profile along a path curve (pipes, handles)." },
       { icon: "loft", name: "Loft", text: "Blend between two or more profiles, e.g. a square into a circle." },
       { icon: "shell", name: "Shell", text: "Hollow a body out, leaving walls of the thickness you choose; picked faces become openings." },
       { icon: "transform", name: "Transform", text: "Move/Rotate, Scale, Translate (from a point to a point), Mirror, Rotate Around Axis and Patterns (copies in a row or around a centre)." },
       { icon: "union", name: "Union / Subtract / Intersect", text: "Combine bodies, cut one from another, or keep only where they overlap. Union needs the bodies to touch. Subtract / Intersect: tap the body to change (marked +), then the bodies to cut with (marked −); Keep modified body / Keep subtracted bodies leave copies. Two overlapping bodies picked: all three are in the list." },
       { icon: "tools", name: "Tools", text: "Split Body (by a plane or face), Fill to Plane (an open freeform surface filled down to a plane becomes a solid), Thread (tap a round face or a hole's rim: ISO pitch, outside or inside, left-hand as an option), Repair Body (fixes an imported or broken body without changing its shape), Offset Face." },
-      { icon: "construct", name: "Construct", text: "Helper planes — offset, midplane, through 3 points, on a curve, perpendicular to an edge, through an edge at an angle, parallel to a face — each with its own mark at a corner; and axes (from a face or edge, or along X / Y / Z through a point you type)." },
+      { icon: "construct", name: "Construct", text: "Helper planes - offset, midplane, through 3 points, on a curve, perpendicular to an edge, through an edge at an angle, parallel to a face - each with its own mark at a corner; and axes (from a face or edge, or along X / Y / Z through a point you type)." },
       { icon: "insert", name: "Insert", text: "Variables (New Variable, or Edit Variables to see and change them), images to trace over (on the floor, front or side, at the X / Y you type), STEP/STL/SVG/DXF files." },
     ],
   },
@@ -51,8 +51,8 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     title: "With something selected",
     intro: "Tap a face, edge, corner or body: the left column shows only what can be done with it, in groups apart with a dim line. On touch screens every tap adds to the selection (tap again to drop it). Right-click shows the same list by the pointer.",
     items: [
-      { icon: "offsetFace", name: "Face", text: "Drag the arrow to push/pull it (its neighbours follow), Move/Rotate it (every way, and turned about its normal), Scale it, Replace it with another face's plane, sketch on it, or delete it (the neighbours close up as if it was never there — fillets too)." },
-      { icon: "moveEdge", name: "Edge", text: "A straight edge shows its Move/Rotate gimbal (the faces round it tilt); Fillet and Chamfer are in the list — drag the dot outward to round, inward to bevel." },
+      { icon: "offsetFace", name: "Face", text: "Drag the arrow to push/pull it (its neighbours follow), Move/Rotate it (every way, and turned about its normal), Scale it, Replace it with another face's plane, sketch on it, or delete it (the neighbours close up as if it was never there - fillets too)." },
+      { icon: "moveEdge", name: "Edge", text: "A straight edge shows its Move/Rotate gimbal (the faces round it tilt); Fillet and Chamfer are in the list - drag the dot outward to round, inward to bevel." },
       { icon: "move", name: "Body", text: "The gimbal moves (arrows), slides (squares) and turns (rings) it. With Copy on, a drag makes a copy; the panel stays when you let go so you can type exact values. A copy is its own body; switch Link on to keep a freeform copy shaped like its original. A body of a pattern: Whole Pattern picks the rest." },
       { icon: "copy", name: "Sketch → Copy to Plane", text: "Tap a sketch region, then Copy to Plane: drag the blue arrow to a parallel plane (or red/green to slide it), or type the distance. Turn Copy off to move the sketch instead." },
       { icon: "color", name: "Colour / Transparency", text: "Pick a colour for the selected bodies (or Custom… for any colour), and how see-through they are (Solid, 75%, 50%, 25%)." },
@@ -61,8 +61,8 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
   {
     title: "Values and cards",
     items: [
-      { icon: "numpad", name: "Value boxes", text: "Every drag shows a value box by the pointer that stays when you let go: tap it to type. Just type while dragging — it goes into that box. Press on a box and drag left or right to turn the value down or up like a wheel." },
-      { icon: "menu", name: "Tool cards", text: "A tool's values, its own actions and Cancel / Done, apart with dim lines. Drag the card (or the numpad) by its grip where you want it — remembered per screen type; double-tap the grip to let it place itself again." },
+      { icon: "numpad", name: "Value boxes", text: "Every drag shows a value box by the pointer that stays when you let go: tap it to type. Just type while dragging - it goes into that box. Press on a box and drag left or right to turn the value down or up like a wheel." },
+      { icon: "menu", name: "Tool cards", text: "A tool's values, its own actions and Cancel / Done, apart with dim lines. Drag the card (or the numpad) by its grip where you want it - remembered per screen type; double-tap the grip to let it place itself again." },
       { icon: "line", name: "Exact points on touch screens", text: "Right after the first tap of a line, rectangle, circle… the card has X / Y for that point; a line also takes Length and Angle, or Across and Up for a slope; an arc by centre takes the centre, Radius and the Start and End angles." },
     ],
   },
@@ -73,11 +73,11 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "project", name: "Project", text: "Copy body edges or curves of other sketches into this sketch." },
       { icon: "offset", name: "Offset Edge", text: "A parallel copy of a curve (or a whole outline) at a distance. Tap empty space to finish." },
       { icon: "sketchFillet", name: "Fillet / Chamfer", text: "Round or bevel a corner where lines or arcs meet; tap the next corner to go on." },
-      { icon: "trim", name: "Trim / Join", text: "Cut away the piece of a curve between crossings (tap, or swipe across several) — or join two lines on the same axis." },
+      { icon: "trim", name: "Trim / Join", text: "Cut away the piece of a curve between crossings (tap, or swipe across several) - or join two lines on the same axis." },
       { icon: "mirror", name: "Mirror, Move/Rotate, Pattern", text: "Mirror the selected shapes across a line or an axis; Move/Rotate with its gimbal (Rotate About a tapped centre); Pattern in a row or round a centre." },
       { icon: "alignLine", name: "Align", text: "Move a line onto another line's axis; lines joined to it stretch along." },
       { icon: "extend", name: "Extend", text: "Carry a line or arc on until it meets another curve." },
-      { icon: "constraints", name: "Constraints", text: "Rules that keep the drawing in shape: horizontal, parallel, equal, a fixed distance… shown as small faint marks, a colour per kind. A rule that contradicts the ones already there isn't added — remove the old one first (or switch Auto constrain off). Dragging a point onto another joins them." },
+      { icon: "constraints", name: "Constraints", text: "Rules that keep the drawing in shape: horizontal, parallel, equal, a fixed distance… shown as small faint marks, a colour per kind. A rule that contradicts the ones already there isn't added - remove the old one first (or switch Auto constrain off). Dragging a point onto another joins them." },
       { icon: "lineDashed", name: "Construction", text: "Helper lines that guide the drawing but don't make faces. Tap to switch the selection or new lines." },
     ],
   },
@@ -96,7 +96,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     title: "Bottom left",
     items: [
       { icon: "undo", name: "Undo / Redo", text: "Step back and forward (Ctrl Z / Ctrl Y)." },
-      { icon: "section", name: "Section View", text: "Cut the view open to see inside — the cut shows as a solid face with a thick outline; tap again to hide it (it's remembered)." },
+      { icon: "section", name: "Section View", text: "Cut the view open to see inside - the cut shows as a solid face with a thick outline; tap again to hide it (it's remembered)." },
       { icon: "measure", name: "Measure", text: "Distances, angles and sizes between anything you tap; pin them to keep them on screen." },
       { icon: "isolate", name: "Isolate", text: "Show only the selected bodies; tap again to show everything." },
     ],
@@ -125,7 +125,7 @@ export class HelpPanel {
         const ic = el("span", "help-icon");
         ic.innerHTML = icons[it.icon] ?? "";
         const txt = el("div", "");
-        txt.append(el("b", "", it.name), el("span", "", ` — ${it.text}`));
+        txt.append(el("b", "", it.name), el("span", "", ` - ${it.text}`));
         li.append(ic, txt);
         list.append(li);
       }

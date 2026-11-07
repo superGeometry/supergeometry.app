@@ -1,4 +1,4 @@
-// Run: npx tsx tests/dxf.test.ts — sketch → DXF → read back: same curves.
+// Run: npx tsx tests/dxf.test.ts - sketch → DXF → read back: same curves.
 import assert from "node:assert/strict";
 import type { SketchEntity } from "../src/doc/types";
 import { sketchToDXF } from "../src/io/dxf";

@@ -197,7 +197,7 @@ export class DimWidget {
     view.helpers.add(this);
     if (opts.focus) {
       setTimeout(() => {
-        // The numpad opens on it straight away (on touch screens focus alone may not happen) —
+        // The numpad opens on it straight away (on touch screens focus alone may not happen) -
         // unless it opened because keys were typed: then the keyboard carries on in it.
         if (settings.value.numpad && opts.typed === undefined) return openNumpad(this.input);
         this.input.focus();
@@ -340,7 +340,7 @@ function clampToFree(s: [number, number], hw: number, hh: number): [number, numb
   if (right - left < hw * 2) [left, right] = [8, window.innerWidth - 8];
   const x = Math.max(left + hw, Math.min(right - hw, s[0]));
   let y = Math.max(52 + hh, Math.min(window.innerHeight - 8 - hh, s[1]));
-  // Phones: the tool's options card sits fixed along the bottom — the box stays above it.
+  // Phones: the tool's options card sits fixed along the bottom - the box stays above it.
   if (free.panel) {
     const r = free.panel;
     if (x + hw > r.left - 6 && x - hw < r.right + 6 && y + hh > r.top - 6) y = Math.max(52 + hh, r.top - 8 - hh);

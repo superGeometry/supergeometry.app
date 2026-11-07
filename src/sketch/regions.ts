@@ -430,7 +430,7 @@ export function materialRegions(arr: Arrangement): Region[] {
 /**
  * "All shapes" in a sketch on a face: the pieces of the whole sketch (the
  * face's outline included, so the regions match what can be tapped) that lie
- * inside what was drawn — by nesting among the drawn shapes alone. With the
+ * inside what was drawn - by nesting among the drawn shapes alone. With the
  * outline counted, windows drawn on a wall came out as holes in the wall, and
  * the cut took the wall instead of the windows.
  */

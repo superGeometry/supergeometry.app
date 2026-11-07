@@ -1,6 +1,6 @@
 // Newer version available? The page checks the site now and then (and when
 // you come back to it); if a new build is out, a notice offers to update.
-// Updating — or More → Reset cache — clears the browser's stored copies of
+// Updating - or More → Reset cache - clears the browser's stored copies of
 // the app's files and reloads. Your project is saved first and stays.
 
 import { el } from "./ui";

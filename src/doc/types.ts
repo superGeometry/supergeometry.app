@@ -102,7 +102,7 @@ export interface SketchConstraint {
   type: ConstraintType;
   pts?: PointRef[];
   curves?: string[];
-  /** dim: which size — length, radius, diameter, w, h, rx, ry, angle. */
+  /** dim: which size - length, radius, diameter, w, h, rx, ry, angle. */
   prop?: string;
   value?: number;
   expr?: string;
@@ -130,7 +130,7 @@ export interface ExtrudeFeature extends FeatureBase {
   target?: string;
   /**
    * How big the far end is, as a fraction of the shape (1 or missing: straight
-   * sides; 0.5: half size; near 0: to a point — a spire, a pyramid, a cone).
+   * sides; 0.5: half size; near 0: to a point - a spire, a pyramid, a cone).
    */
   taper?: number;
 }
@@ -285,7 +285,7 @@ export interface DeleteGeomFeature extends FeatureBase {
 }
 
 /**
- * Move/tilt one flat face — or one straight edge between two flat faces (both
+ * Move/tilt one flat face - or one straight edge between two flat faces (both
  * faces turn to follow it). The neighbouring faces extend or trim.
  */
 export interface MoveFaceFeature extends FeatureBase {
@@ -338,7 +338,7 @@ export interface ReplaceFaceFeature extends FeatureBase {
 
 /**
  * Fill to Plane: an open surface (a freeform sheet) becomes a solid by filling
- * the gap down to a plane — sides straight down to it (along its normal), the
+ * the gap down to a plane - sides straight down to it (along its normal), the
  * bottom the surface's outline projected flat onto it.
  */
 export interface FillToPlaneFeature extends FeatureBase {
@@ -365,7 +365,7 @@ export interface ThreadFeature extends FeatureBase {
 
 /**
  * Repair bodies: gaps sewn, missing flat faces filled, hair-thin faces
- * removed, faces fixed and merged, inside-out solids turned — the shape
+ * removed, faces fixed and merged, inside-out solids turned - the shape
  * itself stays. Turns loose faces (an imported mesh or STEP surface) into a solid.
  */
 export interface RepairFeature extends FeatureBase {

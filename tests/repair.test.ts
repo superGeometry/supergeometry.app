@@ -1,4 +1,4 @@
-// Run: npx tsx tests/repair.test.ts — the repair tool on shapes broken on purpose.
+// Run: npx tsx tests/repair.test.ts - the repair tool on shapes broken on purpose.
 import opencascade from "replicad-opencascadejs";
 import { cast, getOC, makeBaseBox, makeCompound, makeCylinder, makePolygon, measureVolume, setOC, type Shape3D } from "replicad";
 import { healthOf, isHealthy, repairShape } from "../src/kernel/repair";

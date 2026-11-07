@@ -50,7 +50,7 @@ class Numpad {
   constructor() {
     this.el.className = "numpad";
     this.el.hidden = true;
-    // The grip along the top: drag it to put the numpad where you want it — it
+    // The grip along the top: drag it to put the numpad where you want it - it
     // opens there from then on. Double-tap it: back to opening by the box.
     const grip = document.createElement("div");
     grip.className = "np-grip";
@@ -246,7 +246,7 @@ class Numpad {
     this.selEnd = e;
     this.showSelection();
     // Tool panel boxes (fillet radius, extrude distance…) show the result while
-    // typing — a preview only: ↵ is what applies it. Boxes on the sketch wait for ↵.
+    // typing - a preview only: ↵ is what applies it. Boxes on the sketch wait for ↵.
     if (t.closest("#panel") || t.dataset.live === "1") t.dispatchEvent(new Event("input", { bubbles: true }));
   }
 }

@@ -1,4 +1,4 @@
-// Run: npx tsx tests/engine.test.ts — every feature type through the real engine.
+// Run: npx tsx tests/engine.test.ts - every feature type through the real engine.
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";
 import type { Feature, PlaneDef } from "../src/doc/types";
@@ -134,10 +134,10 @@ for (const [name, features, describe] of tests) {
   try {
     const r = await regenerate(features);
     if (r.errors.length) throw new Error(r.errors.map((e) => `${e.featureId}: ${e.message}`).join("; "));
-    console.log("ok  ", name, "—", describe(r));
+    console.log("ok  ", name, "-", describe(r));
   } catch (e) {
     failed++;
-    console.log("FAIL", name, "—", e instanceof Error ? e.message : e);
+    console.log("FAIL", name, "-", e instanceof Error ? e.message : e);
   }
 }
 // A line across the top face splits it into two regions (with the face outline).

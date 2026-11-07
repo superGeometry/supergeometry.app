@@ -158,7 +158,7 @@ async function run(features: Feature[]) {
           editNotes.length = 0;
           // An edit works on copies of the bodies it may touch: OpenCascade is
           // allowed to adjust the shapes it is given, and the earlier steps'
-          // results (kept in the cache) must never change — not even when this
+          // results (kept in the cache) must never change - not even when this
           // step fails. Bodies it leaves alone get their originals back.
           const copies = new Map<string, Shape3D>();
           if (GUARDED.has(f.type)) {
@@ -178,7 +178,7 @@ async function run(features: Feature[]) {
               const before = ctx.bodies.get(id);
               if (after === before) continue;
               // A freeform left as an open surface (a sheet) isn't a solid to check; a solid
-              // freeform is — its edits are checked like any body's.
+              // freeform is - its edits are checked like any body's.
               if (before && (out.freeforms.has(id) || ctx.freeforms.has(id)) && !subShapes(before, "SOLID").length) continue;
               // Offsetting a face of the body itself is a face move: it doesn't split it either.
               const inPlace = f.type === "extrude" && f.source.kind === "face" && f.mode !== "new" && f.target === f.source.face.body;
@@ -257,7 +257,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           bodies.set(f.target, out);
           return;
         } catch (err) {
-          // Faces whose neighbours don't enclose them still get a straight push —
+          // Faces whose neighbours don't enclose them still get a straight push -
           // but not one with a fillet on it (the old fillet would stay standing).
           if (face.geomType !== "PLANE" || hasBlends(body, face)) throw err;
         }
@@ -265,7 +265,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const parts = sourceFaces(f.source, ctx).map(({ face, normal }) => basicFaceExtrusion(face, new Vector(normal).multiply(f.distance)));
       const solid = fuseAll(parts);
       // Auto: other bodies the extrusion runs into get cut through. Drawn on
-      // its own (no body it belongs to), it then only cuts — no new body.
+      // its own (no body it belongs to), it then only cuts - no new body.
       if (f.mode === "auto") {
         const hit = overlapping(solid, ctx, f.target);
         for (const id of hit) {
@@ -363,7 +363,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         } catch (err) {
           if (err instanceof Error && !/WebAssembly|kernel/i.test(err.message)) throw err;
           const what = f.type === "fillet" ? "radius" : "distance";
-          throw new Error(`That ${f.type} doesn't fit here — the ${what} is too big for the faces around ${edges.length > 1 ? "those edges" : "that edge"}. Try a smaller ${what}.`);
+          throw new Error(`That ${f.type} doesn't fit here - the ${what} is too big for the faces around ${edges.length > 1 ? "those edges" : "that edge"}. Try a smaller ${what}.`);
         }
         bodies.set(bodyId, result);
       }
@@ -373,7 +373,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     case "shell": {
       const body = need(bodies, f.body);
       const faces = f.faces.map((r) => resolveFace(body, r));
-      // A freeform: drop the picked cage faces and thicken the rest inward —
+      // A freeform: drop the picked cage faces and thicken the rest inward -
       // exact, where shelling its smooth surfaces is unreliable.
       const ff = ctx.freeforms.get(f.body);
       if (ff && faces.length) {
@@ -402,20 +402,20 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     case "boolean": {
       let target = need(bodies, f.target);
       const solidsIn = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;
-      // Subtract: every tool at once — joined, then one tolerant cut checked by
+      // Subtract: every tool at once - joined, then one tolerant cut checked by
       // its volume. Cut one by one, eight vents round a lamp shade left it with
       // no solid after the sixth, and the message blamed an "open surface".
       if (f.op === "subtract" && f.tools.length) {
         const tools = f.tools.map((t) => need(bodies, t));
         if (!solidsIn(target) || tools.some((t) => !solidsIn(t)))
-          throw new Error("One of these is an open surface (e.g. a freeform with a hole), not a solid. Close it first: tap an edge of the hole → Fill hole, or give it a Thickness — then Union.");
+          throw new Error("One of these is an open surface (e.g. a freeform with a hole), not a solid. Close it first: tap an edge of the hole → Fill hole, or give it a Thickness - then Union.");
         const all = fuseAll(tools.map((t) => t.clone()));
         let out = fuzzyBoolean("cut", target, all);
         if (!solidsIn(out) || !booleanVolumeOk("cut", target, all, out)) {
           const plain = target.cut(all);
           if (solidsIn(plain) && booleanVolumeOk("cut", target, all, plain)) out = plain;
           else if (isEmpty(out) && isEmpty(plain)) throw new Error("The result is empty");
-          else throw new Error("Subtracting these didn't work out — the geometry engine lost the shape. Try the tools one or two at a time");
+          else throw new Error("Subtracting these didn't work out - the geometry engine lost the shape. Try the tools one or two at a time");
         }
         if (!f.keepTools) for (const t of f.tools) bodies.delete(t);
         // Kept as it was: the result is a body of its own.
@@ -428,7 +428,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         const solids = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;
         // An open freeform (a surface with a hole) isn't a solid: nothing to join into.
         if (!solids(target) || !solids(tool))
-          throw new Error("One of these is an open surface (e.g. a freeform with a hole), not a solid. Close it first: tap an edge of the hole → Fill hole, or give it a Thickness — then Union.");
+          throw new Error("One of these is an open surface (e.g. a freeform with a hole), not a solid. Close it first: tap an edge of the hole → Fill hole, or give it a Thickness - then Union.");
         const before = f.op === "union" ? solids(target) + solids(tool) : 0;
         const prev = target;
         target = f.op === "union" ? target.fuse(tool) : f.op === "subtract" ? target.cut(tool) : target.intersect(tool);
@@ -449,7 +449,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           open = now;
         }
         // A union joins: a body that doesn't touch would only be grouped with it, not joined.
-        if (f.op === "union" && solids(target) >= before) throw new Error("These bodies don't touch — Union needs them to overlap or touch (move one onto the other first)");
+        if (f.op === "union" && solids(target) >= before) throw new Error("These bodies don't touch - Union needs them to overlap or touch (move one onto the other first)");
         if (!(f.op === "intersect" && f.keepTools)) bodies.delete(t);
       }
       if (isEmpty(target)) throw new Error("The result is empty");
@@ -573,7 +573,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         const body = need(bodies, id);
         const r = repairShape(body);
         if (!r) throw new Error(`This body can't be made a clean solid: ${whatsWrong(healthOf(body))}`);
-        editNotes.push(r.fixes.length ? `Repaired: ${r.fixes.join(", ")}.` : "Nothing to repair — it's a clean solid already.");
+        editNotes.push(r.fixes.length ? `Repaired: ${r.fixes.join(", ")}.` : "Nothing to repair - it's a clean solid already.");
         bodies.set(id, r.shape);
       }
       return;
@@ -598,7 +598,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         const face = resolveFace(body, f.face);
         const { origin, normal } = planeOf(face);
         // Slid within its own plane, or turned about its normal: its corners
-        // move and the faces round it follow (a plane alone can't show that —
+        // move and the faces round it follow (a plane alone can't show that -
         // the face stayed where it was).
         const nn = norm(normal);
         const slide = sub(f.translate, scale(nn, dot(f.translate, nn)));
@@ -607,7 +607,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           const size = Math.hypot(body.boundingBox.width, body.boundingBox.height, body.boundingBox.depth) || 1;
           const loop = faceLoop(face, size * 1e-6);
           const out = loop ? movePolyhedronPoints(body, loop.map((v) => [v, move(v)] as [Vec3, Vec3])) : null;
-          if (!out) throw new Error("Sliding or turning a face within its plane works on bodies of flat, straight-edged faces — push or tilt it instead");
+          if (!out) throw new Error("Sliding or turning a face within its plane works on bodies of flat, straight-edged faces - push or tilt it instead");
           bodies.set(f.face.body, staysClosed(body, out));
           return;
         }
@@ -707,19 +707,19 @@ function freeformShape(f: Extract<Feature, { type: "freeform" }>, m: Affine): Sh
  * of each other) would make a solid every later edit trips over.
  */
 function checkedFreeform(cage: { verts: Vec3[]; faces: [number, number, number, number][] }, thicken?: { thickness: number; side: "up" | "down" | "both" }): Shape3D {
-  if (selfCrossings(cage, 2, 1).length) throw new Error("This freeform passes through itself (a cage point pulled through the body, or faces folded over) — pull it back; it shows red while you edit it");
+  if (selfCrossings(cage, 2, 1).length) throw new Error("This freeform passes through itself (a cage point pulled through the body, or faces folded over) - pull it back; it shows red while you edit it");
   let shape: Shape3D;
   try {
     shape = cageToShape(cage, 3, thicken);
   } catch (e) {
-    if (thicken) throw new Error("That thickness doesn't fit this surface (it folds into itself) — try a thinner one, or the other side");
+    if (thicken) throw new Error("That thickness doesn't fit this surface (it folds into itself) - try a thinner one, or the other side");
     throw e;
   }
   const closed = isClosed(cage) || !!thicken;
-  const degenerate = "This freeform has collapsed somewhere (cage points on top of each other, or a face squashed flat) — move those points apart";
+  const degenerate = "This freeform has collapsed somewhere (cage points on top of each other, or a face squashed flat) - move those points apart";
   if (!shapeValid(shape)) {
     const r = repairShape(shape, { maxSolids: 1 });
-    if (!r) throw new Error(thicken ? "That thickness doesn't fit this surface (it folds into itself) — try a thinner one, or the other side" : degenerate);
+    if (!r) throw new Error(thicken ? "That thickness doesn't fit this surface (it folds into itself) - try a thinner one, or the other side" : degenerate);
     editNotes.push(`Repaired automatically: ${r.fixes.join(", ")}.`);
     shape = r.shape;
   }
@@ -790,7 +790,7 @@ function moveEdge(body: Shape3D, ref: EdgeRef, move: (p: Vec3) => Vec3): Shape3D
   const a2 = move(a);
   const b2 = move(b);
   // A body of flat faces: just the edge's two corners move; every other corner
-  // stays (bending faces are split) — repeated moves don't drift or pile up.
+  // stays (bending faces are split) - repeated moves don't drift or pile up.
   const poly = movePolyhedronPoints(body, [[a, a2], [b, b2]]);
   if (poly) return poly;
   const d2 = norm(sub(b2, a2));
@@ -898,9 +898,9 @@ function movePolyhedronPoints(body: Shape3D, moves: [Vec3, Vec3][]): Shape3D | n
   }
   if (!touched) throw new Error("That corner is no longer there");
   // A body of flat faces: this is the way to move its corners. If the result
-  // folds through itself, say so — another method would only give a mangled
+  // folds through itself, say so - another method would only give a mangled
   // shape (and dragging would jump between the two).
-  const folded = "That would fold the faces through each other — move it less far, or another way";
+  const folded = "That would fold the faces through each other - move it less far, or another way";
   let solid: Shape3D;
   let v: number;
   try {
@@ -1011,7 +1011,7 @@ function deleteEdge(body: Shape3D, ref: EdgeRef): Shape3D {
       // try the other face
     }
   }
-  throw new Error("This edge can't be removed — the faces around it wouldn't close up");
+  throw new Error("This edge can't be removed - the faces around it wouldn't close up");
 }
 
 function hasEdge(body: Shape3D, ref: EdgeRef): boolean {
@@ -1167,7 +1167,7 @@ export function threadFace(body: Shape3D, face: Face, pitch: number, left = fals
       }
     }
   }
-  throw new Error("The thread couldn't be cut here — try a slightly different pitch");
+  throw new Error("The thread couldn't be cut here - try a slightly different pitch");
 }
 
 /**
@@ -1219,7 +1219,7 @@ function deleteVertex(body: Shape3D, at: Vec3): Shape3D {
   const merged = unify(body);
   const tol = 1e-6 * (Math.hypot(body.boundingBox.width, body.boundingBox.height, body.boundingBox.depth) || 1);
   const still = merged.edges.some((e) => dist(e.startPoint.toTuple() as Vec3, at) < tol || dist(e.endPoint.toTuple() as Vec3, at) < tol);
-  if (still) throw new Error("This corner can't be removed — it's where faces meet");
+  if (still) throw new Error("This corner can't be removed - it's where faces meet");
   return merged;
 }
 
@@ -1287,7 +1287,7 @@ function resolveAxis(a: AxisRef, ctx: Ctx): { origin: Vec3; dir: Vec3 } {
 function combine(id: string, mode: string, target: string | undefined, solid: Shape3D, negative: boolean, ctx: Ctx): void {
   const m = mode === "auto" ? (target ? (negative ? "cut" : "join") : "new") : mode;
   // Add or Cut picked, with no body named (drawn on the floor, not on a face):
-  // it acts on what it runs into — Add on the body it touches, Cut on every
+  // it acts on what it runs into - Add on the body it touches, Cut on every
   // body it overlaps. (It used to make a separate body: a nave "added" to its
   // tower stood beside it as Body 2.)
   if (!target && m === "cut") {
@@ -1313,7 +1313,7 @@ function combine(id: string, mode: string, target: string | undefined, solid: Sh
     const ok = (r: Shape3D) => booleanVolumeOk(m === "join" ? "fuse" : "cut", t, solid, r);
     if (!ok(result)) {
       const plain = m === "join" ? t.fuse(solid) : t.cut(solid);
-      if (!ok(plain)) throw new Error(m === "join" ? "Joining these didn't work out — the shapes only just overlap here: let them overlap more" : "This cut didn't work out — the shapes only just overlap here: let them overlap more, or less");
+      if (!ok(plain)) throw new Error(m === "join" ? "Joining these didn't work out - the shapes only just overlap here: let them overlap more" : "This cut didn't work out - the shapes only just overlap here: let them overlap more, or less");
       result = plain;
     }
   }
@@ -1331,7 +1331,7 @@ function booleanVolumeOk(op: "fuse" | "cut", a: Shape3D, b: Shape3D, r: Shape3D)
     const vb = Math.abs(measureVolume(b));
     const v = isEmpty(r) ? 0 : measureVolume(r);
     // A big many-faced body measures a little differently once a join splits
-    // its faces (a jet engine's casing: 2 to 75 mm³ in 1.9 litres) — more than
+    // its faces (a jet engine's casing: 2 to 75 mm³ in 1.9 litres) - more than
     // the name raised on its pylon (158 mm³) could stand under a closer check.
     // A boolean gone wrong is off by about the smaller shape, or more.
     const tol = (va + vb) * 1e-5 + Math.min(va, vb) * 0.6 + 1e-9;
@@ -1452,7 +1452,7 @@ function transform(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {
       case "scaleXYZ": {
         if (op.factors.some((k) => k <= 0)) throw new Error("Scale factors must be positive");
         const ff = ctx.freeforms.get(id);
-        if (!ff) throw new Error("Stretching along X/Y/Z works on freeform bodies only — the geometry engine can't stretch other bodies (use uniform Scale)");
+        if (!ff) throw new Error("Stretching along X/Y/Z works on freeform bodies only - the geometry engine can't stretch other bodies (use uniform Scale)");
         results.push(freeformShape(ff.feature, affineThen(ff.m, scaleAbout(op.center, op.factors))));
         break;
       }
@@ -1631,7 +1631,7 @@ function slivers(s: Shape3D): number {
 }
 
 /**
- * The bodies an edit may change: the ones it names — and, for a solid made
+ * The bodies an edit may change: the ones it names - and, for a solid made
  * from a sketch or face that joins/cuts whatever it runs into, all of them.
  */
 function touchedBodies(f: Feature, ctx: Ctx): string[] {
@@ -1658,7 +1658,7 @@ const NO_SPLIT = new Set<string>(["fillet", "chamfer", "shell", "moveFace", "sca
 /**
  * The result of an edit must be a solid like the one it changed: crumbs a
  * cut left behind are swept away, a hollow left as loose surfaces is made a
- * solid, an inside-out one is turned right — and anything still broken
+ * solid, an inside-out one is turned right - and anything still broken
  * (invalid, hair-thin faces, split by an edit that shouldn't split) makes the
  * step stop with a message instead of leaving a damaged body to build on.
  */
@@ -1684,7 +1684,7 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
   }
   // A lump inside out among the others: the cut went wrong.
   const signed = solids.map((x) => measureVolume(cast(x) as Shape3D));
-  if (solids.length > 1 && signed.some((v) => v < 0) && signed.some((v) => v > 0)) throw new Error("That edit would damage the body — try a different value");
+  if (solids.length > 1 && signed.some((v) => v < 0) && signed.some((v) => v > 0)) throw new Error("That edit would damage the body - try a different value");
   // Crumbs: lumps far smaller than the rest (left between coincident faces).
   const vols = signed.map((v) => Math.abs(v));
   const total = vols.reduce((a, b) => a + b, 0);
@@ -1697,8 +1697,8 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
     else after = makeCompound(keep.map((x) => cast(x))) as Shape3D;
     solids = keep;
   }
-  if (!mayPart && solids.length > was) throw new Error("That would break the body into pieces — try a smaller value");
-  // Inside out (negative volume): turn it right — on a copy (its faces may be
+  if (!mayPart && solids.length > was) throw new Error("That would break the body into pieces - try a smaller value");
+  // Inside out (negative volume): turn it right - on a copy (its faces may be
   // shared with earlier steps' results, which must never change).
   if (measureVolume(after) < 0) {
     after = deepCopy(after);
@@ -1715,9 +1715,9 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
     return r.shape;
   };
   // Gaps it didn't have before (an edge with a face on one side only).
-  if (openEdges(after).length > (before ? openEdges(before).length : 0)) return fixOr("That edit would tear the body open — try a smaller value, or another face");
+  if (openEdges(after).length > (before ? openEdges(before).length : 0)) return fixOr("That edit would tear the body open - try a smaller value, or another face");
   const validBefore = before ? shapeValid(before) : true;
-  if (validBefore && !shapeValid(after)) return fixOr("That edit would damage the body (the faces don't meet up) — try a different value");
+  if (validBefore && !shapeValid(after)) return fixOr("That edit would damage the body (the faces don't meet up) - try a different value");
   const thinBefore = before ? hairThin(before) : 0;
   if (hairThin(after) > thinBefore) {
     // Often just faces left split on one surface: merge them, then look again.
@@ -1728,20 +1728,20 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
       merged = null;
     }
     if (merged && hairThin(merged) <= thinBefore && (!validBefore || shapeValid(merged))) return merged;
-    return fixOr("That edit would leave hair-thin faces — try a slightly different value");
+    return fixOr("That edit would leave hair-thin faces - try a slightly different value");
   }
   return after;
 }
 
 function staysClosed(before: Shape3D, after: Shape3D): Shape3D {
-  if (openEdges(after).length > openEdges(before).length) throw new Error("That would tear the body open — try a smaller value, or another face");
+  if (openEdges(after).length > openEdges(before).length) throw new Error("That would tear the body open - try a smaller value, or another face");
   return after;
 }
 
 /**
  * An STL file as a body. OpenCascade's reader hands back a compound holding
  * the mesh's shell (replicad's importSTL wanted the shell itself and threw on
- * every file — the app's own STL exports too). One closed shell: a solid, its
+ * every file - the app's own STL exports too). One closed shell: a solid, its
  * flat triangles merged; anything else stays loose faces for Repair to close.
  */
 function readSTL(bytes: Uint8Array): Shape3D {
@@ -1861,17 +1861,17 @@ function hash53(str: string, seed: number): string {
 /**
  * An open surface filled down to a plane: the surface swept straight towards
  * the plane (along its normal) and past it, then everything beyond the plane
- * cut away — sides straight down, the bottom its outline projected onto the
+ * cut away - sides straight down, the bottom its outline projected onto the
  * plane. Parts of the surface beyond the plane are left out.
  */
 function fillToPlane(sheet: Shape3D, plane: PlaneDef): Shape3D {
   const oc = getOC();
-  if (subShapes(sheet, "SOLID").length) throw new Error("Fill to Plane fills an open surface — this body is already a solid");
+  if (subShapes(sheet, "SOLID").length) throw new Error("Fill to Plane fills an open surface - this body is already a solid");
   if (!sheet.faces.length) throw new Error("This body has no surface to fill from");
   const n = norm(plane.normal);
   // Which side the surface is on (most of it): the fill goes from there to the plane.
   const side = Math.sign(dot(sub(sheet.boundingBox.center as Vec3, plane.origin), n));
-  if (!side) throw new Error("The surface lies across the plane — move the plane to one side of it");
+  if (!side) throw new Error("The surface lies across the plane - move the plane to one side of it");
   // Seen from the plane, the surface must have some area: a plane side-on to it
   // (facing its edge) has nothing to fill.
   let facing = 0;
@@ -1897,7 +1897,7 @@ function fillToPlane(sheet: Shape3D, plane: PlaneDef): Shape3D {
     }
   }
   const folds = Math.min(up, down) > Math.max(up, down) * 1e-3;
-  if (facing < total * 0.3) throw new Error("The plane is side-on to the surface (facing its edge) — pick a plane the surface lies over, like the ground under it");
+  if (facing < total * 0.3) throw new Error("The plane is side-on to the surface (facing its edge) - pick a plane the surface lies over, like the ground under it");
   const bb = sheet.boundingBox;
   const reach = (Math.hypot(bb.width, bb.height, bb.depth) + Math.abs(dot(sub(bb.center as Vec3, plane.origin), n))) * 2 + 1;
   const v = new oc.gp_Vec(-side * n[0] * reach, -side * n[1] * reach, -side * n[2] * reach);
@@ -1909,7 +1909,7 @@ function fillToPlane(sheet: Shape3D, plane: PlaneDef): Shape3D {
     mk.delete();
     v.delete();
   }
-  // The surface's side of the plane only — one cut for the whole sweep.
+  // The surface's side of the plane only - one cut for the whole sweep.
   const keep = halfSpace(side > 0 ? plane : { ...plane, normal: scale(n, -1) as Vec3 }, swept);
   const cut = swept.intersect(keep);
   if (isEmpty(cut)) throw new Error("The surface doesn't reach over the plane (seen along the plane's normal, there's nothing to fill)");
@@ -1933,7 +1933,7 @@ function fillToPlane(sheet: Shape3D, plane: PlaneDef): Shape3D {
       if (isEmpty(j)) throw new Error("empty");
       return j;
     } catch {
-      throw new Error(facing < total * 0.6 ? "The plane is too side-on to the surface — pick a plane the surface lies over, like the ground under it" : "The surface folds back over itself as seen from the plane too much to fill — pick a plane it lies flatter over");
+      throw new Error(facing < total * 0.6 ? "The plane is too side-on to the surface - pick a plane the surface lies over, like the ground under it" : "The surface folds back over itself as seen from the plane too much to fill - pick a plane it lies flatter over");
     }
   };
   const size = Math.hypot(bb.width, bb.height, bb.depth);
@@ -1955,7 +1955,7 @@ function fillToPlane(sheet: Shape3D, plane: PlaneDef): Shape3D {
     sw.delete();
   }
   // The surface folds back over itself as seen from the plane: the blocks
-  // overlap instead of just touching — joined the slow, sure way instead.
+  // overlap instead of just touching - joined the slow, sure way instead.
   if (folds) solid = joinAll();
   // The bottom (one flat piece per patch) and flat sides become whole faces.
   try {

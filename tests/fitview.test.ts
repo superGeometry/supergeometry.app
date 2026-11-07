@@ -1,4 +1,4 @@
-// Run: npx tsx tests/fitview.test.ts — Zoom to fit on every screen shape: the
+// Run: npx tsx tests/fitview.test.ts - Zoom to fit on every screen shape: the
 // model must land inside the part of the screen the tool columns and bars
 // leave free (a ruler fitted to a phone's whole screen ran under the columns).
 import { Box3, MathUtils, Vector3 } from "three";

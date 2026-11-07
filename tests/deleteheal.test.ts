@@ -1,4 +1,4 @@
-// Run: npx tsx tests/deleteheal.test.ts — deleting faces, fillets, chamfers and
+// Run: npx tsx tests/deleteheal.test.ts - deleting faces, fillets, chamfers and
 // holes as if they'd never been there: the neighbours carry on until they meet,
 // and the result must be exactly the part without that feature.
 import opencascade from "replicad-opencascadejs";

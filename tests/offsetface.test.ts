@@ -1,4 +1,4 @@
-// Run: npx tsx tests/offsetface.test.ts — a user's part (tests/fixtures/offsetface.json):
+// Run: npx tsx tests/offsetface.test.ts - a user's part (tests/fixtures/offsetface.json):
 // a fillet whose far end runs into a twisted corner patch (where a chamfer
 // meets it), offset 3.5 mm outwards. The patch has no one way to carry on, so
 // the region was left open there and the offset was refused; then the ring

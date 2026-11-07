@@ -45,7 +45,7 @@ const LABELS: Record<FeatureType, string> = {
  */
 /**
  * Undo snapshots are whole documents as text. Big values in them (an imported
- * model, an image — megabytes of base64) are kept once, and each snapshot
+ * model, an image - megabytes of base64) are kept once, and each snapshot
  * holds only a short reference: otherwise 200 undo steps would hold 200 copies.
  */
 const BIG = 50_000;
@@ -167,7 +167,7 @@ export class DocStore {
     const wasLive = this.transientBase !== null;
     this.transientBase = null;
     if (pack(next) === before) {
-      // No change overall — but after a drag that came back to where it began,
+      // No change overall - but after a drag that came back to where it began,
       // the document must still end up there (not at the drag's last frame).
       if (wasLive) {
         this.doc = next;

@@ -93,7 +93,7 @@ for (const [name, fn] of checks) {
     console.log("ok  ", name);
   } catch (e) {
     failed++;
-    console.log("FAIL", name, "—", (e as Error).message);
+    console.log("FAIL", name, "-", (e as Error).message);
   }
 }
 

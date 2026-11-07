@@ -4,7 +4,7 @@
 // half, one face's, one point) by tiny, huge and lopsided factors, and whole
 // freeform bodies scaled (uniform and per axis, copies too). A scale may be
 // refused with a message; one that's accepted must give a valid closed solid
-// (a clean sheet for a surface) — and, for the whole shape, exactly that size.
+// (a clean sheet for a surface) - and, for the whole shape, exactly that size.
 import opencascade from "replicad-opencascadejs";
 import { measureVolume, setOC } from "replicad";
 import { debugBodies, regenerate, shapeValid } from "../src/kernel/engine";

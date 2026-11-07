@@ -48,7 +48,7 @@ export function isHealthy(h: Health, o: RepairOptions = {}): boolean {
   return h.valid && h.solids >= 1 && (!o.maxSolids || h.solids <= o.maxSolids) && h.openEdges === 0 && h.thin === 0 && h.volume > 0;
 }
 
-/** How broken (0: healthy) — to tell whether a fix helped. */
+/** How broken (0: healthy) - to tell whether a fix helped. */
 function badness(h: Health, o: RepairOptions): number {
   return (h.valid ? 0 : 1000) + (h.solids ? 0 : 400) + (o.maxSolids && h.solids > o.maxSolids ? 300 : 0) + (h.volume > 0 ? 0 : 200) + Math.min(h.openEdges, 50) * 4 + Math.min(h.thin, 50) * 2;
 }

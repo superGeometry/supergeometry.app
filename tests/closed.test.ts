@@ -1,4 +1,4 @@
-// Run: npx tsx tests/closed.test.ts — face edits never leave a body torn open.
+// Run: npx tsx tests/closed.test.ts - face edits never leave a body torn open.
 // A tower pushed out over a fillet used to leave hair-thin faces; offsetting
 // one of them, then moving a corner, opened the body.
 import opencascade from "replicad-opencascadejs";
@@ -17,6 +17,6 @@ for (let i = 1; i <= features.length; i++) {
   const open = r.bodies.filter((b) => b.openEdges.length);
   const ok = !open.length && !r.errors.length;
   if (!ok) failed++;
-  console.log(`${ok ? "ok  " : "FAIL"} ${features[i - 1].name}: ${r.bodies.map((b) => `${b.name} ${b.faces.length} faces, ${b.openEdges.length} open`).join("; ")}${r.errors.length ? " — " + r.errors.map((e) => e.message).join("; ") : ""}`);
+  console.log(`${ok ? "ok  " : "FAIL"} ${features[i - 1].name}: ${r.bodies.map((b) => `${b.name} ${b.faces.length} faces, ${b.openEdges.length} open`).join("; ")}${r.errors.length ? " - " + r.errors.map((e) => e.message).join("; ") : ""}`);
 }
 if (failed) process.exit(1);

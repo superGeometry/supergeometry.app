@@ -129,7 +129,7 @@ export class Gimbal {
     return this.view.toScreen(local.clone().multiplyScalar(this.scale()).add(this.center));
   }
 
-  /** Which part is under the pointer (centre, planes, arrows, arcs — in that order). */
+  /** Which part is under the pointer (centre, planes, arrows, arcs - in that order). */
   hit(p: ToolPointer): GimbalPart | null {
     const tol = Math.max(10, p.tol * 1.2);
     const c = this.screen(new Vector3());
