@@ -21,9 +21,21 @@ interface Cyl {
 
 const tup = (v: { toTuple(): number[] }) => v.toTuple() as Vec3;
 
-function sizeOf(body: Shape3D): number {
-  const bb = body.boundingBox;
-  return Math.hypot(bb.width, bb.height, bb.depth) || 1;
+/**
+ * The body's size (its box's diagonal), worked out once per body: a box round
+ * a big curved body is slow, and the steps here asked for it again and again
+ * (2.8 s of deleting one hole in a jet engine's casing).
+ */
+const sizes = new WeakMap<object, number>();
+export function sizeOf(body: Shape3D): number {
+  const key = body.wrapped as object;
+  let s = sizes.get(key);
+  if (s === undefined) {
+    const bb = body.boundingBox;
+    s = Math.hypot(bb.width, bb.height, bb.depth) || 1;
+    sizes.set(key, s);
+  }
+  return s;
 }
 
 // Each helper solid gets a slightly different size: when two of them end on the
@@ -890,42 +902,40 @@ export function deleteFaces(body: Shape3D, S: Face[]): Shape3D {
     ]),
   ];
   const v0 = Math.abs(measureVolume(body));
+  const keptInfo = kept.map((f) => ({ f, t: f.geomType, box: f.boundingBox.bounds as number[][], next: N.some((x) => x.isSame(f)), area: measureArea(f) }));
+  const boxesMeet = (a: number[][], b: number[][], e: number) => [0, 1, 2].every((k) => a[0][k] <= b[1][k] + e && b[0][k] <= a[1][k] + e);
   let best: { out: Shape3D; change: number } | null = null;
   for (const c of candidates) {
     let out: Shape3D | null = null;
     try {
       out = c.make();
-      if (out) out = unify(out);
+      if (out) out = unify(out, size);
     } catch {
       out = null;
     }
     if (!out || isEmpty(out)) continue;
+    // The result's faces, read once (each read of out.faces makes them anew,
+    // and the checks below went over them for every face of the body: deleting
+    // one hole in a jet engine's casing took 8 s).
+    const outFaces = out.faces.map((g) => ({ g, t: g.geomType, pts: samples(g), box: g.boundingBox.bounds as number[][] }));
     // Nothing new: every face lies on a surface the body already had (S's aside).
-    const honest = out.faces.every((g) => {
-      const pts = samples(g);
-      return kept.some((f) => f.geomType === g.geomType && pts.every((q) => offSurface(f, q) < tol));
-    });
+    const honest = outFaces.every(({ t, pts }) => keptInfo.some((k) => k.t === t && pts.every((q) => offSurface(k.f, q) < tol)));
     if (!honest) continue;
     // And S is gone: no face left on S's surface that isn't also on a kept one's.
-    const left = out.faces.some((g) => {
-      const pts = samples(g);
-      return S.some((f) => f.geomType === g.geomType && pts.every((q) => offSurface(f, q) < tol)) && !kept.some((f) => f.geomType === g.geomType && pts.every((q) => offSurface(f, q) < tol));
-    });
+    const left = outFaces.some(({ t, pts }) => S.some((f) => f.geomType === t && pts.every((q) => offSurface(f, q) < tol)) && !keptInfo.some((k) => k.t === t && pts.every((q) => offSurface(k.f, q) < tol)));
     if (left) continue;
     // The faces S ran smoothly into carry on: they're still there (deleting a
     // fillet never takes away the walls it rounded).
-    const walls = [...tangent].every((g) => {
-      const pts = samples(g);
-      return out!.faces.some((h) => h.geomType === g.geomType && samples(h).every((q) => offSurface(g, q) < tol)) && pts.length > 0;
-    });
+    const walls = [...tangent].every((g) => outFaces.some((h) => h.t === g.geomType && h.pts.every((q) => offSurface(g, q) < tol)) && samples(g).length > 0);
     if (!walls) continue;
     // Every face that wasn't next to S is still there (on its own surface):
     // deleting a big wall must not just keep some other piece of the part.
-    const stays = kept.every((g) => {
-      if (N.some((x) => x.isSame(g))) return true;
+    // (Only the result's faces overlapping it can be it.)
+    const stays = keptInfo.every((k) => {
+      if (k.next) return true;
       // (most of it: a scrap on the same plane doesn't count)
-      const on = out!.faces.filter((h) => h.geomType === g.geomType && samples(h).every((q) => offSurface(g, q) < tol));
-      return on.reduce((a, h) => a + measureArea(h), 0) >= measureArea(g) * 0.5;
+      const on = outFaces.filter((h) => h.t === k.t && boxesMeet(h.box, k.box, tol) && h.pts.every((q) => offSurface(k.f, q) < tol));
+      return on.reduce((a, h) => a + measureArea(h.g), 0) >= k.area * 0.5;
     });
     if (!stays) continue;
     const change = Math.abs(Math.abs(measureVolume(out)) - v0);
@@ -993,13 +1003,17 @@ function takeOffBlend(body: Shape3D, F: Face): Shape3D {
   return sanity(body, tries[0].out);
 }
 
-/** Merge faces/edges that lie on the same surface (removes imprinted edges). */
-export function unify(body: Shape3D): Shape3D {
+/**
+ * Merge faces/edges that lie on the same surface (removes imprinted edges).
+ * `size`: how big the body is, when known (the result of a join is about as
+ * big as what was joined) — boxing every result again was slow on big bodies.
+ */
+export function unify(body: Shape3D, size?: number): Shape3D {
   const oc = getOC();
   const u = new oc.ShapeUpgrade_UnifySameDomain(body.wrapped, true, true, false);
   try {
     // Surfaces rebuilt from samples match the originals only to ~1e-9 relative.
-    u.SetLinearTolerance(sizeOf(body) * 1e-6);
+    u.SetLinearTolerance((size ?? sizeOf(body)) * 1e-6);
     u.SetAngularTolerance(1e-6);
     u.Build();
     return cast(u.Shape()) as Shape3D;

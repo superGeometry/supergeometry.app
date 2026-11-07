@@ -4,7 +4,9 @@
 // in the card. The smooth surface updates live; Done turns it into a body.
 // Undo/Redo step through the cage changes made here.
 
-import { Box3, BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
+import { Box3, BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshBasicMaterial, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import type { Feature, FreeformFeature, PlaneDef, TransformFeature, Vec3 } from "../doc/types";
 import { applyPlan, archBridge, planeCage, borderChains, cachedPlan, planIndices, smoothNormals, type SubdivPlan, bridgeChains, bridgeFaces, moveTurnScale, shapeCage, sweepFace, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
 import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
@@ -12,8 +14,8 @@ import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
 import { dotMaterial } from "../view/viewport";
-import { isCoarse } from "../device";
-import { DragTyping } from "./dragTyping";
+import { isCoarse, screenClass } from "../device";
+import { DragTyping, type DragTypingTarget } from "./dragTyping";
 import { Gimbal, GIMBAL_AXES, type GimbalPart } from "./gimbal";
 import { axisDrag } from "./handles";
 import { FillToPlaneOp } from "./ops";
@@ -72,10 +74,22 @@ export class FreeformTool implements Tool {
   private surface = new Mesh(new BufferGeometry(), new MeshStandardMaterial({ color: 0xb9c6dc, roughness: 0.5, metalness: 0.05, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
   private lines = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x5f8fe8, transparent: true, opacity: 0.85, depthTest: false }));
   private dots = new Points(new BufferGeometry(), dotMaterial({ color: 0xffffff, size: isCoarse ? 13 : 9 }));
-  private marks = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: SEL, depthTest: false, linewidth: 2 }));
-  private markDots = new Points(new BufferGeometry(), dotMaterial({ color: SEL, size: isCoarse ? 16 : 12 }));
-  private hoverMarks = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: HOVER, depthTest: false }));
-  private hoverDots = new Points(new BufferGeometry(), dotMaterial({ color: HOVER, size: isCoarse ? 16 : 12 }));
+  // Picked points / edges / faces stand out: thick lines (a plain line is
+  // always 1 px), bigger dots, and picked faces filled.
+  private marks: LineSegments2;
+  private markDots = new Points(new BufferGeometry(), dotMaterial({ color: SEL, size: isCoarse ? 20 : 15 }));
+  private hoverMarks: LineSegments2;
+  private hoverDots = new Points(new BufferGeometry(), dotMaterial({ color: HOVER, size: isCoarse ? 18 : 14 }));
+  /**
+   * Symmetry: every point moved moves its mirror image too (across this plane);
+   * points on the plane stay on it. `symPicking`: waiting for X / Y / Z or a
+   * tapped cage edge (the plane across its middle).
+   */
+  private sym: { origin: Vec3; normal: Vec3 } | null = null;
+  private symPicking = false;
+  private symPairs: Map<number, number> | null = null;
+  private symPlane = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ color: 0xb36bff, transparent: true, opacity: 0.1, depthTest: false, side: DoubleSide, depthWrite: false }));
+  private markFill = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ color: SEL, transparent: true, opacity: 0.35, depthTest: false, side: DoubleSide }));
 
   constructor(
     private app: AppContext,
@@ -97,6 +111,9 @@ export class FreeformTool implements Tool {
       this.choosingPlane = from.primitive === "plane";
     }
     this.typing = new DragTyping(app);
+    this.marks = new LineSegments2(new LineSegmentsGeometry(), app.view.lineMaterial(SEL, 4, false));
+    this.hoverMarks = new LineSegments2(new LineSegmentsGeometry(), app.view.lineMaterial(HOVER, 2.5, false));
+    this.markFill.renderOrder = 67;
     // Zoom to fit frames the cage being shaped (its points: the smooth shape lies inside them).
     this.dots.userData.fit = true;
     // The cage on top of everything (planes, other bodies, the gimbal).
@@ -112,11 +129,12 @@ export class FreeformTool implements Tool {
 
   enter(): void {
     const view = this.app.view;
-    view.overlay.add(this.surface, this.lines, this.dots, this.marks, this.markDots, this.hoverMarks, this.hoverDots);
+    view.overlay.add(this.symPlane, this.surface, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots);
     // Editing an existing freeform: hide its finished body while the cage is out.
     if (this.existing) view.setHidden(new Set([...this.app.store.doc.hidden, this.existing.id]));
     this.app.setSelection([]);
-    this.app.ui.setTools([{ id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: () => this.cancel() }]);
+    // Cancel is in the card (on a phone the card is one row without it: there it's in the column).
+    this.app.ui.setTools(screenClass() === "phone" ? [{ id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: () => this.cancel() }] : []);
     this.app.ui.setBottom([]);
     if (this.choosingPlane) {
       // Nothing shown yet: the origin planes (and flat faces) to put it on.
@@ -178,7 +196,7 @@ export class FreeformTool implements Tool {
   exit(): void {
     const view = this.app.view;
     view.setOriginPlanesVisible(false);
-    for (const o of [this.surface, this.lines, this.dots, this.marks, this.markDots, this.hoverMarks, this.hoverDots]) {
+    for (const o of [this.symPlane, this.surface, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots]) {
       view.overlay.remove(o);
       o.geometry.dispose();
     }
@@ -188,6 +206,11 @@ export class FreeformTool implements Tool {
     this.app.ui.showPanel(null);
     this.app.ui.setHint(null);
     this.app.ui.setLabel(0, 0, null);
+    this.typing.hideBox();
+    for (const o of [this.marks, this.hoverMarks]) {
+      o.geometry.dispose();
+      view.releaseLineMaterial(o.material);
+    }
     view.requestRender();
   }
 
@@ -219,6 +242,25 @@ export class FreeformTool implements Tool {
       } else {
         const turn = this.xform === "turn";
         for (const [k, a] of ["X", "Y", "Z"].entries()) items.push({ type: "number", label: turn ? `${a}°` : `Δ${a}`, value: 0, kind: turn ? "angle" : "length", onInput: (v) => this.setField(k, v) });
+      }
+    }
+    if (!this.live && !this.placing) {
+      items.push({
+        type: "toggle",
+        label: "Symmetry",
+        value: !!this.sym || this.symPicking,
+        onChange: (on) => {
+          this.sym = null;
+          this.symPairs = null;
+          this.symPicking = on;
+          this.drawSymPlane();
+          if (on) this.app.ui.setHint("Symmetry: pick X / Y / Z (through the middle), or tap a cage edge — the mirror goes across its middle.");
+          this.panel();
+        },
+      });
+      if (this.symPicking) {
+        const mid = this.centroid(this.cage.verts.map((_, i) => i));
+        items.push({ type: "choice", label: "Mirror across", options: [{ id: "x", label: "X" }, { id: "y", label: "Y" }, { id: "z", label: "Z" }], value: "", onChange: (k) => this.setSymmetry(mid, k === "x" ? [1, 0, 0] : k === "y" ? [0, 1, 0] : [0, 0, 1]) });
       }
     }
     const faces = this.picks.filter((p) => p.kind === "face").length;
@@ -696,6 +738,15 @@ export class FreeformTool implements Tool {
   }
 
   tap(p: ToolPointer, count = 1): void {
+    if (this.symPicking && !this.choosingPlane) {
+      const hit = this.pickAt(p);
+      if (hit?.kind === "edge") {
+        const [a, b] = hit.e.map((i) => this.cage.verts[i]);
+        this.setSymmetry(scale(add(a, b), 0.5), sub(b, a));
+        return;
+      }
+      return this.app.ui.toast("Tap a cage edge (the mirror goes across its middle), or pick X / Y / Z in the card");
+    }
     if (this.choosingPlane) {
       const at = this.planeAt(p);
       if (!at) return this.app.ui.toast("Select a plane or a flat face");
@@ -800,6 +851,24 @@ export class FreeformTool implements Tool {
 
   // ------------------------------------------------------------ dragging
 
+  /**
+   * A mouse drag from empty space: the blue box — the cage points inside it
+   * are picked (with Shift / Ctrl added to what's picked).
+   */
+  box(a: { x: number; y: number }, b: { x: number; y: number }, final: boolean, add: boolean): void {
+    if (!final || this.choosingPlane || this.dragging) return;
+    const [x0, x1] = [Math.min(a.x, b.x), Math.max(a.x, b.x)];
+    const [y0, y1] = [Math.min(a.y, b.y), Math.max(a.y, b.y)];
+    if (x1 - x0 < 3 && y1 - y0 < 3) return;
+    const inside = this.cage.verts.flatMap((v, i) => {
+      const q = this.app.view.toScreen(v);
+      return q && q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1 ? [i] : [];
+    });
+    const keep = add ? this.picks.filter((p) => p.kind === "vert" && !inside.includes(p.i)) : [];
+    this.picks = [...keep, ...inside.map((i) => ({ kind: "vert" as const, i }))];
+    this.selectionChanged();
+  }
+
   down(p: ToolPointer): boolean {
     if (this.choosingPlane) return false;
     const part = this.gimbal?.hit(p);
@@ -837,7 +906,7 @@ export class FreeformTool implements Tool {
       const dir = GIMBAL_AXES[part.i];
       const d = snap(axisDrag(view, dr.center, dir, dr.from, p));
       this.apply(scale(dir, d), 0);
-      this.app.ui.setLabel(p.x, p.y, `${fmtLen(d)}  · type a value`);
+      this.boxAt(p, fmtLen(d));
     } else if (part.kind === "plane" || part.kind === "center") {
       const n: Vec3 = part.kind === "plane" ? GIMBAL_AXES[part.i] : (view.cam.viewDir().toArray() as Vec3);
       const plane = { origin: dr.center, normal: n, xDir: xDirFor(n) };
@@ -846,7 +915,7 @@ export class FreeformTool implements Tool {
       if (!a || !b) return;
       const d = sub(b, a);
       this.apply([snap(d[0]), snap(d[1]), snap(d[2])], 0);
-      this.app.ui.setLabel(p.x, p.y, `${fmtLen(len(dr.d))}  · type a value`);
+      this.boxAt(p, fmtLen(len(dr.d)));
     } else if (part.kind === "ring") {
       const axis = GIMBAL_AXES[part.i];
       const c = view.toScreen(dr.center);
@@ -857,7 +926,7 @@ export class FreeformTool implements Tool {
       deg = ((deg + 540) % 360) - 180;
       const total = p.shift ? deg : Math.round(deg);
       this.apply([0, 0, 0], total);
-      this.app.ui.setLabel(p.x, p.y, `${total}°  · type a value`);
+      this.boxAt(p, `${total}°`);
     }
   }
 
@@ -880,8 +949,87 @@ export class FreeformTool implements Tool {
       }
       this.cage.verts[i] = add(q, d);
     }
+    this.mirrorMoved(ids);
     this.gimbal?.setCenter(this.centroid(ids));
     this.rebuild();
+  }
+
+  // ----------------------------------------------------------- symmetry
+
+  /** Mirror a point across the symmetry plane. */
+  private mirrored(q: Vec3): Vec3 {
+    const { origin, normal } = this.sym!;
+    return sub(q, scale(normal, 2 * dot(sub(q, origin), normal)));
+  }
+
+  private setSymmetry(origin: Vec3, normal: Vec3): void {
+    const n = norm(normal);
+    if (len(n) < 0.5) return;
+    this.sym = { origin, normal: n };
+    this.symPicking = false;
+    this.symPairs = null;
+    this.drawSymPlane();
+    this.panel();
+    this.app.ui.toast("Symmetry on: what you move on one side moves on the other");
+  }
+
+  /** Which point mirrors which (worked out from where the points are before a change). */
+  private pairs(base: Vec3[]): Map<number, number> {
+    if (this.symPairs && this.symPairs.size === base.length) return this.symPairs;
+    const box = new Box3().setFromPoints(base.map((v) => new Vector3(...v)));
+    const tol = Math.max(1e-6, box.getSize(new Vector3()).length() * 1e-4);
+    const m = new Map<number, number>();
+    base.forEach((v, i) => {
+      const w = this.mirrored(v);
+      let best = -1;
+      let bd = tol;
+      base.forEach((u, j) => {
+        const dd = Math.hypot(u[0] - w[0], u[1] - w[1], u[2] - w[2]);
+        if (dd <= bd) ((bd = dd), (best = j));
+      });
+      if (best >= 0) m.set(i, best);
+    });
+    this.symPairs = m;
+    return m;
+  }
+
+  /** After points moved: their mirror images follow; points on the plane stay on it. */
+  private mirrorMoved(ids: number[]): void {
+    if (!this.sym || !ids.length) return;
+    const base = this.dragging?.base ?? this.past[this.past.length - 1]?.cage.verts ?? this.cage.verts;
+    if (base.length !== this.cage.verts.length) return;
+    const pair = this.pairs(base);
+    const moved = new Set(ids);
+    const { origin, normal } = this.sym;
+    for (const i of ids) {
+      const j = pair.get(i);
+      if (j === undefined) continue;
+      if (j === i) {
+        const v = this.cage.verts[i];
+        this.cage.verts[i] = sub(v, scale(normal, dot(sub(v, origin), normal)));
+      } else if (!moved.has(j) || i < j) this.cage.verts[j] = this.mirrored(this.cage.verts[i]);
+    }
+  }
+
+  /** The symmetry plane, a see-through square round the shape. */
+  private drawSymPlane(): void {
+    const g = this.symPlane.geometry;
+    if (!this.sym) {
+      g.setAttribute("position", new BufferAttribute(new Float32Array(0), 3));
+      return;
+    }
+    const box = new Box3().setFromPoints(this.cage.verts.map((v) => new Vector3(...v)));
+    const r = box.getSize(new Vector3()).length() * 0.6 + 1;
+    const n = this.sym.normal;
+    const u = xDirFor(n);
+    const w = cross(n, u);
+    const c = sub(this.sym.origin, scale(n, 0));
+    const P = (a: number, b: number) => add(c, add(scale(u, a * r), scale(w, b * r)));
+    const q = [P(-1, -1), P(1, -1), P(1, 1), P(-1, -1), P(1, 1), P(-1, 1)].flat();
+    g.setAttribute("position", new BufferAttribute(new Float32Array(q), 3));
+    g.computeBoundingSphere();
+    this.symPlane.renderOrder = 66;
+    this.app.view.requestRender();
   }
 
   up(): void {
@@ -896,12 +1044,14 @@ export class FreeformTool implements Tool {
     if (from && !moved && !this.typing.active && this.pickAt(from)) {
       this.typing.reset();
       this.app.ui.setLabel(0, 0, null);
+      this.typing.hideBox();
       this.gimbal?.setHot(null);
       this.tap(from);
       return;
     }
     this.typing.reset();
     this.app.ui.setLabel(0, 0, null);
+    this.typing.hideBox();
     this.gimbal?.setHot(null);
     if (this.placing && moved) {
       // In place: on to editing points, edges and faces.
@@ -915,12 +1065,13 @@ export class FreeformTool implements Tool {
     if (moved) this.panel();
   }
 
-  dragKey(e: KeyboardEvent): boolean {
+  /** What a typed value does to the drag under way. */
+  private dragTarget(): DragTypingTarget | null {
     const dr = this.dragging;
-    if (!dr) return false;
+    if (!dr) return null;
     const part = dr.part;
     const dragDir = norm(dr.d);
-    return this.typing.key(e, {
+    return {
       kind: part.kind === "ring" ? "angle" : "length",
       apply: (v) => {
         if (part.kind === "ring") this.apply([0, 0, 0], v);
@@ -929,7 +1080,18 @@ export class FreeformTool implements Tool {
       },
       commit: () => this.up(),
       cancel: () => this.apply([0, 0, 0], 0),
-    });
+    };
+  }
+
+  dragKey(e: KeyboardEvent): boolean {
+    const t = this.dragTarget();
+    return !!t && this.typing.key(e, t);
+  }
+
+  /** The drag's value in a box by the pointer (type into it while dragging). */
+  private boxAt(p: ToolPointer, text: string): void {
+    const t = this.dragTarget();
+    if (t) this.typing.box(p, text, t);
   }
 
   /**
@@ -948,6 +1110,7 @@ export class FreeformTool implements Tool {
     const base = [...this.fieldBase];
     const moved = moveTurnScale(base.map(([, p]) => p), this.xform, this.fieldVals as [number, number, number, number]);
     base.forEach(([i], n) => (this.cage.verts[i] = moved[n]));
+    this.mirrorMoved(base.map(([i]) => i));
     this.rebuild();
     this.placeGimbal();
   }
@@ -1061,15 +1224,32 @@ export class FreeformTool implements Tool {
         return [];
       });
     const pts = (ps: Pick[]) => ps.flatMap((p) => (p.kind === "vert" ? [...this.cage.verts[p.i]] : []));
-    setPositions(this.marks, seg(this.picks));
+    setLines(this.marks, seg(this.picks));
     setPositions(this.markDots, pts(this.picks));
     const h = this.hovered ? [this.hovered] : [];
-    setPositions(this.hoverMarks, seg(h));
+    setLines(this.hoverMarks, seg(h));
     setPositions(this.hoverDots, pts(h));
+    // Picked faces filled (two triangles each).
+    const fill = this.picks.flatMap((p) => {
+      if (p.kind !== "face") return [];
+      const [a, b, c, d] = this.cage.faces[p.f].map((i) => this.cage.verts[i]);
+      return [...a, ...b, ...c, ...a, ...c, ...d];
+    });
+    const fg = this.markFill.geometry;
+    fg.setAttribute("position", new BufferAttribute(new Float32Array(fill), 3));
+    fg.computeBoundingSphere();
     this.app.view.requestRender();
   }
 
   // ------------------------------------------------------------- finishing
+
+  /** Right-click: let go of the picked points/edges/faces; then finish (keeping the shape). */
+  context(): void {
+    if (this.dragging) return;
+    if (this.picks.length) return ((this.picks = []), this.selectionChanged());
+    if (this.choosingPlane) return this.cancel();
+    this.done();
+  }
 
   key(e: KeyboardEvent): boolean {
     if (e.key === "Escape") {
@@ -1166,6 +1346,14 @@ export class FreeformTool implements Tool {
     this.picks = [hit];
     this.selectionChanged();
   }
+}
+
+/** Thick lines (segment pairs). */
+function setLines(o: LineSegments2, xyz: number[]): void {
+  const g = o.geometry as LineSegmentsGeometry;
+  // (No segments: an empty instanced line draws nothing.)
+  g.setPositions(xyz.length ? xyz : [0, 0, 0, 0, 0, 0]);
+  o.visible = xyz.length > 0;
 }
 
 function setPositions(o: LineSegments | Points, xyz: number[]): void {

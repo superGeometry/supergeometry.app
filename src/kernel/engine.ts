@@ -54,7 +54,7 @@ import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
-import { cylinderOf, deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, unify } from "./faceEdit";
+import { cylinderOf, deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import type { BodyMesh, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
@@ -417,8 +417,9 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           else if (isEmpty(out) && isEmpty(plain)) throw new Error("The result is empty");
           else throw new Error("Subtracting these didn't work out — the geometry engine lost the shape. Try the tools one or two at a time");
         }
-        for (const t of f.tools) bodies.delete(t);
-        bodies.set(f.target, out);
+        if (!f.keepTools) for (const t of f.tools) bodies.delete(t);
+        // Kept as it was: the result is a body of its own.
+        bodies.set(f.keepTarget ? f.id : f.target, out);
         return;
       }
       let open: number | undefined;
@@ -449,10 +450,10 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         }
         // A union joins: a body that doesn't touch would only be grouped with it, not joined.
         if (f.op === "union" && solids(target) >= before) throw new Error("These bodies don't touch — Union needs them to overlap or touch (move one onto the other first)");
-        bodies.delete(t);
+        if (!(f.op === "intersect" && f.keepTools)) bodies.delete(t);
       }
       if (isEmpty(target)) throw new Error("The result is empty");
-      bodies.set(f.target, target);
+      bodies.set(f.op === "intersect" && f.keepTarget ? f.id : f.target, target);
       return;
     }
 
@@ -594,6 +595,20 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         const body = need(bodies, f.face.body);
         const face = resolveFace(body, f.face);
         const { origin, normal } = planeOf(face);
+        // Slid within its own plane, or turned about its normal: its corners
+        // move and the faces round it follow (a plane alone can't show that —
+        // the face stayed where it was).
+        const nn = norm(normal);
+        const slide = sub(f.translate, scale(nn, dot(f.translate, nn)));
+        const twist = !!r && Math.abs(dot(norm(r.axis), nn)) > 1e-6;
+        if (len(slide) > 1e-9 || twist) {
+          const size = Math.hypot(body.boundingBox.width, body.boundingBox.height, body.boundingBox.depth) || 1;
+          const loop = faceLoop(face, size * 1e-6);
+          const out = loop ? movePolyhedronPoints(body, loop.map((v) => [v, move(v)] as [Vec3, Vec3])) : null;
+          if (!out) throw new Error("Sliding or turning a face within its plane works on bodies of flat, straight-edged faces — push or tilt it instead");
+          bodies.set(f.face.body, staysClosed(body, out));
+          return;
+        }
         const n = turn(normal);
         bodies.set(f.face.body, staysClosed(body, replaceFacePlane(body, face, { origin: move(origin), normal: n, xDir: xDirFor(n) })));
         return;
@@ -1331,8 +1346,7 @@ function booleanVolumeOk(op: "fuse" | "cut", a: Shape3D, b: Shape3D, r: Shape3D)
  */
 function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Shape3D {
   const oc = getOC();
-  const bb = a.boundingBox;
-  const tol = Math.max(1e-7, Math.hypot(bb.width, bb.height, bb.depth) * 1e-6);
+  const tol = Math.max(1e-7, sizeOf(a) * 1e-6);
   const algo = op === "cut" ? new oc.BRepAlgoAPI_Cut() : op === "fuse" ? new oc.BRepAlgoAPI_Fuse() : new oc.BRepAlgoAPI_Common();
   const args = new oc.NCollection_List_TopoDS_Shape();
   const tools = new oc.NCollection_List_TopoDS_Shape();
@@ -1348,7 +1362,7 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
     if (!algo.IsDone()) throw new Error("boolean failed");
     const out = cast(algo.Shape()) as Shape3D;
     // Fuse and cut keep their faces tidy like the usual booleans do.
-    return op === "common" ? out : (unify(out) as Shape3D);
+    return op === "common" ? out : (unify(out, Math.max(sizeOf(a), sizeOf(b))) as Shape3D);
   } catch {
     return op === "cut" ? a.cut(b) : op === "fuse" ? a.fuse(b) : a.intersect(b);
   } finally {

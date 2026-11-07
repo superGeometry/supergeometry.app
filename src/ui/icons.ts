@@ -24,6 +24,10 @@ export const icons = {
   sketchFillet: svg('<path d="M4 20V11a7 7 0 0 1 7-7h9"/>'),
   text: svg('<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'),
   move: svg('<path d="M12 3v18M3 12h18"/><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>'),
+  // An edge (thick) with arrows off it: moving / tilting just that edge.
+  moveEdge: svg('<path d="M5 17L17 5" stroke-width="3"/><path d="M14 16l4 4M18 16v4h-4M10 8L6 4M6 8V4h4"/>'),
+  // A face (a slanted square) with an arrow up out of it.
+  moveFace: svg('<path d="M3 16l7 4 11-5-7-4z"/><path d="M12 13V3M9 6l3-3 3 3"/>'),
   scale: svg('<rect x="3" y="11" width="10" height="10"/><path d="M13 11l8-8M15 3h6v6"/>'),
   patternLinear: svg('<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>'),
   patternCircular: svg('<circle cx="12" cy="5" r="2.2"/><circle cx="19" cy="12" r="2.2"/><circle cx="12" cy="19" r="2.2"/><circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="12" r="0.8" fill="currentColor"/>'),

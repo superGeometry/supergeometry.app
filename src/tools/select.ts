@@ -19,6 +19,7 @@ import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 import { connectEdges } from "../doc/freeformConnect";
 import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
+import { BooleanOp } from "./booleanOp";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
 
 const SOON = "Coming soon";
@@ -90,11 +91,14 @@ export class SelectTool implements Tool {
       const img = s?.kind === "image" ? this.app.store.find<ImageFeature>(s.id) : undefined;
       // A vertex: its gimbal moves just that corner (the faces around it follow).
       const at = s?.kind === "vertex" ? this.app.view.vertexOf(s.body, s.vertex) : undefined;
+      const edge = s?.kind === "edge" ? this.edgeRefs()[0] : undefined;
       const op = img
         ? new ImageOp(this.app, img)
         : s?.kind === "vertex" && at
           ? new MoveFaceOp(this.app, { vertex: { body: s.body, at } })
-          : new TransformOp(this.app, "move", bodiesOf(this.app.selection), undefined, undefined, s?.kind === "body" && copyMode.on);
+          : edge
+            ? new MoveFaceOp(this.app, { edge })
+            : new TransformOp(this.app, "move", bodiesOf(this.app.selection), undefined, undefined, s?.kind === "body" && copyMode.on);
       this.app.setTool(op);
       return op.down(p);
     }
@@ -169,7 +173,7 @@ export class SelectTool implements Tool {
     const now = this.app.selection;
     if (s.kind === "profile" && !p.add && count < 2 && now.length && now.every((x) => x.kind === "profile") && now.some((x) => sameSel(x, s!))) {
       const src = sourcesOf(this.app, now)[0];
-      if (src) this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { distance: 0 }));
+      if (src) this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { distance: 0 }).markTapped());
     }
   }
 
@@ -191,6 +195,13 @@ export class SelectTool implements Tool {
     const picked: Sel[] = inside.map((body) => ({ kind: "body", body: body.id }));
     const base = add ? this.app.selection.filter((s) => s.kind === "body") : [];
     this.app.setSelection([...base, ...picked.filter((s) => !base.some((x) => sameSel(x, s)))]);
+  }
+
+  /** Right-click: let go of what's picked (and of a tool waiting for a pick). */
+  context(): void {
+    if (!this.app.selection.length && !this.pending) return;
+    this.pending = null;
+    this.app.setSelection([]);
   }
 
   key(e: KeyboardEvent): boolean {
@@ -272,7 +283,13 @@ export class SelectTool implements Tool {
       }
     } else if (first.kind === "edge") {
       const e = this.edgeRefs()[0];
-      if (e) this.showHandle({ base: e.mid, normal: e.dir }, "dot", () => new EdgeOp(this.app, "fillet", this.edgeRefs()).grabFromEdge());
+      const straight = this.app.view.body(first.body)?.edges[first.edge]?.type === "LINE";
+      // One straight edge: its Move/Rotate gimbal is ready to drag (fillet and
+      // chamfer are in the list); a round one: the fillet's dot.
+      if (e && straight && sel.length === 1 && !this.freeformOf(first.body)) {
+        this.gimbal = new Gimbal(this.app.view, { axes: MoveFaceOp.edgeAxes(e.dir), parts: MoveFaceOp.edgeParts });
+        this.gimbal.setCenter(e.mid);
+      } else if (e) this.showHandle({ base: e.mid, normal: e.dir }, "dot", () => new EdgeOp(this.app, "fillet", this.edgeRefs()).grabFromEdge());
     }
   }
 
@@ -430,7 +447,7 @@ export class SelectTool implements Tool {
     return [
       { id: "sketch", label: "Sketch", icon: "sketch", shortcut: "S", ...needFlat, run: () => this.sketchOnFace() },
       // Moves just this face; the rest of the body stretches to follow.
-      { id: "move", label: "Move/Rotate Face", icon: "move", shortcut: "M", ...needFlat, run: () => ref && info?.plane && app.setTool(new MoveFaceOp(app, { face: ref, plane: info.plane })) },
+      { id: "move", label: "Move/Rotate Face", icon: "moveFace", shortcut: "M", ...needFlat, run: () => ref && info?.plane && app.setTool(new MoveFaceOp(app, { face: ref, plane: info.plane })) },
       // Scales just this face, within its plane; the sides tilt to follow.
       { id: "scale", label: "Scale Face", icon: "scale", ...needFlat, run: () => ref && info?.plane && app.setTool(new ScaleFaceOp(app, ref, info.plane)) },
       { id: "align", label: "Align", icon: "align", disabled: true, why: SOON },
@@ -495,7 +512,7 @@ export class SelectTool implements Tool {
       { id: "fillet", label: "Fillet", icon: "fillet", shortcut: "F", active: true, run: () => app.setTool(new EdgeOp(app, "fillet", this.edgeRefs())), ...sized("fillet") },
       { id: "chamfer", label: "Chamfer", icon: "chamfer", shortcut: "C", run: () => app.setTool(new EdgeOp(app, "chamfer", this.edgeRefs())), ...sized("chamfer") },
       // Moves just this edge: the faces on it tilt to follow.
-      { id: "move", label: "Move/Rotate Edge", icon: "move", shortcut: "M", disabled: !straight || sel.length !== 1, why: "Needs one straight edge", run: () => ref && app.setTool(new MoveFaceOp(app, { edge: ref })) },
+      { id: "move", label: "Move/Rotate Edge", icon: "moveEdge", shortcut: "M", disabled: !straight || sel.length !== 1, why: "Needs one straight edge", run: () => ref && app.setTool(new MoveFaceOp(app, { edge: ref })) },
       { id: "moveBody", label: "Move/Rotate Body", icon: "move", run: () => app.setTool(new TransformOp(app, "move", bodies)) },
       // A round edge (a hole's rim, a shank's end): thread the round face it bounds — in a small hole the rim is what a finger hits.
       ...(info?.type === "CIRCLE" && sel.length === 1 ? [{ id: "thread", label: "Thread", icon: "thread" as const, run: () => app.startThread() }] : []),
@@ -570,8 +587,9 @@ export class SelectTool implements Tool {
       { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: () => app.setTool(new TransformOp(app, "rotate", bodies)) },
       { id: "mirror", label: "Mirror", icon: "mirror", run: () => app.setTool(new TransformOp(app, "mirror", bodies)) },
       { id: "union", label: "Union", icon: "union", shortcut: "U", disabled: !multi, why: "Select 2+ bodies", run: boolean("union") },
-      { id: "subtract", label: "Subtract", icon: "subtract", disabled: !multi, why: "Select 2+ bodies (first is kept)", run: boolean("subtract") },
-      { id: "intersect", label: "Intersect", icon: "intersect", disabled: !multi, why: "Select 2+ bodies", run: boolean("intersect") },
+      // Subtract / Intersect open their tool with the bodies picked (+ the first, − the rest): Keep options there.
+      { id: "subtract", label: "Subtract", icon: "subtract", disabled: !multi, why: "Select 2+ bodies (first is kept)", run: () => app.setTool(new BooleanOp(app, "subtract", bodies[0], bodies.slice(1))) },
+      { id: "intersect", label: "Intersect", icon: "intersect", disabled: !multi, why: "Select 2+ bodies", run: () => app.setTool(new BooleanOp(app, "intersect", bodies[0], bodies.slice(1))) },
       { id: "split", label: "Split Body", icon: "split", run: () => app.setTool(new SplitOp(app, bodies[0])) },
       // An open surface (a freeform sheet): filled down to a plane to make it a solid.
       ...(openSurface ? [{ id: "fillToPlane", label: "Fill to Plane", icon: "fill" as const, run: () => app.setTool(new FillToPlaneOp(app, bodies[0])) }] : []),

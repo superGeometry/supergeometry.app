@@ -107,10 +107,26 @@ export class ItemsPanel {
     };
     const byId = new Map(Object.values(rows).flat().map((r) => [r.id, r]));
 
+    // Each kind folds away under its heading (a long list of sketches and
+    // planes buried the bodies).
+    const category = (title: string, count: number) => {
+      const key = `cat:${title}`;
+      const li = el("li", "items-heading items-category");
+      const b = el("button", "items-category-btn", `${this.collapsed.has(key) ? "▸" : "▾"} ${title} (${count})`);
+      b.title = this.collapsed.has(key) ? "Show" : "Fold away";
+      b.addEventListener("click", () => {
+        if (this.collapsed.has(key)) this.collapsed.delete(key);
+        else this.collapsed.add(key);
+        this.render(this.last);
+      });
+      li.append(b);
+      this.list.append(li);
+      return !this.collapsed.has(key);
+    };
     for (const [title, list] of Object.entries(rows)) {
       const loose = list.filter((r) => !inFolder.has(r.id));
       if (title !== "Bodies" && !loose.length) continue;
-      section(`${title} (${loose.length})`);
+      if (!category(title, loose.length)) continue;
       if (!loose.length) this.list.append(el("li", "items-empty", bodies.length ? "All in folders" : "No bodies yet"));
       for (const r of loose) this.row(r, hidden, 0);
     }

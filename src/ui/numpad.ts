@@ -36,6 +36,11 @@ const KEYS = ["7", "8", "9", "⌫", "4", "5", "6", "−", "1", "2", "3", "↵", 
 class Numpad {
   private el = document.createElement("div");
   private target: HTMLInputElement | null = null;
+
+  /** Put away if it's open on this box. */
+  closeIf(input: HTMLInputElement): void {
+    if (this.target === input) this.close();
+  }
   /** The caret / selection inside the box, kept here (the box may not have focus). */
   private selStart = 0;
   private selEnd = 0;
@@ -122,12 +127,19 @@ class Numpad {
       (e) => {
         const t = e.target as HTMLElement;
         if (this.el.contains(t)) return;
-        if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad) {
-          if (t !== this.target) this.open(t);
-          return;
-        }
+        // A numpad box opens on a plain tap (the click): pressing and dragging
+        // sideways scrubs its value instead.
+        if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad) return;
         // A tap anywhere else puts the numpad away.
         if (this.target) this.close();
+      },
+      true,
+    );
+    document.addEventListener(
+      "click",
+      (e) => {
+        const t = e.target as HTMLElement;
+        if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad && !t.dataset.scrubbed && t !== this.target) this.open(t);
       },
       true,
     );
@@ -249,6 +261,88 @@ export function numpadInput(input: HTMLInputElement): void {
   pad ??= new Numpad();
   input.dataset.numpad = "1";
   if (settings.value.numpad) input.inputMode = "none";
+  scrubbable(input);
+}
+
+/** Length, angle or plain number: the box's own kind, else its unit. */
+function kindOf(input: HTMLInputElement): "length" | "angle" | "number" | "int" {
+  const k = input.dataset.kind;
+  if (k === "length" || k === "angle" || k === "number" || k === "int") return k;
+  const unit = input.parentElement?.querySelector(".dim-unit, .field-unit")?.textContent?.trim() ?? "";
+  return unit === "°" ? "angle" : unit ? "length" : "number";
+}
+
+/** A step a few pixels of drag should move this value by. */
+function scrubStep(v: number, kind: string): number {
+  if (kind === "int") return 1;
+  if (kind === "angle") return 1;
+  const a = Math.abs(v);
+  if (kind === "number") return a < 1 ? 0.01 : a < 10 ? 0.1 : 1;
+  return a < 1 ? 0.01 : a < 10 ? 0.1 : a < 100 ? 0.5 : a < 1000 ? 5 : 50;
+}
+
+/**
+ * A value box is also a horizontal scroll wheel: press and drag left or right
+ * to turn the value down or up (a click still opens the numpad / types).
+ */
+function scrubbable(input: HTMLInputElement): void {
+  if (input.dataset.scrub) return;
+  input.dataset.scrub = "1";
+  let start: { x: number; v: number; id: number; kind: string; step: number } | null = null;
+  let moved = false;
+  input.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    const kind = kindOf(input);
+    // Only plain numbers (not "width*2" or a variable).
+    const text = input.value.trim().replace(/\s*(mm|cm|m|in|ft|°|")$/i, "");
+    if (!/^-?\d*\.?\d+$/.test(text)) return;
+    const v = Number(text);
+    start = { x: e.clientX, v, id: e.pointerId, kind, step: scrubStep(v, kind) };
+    moved = false;
+    // A mouse doesn't focus the box until it's known to be a click.
+    if (e.pointerType === "mouse" && document.activeElement !== input) e.preventDefault();
+    try {
+      input.setPointerCapture(e.pointerId);
+    } catch {
+      // synthetic pointers can't be captured
+    }
+  });
+  input.addEventListener("pointermove", (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.x;
+    if (!moved && Math.abs(dx) < 6) return;
+    if (!moved) {
+      moved = true;
+      input.dataset.scrubbed = "1";
+      input.classList.add("scrubbing");
+      pad?.closeIf(input);
+    }
+    e.preventDefault();
+    const n = Math.round(dx / 4);
+    let nv = start.v + n * start.step;
+    if (start.kind === "int") nv = Math.round(nv);
+    const dec = Math.max(0, -Math.floor(Math.log10(start.step) + 1e-9));
+    const text = String(Number(nv.toFixed(dec)));
+    if (text !== input.value) {
+      input.value = text;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  const end = (e: PointerEvent) => {
+    if (!start || e.pointerId !== start.id) return;
+    start = null;
+    if (moved) {
+      input.classList.remove("scrubbing");
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.blur();
+      // (the click that follows mustn't open the numpad)
+      setTimeout(() => delete input.dataset.scrubbed, 0);
+    } else if (e.type === "pointerup" && e.pointerType === "mouse" && document.activeElement !== input) {
+      input.focus();
+    }
+  };
+  input.addEventListener("pointerup", end);
+  input.addEventListener("pointercancel", end);
 }
 
 /** Open the numpad on a box right away (a box that appears ready for typing). */

@@ -18,7 +18,7 @@ import { entityPolylines } from "../sketch/curves";
 import { arrangement, drawnRegions, regionRef } from "../sketch/regions";
 import { DimWidget } from "./annotate";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
-import { DragTyping } from "./dragTyping";
+import { DragTyping, type DragTypingTarget } from "./dragTyping";
 import { isTouchDevice } from "../device";
 import { CopyToggle, linkMode } from "./copyToggle";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
@@ -265,8 +265,14 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     this.frame = sourceFrame(this.app, this.feature.source);
   }
 
-  /** When it opened (a tap on a shape opens it straight away). */
-  private openedAt = performance.now();
+  /** When a tap on a shape opened it (straight away); not when a drag of its arrow did. */
+  private openedAt = -Infinity;
+
+  /** Opened by a tap: a second tap right after is the double tap's (not a grab of the arrow). */
+  markTapped(): this {
+    this.openedAt = performance.now();
+    return this;
+  }
 
   down(p: ToolPointer): boolean {
     if (!this.handle.hit(p)) return false;
@@ -996,7 +1002,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       const dir = GIMBAL_AXES[part.i];
       const d = snap(axisDrag(view, dr.center, dir, dr.from, p));
       o.translate = add(dr.t0, scale(dir, d));
-      this.app.ui.setLabel(p.x, p.y, fmtLen(d));
+      this.boxAt(p, fmtLen(d));
     } else if (part.kind === "plane" || part.kind === "center") {
       // Move in the plane of the square (or the screen plane for the centre).
       const n: Vec3 = part.kind === "plane" ? GIMBAL_AXES[part.i] : (view.cam.viewDir().toArray() as Vec3);
@@ -1006,7 +1012,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       if (!a || !b) return;
       const d = sub(b, a);
       o.translate = add(dr.t0, [snap(d[0]), snap(d[1]), snap(d[2])]);
-      this.app.ui.setLabel(p.x, p.y, fmtLen(len(sub(o.translate, dr.t0))));
+      this.boxAt(p, fmtLen(len(sub(o.translate, dr.t0))));
     } else {
       const axis = GIMBAL_AXES[part.i];
       const c = view.toScreen(dr.center);
@@ -1018,7 +1024,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       deg = ((deg + 540) % 360) - 180;
       const total = p.shift ? dr.a0 + deg : Math.round((dr.a0 + deg) / 5) * 5;
       o.rotate = { origin: this.center, axis, angle: total };
-      this.app.ui.setLabel(p.x, p.y, `${Math.round(total * 10) / 10}°`);
+      this.boxAt(p, `${Math.round(total * 10) / 10}°`);
     }
     this.app.ui.updatePanelValues([o.translate[0], o.translate[1], o.translate[2], o.rotate?.angle ?? 0]);
     this.update();
@@ -1039,10 +1045,11 @@ export class TransformOp extends FeatureOp<TransformFeature> {
   private typing = new DragTyping(this.app);
 
   /** Typed while dragging: distance for arrows/squares/centre, angle for arcs. */
-  dragKey(e: KeyboardEvent): boolean {
+  /** What a typed value does to the part being dragged (typed during the drag, or in its value box after). */
+  private dragTarget(): DragTypingTarget | null {
     const o = this.feature.op;
     const dr = this.dragging;
-    if (!dr || o.kind !== "move") return false;
+    if (!dr || o.kind !== "move") return null;
     const part = dr.part;
     const refresh = () => {
       this.app.ui.updatePanelValues([o.translate[0], o.translate[1], o.translate[2], o.rotate?.angle ?? 0]);
@@ -1050,7 +1057,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     };
     // Squares/centre: along the direction dragged so far.
     const dragDir = norm(sub(o.translate, dr.t0));
-    return this.typing.key(e, {
+    return {
       kind: part.kind === "ring" ? "angle" : "length",
       apply: (v) => {
         if (part.kind === "ring") o.rotate = { origin: this.center, axis: GIMBAL_AXES[part.i], angle: dr.a0 + v };
@@ -1060,7 +1067,18 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       },
       commit: () => ((this.dragging = null), this.gimbal?.setHot(null), this.done()),
       cancel: () => ((o.translate = [...dr.t0] as Vec3), o.rotate && (o.rotate.angle = dr.a0), refresh()),
-    });
+    };
+  }
+
+  /** The drag's value in a box by the pointer (typeable, and it stays after letting go). */
+  private boxAt(p: ToolPointer, text: string): void {
+    const t = this.dragTarget();
+    if (t) this.typing.box(p, text, t);
+  }
+
+  dragKey(e: KeyboardEvent): boolean {
+    const t = this.dragTarget();
+    return !!t && this.typing.key(e, t);
   }
 }
 
@@ -1104,20 +1122,27 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
       const x = norm(target.plane.xDir);
       this.axes = [x, cross(n, x), n];
     } else {
-      const d = norm(target.edge.dir);
-      const u = xDirFor(d);
-      this.axes = [d, u, cross(d, u)];
+      this.axes = MoveFaceOp.edgeAxes(target.edge.dir);
     }
-    // Face: push along the normal, tilt about the in-plane axes. Edge: move across it, tilt it.
-    const parts = isFace
-      ? (p: GimbalPart) => (p.kind === "axis" && p.i === 2) || (p.kind === "ring" && p.i < 2)
-      : (p: GimbalPart) => (p.kind === "axis" && p.i > 0) || (p.kind === "plane" && p.i === 0) || (p.kind === "ring" && p.i > 0);
+    // Face: push it, slide it in its plane, tilt it, turn it about its normal
+    // (a body of flat faces: the faces round it follow). Edge: move across it, tilt it.
+    const parts = isFace ? () => true : MoveFaceOp.edgeParts;
     this.gimbal = new Gimbal(app.view, { axes: this.axes, parts });
     this.center = this.feature.rotate?.origin ?? center;
   }
 
+  /** An edge's gimbal: across it, and tilting it (along itself changes nothing). */
+  static edgeParts = (p: GimbalPart): boolean => (p.kind === "axis" && p.i > 0) || (p.kind === "plane" && p.i === 0) || (p.kind === "ring" && p.i > 0);
+
+  /** The axes of an edge's gimbal: along it, then two across. */
+  static edgeAxes(dir: Vec3): Vec3[] {
+    const d = norm(dir);
+    const u = xDirFor(d);
+    return [d, u, cross(d, u)];
+  }
+
   protected hint(): string {
-    return "Drag an arrow to move it, an arc to tilt it — or type a value while dragging.";
+    return "Drag an arrow to move it, an arc to tilt or turn it — or type a value while dragging.";
   }
 
   protected items(): PanelItem[] {
@@ -1175,7 +1200,7 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
       const dir = this.axes[part.i];
       const d = snap(axisDrag(view, dr.center, dir, dr.from, p));
       f.translate = add(dr.t0, scale(dir, d));
-      this.app.ui.setLabel(p.x, p.y, `${fmtLen(d)}  · type a value`);
+      this.boxAt(p, `${fmtLen(d)}`);
     } else if (part.kind === "center") {
       // Free move in the screen plane.
       const n = view.cam.viewDir().toArray() as Vec3;
@@ -1185,7 +1210,7 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
       if (!a || !b) return;
       const d = sub(b, a);
       f.translate = add(dr.t0, [snap(d[0]), snap(d[1]), snap(d[2])]);
-      this.app.ui.setLabel(p.x, p.y, `${fmtLen(len(sub(f.translate, dr.t0)))}  · type a value`);    } else if (part.kind === "plane") {
+      this.boxAt(p, `${fmtLen(len(sub(f.translate, dr.t0)))}`);    } else if (part.kind === "plane") {
       const n = this.axes[part.i];
       const plane = { origin: dr.center, normal: n, xDir: xDirFor(n) };
       const a = view.rayToPlane(dr.from.x, dr.from.y, plane);
@@ -1193,7 +1218,7 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
       if (!a || !b) return;
       const d = sub(b, a);
       f.translate = add(dr.t0, [snap(d[0]), snap(d[1]), snap(d[2])]);
-      this.app.ui.setLabel(p.x, p.y, `${fmtLen(len(sub(f.translate, dr.t0)))}  · type a value`);
+      this.boxAt(p, `${fmtLen(len(sub(f.translate, dr.t0)))}`);
     } else if (part.kind === "ring") {
       const axis = this.axes[part.i];
       const c = view.toScreen(dr.center);
@@ -1204,7 +1229,7 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
       deg = ((deg + 540) % 360) - 180;
       const total = p.shift ? dr.a0 + deg : Math.round(dr.a0 + deg);
       f.rotate = { origin: this.center, axis, angle: total };
-      this.app.ui.setLabel(p.x, p.y, `${Math.round(total * 10) / 10}°  · type a value`);
+      this.boxAt(p, `${Math.round(total * 10) / 10}°`);
     }
     this.app.ui.updatePanelValues([f.translate[0], f.translate[1], f.translate[2], f.rotate?.angle ?? 0]);
     this.update();
@@ -1220,17 +1245,18 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
 
   private typing = new DragTyping(this.app);
 
-  dragKey(e: KeyboardEvent): boolean {
+  /** What a typed value does to the part being dragged (typed during the drag, or in its value box after). */
+  private dragTarget(): DragTypingTarget | null {
     const f = this.feature;
     const dr = this.dragging;
-    if (!dr) return false;
+    if (!dr) return null;
     const part = dr.part;
     const refresh = () => {
       this.app.ui.updatePanelValues([f.translate[0], f.translate[1], f.translate[2], f.rotate?.angle ?? 0]);
       this.update();
     };
     const dragDir = norm(sub(f.translate, dr.t0));
-    return this.typing.key(e, {
+    return {
       kind: part.kind === "ring" ? "angle" : "length",
       apply: (v) => {
         if (part.kind === "ring") f.rotate = { origin: this.center, axis: this.axes[part.i], angle: dr.a0 + v };
@@ -1240,7 +1266,18 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
       },
       commit: () => ((this.dragging = null), this.gimbal.setHot(null), this.done()),
       cancel: () => ((f.translate = [...dr.t0] as Vec3), f.rotate && (f.rotate.angle = dr.a0), refresh()),
-    });
+    };
+  }
+
+  /** The drag's value in a box by the pointer (typeable, and it stays after letting go). */
+  private boxAt(p: ToolPointer, text: string): void {
+    const t = this.dragTarget();
+    if (t) this.typing.box(p, text, t);
+  }
+
+  dragKey(e: KeyboardEvent): boolean {
+    const t = this.dragTarget();
+    return !!t && this.typing.key(e, t);
   }
 }
 
@@ -1340,7 +1377,7 @@ export class ScaleOp extends FeatureOp<TransformFeature> {
     if (dr.part.kind === "axis" && this.xyz) k[dr.part.i] = dr.k0[dr.part.i] * f;
     else for (let i = 0; i < 3; i++) k[i] = dr.k0[i] * f;
     this.setFactors(k);
-    this.app.ui.setLabel(p.x, p.y, `×${(dr.part.kind === "axis" && this.xyz ? k[dr.part.i] : k[0]).toFixed(2)}  · type a value`);
+    this.boxAt(p, `×${(dr.part.kind === "axis" && this.xyz ? k[dr.part.i] : k[0]).toFixed(2)}`);
   }
 
   up(): void {
@@ -1350,10 +1387,11 @@ export class ScaleOp extends FeatureOp<TransformFeature> {
     this.gimbal.setHot(null);
   }
 
-  dragKey(e: KeyboardEvent): boolean {
+  /** What a typed value does to the part being dragged (typed during the drag, or in its value box after). */
+  private dragTarget(): DragTypingTarget | null {
     const dr = this.dragging;
-    if (!dr) return false;
-    return this.typing.key(e, {
+    if (!dr) return null;
+    return {
       kind: "number",
       apply: (v) => {
         if (v <= 0) return;
@@ -1364,7 +1402,18 @@ export class ScaleOp extends FeatureOp<TransformFeature> {
       },
       commit: () => ((this.dragging = null), this.gimbal.setHot(null), this.done()),
       cancel: () => this.setFactors(dr.k0),
-    });
+    };
+  }
+
+  /** The drag's value in a box by the pointer (typeable, and it stays after letting go). */
+  private boxAt(p: ToolPointer, text: string): void {
+    const t = this.dragTarget();
+    if (t) this.typing.box(p, text, t);
+  }
+
+  dragKey(e: KeyboardEvent): boolean {
+    const t = this.dragTarget();
+    return !!t && this.typing.key(e, t);
   }
 }
 
@@ -1447,7 +1496,7 @@ export class ScaleFaceOp extends FeatureOp<ScaleFaceFeature> {
     this.feature.factors = k;
     this.app.ui.updatePanelValues(k);
     this.update();
-    this.app.ui.setLabel(p.x, p.y, `×${(dr.part.kind === "axis" ? k[dr.part.i as 0 | 1] : k[0]).toFixed(2)}  · type a value`);
+    this.boxAt(p, `×${(dr.part.kind === "axis" ? k[dr.part.i as 0 | 1] : k[0]).toFixed(2)}`);
   }
 
   up(): void {
@@ -1456,10 +1505,11 @@ export class ScaleFaceOp extends FeatureOp<ScaleFaceFeature> {
     this.app.ui.setLabel(0, 0, null);
   }
 
-  dragKey(e: KeyboardEvent): boolean {
+  /** What a typed value does to the part being dragged (typed during the drag, or in its value box after). */
+  private dragTarget(): DragTypingTarget | null {
     const dr = this.dragging;
-    if (!dr) return false;
-    return this.typing.key(e, {
+    if (!dr) return null;
+    return {
       kind: "number",
       apply: (v) => {
         if (v <= 0) return;
@@ -1472,7 +1522,18 @@ export class ScaleFaceOp extends FeatureOp<ScaleFaceFeature> {
       },
       commit: () => ((this.dragging = null), this.done()),
       cancel: () => ((this.feature.factors = dr.k0), this.update()),
-    });
+    };
+  }
+
+  /** The drag's value in a box by the pointer (typeable, and it stays after letting go). */
+  private boxAt(p: ToolPointer, text: string): void {
+    const t = this.dragTarget();
+    if (t) this.typing.box(p, text, t);
+  }
+
+  dragKey(e: KeyboardEvent): boolean {
+    const t = this.dragTarget();
+    return !!t && this.typing.key(e, t);
   }
 }
 

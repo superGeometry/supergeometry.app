@@ -4,6 +4,8 @@ import type { FieldKind, PanelItem, ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import type { PickHit, PickOptions } from "../view/viewport";
 import { hitToSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
+import { DragTyping } from "./dragTyping";
+import { screenClass } from "../device";
 import { arrangement, materialRegions, pointInRegion, resolveRegion, type Region } from "../sketch/regions";
 import { pointInPoly } from "../sketch/curves";
 
@@ -75,7 +77,8 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
   }
 
   enter(): void {
-    this.app.ui.setTools([{ id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: () => this.cancel() }]);
+    // Cancel is in the card (on a phone the card is one row without it: there it's in the column).
+    this.app.ui.setTools(screenClass() === "phone" ? [{ id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: () => this.cancel() }] : []);
     this.app.ui.setBottom([]);
     this.active = this.slots.findIndex((s) => !s.filled());
     this.render();
@@ -88,6 +91,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     this.app.ui.showPanel(null);
     this.app.ui.setHint(null);
     this.app.ui.setLabel(0, 0, null);
+    DragTyping.hideAll();
     this.app.setHover(null);
     this.app.setSelection([]);
   }
@@ -177,6 +181,11 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
       return;
     }
     this.done();
+  }
+
+  /** Right-click: back out of the tool (like Esc). */
+  context(): void {
+    this.cancel();
   }
 
   key(e: KeyboardEvent): boolean {

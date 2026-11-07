@@ -38,6 +38,11 @@ import {
   Vector2,
   Vector3,
   WebGLRenderer,
+  AlwaysStencilFunc,
+  DecrementWrapStencilOp,
+  IncrementWrapStencilOp,
+  NotEqualStencilFunc,
+  ReplaceStencilOp,
 } from "three";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
@@ -132,7 +137,12 @@ const COLORS = {
 interface BodyView {
   data: BodyMesh;
   mesh: Mesh;
+  /** Section cap: a plane on the cut, drawn only inside the body (stencil). */
   cap: Mesh;
+  /** The two passes that mark "inside the body" for the cap. */
+  capStencil: Mesh[];
+  /** The cut's outline, drawn thick. */
+  outline: LineSegments2 | null;
   edges: LineSegments;
   hidden: LineSegments;
   /** Unique edge endpoints (the body's vertices). */
@@ -169,11 +179,15 @@ export class Viewport {
   private clip: Plane | null = null;
   private bodyMat: MeshStandardMaterial;
   private capMat: MeshBasicMaterial;
+  private stencilMats: MeshBasicMaterial[] = [];
+  /** Section caps, their stencil passes and outlines (apart: not part of the model's size). */
+  private capGroup = new Group();
+  private capPlaneGeo = new PlaneGeometry(1, 1);
   private edgeMat: LineBasicMaterial;
   private hiddenMat: LineDashedMaterial;
 
   constructor(readonly canvas: HTMLCanvasElement) {
-    this.renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    this.renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true, stencil: true });
     // Headsets render the page into a big virtual screen already: full ratio costs frames for no gain.
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, isHeadset ? 1.25 : 2));
     this.renderer.localClippingEnabled = true;
@@ -185,13 +199,29 @@ export class Viewport {
     this.scene.add(this.light, this.light.target);
 
     this.bodyMat = new MeshStandardMaterial({ color: COLORS.body, metalness: 0.05, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, side: FrontSide });
-    // Section caps: back faces seen through the cut, drawn flat — reads as a solid cut.
-    this.capMat = hatched(new MeshBasicMaterial({ color: COLORS.cap, side: BackSide }));
+    // Section caps: a plane on the cut, drawn only where the body is cut (a
+    // stencil marks the inside) — solid: what's behind it doesn't show through
+    // (the far wall's inside was drawn flat before, its edges and all).
+    this.capMat = hatched(new MeshBasicMaterial({ color: COLORS.cap, side: DoubleSide, stencilWrite: true, stencilRef: 0, stencilFunc: NotEqualStencilFunc, stencilFail: ReplaceStencilOp, stencilZFail: ReplaceStencilOp, stencilZPass: ReplaceStencilOp }));
+    this.stencilMats = [BackSide, FrontSide].map(
+      (side) =>
+        new MeshBasicMaterial({
+          side,
+          colorWrite: false,
+          depthWrite: false,
+          depthTest: false,
+          stencilWrite: true,
+          stencilFunc: AlwaysStencilFunc,
+          ...(side === BackSide
+            ? { stencilFail: IncrementWrapStencilOp, stencilZFail: IncrementWrapStencilOp, stencilZPass: IncrementWrapStencilOp }
+            : { stencilFail: DecrementWrapStencilOp, stencilZFail: DecrementWrapStencilOp, stencilZPass: DecrementWrapStencilOp }),
+        }),
+    );
     this.edgeMat = new LineBasicMaterial({ color: COLORS.edge });
     this.hiddenMat = new LineDashedMaterial({ color: 0x6b7280, dashSize: 2, gapSize: 2, depthTest: false, transparent: true, opacity: 0.7 });
 
     this.axesGroup = makeAxes();
-    this.scene.add(this.grid.mesh, this.axesGroup, this.imageGroup, this.bodiesGroup, this.constructionGroup, this.sketchGroup, this.highlightGroup, this.overlay);
+    this.scene.add(this.grid.mesh, this.axesGroup, this.imageGroup, this.bodiesGroup, this.capGroup, this.constructionGroup, this.sketchGroup, this.highlightGroup, this.overlay);
 
     settings.onChange(() => this.applySettings());
     this.applySettings();
@@ -326,8 +356,10 @@ export class Viewport {
     }
     this.openMats.forEach((m) => this.releaseLineMaterial(m));
     this.openMats = [];
+    for (const b of this.bodies.values()) b.outline?.geometry.dispose();
     this.bodies.clear();
     this.bodiesGroup.clear();
+    this.capGroup.clear();
     for (const data of meshes) {
       const g = new BufferGeometry();
       g.setAttribute("position", new BufferAttribute(data.positions, 3));
@@ -337,16 +369,26 @@ export class Viewport {
       const mats = this.matsFor(data.id);
       const mesh = new Mesh(g, mats.body);
       mesh.userData.body = data.id;
-      const cap = new Mesh(g, mats.cap);
+      const i = this.bodies.size;
+      const capStencil = this.stencilMats.map((m) => {
+        const sm = new Mesh(g, m);
+        sm.renderOrder = 10 + 3 * i;
+        return sm;
+      });
+      const cap = new Mesh(this.capPlaneGeo, mats.cap);
+      cap.renderOrder = 11 + 3 * i;
+      // Each body's cap clears the marks after it: the next body starts afresh.
+      cap.onAfterRender = (r) => r.clearStencil();
       const eg = new BufferGeometry();
       eg.setAttribute("position", new BufferAttribute(data.edgePositions, 3));
       const edges = new LineSegments(eg, this.edgeMat);
       const hidden = new LineSegments(eg, this.hiddenMat);
       hidden.computeLineDistances();
       hidden.renderOrder = 5;
-      this.bodiesGroup.add(mesh, cap, edges, hidden);
+      this.bodiesGroup.add(mesh, edges, hidden);
+      this.capGroup.add(cap, ...capStencil);
       const vertices = uniqueEnds(data.edges);
-      this.bodies.set(data.id, { data, mesh, cap, edges, hidden, vertices });
+      this.bodies.set(data.id, { data, mesh, cap, capStencil, outline: null, edges, hidden, vertices });
       // Open (non-watertight) edges stand out in orange.
       if (data.openEdges?.length) {
         const seg: number[] = [];
@@ -387,6 +429,8 @@ export class Viewport {
       const vis = !this.hiddenIds.has(id);
       b.mesh.visible = vis && settings.value.shader !== "wireframe";
       b.cap.visible = vis && !!this.clip && settings.value.shader === "shaded";
+      for (const sm of b.capStencil) sm.visible = b.cap.visible;
+      if (b.outline) b.outline.visible = vis && !!this.clip;
       b.edges.visible = vis && (settings.value.showEdges || settings.value.shader === "wireframe");
       b.hidden.visible = vis && (settings.value.showHiddenEdges || settings.value.shader === "wireframe");
     }
@@ -483,11 +527,67 @@ export class Viewport {
 
   private applyClip(): void {
     const planes = this.clip ? [this.clip] : [];
-    for (const m of [this.bodyMat, this.capMat, this.edgeMat, this.hiddenMat, ...[...this.colorMats.values()].flatMap((c) => [c.body, c.cap])]) {
+    // (The caps lie on the cut itself: never clipped.)
+    for (const m of [this.bodyMat, this.edgeMat, this.hiddenMat, ...this.stencilMats, ...[...this.colorMats.values()].map((c) => c.body)]) {
       m.clippingPlanes = planes;
       m.needsUpdate = true;
     }
+    this.placeCaps();
     this.dirty = true;
+  }
+
+  private outlineMat: LineMaterial | null = null;
+
+  /** Each cap plane onto the cut (big enough to cover its body), and the cut's outline. */
+  private placeCaps(): void {
+    const clip = this.clip;
+    for (const b of this.bodies.values()) {
+      if (b.outline) {
+        this.capGroup.remove(b.outline);
+        b.outline.geometry.dispose();
+        b.outline = null;
+      }
+      if (!clip) continue;
+      const g = b.mesh.geometry;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      const sph = g.boundingSphere!;
+      b.cap.position.copy(clip.projectPoint(sph.center, new Vector3()));
+      b.cap.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), clip.normal);
+      b.cap.scale.setScalar(sph.radius * 2.2 + 1);
+      b.cap.updateMatrixWorld();
+      // The outline: where the cut crosses each triangle.
+      const pos = g.getAttribute("position").array as ArrayLike<number>;
+      const idx = g.getIndex()!.array as ArrayLike<number>;
+      const n = clip.normal;
+      const k = clip.constant;
+      const dist = (i: number) => n.x * pos[3 * i] + n.y * pos[3 * i + 1] + n.z * pos[3 * i + 2] + k;
+      const seg: number[] = [];
+      for (let t = 0; t < idx.length; t += 3) {
+        const v = [idx[t], idx[t + 1], idx[t + 2]];
+        const sd = v.map(dist);
+        if ((sd[0] > 0 && sd[1] > 0 && sd[2] > 0) || (sd[0] < 0 && sd[1] < 0 && sd[2] < 0)) continue;
+        const pts: number[] = [];
+        for (let e = 0; e < 3; e++) {
+          const a = v[e];
+          const c = v[(e + 1) % 3];
+          const sa = sd[e];
+          const sc = sd[(e + 1) % 3];
+          if (sa < 0 === sc < 0 || sa === sc) continue;
+          const f = sa / (sa - sc);
+          pts.push(pos[3 * a] + (pos[3 * c] - pos[3 * a]) * f, pos[3 * a + 1] + (pos[3 * c + 1] - pos[3 * a + 1]) * f, pos[3 * a + 2] + (pos[3 * c + 2] - pos[3 * a + 2]) * f);
+        }
+        if (pts.length === 6) seg.push(...pts);
+      }
+      if (!seg.length) continue;
+      const lg = new LineSegmentsGeometry();
+      lg.setPositions(seg);
+      this.outlineMat ??= this.lineMaterial(COLORS.edge, 3, true);
+      const line = new LineSegments2(lg, this.outlineMat);
+      line.renderOrder = 1000;
+      line.visible = !this.hiddenIds.has(b.data.id);
+      this.capGroup.add(line);
+      b.outline = line;
+    }
   }
 
   // -------------------------------------------------------------- sketches

@@ -18,6 +18,7 @@ import { entityPolylines } from "./sketch/curves";
 import { FreeformTool } from "./tools/freeform";
 import { sectionPlane, SectionTool, type SectionState } from "./tools/section";
 import { SelectTool } from "./tools/select";
+import { BooleanOp } from "./tools/booleanOp";
 import { SketchTool } from "./tools/sketch";
 import { bodiesOf, edgeRefOf, faceRefOf, sameSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tools/tool";
 import { setupRightColumn } from "./ui/panels";
@@ -479,6 +480,10 @@ export class App implements AppContext {
     if (!f) return;
     this.setSelection([]);
     switch (f.type) {
+      case "boolean":
+        // Subtract / Intersect open their tool (picks, Keep options); Union has nothing to set.
+        if (f.op !== "union") return this.setTool(new BooleanOp(this, f.op, f.target, f.tools, f));
+        break;
       case "sketch":
         return this.setTool(new SketchTool(this, { sketchId: f.id }));
       case "extrude":
@@ -659,8 +664,8 @@ export class App implements AppContext {
           }) },
           { id: "loft", label: "Loft", icon: "loft", run: wait("Loft", ["profile", "face"], () => this.setTool(new LoftOp(this, sourcesOf(this, this.selection).flatMap((s): ExtrudeSource[] => (s.kind === "profile" ? s.regions.map((r) => ({ ...s, regions: [r] })) : [s])), this.selection))) },
           { id: "union", label: "Union", icon: "union", run: wait("Union (double-tap bodies)", ["body"], () => this.selectTool.refresh()) },
-          { id: "subtract", label: "Subtract", icon: "subtract", run: wait("Subtract (double-tap bodies)", ["body"], () => this.selectTool.refresh()) },
-          { id: "intersect", label: "Intersect", icon: "intersect", run: wait("Intersect (double-tap bodies)", ["body"], () => this.selectTool.refresh()) },
+          { id: "subtract", label: "Subtract", icon: "subtract", run: () => this.setTool(new BooleanOp(this, "subtract")) },
+          { id: "intersect", label: "Intersect", icon: "intersect", run: () => this.setTool(new BooleanOp(this, "intersect")) },
           { id: "split", label: "Split Body", icon: "split", run: wait("Split Body", ["body", "face"], () => this.setTool(new SplitOp(this, bodiesOf(this.selection)[0]))) },
           { id: "fillToPlane", label: "Fill to Plane", icon: "fill", run: wait("Fill to Plane (tap the surface)", ["body", "face", "edge"], () => this.setTool(new FillToPlaneOp(this, bodiesOf(this.selection)[0]))) },
           { id: "revolve", label: "Revolve", icon: "revolve", run: wait("Revolve", ["profile", "face"], () => src() && this.setTool(new RevolveOp(this, src()!))) },

@@ -146,6 +146,10 @@ export interface BooleanFeature extends FeatureBase {
   op: "union" | "subtract" | "intersect";
   target: string;
   tools: string[];
+  /** Subtract / Intersect: the body changed stays as it was too (the result is a new body). */
+  keepTarget?: boolean;
+  /** Subtract / Intersect: the bodies it was changed with stay. */
+  keepTools?: boolean;
 }
 
 export interface DeleteFeature extends FeatureBase {

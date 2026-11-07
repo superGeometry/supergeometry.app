@@ -1785,6 +1785,13 @@ export class SketchTool implements Tool {
     // Right-click on empty space, in any tool: let go of everything picked
     // (selection, a half-done Offset / Extend / Fillet / Align, a Pattern centre).
     if (!p || !this.curveAt(p)) {
+      // Each right-click goes one step back: what's picked or half done, then
+      // the drawing tool (back to Select), then out of the sketch.
+      const pending = !!this.filletEdit || !!(this.edit.offsetOf || this.edit.extendFrom || this.edit.alignFrom || this.edit.filletFrom || this.edit.pivot || this.edit.picking) || !!this.selConstraint || this.selected.size > 0 || this.selPts.length > 0;
+      if (!pending) {
+        if (this.kind !== "select") return this.setKind("select");
+        return this.app.setTool(null);
+      }
       if (this.filletEdit) this.cancelFillet();
       this.edit.offsetOf = this.edit.extendFrom = this.edit.alignFrom = this.edit.filletFrom = undefined;
       this.edit.pivot = undefined;
