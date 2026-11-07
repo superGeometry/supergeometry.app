@@ -42,6 +42,9 @@ import { sketchToDXF } from "./io/dxf";
 import { isHeadset, screenClass } from "./device";
 import { Viewport } from "./view/viewport";
 
+/** The page's own title, from index.html (it names the app for search results). */
+const PAGE_TITLE = document.title;
+
 const SOON = "Coming soon";
 
 export class App implements AppContext {
@@ -923,7 +926,8 @@ export class App implements AppContext {
     const name = document.getElementById("project-name") as HTMLInputElement;
     const show = () => {
       if (document.activeElement !== name) name.value = this.store.doc.name;
-      document.title = `${this.store.doc.name} – supergeometry.app`;
+      // A new, unnamed project keeps the page's own title (what search results show).
+      document.title = this.store.doc.name === "Untitled" ? PAGE_TITLE : `${this.store.doc.name} – supergeometry.app`;
     };
     const rename = () => {
       const v = name.value.trim();

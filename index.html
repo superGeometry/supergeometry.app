@@ -6,13 +6,75 @@
     <meta name="theme-color" content="#1f2125" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="description" content="supergeometry.app - a free 3D solid modeler that runs in your browser, on any device." />
+    <meta name="description" content="Free 3D CAD app in your browser, for phone, tablet, computer and VR headset. Sketch, extrude, fillet and design parts for 3D printing. Export STL, STEP and 3MF. No account, no download." />
+    <link rel="canonical" href="https://supergeometry.app/" />
+    <!-- Link previews (WhatsApp, Reddit, Discord, X, Facebook...). -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="supergeometry.app" />
+    <meta property="og:url" content="https://supergeometry.app/" />
+    <meta property="og:title" content="supergeometry.app - Free 3D CAD and 3D modeling in your browser" />
+    <meta property="og:description" content="Free 3D CAD app in your browser, for phone, tablet, computer and VR headset. Sketch, extrude, fillet and design parts for 3D printing. Export STL, STEP and 3MF. No account, no download." />
+    <meta property="og:image" content="https://supergeometry.app/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="supergeometry.app - free 3D CAD in your browser" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="supergeometry.app - Free 3D CAD and 3D modeling in your browser" />
+    <meta name="twitter:description" content="Free 3D CAD app in your browser, for phone, tablet, computer and VR headset. Sketch, extrude, fillet and design parts for 3D printing. Export STL, STEP and 3MF. No account, no download." />
+    <meta name="twitter:image" content="https://supergeometry.app/og-image.png" />
+    <!-- What it is, for search engines: a free design app that runs in the browser. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "supergeometry.app",
+        "url": "https://supergeometry.app/",
+        "description": "Free 3D CAD app in your browser, for phone, tablet, computer and VR headset. Sketch, extrude, fillet and design parts for 3D printing. Export STL, STEP and 3MF. No account, no download.",
+        "applicationCategory": "DesignApplication",
+        "applicationSubCategory": "3D CAD",
+        "operatingSystem": "Windows, macOS, Linux, ChromeOS, Android, iOS, iPadOS, Meta Quest",
+        "browserRequirements": "Requires a modern web browser with WebGL and WebAssembly",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "image": "https://supergeometry.app/icon-512.png",
+        "screenshot": "https://supergeometry.app/og-image.png",
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+        "featureList": "Sketching with constraints, extrude, revolve, sweep, loft, fillet, chamfer, shell, union, subtract, intersect, patterns, threads, freeform shapes, variables, editable history, STL export, STEP export, 3MF export, DXF export, STEP STL SVG DXF import",
+        "sameAs": ["https://github.com/superGeometry/supergeometry.app"]
+      }
+    </script>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
-    <title>supergeometry.app</title>
+    <title>supergeometry.app - Free 3D CAD and 3D modeling in your browser</title>
   </head>
   <body>
+    <!-- What the app is, as text (the app itself is a 3D canvas and buttons):
+         for search engines and screen readers. Not shown on screen. -->
+    <main class="sr-only" aria-label="About supergeometry.app">
+      <h1>supergeometry.app - free 3D CAD in your browser</h1>
+      <p>
+        supergeometry.app is a free 3D design (CAD) and 3D modeling app that runs in your web browser, on a computer
+        (Windows, Mac, Linux, Chromebook), an iPad or Android tablet, a phone, or a VR headset like the Meta Quest 3.
+        No account, no download, no subscription. Your work stays on your device.
+      </p>
+      <p>
+        Design parts for 3D printing, woodworking, laser cutting and CNC: brackets, boxes, enclosures, vases, knobs,
+        threads, furniture parts. It is a parametric solid modeler: every step stays in the history, so you can change
+        a size later and the model rebuilds.
+      </p>
+      <h2>What you can do</h2>
+      <ul>
+        <li>Sketch lines, rectangles, circles, arcs, splines and text with dimensions and constraints.</li>
+        <li>Extrude, revolve, sweep and loft sketches into solids; push and pull faces.</li>
+        <li>Fillet and chamfer edges, shell a body, add threads, mirror and pattern.</li>
+        <li>Combine bodies: union, subtract, intersect, split.</li>
+        <li>Freeform shapes, variables for exact sizes, and a numpad made for touch screens.</li>
+        <li>Export STL and 3MF for 3D printers and slicers (Bambu Studio, PrusaSlicer, Cura, OrcaSlicer), STEP for other CAD programs, and DXF for laser cutters.</li>
+        <li>Import STEP, STL, SVG and DXF files, and images to trace over.</li>
+      </ul>
+      <p>Free and open source (AGPL-3.0), made to work with touch, pen, mouse and keyboard.</p>
+    </main>
     <canvas id="view"></canvas>
     <div id="pins"></div>
 
