@@ -21,7 +21,7 @@ import {
 import type { Vec3 } from "../doc/types";
 import type { Viewport } from "./viewport";
 
-const PX = 110;
+const PX = 143;
 
 interface FaceDef {
   label: string;
