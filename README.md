@@ -332,8 +332,9 @@ can't be rebuilt after a change, it's marked and the reason is shown.
 
 - Your project **saves itself** in this browser as you work, and every project
   you've worked on is **kept on this device**.
-- **File → Open** shows them as a gallery of pictures, newest first: tap one to
-  carry on with it, or **Open file…** for any `.super` file (it joins the
+- **File → Open** shows them as a gallery of pictures, newest first (it also
+  greets you each time the app opens): tap one to carry on with it, start a
+  **New project**, or **Open file…** for any `.super` file (it joins the
   gallery); with many, the row scrolls side to side. Each card can be saved
   as a file or deleted. They live in the
   browser's storage for this site: **More → Update** keeps them, but

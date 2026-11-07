@@ -2,6 +2,7 @@ import { isTouchDevice } from "./device";
 import { circleAxis } from "./tools/slots";
 import { CurvePointPlaneOp, EdgeAnglePlaneOp, FacePointPlaneOp, ThreePointPlaneOp } from "./tools/planeOps";
 import { DocStore, parseProject } from "./doc/store";
+import { SUPPORT, openSupport } from "./ui/support";
 import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, renameProject, setCurrentProject } from "./doc/library";
 import { showLibrary } from "./ui/library";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
@@ -141,6 +142,8 @@ export class App implements AppContext {
         this.ui.setStatus(null);
         await this.regenerate();
         this.view.fitAll(false);
+        // Every visit starts at the projects, with a welcome.
+        void this.showProjects(true);
       })
       .catch((err) => this.ui.setStatus(`Could not start the geometry kernel: ${err.message ?? err}`));
   }
@@ -865,14 +868,14 @@ export class App implements AppContext {
       donateList.hidden = !donateList.hidden;
       document.getElementById("m-donate-arrow")!.textContent = donateList.hidden ? "▸" : "▾";
     });
-    for (const [id, url] of Object.entries(SUPPORT_LINKS)) {
+    for (const { id, url } of SUPPORT) {
       const b = document.getElementById(`m-support-${id}`);
       if (!b) continue;
       if (!url) {
         b.querySelector(".menu-soon")!.textContent = "soon";
         b.classList.add("disabled");
       }
-      moreItem(`m-support-${id}`, () => (url ? openTab(url) : this.ui.toast("Coming soon")));
+      moreItem(`m-support-${id}`, () => (url ? openSupport(url) : this.ui.toast("Coming soon")));
     }
     document.addEventListener("pointerdown", (e) => {
       if (!(e.target as HTMLElement).closest("#file-menu, #file-btn")) menu.hidden = true;
@@ -1089,11 +1092,13 @@ export class App implements AppContext {
   }
 
   /** File → Open: the projects kept on this device, and Open file… for any other. */
-  private async showProjects(): Promise<void> {
+  private async showProjects(welcome = false): Promise<void> {
     // The open one with its picture as it looks now.
     if (this.projectId) await this.keepInLibrary(JSON.stringify(this.store.doc), true);
-    showLibrary(await libraryEntries(), this.projectId, {
+    const entries = await libraryEntries();
+    showLibrary(entries, this.projectId, {
       open: (id) => void this.openKept(id),
+      newProject: () => void this.newProject(),
       openFile: () => this.open(),
       download: (id) => void this.downloadKept(id),
       remove: (id) => forgetProject(id),
@@ -1105,7 +1110,7 @@ export class App implements AppContext {
         else await renameProject(id, name);
         return name;
       },
-    });
+    }, { welcome });
   }
 
   private async openKept(id: string): Promise<void> {
@@ -1248,13 +1253,6 @@ function chosenBodies(app: App): string[] {
 }
 
 type Delivery = "download" | "share";
-
-/** Where Boost / Donate / Support goes (an empty link shows as "soon"). */
-const SUPPORT_LINKS: Record<string, string> = {
-  makerworld: "https://makerworld.com/en/@supergeometry/upload",
-  bmc: "",
-  stripe: "",
-};
 
 /** The file types the exports are shared as (the share sheet picks apps by them). */
 const MIME: Record<string, string> = {

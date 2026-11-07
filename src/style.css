@@ -1606,6 +1606,122 @@ body.items-open #bottom-left {
 .library-note {
   font-size: 11.5px;
 }
+.library-welcome {
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.45;
+  opacity: 0.9;
+}
+.library-section {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: -4px;
+}
+/* The ways to support it: a few words, then a button each with room for its logo. */
+.library-support {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.03);
+}
+.library-support-text {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.library-support-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.library-support-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 10px 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.library-support-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.library-support-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.library-support-logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--muted);
+  overflow: hidden;
+}
+.library-support-logo svg {
+  width: 22px;
+  height: 22px;
+}
+.library-support-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.library-support-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.library-support-name b {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 560px) {
+  /* The title and close on top, New project and Open file… under them. */
+  .library-head {
+    flex-wrap: wrap;
+  }
+  .library-head .panel-title {
+    flex: 1 1 calc(100% - 50px);
+    order: 0;
+  }
+  .library-head .library-close {
+    order: 1;
+  }
+  .library-head .text-btn {
+    order: 2;
+    flex: 1;
+    justify-content: center;
+  }
+  .library-support-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .library-support-btn {
+    min-height: 42px;
+  }
+}
 @media (max-width: 720px) {
   /* Two cards across, the next one peeking in at the edge. */
   .library-grid {

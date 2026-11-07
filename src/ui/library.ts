@@ -1,12 +1,16 @@
 // File → Open: the projects kept on this device, as a gallery of pictures.
-// Tap one to open it; Open file… still takes any .super file.
+// Tap one to open it; New project starts one; Open file… still takes any
+// .super file. It also opens by itself when the app starts, with a welcome
+// and the ways to support the project.
 
 import type { LibraryEntry } from "../doc/library";
 import { icons } from "./icons";
+import { SUPPORT, openSupport } from "./support";
 import { el, twoTap } from "./ui";
 
 export interface LibraryActions {
   open(id: string): void;
+  newProject(): void;
   openFile(): void;
   download(id: string): void;
   /** Resolves with the new name (null: kept as it was). */
@@ -29,11 +33,50 @@ function when(ms: number): string {
   return d.toLocaleDateString([], { day: "numeric", month: "short", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
 }
 
-export function showLibrary(entries: LibraryEntry[], currentId: string | null, act: LibraryActions): void {
+/** The ways to support the project, each with room for its logo. */
+function supportBox(): HTMLElement {
+  const box = el("div", "library-support");
+  box.append(
+    el(
+      "div",
+      "library-support-text",
+      "supergeometry.app is free, with no ads and no account, and one person makes it. If it's useful to you, a donation lets me keep working on it - thank you!",
+    ),
+  );
+  const row = el("div", "library-support-row");
+  for (const w of SUPPORT) {
+    const b = el("button", "library-support-btn");
+    b.type = "button";
+    const logo = el("span", "library-support-logo");
+    if (w.logo) {
+      const img = el("img", "");
+      img.src = w.logo;
+      img.alt = "";
+      img.draggable = false;
+      logo.append(img);
+    } else logo.innerHTML = w.mark;
+    const text = el("span", "library-support-name");
+    text.append(el("b", "", w.name), el("span", "", w.url ? w.sub : "Coming soon"));
+    b.append(logo, text);
+    if (w.url) {
+      b.title = `${w.name} - opens in a new tab`;
+      b.addEventListener("click", () => openSupport(w.url));
+    } else b.disabled = true;
+    row.append(b);
+  }
+  box.append(row);
+  return box;
+}
+
+export function showLibrary(entries: LibraryEntry[], currentId: string | null, act: LibraryActions, opts: { welcome?: boolean } = {}): void {
   const back = el("div", "dialog-back");
   const box = el("div", "dialog library");
+  if (opts.welcome) box.classList.add("welcome");
   const head = el("div", "library-head");
-  head.append(el("div", "panel-title", "Projects"));
+  head.append(el("div", "panel-title", opts.welcome ? "Welcome to supergeometry.app" : "Projects"));
+  const newBtn = el("button", "text-btn", "New project");
+  newBtn.type = "button";
+  newBtn.title = "Start an empty project (the open one stays here)";
   const fileBtn = el("button", "text-btn primary", "Open file…");
   fileBtn.type = "button";
   fileBtn.title = "Open a .super file from this device or elsewhere";
@@ -41,8 +84,18 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
   closeBtn.type = "button";
   closeBtn.title = "Close";
   closeBtn.innerHTML = icons.close;
-  head.append(fileBtn, closeBtn);
+  head.append(newBtn, fileBtn, closeBtn);
   box.append(head);
+  if (opts.welcome) {
+    box.append(
+      el(
+        "div",
+        "library-welcome",
+        "A free 3D design app in your browser: sketch, extrude, round and cut, then export for 3D printing. Pick up one of your projects, start a new one, or open a .super file. Everything stays on this device.",
+      ),
+    );
+    if (entries.length) box.append(el("div", "library-section", "Your projects"));
+  }
 
   const grid = el("div", "library-grid");
   const close = () => {
@@ -56,6 +109,7 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
     e.stopPropagation();
   };
   fileBtn.addEventListener("click", () => (close(), act.openFile()));
+  newBtn.addEventListener("click", () => (close(), act.newProject()));
   closeBtn.addEventListener("click", close);
 
   const empty = () => {
@@ -132,6 +186,7 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
   );
   grid.dataset.ownBar = "";
   box.append(grid);
+  box.append(supportBox());
   box.append(el("div", "dialog-note library-note", "Kept in this browser on this device (Update keeps them). Clearing this site's data in the browser's settings deletes them - save the ones that matter as files too."));
   back.append(box);
   back.addEventListener("pointerdown", (ev) => ev.target === back && close());
