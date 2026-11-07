@@ -2656,16 +2656,39 @@ html[data-screen="phone"] body.is-fullscreen {
 .fs-banner {
   flex-wrap: nowrap;
   white-space: nowrap;
-  gap: 8px;
-  padding: 6px 8px 6px 14px;
+  gap: 6px;
+  padding: 4px 4px 4px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
 }
-/* Small phones (320 px): one line doesn't fit - the question goes above its buttons. */
+/* Compact: small buttons, the question in a quieter colour. */
+.fs-banner > span {
+  color: var(--muted);
+  margin-right: 2px;
+}
+.fs-banner .text-btn {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+@media (pointer: coarse) {
+  .fs-banner .text-btn {
+    min-height: 32px;
+  }
+}
+/* Small phones (320 px): still one line, a little tighter. */
 @media (max-width: 360px) {
   .fs-banner {
-    flex-wrap: wrap;
-    white-space: normal;
-    justify-content: center;
-    text-align: center;
+    gap: 4px;
+    padding-left: 10px;
+  }
+  .fs-banner > span,
+  .fs-banner .text-btn {
+    font-size: 12px;
+  }
+  .fs-banner .text-btn {
+    padding: 0 8px;
   }
 }
 
