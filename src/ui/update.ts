@@ -22,20 +22,21 @@ async function liveBuild(): Promise<string | null> {
 }
 
 export class Updates {
-  private banner = el("div", "update-banner");
+  private banner = el("div", "update-banner compact-banner");
   private shownFor: string | null = null;
 
   /** `beforeReload` saves the project before the page is reloaded. */
   constructor(private beforeReload: () => Promise<void>) {
     this.banner.hidden = true;
-    const text = el("span", "", "New app version available");
-    const now = el("button", "text-btn primary", "Update now");
+    const text = el("span", "", "Update available");
+    const now = el("button", "text-btn primary", "Update");
     now.addEventListener("click", () => void this.reset());
-    const later = el("button", "text-btn", "Later");
-    later.addEventListener("click", () => (this.banner.hidden = true));
-    this.banner.append(text, now, later);
+    this.banner.append(text, now);
     this.banner.addEventListener("pointerdown", (e) => e.stopPropagation());
     document.body.append(this.banner);
+    // No "Later": a click or tap on the workspace puts it away (More → Reset
+    // cache & update is always there).
+    document.getElementById("view")?.addEventListener("pointerdown", () => (this.banner.hidden = true), { capture: true });
     // Only a built site has a build to compare (not the dev server).
     if (!loadedBuild()) return;
     setTimeout(() => void this.check(), 20_000);

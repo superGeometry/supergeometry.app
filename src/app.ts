@@ -796,7 +796,7 @@ export class App implements AppContext {
     const canFull = !!(root.requestFullscreen || root.webkitRequestFullscreen) && (document.fullscreenEnabled ?? true);
     const already = () => isFull() || matchMedia("(display-mode: fullscreen)").matches || matchMedia("(display-mode: standalone)").matches;
     if (canFull && !already()) {
-      const banner = el("div", "update-banner fs-banner");
+      const banner = el("div", "update-banner compact-banner");
       banner.addEventListener("pointerdown", (e) => e.stopPropagation());
       const yes = el("button", "text-btn primary", "Full screen");
       const away = () => banner.remove();

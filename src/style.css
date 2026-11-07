@@ -2652,8 +2652,8 @@ html[data-screen="phone"] body.is-fullscreen {
     --safe-b: 4px;
   }
 }
-/* "Use the whole screen?": one short line with its two buttons. */
-.fs-banner {
+/* "Use the whole screen?" and "Update available": one short line with its button. */
+.compact-banner {
   flex-wrap: nowrap;
   white-space: nowrap;
   gap: 6px;
@@ -2662,32 +2662,32 @@ html[data-screen="phone"] body.is-fullscreen {
   font-size: 12.5px;
 }
 /* Compact: small buttons, the question in a quieter colour. */
-.fs-banner > span {
+.compact-banner > span {
   color: var(--muted);
   margin-right: 2px;
 }
-.fs-banner .text-btn {
+.compact-banner .text-btn {
   min-height: 28px;
   padding: 0 10px;
   border-radius: 7px;
   font-size: 12.5px;
 }
 @media (pointer: coarse) {
-  .fs-banner .text-btn {
+  .compact-banner .text-btn {
     min-height: 32px;
   }
 }
 /* Small phones (320 px): still one line, a little tighter. */
 @media (max-width: 360px) {
-  .fs-banner {
+  .compact-banner {
     gap: 4px;
     padding-left: 10px;
   }
-  .fs-banner > span,
-  .fs-banner .text-btn {
+  .compact-banner > span,
+  .compact-banner .text-btn {
     font-size: 12px;
   }
-  .fs-banner .text-btn {
+  .compact-banner .text-btn {
     padding: 0 8px;
   }
 }
