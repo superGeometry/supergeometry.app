@@ -69,7 +69,9 @@ export type PickHit =
   | { kind: "point"; sketch: string; entity: string; p: string; point: Vec3 }
   | { kind: "image"; id: string; point: Vec3 }
   | { kind: "plane"; id: string; point: Vec3 }
-  | { kind: "axis"; id: string; point: Vec3 };
+  | { kind: "axis"; id: string; point: Vec3 }
+  /** The world origin, 0, 0, 0 (point picks only: PickOptions.origin). */
+  | { kind: "origin"; point: Vec3 };
 
 export type Highlight =
   | { kind: "face"; body: string; face: number }
@@ -81,7 +83,8 @@ export type Highlight =
   | { kind: "point"; sketch: string; entity: string; p: string }
   | { kind: "image"; id: string }
   | { kind: "plane"; id: string }
-  | { kind: "axis"; id: string };
+  | { kind: "axis"; id: string }
+  | { kind: "origin" };
 
 const WORLD_AXIS_DIRS: Record<string, Vec3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
 
@@ -115,6 +118,8 @@ export interface PickOptions {
   images?: boolean;
   /** Planes win even when a body is in front (picking a sketch/section plane). */
   planesFirst?: boolean;
+  /** The world origin (0, 0, 0) can be picked, near where the X / Y / Z axes cross. */
+  origin?: boolean;
 }
 
 /** A sketch as drawn: its own curves plus the face outline it sits on (if any). */
@@ -948,6 +953,12 @@ export class Viewport {
         this.highlightGroup.add(m);
         return;
       }
+      if (h.kind === "origin") {
+        const dot = new Points(new BufferGeometry().setFromPoints([new Vector3(0, 0, 0)]), dotMaterial({ color, size: 13, depthTest: false }));
+        dot.renderOrder = 6;
+        this.highlightGroup.add(dot);
+        return;
+      }
       if (h.kind === "axis") {
         const a = this.axisLines.find((x) => x.id === h.id) ?? this.worldAxisLine(h.id);
         if (a) fatLines([...a.a.toArray(), ...a.b.toArray()], color);
@@ -1033,6 +1044,11 @@ export class Viewport {
   pick(x: number, y: number, opts: PickOptions = {}): PickHit | null {
     const { edgeTolPx = 8, profiles = true, bodies = true, edges = true, curves = false, planes = true, axes = true, vertices = edges, planesFirst = false } = opts;
     this.setRay(x, y);
+    // The origin, tapped near it on screen: it wins (a point you mean exactly).
+    if (opts.origin) {
+      const s = new Float64Array(2);
+      if (this.projector()(0, 0, 0, s) && Math.hypot(s[0] - x, s[1] - y) < Math.max(12, edgeTolPx)) return { kind: "origin", point: [0, 0, 0] };
+    }
     if (planes && planesFirst) {
       const hit = this.raycaster.intersectObjects(this.planeMeshes.filter((m) => m.userData.origin), false)[0];
       if (hit) return { kind: "plane", id: hit.object.userData.plane, point: hit.point.toArray() as Vec3 };

@@ -290,10 +290,10 @@ export function pointSlot(app: AppContext, label: string, get: () => Vec3 | null
     label,
     describe: () => {
       const p = get();
-      return p ? p.map((v) => Math.round(v * 1000) / 1000).join(", ") : "Tap a corner, edge, face or point";
+      return p ? (p.every((v) => v === 0) ? "Origin (0, 0, 0)" : p.map((v) => Math.round(v * 1000) / 1000).join(", ")) : "Tap a corner, edge, face, point or the origin";
     },
     filled: () => !!get(),
-    pick: { profiles: false, curves: true, planes: true },
+    pick: { profiles: false, curves: true, planes: true, origin: true },
     shows: () => (shown ? [shown] : []),
     accept(hit) {
       let at: Vec3 | null = "point" in hit ? hit.point : null;
@@ -316,7 +316,8 @@ export function pointSlot(app: AppContext, label: string, get: () => Vec3 | null
         const f = app.view.body(hit.body)?.faces[hit.face];
         if (f?.plane && near(f.center)) at = f.center;
         shown = { kind: "face", body: hit.body, face: hit.face };
-      } else shown = null;
+      } else if (hit.kind === "origin") shown = { kind: "origin" };
+      else shown = null;
       set(at);
       return true;
     },

@@ -1006,7 +1006,7 @@ function perpTo(d: Vec3): Vec3 {
 }
 
 function label(s: Sel, n: number): string {
-  const base = { face: "face", edge: "edge", vertex: "vertex", body: "body", profile: "profile", curve: "curve", point: "point", image: "image", plane: "plane", axis: "axis" }[s.kind];
+  const base = { face: "face", edge: "edge", vertex: "vertex", body: "body", profile: "profile", curve: "curve", point: "point", image: "image", plane: "plane", axis: "axis", origin: "origin" }[s.kind];
   if (base === "vertex") return n === 1 ? "vertex" : "vertices";
   return n === 1 ? base : base === "body" ? "bodies" : base === "axis" ? "axes" : `${base}s`;
 }

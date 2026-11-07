@@ -348,6 +348,7 @@ export class App implements AppContext {
       if (s.kind === "profile" || s.kind === "curve" || s.kind === "point") return !!this.store.find(s.sketch) || features.some((f) => f.id === s.sketch);
       if (s.kind === "plane" || s.kind === "axis") return !!this.view.planeOf(s.id) || !!this.view.axisOf(s.id);
       if (s.kind === "image") return features.some((f) => f.id === s.id);
+      if (s.kind === "origin") return true;
       const b = this.view.body(s.body);
       if (!b) return false;
       if (s.kind === "face") return s.face < b.faces.length;

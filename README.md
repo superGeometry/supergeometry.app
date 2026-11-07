@@ -240,7 +240,7 @@ sketch. A sketch stays in view until every region of it is used.
 - **Transform** - Move/Rotate (gimbal, with a Copy switch: after a drag the
   panel stays for exact values; copies are independent bodies, **Link** keeps a
   freeform copy following its original), Scale (uniform,
-  or X/Y/Z on freeform bodies), Translate (from a point to a point), Mirror,
+  or X/Y/Z on freeform bodies), Translate (from a point to a point; the origin, 0, 0, 0, can be tapped too), Mirror,
   Rotate Around Axis (a round edge gives an axis through its centre),
   Patterns. A body of a pattern picked: **Whole Pattern** selects the rest.
 - **Union / Subtract / Intersect** - combine bodies (they need to touch to
