@@ -82,6 +82,8 @@ export class InputRouter {
     el.addEventListener("pointerup", (e) => this.onUp(e));
     el.addEventListener("pointercancel", (e) => this.onCancel(e));
     el.addEventListener("pointerleave", (e) => {
+      // A hover still queued for the next frame would bring back what this clears.
+      this.hoverAt = null;
       if (e.pointerType !== "touch" && this.mode === "idle") this.handler.hover?.(null);
     });
     el.addEventListener("contextmenu", (e) => e.preventDefault());

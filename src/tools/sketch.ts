@@ -1208,6 +1208,9 @@ export class SketchTool implements Tool {
       this.app.setHover(ok ? hitToSel(hit) : null);
       return;
     }
+    // The pointer left the view: its snap hint ("Aligned", "Midpoint"...) goes
+    // with it - it stayed up, stuck where the pointer last was.
+    if (!p && this.phase === "draw") this.app.ui.clearPointerLabel();
     if (!p || this.phase !== "draw" || this.dragging || this.sdrag) return;
     if (this.kind === "patternLinear" && this.patGimbal) {
       const g = this.patGimbal.hit(p);

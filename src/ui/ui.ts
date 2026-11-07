@@ -496,6 +496,11 @@ export class UI {
     this.labelEl.style.transform = `translate(${Math.round(x + 18)}px, ${Math.round(y + 14)}px)`;
   }
 
+  /** Hides the label by the pointer, unless a value is being typed into it. */
+  clearPointerLabel(): void {
+    if (!this.labelEl.classList.contains("typing")) this.labelEl.hidden = true;
+  }
+
   /** Small modal form; resolves with the values, or null if cancelled. */
   dialog(title: string, fields: { key: string; label: string; value: string; placeholder?: string }[], note?: string): Promise<Record<string, string> | null> {
     return new Promise((resolve) => {
