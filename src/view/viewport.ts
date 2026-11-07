@@ -715,7 +715,7 @@ export class Viewport {
       if (!origin) {
         const mark = new Sprite(planeMarkMaterial(kindOf(id)));
         // Small, in the plane's corner: it grows and shrinks with the zoom like the plane.
-        mark.position.set(-0.46, 0.46, 0);
+        mark.position.set(-0.48, 0.48, 0);
         mark.scale.set(PLANE_MARK_SIZE, PLANE_MARK_SIZE, 1);
         mark.renderOrder = 4;
         mesh.add(mark);
@@ -1395,7 +1395,7 @@ function hatched<M extends MeshBasicMaterial>(m: M): M {
  */
 const PLANE_MARKS: Record<string, string> = { offset: "⇡", mid: "⇹", "3pt": "∴", curve: "∿", perp: "⊥", angle: "∠", parallel: "∥", symmetry: "⧖" };
 /** Its size, as a part of the plane's width. */
-export const PLANE_MARK_SIZE = 0.045;
+export const PLANE_MARK_SIZE = 0.0225;
 const markMats = new Map<string, SpriteMaterial>();
 export function planeMarkMaterial(kind: string): SpriteMaterial {
   let m = markMats.get(kind);
