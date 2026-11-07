@@ -1016,7 +1016,6 @@ export class App implements AppContext {
   private projectId: string | null = null;
   /** The open project has an entry in the library (an empty new one doesn't, yet). */
   private projectKept = false;
-  private lastPicture = 0;
 
   /** Startup: the open project is the library's current one (work from before the library is kept now). */
   private async attachLibrary(): Promise<void> {
@@ -1027,8 +1026,10 @@ export class App implements AppContext {
     }
     this.projectId = id;
     this.projectKept = (await libraryEntries()).some((e) => e.id === id);
-    this.store.onSaved = (text) => void this.keepInLibrary(text);
-    this.lastPicture = Date.now(); // (nothing drawn yet)
+    // The library's copy follows when the app goes to the background (the
+    // autosave holds the newest state meanwhile, and is copied in at the next
+    // start if need be) - no extra saving or drawing while modelling.
+    this.store.onSaved = (text) => document.visibilityState === "hidden" && void this.keepInLibrary(text);
     // Its newest state is the autosave (a page closed mid-save left the library a step behind).
     const text = JSON.stringify(this.store.doc);
     // (No picture: nothing is drawn yet.)
@@ -1042,11 +1043,8 @@ export class App implements AppContext {
   private async keepInLibrary(text: string, picture = false): Promise<void> {
     const id = this.projectId;
     if (!id || (!this.projectKept && !this.store.features.length)) return;
-    const now = Date.now();
-    // (Not right after opening one: the view isn't rebuilt yet. Opening the
-    // gallery or leaving the project always takes a new one.)
-    const snap = picture || document.visibilityState === "hidden" || now - this.lastPicture > 20000;
-    if (snap) this.lastPicture = now;
+    // A new picture: opening the gallery, leaving the project, or the app going to the background.
+    const snap = picture || document.visibilityState === "hidden";
     this.projectKept = true;
     await keepProject(id, this.store.doc.name, text, snap ? this.viewPicture() : undefined);
   }
@@ -1071,7 +1069,6 @@ export class App implements AppContext {
     // The id and the document change together: an autosave due meanwhile went to the old project.
     this.projectId = id;
     this.projectKept = kept;
-    this.lastPicture = Date.now();
     this.store.openDoc(doc);
     setTimeout(() => this.fit(), 400);
   }
