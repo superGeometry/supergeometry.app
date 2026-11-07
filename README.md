@@ -213,8 +213,9 @@ sketch. A sketch stays in view until every region of it is used.
 
 - **Extrude** - pull a region or a face. Negative distances cut. In *Auto*
   mode an extrusion that runs into another body cuts through it; choose *New*
-  for a separate body. **Taper** shrinks the far end, down to a point: a
-  spire, a pyramid or a cone in one step. Extrude starts at the last distance.
+  for a separate body. **Taper end %** sizes the far end (100 none, 0 a
+  point: a spire, a pyramid or a cone in one step) - type it or drag the box
+  left / right. Extrude starts at the last distance.
 - **Revolve** - spin a region around an axis (a separate line, a side of a
   rectangle or outline, a round edge, or one of your axes by name);
   **Travel** moves it along the axis at the same time (threads, springs).

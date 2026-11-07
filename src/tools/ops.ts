@@ -178,16 +178,17 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
       // far too many to tap) - holes stay holes.
       ...(src.kind === "profile" && !this.existing ? [{ type: "button" as const, label: "All shapes", onClick: () => this.allShapes() }] : []),
       // Lean the sides in towards a smaller end (a spire, a pyramid) - no angle to work out.
+      // How big the far end is, in % of the shape: 100 none, 0 to a point. A
+      // value box: type it, or press on it and drag left / right.
       {
-        type: "slider" as const,
-        label: "Taper",
-        value: this.feature.taper ?? 1,
+        type: "number" as const,
+        label: "Taper end %",
+        value: Math.round((this.feature.taper ?? 1) * 1000) / 10,
+        kind: "number" as const,
         min: 0,
-        max: 2,
-        step: 0.01,
-        show: (v: number) => (Math.abs(v - 1) < 1e-9 ? "none" : v < 0.01 ? "to a point" : `end ${Math.round(v * 100)}%`),
         onInput: (v: number) => {
-          this.feature.taper = Math.abs(v - 1) < 1e-9 ? undefined : v;
+          const t = Math.min(300, v) / 100;
+          this.feature.taper = Math.abs(t - 1) < 1e-9 ? undefined : t;
           this.onDraftChanged();
         },
       },
