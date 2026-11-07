@@ -1493,8 +1493,39 @@ body.items-open #bottom-left {
   background: transparent;
 }
 .color-dialog {
-  width: min(300px, calc(100vw - 24px));
+  width: min(232px, calc(100vw - 24px));
+  padding: 6px 12px 12px;
+  gap: 8px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.color-grip {
+  height: 16px;
+  margin: 0 -12px -4px;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+.color-grip span {
+  width: 32px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--muted);
+  opacity: 0.55;
+}
+.color-grip:active {
+  cursor: grabbing;
+}
+/* Cancel and Done side by side in the narrow window (the key hints left out). */
+.color-dialog .panel-buttons {
+  flex-wrap: nowrap;
+}
+.color-dialog .panel-buttons .text-btn {
+  flex: 1;
+  justify-content: center;
+}
+.color-dialog .panel-buttons kbd {
+  display: none;
 }
 .color-sv,
 .color-hue {
@@ -1504,7 +1535,7 @@ body.items-open #bottom-left {
   cursor: crosshair;
 }
 .color-sv {
-  height: 170px;
+  height: 140px;
 }
 .color-hue {
   height: 18px;

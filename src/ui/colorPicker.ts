@@ -38,7 +38,38 @@ export function pickColor(title: string, start: string, live: (hex: string) => v
     let hsv = hexToHsv(HEX.test(start) ? start : "#888888");
     const back = el("div", "dialog-back see-through");
     const box = el("div", "dialog color-dialog");
-    box.append(el("div", "panel-title", title));
+    // The grip along the top (like the tool cards'): drag the window aside to see the body.
+    const grip = el("div", "color-grip");
+    grip.title = "Drag to move";
+    grip.append(el("span", ""));
+    box.append(grip, el("div", "panel-title", title));
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      const r = box.getBoundingClientRect();
+      const dx = e.clientX - r.left;
+      const dy = e.clientY - r.top;
+      try {
+        grip.setPointerCapture(e.pointerId);
+      } catch {
+        // (no live pointer to hold)
+      }
+      const move = (m: PointerEvent) => {
+        // Kept whole on screen.
+        const x = Math.min(window.innerWidth - r.width, Math.max(0, m.clientX - dx));
+        const y = Math.min(window.innerHeight - r.height, Math.max(0, m.clientY - dy));
+        box.style.position = "fixed";
+        box.style.left = `${x}px`;
+        box.style.top = `${y}px`;
+      };
+      const up = () => {
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        grip.removeEventListener("pointercancel", up);
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+      grip.addEventListener("pointercancel", up);
+    });
 
     const sv = el("div", "color-sv");
     const svDot = el("div", "color-dot");
