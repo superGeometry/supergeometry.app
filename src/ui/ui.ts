@@ -1,3 +1,4 @@
+import { mergingCommits } from "../doc/store";
 import type { Feature, HistoryGroup } from "../doc/types";
 import { screenClass, watchScreenClass } from "../device";
 import type { FeatureError } from "../kernel/protocol";
@@ -712,8 +713,11 @@ export class UI {
       // Text with a variable name stays an expression (parametric); plain numbers don't.
       const isExpr = isExpression(input.value);
       input.classList.toggle("has-expr", isExpr);
-      f.onExpr?.(isExpr ? input.value.trim() : null);
-      f.onInput(kind === "int" ? Math.round(v!) : v!);
+      // Key by key into this box: one undo step for the value typed.
+      mergingCommits(input, () => {
+        f.onExpr?.(isExpr ? input.value.trim() : null);
+        f.onInput(kind === "int" ? Math.round(v!) : v!);
+      });
     };
     input.addEventListener("input", apply);
     // Clicking a value selects it: typing replaces it (no "020").

@@ -2,6 +2,7 @@
 // floating input (Total/Offset + value + pin), and the layer of pinned measurements.
 
 import { BufferGeometry, ConeGeometry, Group, Line, LineBasicMaterial, LineDashedMaterial, Mesh, MeshBasicMaterial, Vector3 } from "three";
+import { mergingCommits } from "../doc/store";
 import type { PinDef, Vec3 } from "../doc/types";
 import { el } from "../ui/ui";
 import { numpadInput, openNumpad } from "../ui/numpad";
@@ -98,8 +99,6 @@ export interface DimWidgetOptions {
   angle?: boolean;
   /** No dimension line (just the box, e.g. at the corner between two lines). */
   noLine?: boolean;
-  /** The value shows as it's typed, before ↵ (a preview that is safe to redo on every key). */
-  live?: boolean;
   /** Variables to choose from (a ƒx menu before the pin): the value becomes that variable. */
   variables?: string[];
   onVariable?(name: string): void;
@@ -144,8 +143,6 @@ export class DimWidget {
     }
     this.input.inputMode = "decimal";
     numpadInput(this.input);
-    // Typing on the numpad previews the value as it goes (↵ still applies it).
-    if (opts.live) this.input.dataset.live = "1";
     this.input.spellcheck = false;
     this.angle = !!opts.angle;
     this.line.group.visible = !opts.noLine;
@@ -156,7 +153,8 @@ export class DimWidget {
     this.input.addEventListener("input", () => {
       const v = evaluate(this.input.value, this.angle ? "angle" : "length");
       this.input.classList.toggle("invalid", v === null);
-      if (v !== null) opts.onInput?.(v);
+      // Key by key into this box: one undo step for the value typed.
+      if (v !== null) mergingCommits(this, () => opts.onInput?.(v));
     });
     this.input.addEventListener("keydown", (e) => {
       e.stopPropagation();

@@ -4,6 +4,24 @@ import { pointInPoly } from "../sketch/curves";
 import { resolveDoc } from "./params";
 import { emptyDoc, type Feature, type FeatureType, type ProjectDoc, type SketchEntity } from "./types";
 
+/** While set, commits made under the same key join into one undo step. */
+let mergeKey: object | null = null;
+
+/**
+ * Run `fn` with its commits merged with the ones made before under the same
+ * key (and nothing else in between): a value typed key by key into one box -
+ * 3, 30, 30.5 - is one undo step, not three.
+ */
+export function mergingCommits(key: object, fn: () => void): void {
+  const was = mergeKey;
+  mergeKey = key;
+  try {
+    fn();
+  } finally {
+    mergeKey = was;
+  }
+}
+
 // Earlier builds were called "Tessel": their autosave is still picked up.
 const LEGACY_KEY = "tessel.autosave.v1";
 const DB_NAME = "supergeometry";
@@ -175,12 +193,18 @@ export class DocStore {
       }
       return;
     }
-    this.undoStack.push(before);
+    // The same box typed into again: still the step it began (its first undo state stays).
+    const joins = mergeKey !== null && mergeKey === this.lastMerge && this.undoStack.length > 0;
+    if (!joins) this.undoStack.push(before);
+    this.lastMerge = mergeKey;
     if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
     this.redoStack = [];
     this.doc = next;
     this.changed();
   }
+
+  /** The merge key of the last commit (see mergingCommits). */
+  private lastMerge: object | null = null;
 
   /**
    * Live edits during a drag: update the document and notify, but leave undo
@@ -228,6 +252,7 @@ export class DocStore {
   undo(): void {
     const prev = this.undoStack.pop();
     if (!prev) return;
+    this.lastMerge = null;
     this.redoStack.push(pack(this.doc));
     this.doc = unpack(prev);
     this.changed();
@@ -236,6 +261,7 @@ export class DocStore {
   redo(): void {
     const next = this.redoStack.pop();
     if (!next) return;
+    this.lastMerge = null;
     this.undoStack.push(pack(this.doc));
     this.doc = unpack(next);
     this.changed();

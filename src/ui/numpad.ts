@@ -5,7 +5,7 @@
 // It doesn't rely on keyboard focus (iPad Safari moves focus away from the
 // box as soon as a button is tapped): it keeps its own target and caret,
 // answers on the key's release, and only closes on ↵, or a tap elsewhere.
-// Nothing is applied while typing: ↵ applies it (tool panel boxes preview as you type).
+// The value follows each key (the model updates as you type); ↵ finishes.
 
 import { screenClass } from "../device";
 import { settings } from "../settings";
@@ -153,8 +153,9 @@ class Numpad {
   open(input: HTMLInputElement): void {
     this.target = input;
     this.fresh = true;
-    // All of it selected, so typing overrides it.
-    this.selStart = 0;
+    // All of it selected, so typing overrides it - but a minus stays: the
+    // number after it is what's selected (⌫ first clears it all, sign too).
+    this.selStart = input.value.startsWith("-") ? 1 : 0;
     this.selEnd = input.value.length;
     this.showSelection();
     this.el.hidden = false;
@@ -211,8 +212,10 @@ class Numpad {
     let v = t.value;
     let s = Math.min(this.selStart, v.length);
     let e = Math.min(this.selEnd, v.length);
-    // First key after opening: a digit, point or ⌫ starts the value over.
-    if (this.fresh && (k === "⌫" || k === "." || /^\d$/.test(k))) [s, e] = [0, v.length];
+    // First key after opening: a digit or point types over the number (a
+    // minus in front stays); ⌫ clears it all, sign too - then type it positive.
+    if (this.fresh && (k === "." || /^\d$/.test(k))) [s, e] = [v.startsWith("-") ? 1 : 0, v.length];
+    if (this.fresh && k === "⌫") [s, e] = [0, v.length];
     if (k !== "↵") this.fresh = false;
     const put = (text: string) => {
       v = v.slice(0, s) + text + v.slice(e);
@@ -245,9 +248,8 @@ class Numpad {
     this.selStart = s;
     this.selEnd = e;
     this.showSelection();
-    // Tool panel boxes (fillet radius, extrude distance…) show the result while
-    // typing - a preview only: ↵ is what applies it. Boxes on the sketch wait for ↵.
-    if (t.closest("#panel") || t.dataset.live === "1") t.dispatchEvent(new Event("input", { bubbles: true }));
+    // Every box hears each key: the model follows what's typed (↵ finishes).
+    t.dispatchEvent(new Event("input", { bubbles: true }));
   }
 }
 

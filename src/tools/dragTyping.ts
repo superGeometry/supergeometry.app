@@ -1,6 +1,7 @@
 // Type a value while holding a drag: digits set the value live, Enter applies
 // it and finishes, Esc drops what was typed. "," is accepted as decimal point.
 
+import { mergingCommits } from "../doc/store";
 import { evaluate, UNIT_LABEL, units } from "../units";
 import { numpadInput } from "../ui/numpad";
 import type { ToolPointer } from "../view/input";
@@ -62,7 +63,7 @@ export class DragTyping {
         if (!t) return;
         const v = evaluate(input.value, t.kind);
         input.classList.toggle("invalid", v === null);
-        if (v !== null) t.apply(v);
+        if (v !== null) mergingCommits(input, () => t.apply(v));
       });
       input.addEventListener("keydown", (e) => {
         e.stopPropagation();

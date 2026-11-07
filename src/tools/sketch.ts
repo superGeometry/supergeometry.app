@@ -3626,7 +3626,6 @@ export class SketchTool implements Tool {
       value: memory.fillet,
       boxAt: "beyond",
       focus: true,
-      live: true,
       onInput: (v) => v > 0 && this.applyFillet(v),
       onCommit: () => this.finishFillet(),
     });
