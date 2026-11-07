@@ -17,6 +17,7 @@ import { FreeformTool } from "./freeform";
 import { isClosed } from "../freeform/cage";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 import { connectEdges } from "../doc/freeformConnect";
+import { OffsetEdgeOp } from "./offsetEdge";
 import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { BooleanOp } from "./booleanOp";
@@ -512,6 +513,8 @@ export class SelectTool implements Tool {
     return [
       { id: "fillet", label: "Fillet", icon: "fillet", shortcut: "F", active: true, run: () => app.setTool(new EdgeOp(app, "fillet", this.edgeRefs())), ...sized("fillet") },
       { id: "chamfer", label: "Chamfer", icon: "chamfer", shortcut: "C", run: () => app.setTool(new EdgeOp(app, "chamfer", this.edgeRefs())), ...sized("chamfer") },
+      // A line on a face, parallel to this edge (the face is tapped next).
+      { id: "offsetEdge", label: "Offset Edge", icon: "offsetEdge", disabled: !straight || sel.length !== 1, why: "Needs one straight edge", run: () => app.setTool(new OffsetEdgeOp(app, s)) },
       // Moves just this edge: the faces on it tilt to follow.
       { id: "move", label: "Move/Rotate Edge", icon: "moveEdge", shortcut: "M", disabled: !straight || sel.length !== 1, why: "Needs one straight edge", run: () => ref && app.setTool(new MoveFaceOp(app, { edge: ref })) },
       { id: "moveBody", label: "Move/Rotate Body", icon: "move", run: () => app.setTool(new TransformOp(app, "move", bodies)) },

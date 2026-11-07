@@ -422,7 +422,7 @@ three.js view. Units are millimetres internally; the display unit is a setting.
   Extrude, Revolve, Sweep, Loft, Shell, Transform ▸ (Move/Rotate, Scale,
   Translate, Mirror, Rotate Around Axis, Patterns), Boolean ▸ (Union,
   Subtract, Intersect), Construct ▸ (planes, axes), Insert ▸ (variables,
-  images, files), Tools ▸ (Offset Face, Split Body, Fill to Plane, Thread,
+  images, files), Tools ▸ (Offset Face, Offset Edge, Split Body, Fill to Plane, Thread,
   Repair Body…).
 - Something selected → only tools valid for it are shown (unusable ones are
   hidden, not greyed). Faces get a drag arrow (offset), straight edges a

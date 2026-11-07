@@ -16,6 +16,7 @@ import { settings } from "./settings";
 import { PinLayer } from "./tools/annotate";
 import { MeasureTool } from "./tools/measure";
 import { ItemsPanel } from "./ui/items";
+import { OffsetEdgeOp } from "./tools/offsetEdge";
 import { AxisOp, EdgeOp, ExtrudeOp, FillToPlaneOp, ThreadOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
 import { add, dist, scale, toWorld, xDirFor } from "./geom";
 import { entityPolylines } from "./sketch/curves";
@@ -686,6 +687,10 @@ export class App implements AppContext {
           { id: "offsetFace", label: "Offset Face", icon: "offsetFace", run: wait("Offset Face", ["face"], () => src() && this.setTool(new ExtrudeOp(this, src()!))) },
           { id: "fillet", label: "Fillet", icon: "fillet", run: wait("Fillet", ["edge"], () => this.setTool(new EdgeOp(this, "fillet", this.selection.flatMap((s) => (s.kind === "edge" ? [edgeRefOf(this, s)!] : []))))) },
           { id: "chamfer", label: "Chamfer", icon: "chamfer", run: wait("Chamfer", ["edge"], () => this.setTool(new EdgeOp(this, "chamfer", this.selection.flatMap((s) => (s.kind === "edge" ? [edgeRefOf(this, s)!] : []))))) },
+          { id: "offsetEdge", label: "Offset Edge", icon: "offsetEdge", run: () => {
+            const s = this.selection.find((x) => x.kind === "edge");
+            this.setTool(new OffsetEdgeOp(this, s?.kind === "edge" ? s : undefined));
+          } },
           { id: "extrude", label: "Extrude", icon: "extrude", run: wait("Extrude", ["profile", "face"], () => src() && this.setTool(new ExtrudeOp(this, src()!))) },
           { id: "shell", label: "Shell", icon: "shell", run: wait("Shell", ["face", "body"], () => {
             const s = this.selection[0];

@@ -69,6 +69,7 @@ export const icons = {
   translate: svg('<path d="M4 12h16M16 8l4 4-4 4"/>'),
   fillet: svg('<path d="M4 20V10a6 6 0 0 1 6-6h10"/><path d="M4 20h16V4" stroke-dasharray="2 2.5"/>'),
   chamfer: svg('<path d="M4 20V10l6-6h10"/><path d="M4 20h16V4" stroke-dasharray="2 2.5"/>'),
+  offsetEdge: svg('<path d="M4 18L20 6"/><path d="M4 12.5L14.5 4.6" stroke-dasharray="2.5 2"/><path d="M9 15.5l-2.2-3M15 11l-2.2-3"/>'),
   offsetFace: svg('<path d="M4 14l8 4 8-4M4 10l8 4 8-4-8-4z"/>'),
   union: svg('<circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5"/>'),
   subtract: svg('<circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5" stroke-dasharray="2 2"/>'),
