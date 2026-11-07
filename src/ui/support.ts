@@ -46,7 +46,7 @@ export const SUPPORT: SupportWay[] = [
   {
     id: "stripe",
     name: "Stripe",
-    sub: "Donate by card",
+    sub: "Support by card",
     url: "",
     logo: "logos/stripe.svg",
     mark: svg('<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>'),

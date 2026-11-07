@@ -40,7 +40,7 @@ function supportBox(): HTMLElement {
     el(
       "div",
       "library-support-text",
-      "This app is free, with no ads and no account, and one person makes it. If it's useful to you, a donation will help keep it this way. Thank you!",
+      "This app is free, with no ads and no account, and one person makes it. If it's useful to you, your support will help keep it this way. Thank you!",
     ),
   );
   const row = el("div", "library-support-row");
