@@ -99,7 +99,7 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
       el(
         "div",
         "library-welcome",
-        "A free parametric, history-based 3D CAD app in your browser: sketch an idea, turn it into a solid part and take it wherever it's going next - a 3D printer, a laser cutter, a workshop or another CAD program. Everything stays on this device only.",
+        "A free parametric, history-based 3D CAD app for every device: sketch an idea, turn it into a solid part and take it wherever it's going next. Everything stays on this device only.",
       ),
     );
     if (entries.length) box.append(el("div", "library-section", "Your projects"));
