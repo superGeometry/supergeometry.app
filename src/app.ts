@@ -799,16 +799,15 @@ export class App implements AppContext {
       const banner = el("div", "update-banner fs-banner");
       banner.addEventListener("pointerdown", (e) => e.stopPropagation());
       const yes = el("button", "text-btn primary", "Full screen");
-      const no = el("button", "text-btn", "Not now");
       const away = () => banner.remove();
       yes.addEventListener("click", () => (away(), goFull()));
-      no.addEventListener("click", away);
-      banner.append(el("span", "", "Use the whole screen?"), yes, no);
+      // No "Not now": a click on the workspace (or waiting) puts it away.
+      banner.append(el("span", "", "Use the whole screen?"), yes);
       setTimeout(() => !already() && document.body.append(banner), 800);
       // Unanswered: it goes away by itself (More → Fullscreen is always there).
       setTimeout(away, 15_000);
       document.addEventListener("fullscreenchange", () => isFull() && away());
-      // A click or tap on the workspace answers it too ("not now").
+      // A click or tap on the workspace answers it ("not now").
       document.getElementById("view")?.addEventListener("pointerdown", away, { once: true, capture: true });
     }
     // Help and Tutorial: placeholders for now.
