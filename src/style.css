@@ -1610,7 +1610,10 @@ body.items-open #bottom-left {
   color: var(--text);
   font-size: 13.5px;
   line-height: 1.45;
-  opacity: 0.9;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.03);
 }
 .library-section {
   color: var(--muted);
@@ -1738,6 +1741,14 @@ body.items-open #bottom-left {
     order: 2;
     flex: 1;
     justify-content: center;
+  }
+  /* Full screen: just its icon. */
+  .library-head .library-full {
+    flex: none;
+    padding-inline: 10px;
+  }
+  .library-full-text {
+    display: none;
   }
   .library-support-row {
     grid-template-columns: 1fr;

@@ -94,10 +94,11 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
   if (opts.welcome) box.classList.add("welcome");
   const head = el("div", "library-head");
   head.append(el("div", "panel-title", opts.welcome ? "Welcome to supergeometry.app" : "Projects"));
-  const newBtn = el("button", "text-btn", "New project");
+  // No projects yet: New project is the way in.
+  const newBtn = el("button", entries.length ? "text-btn" : "text-btn primary", "New project");
   newBtn.type = "button";
   newBtn.title = "Start an empty project (the open one stays here)";
-  const fileBtn = el("button", "text-btn primary", "Open file…");
+  const fileBtn = el("button", entries.length ? "text-btn primary" : "text-btn", "Open file…");
   fileBtn.type = "button";
   fileBtn.title = "Open a .super file from this device or elsewhere";
   const closeBtn = el("button", "icon-btn library-close");
@@ -111,12 +112,13 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
     if (!fsBtn || !fs) return;
     const on = fs.isFull();
     fsBtn.innerHTML = on ? UNFULL : FULL;
-    fsBtn.append(on ? "Exit full screen" : "Full screen");
+    // (Phones show the icon alone.)
+    fsBtn.append(el("span", "library-full-text", on ? "Exit full screen" : "Full screen"));
+    fsBtn.title = on ? "Exit full screen" : "Full screen";
   };
   if (fs) {
     fsBtn = el("button", "text-btn library-full");
     fsBtn.type = "button";
-    fsBtn.title = "Use the whole screen";
     fsBtn.addEventListener("click", () => fs.toggle());
     paintFull();
     head.append(fsBtn);

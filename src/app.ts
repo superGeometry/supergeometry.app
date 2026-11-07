@@ -819,11 +819,9 @@ export class App implements AppContext {
       goFull();
     });
     // The welcome window (and File → Open) has a Full screen button too (a
-    // browser only allows it from a tap). Not where it can't be done, or where
-    // the app already has the whole screen (installed).
-    const canFull = !!(root.requestFullscreen || root.webkitRequestFullscreen) && (document.fullscreenEnabled ?? true);
-    const installed = matchMedia("(display-mode: fullscreen)").matches || matchMedia("(display-mode: standalone)").matches;
-    this.fullscreen = canFull && !installed ? { isFull, toggle: () => (isFull() ? void (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.()) : goFull()) } : null;
+    // browser only allows it from a tap). Everywhere but an app that already
+    // has the whole screen; where a browser has none (iPhone), it says how.
+    this.fullscreen = !matchMedia("(display-mode: fullscreen)").matches ? { isFull, toggle: () => (isFull() ? void (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.()) : goFull()) } : null;
     // Help and Tutorial: placeholders for now.
     // A newer build out? More pulses and its Update item says NEW.
     this.updates = new Updates(() => this.store.flush());
