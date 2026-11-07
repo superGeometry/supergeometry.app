@@ -159,7 +159,11 @@ export class ViewCube {
     return [z(p.x), z(p.y), z(p.z)];
   }
 
+  private hoverKey = "";
   private setHover(zone: Vec3 | null): void {
+    const k = zone ? zone.join() : "";
+    if (k === this.hoverKey) return;
+    this.hoverKey = k;
     this.canvas.style.cursor = zone ? "pointer" : "grab";
     // A tile on each face the zone touches: a face's middle, both halves of an
     // edge, all three squares of a corner - they're one button, so they light together.
@@ -177,7 +181,9 @@ export class ViewCube {
       const sv = Math.abs(new Vector3(...f.up).dot(size));
       h.matrix.copy(basis(f.u, f.up, f.n).multiply(new Matrix4().makeScale(su, sv, 1)).setPosition(center));
     });
+    // Draw now: the cube only redraws with the view otherwise, so a hover would wait.
     this.lastKey = "";
+    this.render();
   }
 
   private render(): void {
