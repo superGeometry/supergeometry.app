@@ -1308,9 +1308,33 @@ export class Viewport {
   }
 
   /** PNG of the current view. */
-  screenshot(): Promise<Blob | null> {
+  /** The view as a PNG, with a see-through supergeometry.app mark at the top left. */
+  async screenshot(): Promise<Blob | null> {
+    const logo = await watermarkLogo();
+    // Render and copy straight away (the drawing buffer isn't kept after this task).
     this.render();
-    return new Promise((resolve) => this.canvas.toBlob(resolve, "image/png"));
+    const out = document.createElement("canvas");
+    out.width = this.canvas.width;
+    out.height = this.canvas.height;
+    const g = out.getContext("2d");
+    if (!g) return new Promise((resolve) => this.canvas.toBlob(resolve, "image/png"));
+    g.drawImage(this.canvas, 0, 0);
+    // Sized like the app's own name at the top (scaled to the picture's pixels).
+    const px = this.canvas.width / Math.max(1, this.canvas.clientWidth);
+    const pad = 14 * px;
+    const icon = 26 * px;
+    g.globalAlpha = 0.45;
+    if (logo) g.drawImage(logo, pad, pad, icon, icon);
+    g.font = `750 ${20 * px}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    g.textBaseline = "middle";
+    const x = pad + (logo ? icon + 8 * px : 0);
+    const y = pad + icon / 2;
+    g.fillStyle = "#cfd6e4";
+    g.fillText("supergeometry", x, y);
+    g.fillStyle = "#3d8bff";
+    g.fillText(".app", x + g.measureText("supergeometry").width, y);
+    g.globalAlpha = 1;
+    return new Promise((resolve) => out.toBlob(resolve, "image/png"));
   }
 
   get sketchList(): SketchView[] {
@@ -1415,4 +1439,17 @@ export function planeMarkMaterial(kind: string): SpriteMaterial {
   m = new SpriteMaterial({ map: tex, transparent: true, depthTest: false, opacity: 0.4 });
   markMats.set(kind, m);
   return m;
+}
+
+/** The app's cube mark (no dark tile behind it), for the screenshot watermark. */
+let logoImage: Promise<HTMLImageElement | null> | null = null;
+function watermarkLogo(): Promise<HTMLImageElement | null> {
+  logoImage ??= new Promise((resolve) => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 8 44 48"><path d="M32 10l19 11v22L32 54 13 43V21z" fill="#3d8bff"/><path d="M32 10l19 11-19 11-19-11z" fill="#8bb8ff"/><path d="M32 32v22L13 43V21z" fill="#2a63c4"/></svg>`;
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+  return logoImage;
 }
