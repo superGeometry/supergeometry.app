@@ -90,7 +90,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "numpad", name: "Numpad", text: "Tap to switch the on-screen numpad on or off: value boxes then open it instead of the keyboard. Typing replaces the value; ↵ applies it." },
       { icon: "display", name: "Display", text: "Shaded, wireframe or X-ray; edges and hidden edges." },
       { icon: "camera", name: "Screenshot", text: "Save a picture of the view, marked faintly at the bottom right with the project's name, the isolated bodies (when isolating) and supergeometry.app." },
-      { icon: "history", name: "History", text: "Every step in order. Tap one to change it, hover to see what it works on, the eye switches it off, the bin deletes it. Select several (Ctrl/Shift+click) to group them: fold, rename, switch all off or on, ungroup." },
+      { icon: "history", name: "History", text: "Every step in order. Tap one to change it, hover to see what it works on, the eye switches it off, the bin deletes it (two taps, as every delete button: the first turns it red). Select several (Ctrl/Shift+click) to group them: fold, rename, switch all off or on, ungroup." },
     ],
   },
   {

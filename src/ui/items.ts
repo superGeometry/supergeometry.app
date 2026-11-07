@@ -5,7 +5,7 @@ import type { DocStore } from "../doc/store";
 import type { Feature, ItemFolder } from "../doc/types";
 import type { RegenResult } from "../kernel/protocol";
 import { icons, type IconName } from "./icons";
-import { el } from "./ui";
+import { el, twoTap } from "./ui";
 
 export interface ItemsHandlers {
   selectBody(id: string): void;
@@ -237,7 +237,7 @@ export class ItemsPanel {
     const del = el("button", "icon-btn");
     del.title = "Delete";
     del.innerHTML = icons.trash;
-    del.addEventListener("click", (e) => (e.stopPropagation(), r.remove()));
+    twoTap(del, `items:${r.id}`, () => r.remove());
     li.append(eye, label, ren, del);
     li.dataset.id = r.id;
     li.classList.toggle("selected", this.selectedIds.has(r.id));
@@ -303,7 +303,7 @@ export class ItemsPanel {
     del.title = "Remove folder (keeps what's in it)";
     del.innerHTML = icons.trash;
     // What it held - items and subfolders - moves up to where it was.
-    del.addEventListener("click", () =>
+    twoTap(del, `folder:${f.id}`, () =>
       this.store.commit((d) => {
         const fs = d.folders ?? [];
         const parent = f.parent && fs.some((p) => p.id === f.parent) ? f.parent : undefined;

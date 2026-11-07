@@ -24,6 +24,8 @@ export interface ToolItem {
   swatch?: string;
   /** Small icons after the label (e.g. ⟲ + what a toggle switches to). */
   trailing?: IconName[];
+  /** Deletes something: two taps (see twoTap). Default: when its icon is the bin. */
+  confirm?: boolean;
   run?(): void;
 }
 
@@ -667,7 +669,8 @@ export class UI {
         const b = el("button", it.primary ? "text-btn primary" : "text-btn");
         if (it.icon) b.innerHTML = icons[it.icon];
         b.append(it.label);
-        b.addEventListener("click", it.onClick);
+        if (it.icon === "trash") twoTap(b, `panel:${it.label}`, it.onClick);
+        else b.addEventListener("click", it.onClick);
         row.append(b);
       }
     }
@@ -681,7 +684,8 @@ export class UI {
         b.innerHTML = icons[a.icon] ?? "";
         b.append(a.label);
         if (a.disabled) b.disabled = true;
-        b.addEventListener("click", () => a.run?.());
+        if (a.icon === "trash") twoTap(b, `action:${a.id}`, () => a.run?.());
+        else b.addEventListener("click", () => a.run?.());
         acts.append(b);
       }
       this.panel.append(acts);
@@ -1232,13 +1236,8 @@ export class UI {
       const eye = iconButton(f.suppressed ? "eyeOff" : "eye", f.suppressed ? "Enable" : "Suppress", () => h.toggle(f.id));
       // Two taps: the bin sits where a phone user expects the panel's close
       // button, and one stray tap deleted a whole extrude.
-      const del = iconButton("trash", "Delete", () => {
-        if (del.classList.contains("armed")) return h.remove(f.id);
-        del.classList.add("armed");
-        del.title = "Tap again to delete";
-        this.toast(`Tap the bin again to delete ${f.name}`);
-        setTimeout(() => (del.classList.remove("armed"), (del.title = "Delete")), 3000);
-      });
+      const del = iconButton("trash", "Delete", () => undefined);
+      twoTap(del, `history:${f.id}`, () => h.remove(f.id));
       // A sketch's own steps fold out under it (closed by default).
       const steps = f.type === "sketch" ? (f.log ?? []) : [];
       if (steps.length) {
@@ -1353,15 +1352,18 @@ function renderTools(host: HTMLElement, all: ToolItem[], onFlyout: (item: ToolIt
       continue;
     }
     const b = toolButton(item, true);
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (item.disabled) return;
-      if (item.children?.length) onFlyout(item, b);
-      else {
-        item.run?.();
-        after?.();
-      }
-    });
+    if (!item.children?.length && !item.disabled && (item.confirm ?? item.icon === "trash")) {
+      twoTap(b, `tool:${item.id}:${item.label}`, () => (item.run?.(), after?.()));
+    } else
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (item.disabled) return;
+        if (item.children?.length) onFlyout(item, b);
+        else {
+          item.run?.();
+          after?.();
+        }
+      });
     host.append(b);
   }
 }
@@ -1391,6 +1393,56 @@ function toolButton(item: ToolItem, withLabel: boolean): HTMLButtonElement {
   }
   return b;
 }
+
+/**
+ * A delete button: the first tap turns it red ("tap again to delete"), the
+ * second deletes - one stray tap never removes anything. It goes back after 3 s,
+ * or at a tap anywhere else. `key` names the button, so it stays armed if its
+ * window is drawn again between the taps.
+ */
+let armed: { key: string; until: number } | null = null;
+let armTimer = 0;
+const ARM_MS = 3000;
+function disarm(): void {
+  clearTimeout(armTimer);
+  armed = null;
+  for (const b of document.querySelectorAll<HTMLElement>(".armed[data-arm-key]")) {
+    b.classList.remove("armed");
+    if (b.dataset.armTitle !== undefined) b.title = b.dataset.armTitle;
+  }
+}
+export function twoTap(b: HTMLElement, key: string, run: () => void): void {
+  b.dataset.armKey = key;
+  const isArmed = () => !!armed && armed.key === key && Date.now() < armed.until;
+  const show = () => {
+    b.classList.add("armed");
+    if (b.dataset.armTitle === undefined) b.dataset.armTitle = b.title;
+    b.title = "Tap again to delete";
+  };
+  if (isArmed()) show();
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (isArmed()) {
+      disarm();
+      run();
+      return;
+    }
+    disarm();
+    armed = { key, until: Date.now() + ARM_MS };
+    show();
+    armTimer = window.setTimeout(disarm, ARM_MS);
+  });
+}
+// A tap anywhere but the armed button calls it off.
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    if (!armed) return;
+    const on = (e.target as Element | null)?.closest?.<HTMLElement>("[data-arm-key]");
+    if (on?.dataset.armKey !== armed.key) disarm();
+  },
+  true,
+);
 
 function iconButton(icon: IconName, title: string, run: () => void): HTMLButtonElement {
   const b = document.createElement("button");

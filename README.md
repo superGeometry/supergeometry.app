@@ -334,7 +334,8 @@ can't be rebuilt after a change, it's marked and the reason is shown.
   you've worked on is **kept on this device**.
 - **File → Open** shows them as a gallery of pictures, newest first: tap one to
   carry on with it, or **Open file…** for any `.super` file (it joins the
-  gallery). Each card can be saved as a file or deleted. They live in the
+  gallery); with many, the row scrolls side to side. Each card can be saved
+  as a file or deleted. They live in the
   browser's storage for this site: **Reset cache & update** keeps them, but
   clearing the site's data in the browser's settings deletes them.
 - **File → Save project** downloads a `.super` file (keep it as a backup or
@@ -356,6 +357,9 @@ can't be rebuilt after a change, it's marked and the reason is shown.
 
 ## Tips for phones, tablets and headsets
 
+- **Deleting takes two taps**, everywhere (Items, History, the project gallery,
+  Delete in the tools): the first turns the bin red, the second deletes. It
+  goes back by itself after 3 seconds, or at a tap anywhere else.
 - Tools show as icons: press and hold one to see its name.
 - With a pen, fingers are ignored while the pen touches the screen.
 - iPad / Android: **More → Fullscreen** gives the whole screen. On phones and

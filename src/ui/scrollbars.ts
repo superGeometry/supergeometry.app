@@ -94,7 +94,8 @@ export function outerScrollbars(): void {
     "scroll",
     (e) => {
       const t = e.target;
-      if (t instanceof HTMLElement && t !== document.body && t !== document.documentElement) show(t);
+      // (A window with a bar of its own, always in sight, needs no second one.)
+      if (t instanceof HTMLElement && t !== document.body && t !== document.documentElement && !("ownBar" in t.dataset)) show(t);
     },
     true,
   );

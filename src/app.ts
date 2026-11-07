@@ -1088,13 +1088,7 @@ export class App implements AppContext {
       open: (id) => void this.openKept(id),
       openFile: () => this.open(),
       download: (id) => void this.downloadKept(id),
-      remove: async (id) => {
-        const e = (await libraryEntries()).find((x) => x.id === id);
-        const ok = await this.ui.ask("Delete this project?", `“${e?.name ?? "Project"}” is removed from this device. A file you saved of it stays.`, [{ id: "del", label: "Delete", primary: true }]);
-        if (ok !== "del") return false;
-        await forgetProject(id);
-        return true;
-      },
+      remove: (id) => forgetProject(id),
     });
   }
 

@@ -3,14 +3,13 @@
 
 import type { LibraryEntry } from "../doc/library";
 import { icons } from "./icons";
-import { el } from "./ui";
+import { el, twoTap } from "./ui";
 
 export interface LibraryActions {
   open(id: string): void;
   openFile(): void;
   download(id: string): void;
-  /** Resolves once it's gone (or the delete was cancelled). */
-  remove(id: string): Promise<boolean>;
+  remove(id: string): Promise<void>;
 }
 
 const DOWNLOAD =
@@ -59,6 +58,7 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
 
   const empty = () => {
     if (grid.querySelector(".library-card")) return;
+    grid.classList.add("empty");
     grid.replaceChildren(el("div", "library-empty", "No projects here yet. The one you're working on is kept here as soon as it has something in it."));
   };
   for (const e of entries) {
@@ -94,11 +94,10 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
       del.type = "button";
       del.title = "Delete from this device";
       del.innerHTML = icons.trash;
-      del.addEventListener("click", async () => {
-        if (await act.remove(e.id)) {
-          card.remove();
-          empty();
-        }
+      twoTap(del, `library:${e.id}`, async () => {
+        await act.remove(e.id);
+        card.remove();
+        empty();
       });
       info.append(del);
     }
@@ -106,6 +105,17 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
     grid.append(card);
   }
   empty();
+  // A mouse wheel turned up and down moves the row side to side.
+  grid.addEventListener(
+    "wheel",
+    (ev) => {
+      if (Math.abs(ev.deltaX) >= Math.abs(ev.deltaY) || grid.scrollWidth <= grid.clientWidth) return;
+      ev.preventDefault();
+      grid.scrollLeft += ev.deltaY;
+    },
+    { passive: false },
+  );
+  grid.dataset.ownBar = "";
   box.append(grid);
   box.append(el("div", "dialog-note library-note", "Kept in this browser on this device (Reset cache & update keeps them). Clearing this site's data in the browser's settings deletes them - save the ones that matter as files too."));
   back.append(box);
