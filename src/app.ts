@@ -119,7 +119,7 @@ export class App implements AppContext {
         else this.store.update(id, { name });
       },
       askName: async (title, current) => (await this.ui.dialog(title, [{ key: "name", label: "Name", value: current }]))?.name.trim() || null,
-      isolated: () => this.isolated,
+      isolated: () => this.isolatedWithSketches(),
     });
     // Computers and tablets start with Items open (phones: History only, there's no room for both).
     // (A phone on its side is wider than 720 px but only ~375 tall: Items would cover a third of it.)
@@ -273,6 +273,18 @@ export class App implements AppContext {
     this.items.render(this.result);
   }
 
+  /**
+   * What isolating shows: the isolated bodies (and what was made since), plus
+   * the sketches drawn on a face of one of those bodies - they belong to it,
+   * so their shapes can be picked (extrude, offset…) like on any face.
+   */
+  isolatedWithSketches(): string[] | null {
+    if (!this.isolated) return null;
+    const iso = new Set(this.isolated);
+    const onIsolated = this.store.doc.features.filter((f) => f.type === "sketch" && !!f.attachedTo && iso.has(f.attachedTo.body) && !iso.has(f.id)).map((f) => f.id);
+    return onIsolated.length ? [...this.isolated, ...onIsolated] : this.isolated;
+  }
+
   /** Hidden (Items) + not isolated → invisible and unpickable. */
   private applyVisibility(): void {
     const hidden = new Set(this.store.doc.hidden);
@@ -390,8 +402,9 @@ export class App implements AppContext {
 
   private refreshSketches(features: readonly Feature[] = this.store.doc.features): void {
     const hidden = new Set(this.store.doc.hidden);
+    const iso = this.isolatedWithSketches();
     const sketches = features
-      .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && ((!hidden.has(f.id) && (!this.isolated || this.isolated.includes(f.id))) || f.id === this.tool.activeSketch))
+      .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && ((!hidden.has(f.id) && (!iso || iso.includes(f.id))) || f.id === this.tool.activeSketch))
       .map((s) => ({ ...s, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }));
     this.view.setSketches(sketches, this.tool.activeSketch);
   }
