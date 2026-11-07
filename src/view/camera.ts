@@ -227,6 +227,18 @@ export class CameraController {
   }
   private scratch = new PerspectiveCamera();
 
+  /** Run `fn` with the camera free to move; it comes back exactly as it was (a picture framed differently, say). */
+  borrow(fn: () => void): void {
+    const keep: ViewState = { target: this.target.clone(), distance: this.distance, azimuth: this.azimuth, elevation: this.elevation, roll: this.roll };
+    const pivot = this.pivot;
+    try {
+      fn();
+    } finally {
+      this.applyState(keep);
+      this.pivot = pivot;
+    }
+  }
+
   savedView(name: string): SavedView {
     return { name, target: this.target.toArray() as Vec3, distance: this.distance, azimuth: this.azimuth, elevation: this.elevation, ortho: this.ortho };
   }

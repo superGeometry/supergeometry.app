@@ -1450,6 +1450,126 @@ body.items-open #bottom-left {
   justify-content: flex-end;
 }
 
+/* File → Open: the projects kept on this device. */
+.dialog.library {
+  width: min(780px, calc(100vw - 24px));
+  max-height: min(86vh, calc(100vh - 24px - var(--safe-t) - var(--safe-b)));
+  padding: 14px;
+}
+.library-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.library-head .panel-title {
+  margin-right: auto;
+}
+.library-close {
+  background: none;
+}
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  margin: 0 -2px;
+  padding: 2px;
+}
+.library-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.library-card.current {
+  border-color: var(--accent);
+}
+.library-pic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  border: 0;
+  background: #24272c;
+  color: var(--muted);
+  cursor: pointer;
+}
+.library-pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.library-pic > svg {
+  width: 36px;
+  height: 36px;
+  opacity: 0.6;
+}
+.library-pic:hover img {
+  filter: brightness(1.12);
+}
+.library-badge {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #fff;
+  background: var(--accent);
+}
+.library-info {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px 6px 10px;
+}
+.library-text {
+  flex: 1;
+  min-width: 0;
+}
+.library-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-date {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.library-info .icon-btn {
+  width: 30px;
+  height: 30px;
+  background: none;
+  color: var(--muted);
+}
+.library-info .icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.library-info .icon-btn.danger:hover {
+  color: var(--danger);
+}
+.library-empty {
+  grid-column: 1 / -1;
+  padding: 28px 8px;
+  text-align: center;
+  color: var(--muted);
+}
+.library-note {
+  font-size: 11.5px;
+}
+@media (max-width: 720px) {
+  .library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+}
+
 /* ---------------------------------------------------------- small screens */
 
 @media (max-width: 720px) {

@@ -2,7 +2,9 @@ import { isTouchDevice } from "./device";
 import { circleAxis } from "./tools/slots";
 import { CurvePointPlaneOp, EdgeAnglePlaneOp, FacePointPlaneOp, ThreePointPlaneOp } from "./tools/planeOps";
 import { DocStore, parseProject } from "./doc/store";
-import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
+import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, setCurrentProject } from "./doc/library";
+import { showLibrary } from "./ui/library";
+import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
 import { createVariable, editVariables, insertFile, insertImage } from "./io/insert";
 import { freeformBodies } from "./doc/freeformCopies";
@@ -134,7 +136,7 @@ export class App implements AppContext {
     this.tool.enter?.();
 
     this.ui.setStatus("Loading geometry kernel…");
-    Promise.all([this.kernel.ready, this.store.load()])
+    Promise.all([this.kernel.ready, this.store.load().then(() => this.attachLibrary())])
       .then(async () => {
         this.ui.setStatus(null);
         await this.regenerate();
@@ -882,7 +884,7 @@ export class App implements AppContext {
         fn();
       });
     item("m-new", () => void this.newProject());
-    item("m-open", () => this.open());
+    item("m-open", () => void this.showProjects());
     item("m-save", () => this.save());
     item("m-stl", () => void this.export("stl"));
     item("m-step", () => void this.export("step"));
@@ -1006,23 +1008,110 @@ export class App implements AppContext {
    * clears its cached files and reloads - a new project starts on the latest.
    */
   private async newProject(): Promise<void> {
-    if (this.store.features.length) {
-      const choice = await this.ui.ask(
-        "Start a new project?",
-        `“${this.store.doc.name}” is open. Save it to a file first, or discard it?`,
-        [
-          { id: "discard", label: "Discard" },
-          { id: "save", label: "Save & start new", primary: true },
-        ],
-      );
-      if (!choice) return;
-      if (choice === "save") this.save();
+    const was = this.store.features.length ? this.store.doc.name : null;
+    await this.switchProject(emptyDoc(), newProjectId());
+    if (was) this.ui.toast(`“${was}” is kept in File → Open`);
+    if (await this.updates.check()) await this.updates.reset();
+  }
+
+  // ------------------------------------------------------------ library
+
+  /** Which library project is open; null until the saved project is read. */
+  private projectId: string | null = null;
+  /** The open project has an entry in the library (an empty new one doesn't, yet). */
+  private projectKept = false;
+  private lastPicture = 0;
+
+  /** Startup: the open project is the library's current one (work from before the library is kept now). */
+  private async attachLibrary(): Promise<void> {
+    let id = await currentProjectId();
+    if (!id) {
+      id = newProjectId();
+      await setCurrentProject(id);
     }
+    this.projectId = id;
+    this.projectKept = (await libraryEntries()).some((e) => e.id === id);
+    this.store.onSaved = (text) => void this.keepInLibrary(text);
+    this.lastPicture = Date.now(); // (nothing drawn yet)
+    // Its newest state is the autosave (a page closed mid-save left the library a step behind).
+    const text = JSON.stringify(this.store.doc);
+    // (No picture: nothing is drawn yet.)
+    if ((this.projectKept || this.store.features.length) && (await projectText(id)) !== text) {
+      this.projectKept = true;
+      await keepProject(id, this.store.doc.name, text);
+    }
+  }
+
+  /** The open project into the library: with a new picture of the view now and then (it costs a moment). */
+  private async keepInLibrary(text: string, picture = false): Promise<void> {
+    const id = this.projectId;
+    if (!id || (!this.projectKept && !this.store.features.length)) return;
+    const now = Date.now();
+    // (Not right after opening one: the view isn't rebuilt yet. Opening the
+    // gallery or leaving the project always takes a new one.)
+    const snap = picture || document.visibilityState === "hidden" || now - this.lastPicture > 20000;
+    if (snap) this.lastPicture = now;
+    this.projectKept = true;
+    await keepProject(id, this.store.doc.name, text, snap ? this.viewPicture() : undefined);
+  }
+
+  /** A small picture of the model (as the view looks at it, framed to fit), for the library. */
+  private viewPicture(): string | undefined {
+    try {
+      return this.view.snapshot(320, 240, getComputedStyle(document.body).backgroundColor || "#2b2d31");
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Close the open project (it's kept, with a fresh picture) and open another. */
+  private async switchProject(doc: ProjectDoc, id: string): Promise<void> {
     this.setTool(null);
     this.setSection(null);
     this.isolate(null);
-    this.store.replace(emptyDoc());
-    if (await this.updates.check()) await this.updates.reset();
+    if (this.projectId) await this.keepInLibrary(JSON.stringify(this.store.doc), true);
+    const kept = (await libraryEntries()).some((e) => e.id === id);
+    await setCurrentProject(id);
+    // The id and the document change together: an autosave due meanwhile went to the old project.
+    this.projectId = id;
+    this.projectKept = kept;
+    this.lastPicture = Date.now();
+    this.store.openDoc(doc);
+    setTimeout(() => this.fit(), 400);
+  }
+
+  /** File → Open: the projects kept on this device, and Open file… for any other. */
+  private async showProjects(): Promise<void> {
+    // The open one with its picture as it looks now.
+    if (this.projectId) await this.keepInLibrary(JSON.stringify(this.store.doc), true);
+    showLibrary(await libraryEntries(), this.projectId, {
+      open: (id) => void this.openKept(id),
+      openFile: () => this.open(),
+      download: (id) => void this.downloadKept(id),
+      remove: async (id) => {
+        const e = (await libraryEntries()).find((x) => x.id === id);
+        const ok = await this.ui.ask("Delete this project?", `“${e?.name ?? "Project"}” is removed from this device. A file you saved of it stays.`, [{ id: "del", label: "Delete", primary: true }]);
+        if (ok !== "del") return false;
+        await forgetProject(id);
+        return true;
+      },
+    });
+  }
+
+  private async openKept(id: string): Promise<void> {
+    const text = await projectText(id);
+    if (!text) return this.ui.toast("That project couldn't be read", "error");
+    try {
+      await this.switchProject(parseProject(text), id);
+    } catch (err) {
+      this.ui.toast(`Could not open: ${(err as Error).message}`, "error");
+    }
+  }
+
+  private async downloadKept(id: string): Promise<void> {
+    const text = await projectText(id);
+    const e = (await libraryEntries()).find((x) => x.id === id);
+    if (text && e) download(new Blob([text], { type: "application/json" }), `${e.name}.super`);
   }
 
   private save(how: Delivery = "download"): void {
@@ -1081,9 +1170,8 @@ export class App implements AppContext {
       try {
         const doc = parseProject(await file.text());
         doc.name = file.name.replace(/\.(super|tessel)$/i, "");
-        this.setTool(null);
-        this.store.replace(doc);
-        setTimeout(() => this.fit(), 400);
+        // A project of its own in the library (the open one is kept as it was).
+        await this.switchProject(doc, newProjectId());
       } catch (err) {
         this.ui.toast(`Could not open: ${(err as Error).message}`, "error");
       }

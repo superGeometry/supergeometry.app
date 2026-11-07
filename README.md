@@ -330,9 +330,15 @@ can't be rebuilt after a change, it's marked and the reason is shown.
 
 ## Saving, opening, exporting, printing
 
-- Your project **saves itself** in this browser as you work.
+- Your project **saves itself** in this browser as you work, and every project
+  you've worked on is **kept on this device**.
+- **File → Open** shows them as a gallery of pictures, newest first: tap one to
+  carry on with it, or **Open file…** for any `.super` file (it joins the
+  gallery). Each card can be saved as a file or deleted. They live in the
+  browser's storage for this site: **Reset cache & update** keeps them, but
+  clearing the site's data in the browser's settings deletes them.
 - **File → Save project** downloads a `.super` file (keep it as a backup or
-  move it to another device); **File → Open** loads one.
+  move it to another device).
 - **File → Export STL** or **Export 3MF** for 3D printing (3MF keeps body
   names and colours), **Export STEP** for other CAD programs. With bodies
   selected (or isolated), only those are exported. On phones and tablets the
@@ -341,8 +347,8 @@ can't be rebuilt after a change, it's marked and the reason is shown.
 - **File → Export DXF (sketch)** saves a sketch's curves as a 2D drawing for
   laser cutters, CNC and drawing programs: open **Items**, tap the sketch, then
   File → Export DXF. Construction lines go on their own layer.
-- **File → New project** asks whether to save the open project first or
-  discard it.
+- **File → New project** starts an empty one; the open project stays in the
+  gallery.
 - **Insert** brings in STEP, STL, SVG and DXF files, and images to trace over
   (on the floor, front or side, its middle at the X / Y you type).
 

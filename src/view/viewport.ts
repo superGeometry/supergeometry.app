@@ -460,6 +460,34 @@ export class Viewport {
     return [...this.bodies.values()].map((b) => b.data);
   }
 
+  /**
+   * A picture of everything shown, fitted into a w × h frame, seen from the
+   * way the view looks now (for the project library). The view itself doesn't move.
+   */
+  snapshot(w: number, h: number, background: string): string | undefined {
+    const W = this.canvas.width, H = this.canvas.height;
+    if (!W || !H) return undefined;
+    // The middle of the canvas with the frame's shape: the model is fitted into that.
+    const s = Math.min(W / w, H / h);
+    const [cw, ch] = [w * s, h * s];
+    const side = (1 - cw / W) / 2, top = (1 - ch / H) / 2;
+    const out = document.createElement("canvas");
+    out.width = w;
+    out.height = h;
+    const g = out.getContext("2d")!;
+    // The view is see-through (the page shows behind it); a JPEG would turn that black.
+    g.fillStyle = background;
+    g.fillRect(0, 0, w, h);
+    this.cam.borrow(() => {
+      this.cam.fit(this.bounds(), false, { left: side, right: side, top, bottom: top });
+      this.render();
+      g.drawImage(this.canvas, (W - cw) / 2, (H - ch) / 2, cw, ch, 0, 0, w, h);
+    });
+    // Drawn again as it was.
+    this.render();
+    return out.toDataURL("image/jpeg", 0.75);
+  }
+
   /** Zoom to fit everything shown, in the part of the screen the tools leave free. */
   fitAll(animate = true): void {
     this.cam.fit(this.bounds(), animate, this.coveredInsets());

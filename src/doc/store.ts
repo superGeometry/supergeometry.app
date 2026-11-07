@@ -267,6 +267,23 @@ export class DocStore {
     this.changed();
   }
 
+  /**
+   * Switch to another project (from the library, a file, or a new one): its
+   * own document, with no undo history - undo never reaches into another project.
+   */
+  openDoc(doc: ProjectDoc): void {
+    this.doc = migrate(structuredClone(doc));
+    this.problems = resolveDoc(this.doc);
+    this.transientBase = null;
+    this.undoStack = [];
+    this.redoStack = [];
+    this.lastMerge = null;
+    this.changed();
+  }
+
+  /** Called with the project's text each time it is autosaved (the library keeps its copy). */
+  onSaved: ((text: string) => void) | null = null;
+
   /** Replace the whole document (open file / new project). Undoable. */
   replace(doc: ProjectDoc): void {
     this.commit((d) => {
@@ -283,6 +300,7 @@ export class DocStore {
     clearTimeout(this.saveTimer);
     const text = JSON.stringify(this.doc);
     await idbSet("autosave", text);
+    this.onSaved?.(text);
     await this.saveHistory(text);
   }
 
@@ -292,6 +310,7 @@ export class DocStore {
     this.saveTimer = window.setTimeout(() => {
       const text = JSON.stringify(this.doc);
       void idbSet("autosave", text);
+      this.onSaved?.(text);
       // The undo steps less eagerly: they're bigger, and only matter after a reload.
       clearTimeout(this.historyTimer);
       this.historyTimer = window.setTimeout(() => void this.saveHistory(text), 1200);
@@ -392,7 +411,7 @@ function db(name = DB_NAME): Promise<IDBDatabase | null> {
   });
 }
 
-async function idbGet(key: string, dbName = DB_NAME): Promise<string | null> {
+export async function idbGet(key: string, dbName = DB_NAME): Promise<string | null> {
   const d = await db(dbName);
   if (!d) return null;
   return new Promise((resolve) => {
@@ -402,10 +421,24 @@ async function idbGet(key: string, dbName = DB_NAME): Promise<string | null> {
   });
 }
 
-async function idbSet(key: string, value: string): Promise<void> {
+export async function idbSet(key: string, value: string): Promise<void> {
   const d = await db();
   if (!d) return;
-  d.transaction("kv", "readwrite").objectStore("kv").put(value, key);
+  await new Promise<void>((resolve) => {
+    const t = d.transaction("kv", "readwrite");
+    t.objectStore("kv").put(value, key);
+    t.oncomplete = t.onerror = t.onabort = () => resolve();
+  });
+}
+
+export async function idbDel(key: string): Promise<void> {
+  const d = await db();
+  if (!d) return;
+  await new Promise<void>((resolve) => {
+    const t = d.transaction("kv", "readwrite");
+    t.objectStore("kv").delete(key);
+    t.oncomplete = t.onerror = t.onabort = () => resolve();
+  });
 }
 
 function legacyAutosave(): string | null {
