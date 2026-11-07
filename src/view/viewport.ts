@@ -1517,11 +1517,11 @@ export function planeMarkMaterial(kind: string): SpriteMaterial {
   return m;
 }
 
-/** The app's cube mark (no dark tile behind it), for the screenshot watermark. */
+/** The app's mark, the icosahedron (no dark tile behind it), for the screenshot watermark. */
 let logoImage: Promise<HTMLImageElement | null> | null = null;
 function watermarkLogo(): Promise<HTMLImageElement | null> {
   logoImage ??= new Promise((resolve) => {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 8 44 48"><path d="M32 10l19 11v22L32 54 13 43V21z" fill="#3d8bff"/><path d="M32 10l19 11-19 11-19-11z" fill="#8bb8ff"/><path d="M32 32v22L13 43V21z" fill="#2a63c4"/></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 8 44 48"><path d="M32.00 10.00 L20.23 25.20 L43.77 25.20Z" fill="#a9cbff"/><path d="M12.95 21.00 L32.00 10.00 L20.23 25.20Z" fill="#bcd6ff"/><path d="M32.00 10.00 L51.05 21.00 L43.77 25.20Z" fill="#8bb8ff"/><path d="M20.23 25.20 L43.77 25.20 L32.00 45.60Z" fill="#5c9dff"/><path d="M51.05 21.00 L51.05 43.00 L43.77 25.20Z" fill="#3d8bff"/><path d="M51.05 43.00 L43.77 25.20 L32.00 45.60Z" fill="#3478e6"/><path d="M12.95 43.00 L12.95 21.00 L20.23 25.20Z" fill="#6aa5ff"/><path d="M12.95 43.00 L20.23 25.20 L32.00 45.60Z" fill="#4a8ff5"/><path d="M51.05 43.00 L32.00 54.00 L32.00 45.60Z" fill="#2a63c4"/><path d="M32.00 54.00 L12.95 43.00 L32.00 45.60Z" fill="#2457ad"/></svg>`;
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => resolve(null);
