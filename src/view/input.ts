@@ -86,6 +86,10 @@ export class InputRouter {
     });
     el.addEventListener("contextmenu", (e) => e.preventDefault());
     el.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
+    // Pressing the wheel: no browser autoscroll (on Windows it kept sliding the
+    // view while the wheel was held). Middle-drag pans instead.
+    el.addEventListener("mousedown", (e) => e.button === 1 && e.preventDefault());
+    el.addEventListener("auxclick", (e) => e.button === 1 && e.preventDefault());
     // Stop iPad Safari's own gestures (Scribble, magnifier, page zoom) on the canvas.
     el.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
     el.addEventListener("gesturestart", (e) => e.preventDefault());
@@ -286,6 +290,10 @@ export class InputRouter {
 
   private onWheel(e: WheelEvent): void {
     e.preventDefault();
+    // Wheel held down (panning): a press on the wheel can tilt it, and a tilted
+    // wheel repeats sideways scrolls for as long as it's held - the view slid
+    // off to one side without stopping. Only the drag pans meanwhile.
+    if (e.buttons & 4 || this.mode === "pan") return;
     const [x, y] = this.local(e);
     if (e.ctrlKey || !isTrackpadPan(e)) {
       // Mouse wheel, or trackpad pinch (reported as ctrl+wheel).
