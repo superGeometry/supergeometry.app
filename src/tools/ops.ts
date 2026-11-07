@@ -13,6 +13,7 @@ import { axisDrag, Handle } from "./handles";
 import { axisSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
 import { faceIndexOf, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
 import { SketchTool } from "./sketch";
+import { screenClass } from "../device";
 import { faceBeforeShell } from "./shellFace";
 import { entityPolylines } from "../sketch/curves";
 import { arrangement, drawnRegions, regionRef } from "../sketch/regions";
@@ -91,6 +92,19 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
 
   enter(): void {
     super.enter();
+    // A new one: the other tools that can start from the same shape, beside it
+    // in the column (drag the arrow: Extrude; tap one of these: that tool).
+    if (!this.existing) {
+      const src = this.feature.source;
+      const sections: ExtrudeSource[] = src.kind === "profile" ? src.regions.map((r) => ({ ...src, regions: [r] })) : [src];
+      this.app.ui.setTools([
+        ...(screenClass() === "phone" ? [{ id: "cancel", label: "Cancel", icon: "close" as const, shortcut: "Esc", run: () => this.cancel() }] : []),
+        { id: "extrude", label: "Extrude", icon: "extrude", active: true, sub: "drag the arrow", run: () => {} },
+        { id: "revolve", label: "Revolve", icon: "revolve", run: () => this.app.setTool(new RevolveOp(this.app, src)) },
+        { id: "sweep", label: "Sweep", icon: "sweep", run: () => this.app.setTool(new SweepOp(this.app, src)) },
+        { id: "loft", label: "Loft", icon: "loft", sub: "then tap the next shape", run: () => this.app.setTool(new LoftOp(this.app, sections, [])) },
+      ]);
+    }
     // From a sketch: the new solid is see-through while you size it, so the profile stays in view.
     if (this.feature.source.kind === "profile") this.app.view.setGhost(true);
     this.dim = new DimWidget(this.app.view, {
@@ -163,13 +177,6 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
       // Every shape in the sketch at once (a scale, lettering: hundreds of them,
       // far too many to tap) — holes stay holes.
       ...(src.kind === "profile" && !this.existing ? [{ type: "button" as const, label: "All shapes", onClick: () => this.allShapes() }] : []),
-      // A tap on a shape opens Extrude: the same shapes can be turned or swept instead.
-      ...(!this.existing
-        ? [
-            { type: "button" as const, label: "Revolve instead", onClick: () => this.app.setTool(new RevolveOp(this.app, this.feature.source)) },
-            { type: "button" as const, label: "Sweep instead", onClick: () => this.app.setTool(new SweepOp(this.app, this.feature.source)) },
-          ]
-        : []),
       // Lean the sides in towards a smaller end (a spire, a pyramid) — no angle to work out.
       {
         type: "slider" as const,
@@ -1779,7 +1786,7 @@ export class PlaneOp extends FeatureOp<PlaneFeature> {
   private base: PlaneDef | null = null;
 
   constructor(app: AppContext, base: PlaneDef | null, face: FaceRef | undefined, existing?: PlaneFeature) {
-    super(app, { ...app.store.newIdentity("plane"), type: "plane", plane: base ?? { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, face, offset: 10 }, existing);
+    super(app, { ...app.store.newIdentity("plane"), type: "plane", kind: "offset", plane: base ?? { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, face, offset: 10 }, existing);
     this.base = existing ? existing.plane : base;
     this.slots = [planeSlot(app, "From", () => this.base, (p, f) => ((this.base = p), (this.feature.plane = p), (this.feature.face = f)))];
   }
@@ -1891,7 +1898,7 @@ export class MidplaneOp extends FeatureOp<PlaneFeature> {
   private b: PlaneDef | null = null;
 
   constructor(app: AppContext) {
-    super(app, { ...app.store.newIdentity("plane", "Midplane"), type: "plane", plane: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, offset: 0 });
+    super(app, { ...app.store.newIdentity("plane", "Midplane"), type: "plane", kind: "mid", plane: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, offset: 0 });
     const apply = () => {
       const m = this.a && this.b ? midplane(this.a, this.b) : null;
       if (m) this.feature.plane = m;

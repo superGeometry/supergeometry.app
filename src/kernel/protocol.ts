@@ -48,6 +48,8 @@ export interface ConstructionInfo {
   id: string;
   name: string;
   plane: PlaneDef;
+  /** A construction plane: how it was made (offset, midplane, 3 points…). */
+  kind?: string;
 }
 
 export interface FeatureError {

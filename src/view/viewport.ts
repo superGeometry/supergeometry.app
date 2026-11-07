@@ -38,6 +38,8 @@ import {
   Vector2,
   Vector3,
   WebGLRenderer,
+  Sprite,
+  SpriteMaterial,
   AlwaysStencilFunc,
   DecrementWrapStencilOp,
   IncrementWrapStencilOp,
@@ -694,6 +696,7 @@ export class Viewport {
     const mat = (color: number, o: number, onTop: boolean) => new MeshBasicMaterial({ color, transparent: true, opacity: o, side: DoubleSide, depthWrite: false, depthTest: !onTop });
     // Origin planes take the colour of the axis they face: XY blue (Z), XZ green (Y), YZ red (X).
     const AXIS_TINT: Record<string, number> = { XY: 0x4f8ce0, XZ: 0x5fbf5a, YZ: 0xe0584f };
+    const kindOf = (id: string) => this.construction.planes.find((c) => c.id === id)?.kind ?? "offset";
     const addPlane = (id: string, p: PlaneDef, size: number, origin: boolean) => {
       const color = origin ? (AXIS_TINT[id] ?? COLORS.plane) : COLORS.plane;
       const mesh = new Mesh(new PlaneGeometry(1, 1), mat(color, origin ? 0.35 : 0.16, origin));
@@ -708,6 +711,14 @@ export class Viewport {
       );
       border.renderOrder = mesh.renderOrder;
       mesh.add(border);
+      // How it was made, at its corner: each kind of plane has its own mark.
+      if (!origin) {
+        const mark = new Sprite(planeMarkMaterial(kindOf(id)));
+        mark.position.set(-0.42, 0.42, 0);
+        mark.scale.set(0.14, 0.14, 1);
+        mark.renderOrder = 4;
+        mesh.add(mark);
+      }
       this.constructionGroup.add(mesh);
       this.planeMeshes.push(mesh);
     };
@@ -1377,3 +1388,27 @@ function hatched<M extends MeshBasicMaterial>(m: M): M {
   return m;
 }
 
+/** A plane's mark: a small badge with a symbol for how it was made (and the symmetry plane's). */
+const PLANE_MARKS: Record<string, string> = { offset: "⇡", mid: "⇹", "3pt": "∴", curve: "∿", perp: "⊥", angle: "∠", parallel: "∥", symmetry: "⧖" };
+const markMats = new Map<string, SpriteMaterial>();
+export function planeMarkMaterial(kind: string): SpriteMaterial {
+  let m = markMats.get(kind);
+  if (m) return m;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d")!;
+  g.fillStyle = kind === "symmetry" ? "#b36bff" : "#3d6fd6";
+  g.beginPath();
+  g.arc(32, 32, 30, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#fff";
+  g.font = "bold 38px system-ui, sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(PLANE_MARKS[kind] ?? "?", 32, 35);
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  m = new SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  markMats.set(kind, m);
+  return m;
+}

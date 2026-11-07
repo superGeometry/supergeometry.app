@@ -7,7 +7,7 @@
 // The plane is worked out from the picks and kept (it can be redone from History).
 
 import { Vector3 } from "three";
-import type { PlaneDef, PlaneFeature, Vec3 } from "../doc/types";
+import type { PlaneDef, PlaneFeature, PlaneKind, Vec3 } from "../doc/types";
 import { add, cross, dot, len, norm, scale, sub, xDirFor } from "../geom";
 import { entityPolylines } from "../sketch/curves";
 import { sketchToWorld } from "../view/viewport";
@@ -110,8 +110,8 @@ const placeholder = (): PlaneDef => ({ origin: [0, 0, 0], xDir: [1, 0, 0], norma
 
 abstract class PlaneFromPicks extends FeatureOp<PlaneFeature> {
   readonly id = "plane";
-  constructor(app: AppContext, label: string) {
-    super(app, { ...app.store.newIdentity("plane", label), type: "plane", plane: placeholder(), offset: 0 });
+  constructor(app: AppContext, label: string, kind: PlaneKind) {
+    super(app, { ...app.store.newIdentity("plane", label), type: "plane", kind, plane: placeholder(), offset: 0 });
   }
   /** The plane the picks make (null: not yet / they don't make one). */
   protected abstract make(): PlaneDef | null;
@@ -130,7 +130,7 @@ abstract class PlaneFromPicks extends FeatureOp<PlaneFeature> {
 export class ThreePointPlaneOp extends PlaneFromPicks {
   private pts: (Vec3 | null)[] = [null, null, null];
   constructor(app: AppContext) {
-    super(app, "Plane 3 Points");
+    super(app, "Plane 3 Points", "3pt");
     this.slots = ["First point", "Second point", "Third point"].map((l, i) => pointSlot(app, l, () => this.pts[i], (p) => ((this.pts[i] = p), this.sync())));
   }
   protected make(): PlaneDef | null {
@@ -149,7 +149,7 @@ export class ThreePointPlaneOp extends PlaneFromPicks {
 export class CurvePointPlaneOp extends PlaneFromPicks {
   private c: CurvePick | null = null;
   constructor(app: AppContext, private edgesOnly: boolean) {
-    super(app, edgesOnly ? "Plane Perp. to Edge" : "Plane on Curve");
+    super(app, edgesOnly ? "Plane Perp. to Edge" : "Plane on Curve", edgesOnly ? "perp" : "curve");
     this.slots = [curveSlot(app, edgesOnly ? "Edge (tap where the plane goes)" : "Curve (tap where the plane goes)", () => this.c, (c) => ((this.c = c), this.sync()))];
     this.finishWhenPicked = true;
   }
@@ -167,7 +167,7 @@ export class EdgeAnglePlaneOp extends PlaneFromPicks {
   private ref: PlaneDef | null = null;
   private angle = 45;
   constructor(app: AppContext) {
-    super(app, "Plane at Angle");
+    super(app, "Plane at Angle", "angle");
     this.slots = [
       curveSlot(app, "Edge (the plane turns about it)", () => this.c, (c) => ((this.c = c), this.sync()), true),
       planeSlot(app, "From face or plane (0°)", () => this.ref, (p) => ((this.ref = p), this.sync())),
@@ -200,7 +200,7 @@ export class FacePointPlaneOp extends PlaneFromPicks {
   private ref: PlaneDef | null = null;
   private at: Vec3 | null = null;
   constructor(app: AppContext) {
-    super(app, "Plane Parallel");
+    super(app, "Plane Parallel", "parallel");
     this.slots = [planeSlot(app, "Parallel to", () => this.ref, (p) => ((this.ref = p), this.sync())), pointSlot(app, "Through point", () => this.at, (p) => ((this.at = p), this.sync()))];
     this.finishWhenPicked = true;
   }

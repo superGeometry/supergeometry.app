@@ -490,7 +490,9 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         }
       }
       plane = { ...plane, origin: add(plane.origin, scale(plane.normal, f.offset)) };
-      ctx.planes.set(f.id, { id: f.id, name: f.name, plane });
+      // (Older projects: how it was made, from its name.)
+      const kind = f.kind ?? (/^Midplane/.test(f.name) ? "mid" : /3 Points/.test(f.name) ? "3pt" : /Perp/.test(f.name) ? "perp" : /on Curve/.test(f.name) ? "curve" : /Angle/.test(f.name) ? "angle" : /Parallel/.test(f.name) ? "parallel" : "offset");
+      ctx.planes.set(f.id, { id: f.id, name: f.name, plane, kind });
       return;
     }
 

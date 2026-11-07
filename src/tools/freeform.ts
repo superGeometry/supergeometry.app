@@ -4,16 +4,16 @@
 // in the card. The smooth surface updates live; Done turns it into a body.
 // Undo/Redo step through the cage changes made here.
 
-import { Box3, BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshBasicMaterial, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
+import { Box3, BufferAttribute, BufferGeometry, DoubleSide, Sprite, LineBasicMaterial, LineSegments, Mesh, MeshBasicMaterial, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import type { Feature, FreeformFeature, PlaneDef, TransformFeature, Vec3 } from "../doc/types";
-import { applyPlan, archBridge, planeCage, borderChains, cachedPlan, planIndices, smoothNormals, type SubdivPlan, bridgeChains, bridgeFaces, moveTurnScale, shapeCage, sweepFace, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
+import { applyPlan, archBridge, planeCage, borderChains, cachedPlan, planIndices, smoothNormals, type SubdivPlan, bridgeChains, bridgeFaces, moveTurnScale, shapeCage, sweepFace, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, extendBorder, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
 import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
-import { dotMaterial } from "../view/viewport";
+import { dotMaterial, planeMarkMaterial } from "../view/viewport";
 import { isCoarse, screenClass } from "../device";
 import { DragTyping, type DragTypingTarget } from "./dragTyping";
 import { Gimbal, GIMBAL_AXES, type GimbalPart } from "./gimbal";
@@ -88,6 +88,7 @@ export class FreeformTool implements Tool {
   private sym: { origin: Vec3; normal: Vec3 } | null = null;
   private symPicking = false;
   private symPairs: Map<number, number> | null = null;
+  private symMark = new Sprite(planeMarkMaterial("symmetry"));
   private symPlane = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ color: 0xb36bff, transparent: true, opacity: 0.1, depthTest: false, side: DoubleSide, depthWrite: false }));
   private markFill = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ color: SEL, transparent: true, opacity: 0.35, depthTest: false, side: DoubleSide }));
 
@@ -103,6 +104,12 @@ export class FreeformTool implements Tool {
       this.surfaceSheet = !!from.feature.surface;
       this.thickness = from.feature.thickness ?? 0;
       this.thickSide = from.feature.thickSide ?? "up";
+      // The symmetry plane set last time: still there (and shown).
+      const sy = from.feature.symmetry;
+      if (sy) {
+        const o = this.place.fwd(sy.origin);
+        this.sym = { origin: o, normal: norm(sub(this.place.fwd(add(sy.origin, sy.normal)), o)) };
+      }
     } else {
       this.cage = primitiveCage(from.primitive);
       this.surfaceSheet = from.primitive === "plane";
@@ -129,7 +136,10 @@ export class FreeformTool implements Tool {
 
   enter(): void {
     const view = this.app.view;
-    view.overlay.add(this.symPlane, this.surface, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots);
+    if (this.sym) queueMicrotask(() => this.drawSymPlane());
+    this.symMark.renderOrder = 72;
+    this.symMark.visible = false;
+    view.overlay.add(this.symPlane, this.symMark, this.surface, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots);
     // Editing an existing freeform: hide its finished body while the cage is out.
     if (this.existing) view.setHidden(new Set([...this.app.store.doc.hidden, this.existing.id]));
     this.app.setSelection([]);
@@ -196,6 +206,8 @@ export class FreeformTool implements Tool {
   exit(): void {
     const view = this.app.view;
     view.setOriginPlanesVisible(false);
+    // (A sprite's geometry is shared by every sprite: only taken off, not disposed.)
+    view.overlay.remove(this.symMark);
     for (const o of [this.symPlane, this.surface, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots]) {
       view.overlay.remove(o);
       o.geometry.dispose();
@@ -250,11 +262,22 @@ export class FreeformTool implements Tool {
         label: "Symmetry",
         value: !!this.sym || this.symPicking,
         onChange: (on) => {
+          // Two facing (parallel) faces picked: the mirror goes midway between them.
+          const fs = this.picks.filter((p): p is Extract<Pick, { kind: "face" }> => p.kind === "face");
+          if (on && fs.length === 2) {
+            const mid = (f: number) => this.centroid([...this.cage.faces[f]]);
+            const nrm = (f: number) => {
+              const [a, b, c, d] = this.cage.faces[f].map((i) => this.cage.verts[i]);
+              return norm(cross(sub(c, a), sub(d, b)));
+            };
+            const [n0, n1] = [nrm(fs[0].f), nrm(fs[1].f)];
+            if (Math.abs(dot(n0, n1)) > 0.995) return this.setSymmetry(scale(add(mid(fs[0].f), mid(fs[1].f)), 0.5), n0);
+          }
           this.sym = null;
           this.symPairs = null;
           this.symPicking = on;
           this.drawSymPlane();
-          if (on) this.app.ui.setHint("Symmetry: pick X / Y / Z (through the middle), or tap a cage edge — the mirror goes across its middle.");
+          if (on) this.app.ui.setHint("Symmetry: pick X / Y / Z (through the middle), tap a cage edge (across its middle) — or pick two facing faces first: midway between them.");
           this.panel();
         },
       });
@@ -262,6 +285,19 @@ export class FreeformTool implements Tool {
         const mid = this.centroid(this.cage.verts.map((_, i) => i));
         items.push({ type: "choice", label: "Mirror across", options: [{ id: "x", label: "X" }, { id: "y", label: "Y" }, { id: "z", label: "Z" }], value: "", onChange: (k) => this.setSymmetry(mid, k === "x" ? [1, 0, 0] : k === "y" ? [0, 1, 0] : [0, 0, 1]) });
       }
+    }
+    // Points on an open border picked (two or more along it): new faces beyond them.
+    const pickedVerts = this.picks.filter((p): p is Extract<Pick, { kind: "vert" }> => p.kind === "vert").map((p) => p.i);
+    if (pickedVerts.length >= 2 && !this.placing && !this.live && extendBorder(this.cage, pickedVerts)) {
+      items.push({
+        type: "button",
+        label: "Extend surface",
+        icon: "extrude",
+        onClick: () => {
+          const r = extendBorder(this.cage, pickedVerts);
+          if (r) this.changeCage(r.cage, r.verts.map((i) => ({ kind: "vert" as const, i })));
+        },
+      });
     }
     const faces = this.picks.filter((p) => p.kind === "face").length;
     if (faces && !this.placing) {
@@ -1014,6 +1050,7 @@ export class FreeformTool implements Tool {
   /** The symmetry plane, a see-through square round the shape. */
   private drawSymPlane(): void {
     const g = this.symPlane.geometry;
+    this.symMark.visible = !!this.sym;
     if (!this.sym) {
       g.setAttribute("position", new BufferAttribute(new Float32Array(0), 3));
       return;
@@ -1029,6 +1066,9 @@ export class FreeformTool implements Tool {
     g.setAttribute("position", new BufferAttribute(new Float32Array(q), 3));
     g.computeBoundingSphere();
     this.symPlane.renderOrder = 66;
+    // Its mark at a corner (the symmetry symbol), so it reads as the mirror, not a plane of the model.
+    this.symMark.position.set(...P(-0.85, 0.85));
+    this.symMark.scale.set(r * 0.22, r * 0.22, 1);
     this.app.view.requestRender();
   }
 
@@ -1279,7 +1319,11 @@ export class FreeformTool implements Tool {
     // Stored where it was made: later move steps in History still apply on top.
     const cage = { faces: structuredClone(this.cage.faces), verts: this.cage.verts.map(this.place.inv) };
     const open = !isClosed(cage);
-    const extra = { surface: this.surfaceSheet || undefined, thickness: open && this.thickness > 0 ? this.thickness : undefined, thickSide: open && this.thickness > 0 ? this.thickSide : undefined };
+    const symmetry = this.sym ? (() => {
+      const o = this.place.inv(this.sym!.origin);
+      return { origin: o, normal: norm(sub(this.place.inv(add(this.sym!.origin, this.sym!.normal)), o)) };
+    })() : undefined;
+    const extra = { surface: this.surfaceSheet || undefined, thickness: open && this.thickness > 0 ? this.thickness : undefined, thickSide: open && this.thickness > 0 ? this.thickSide : undefined, symmetry };
     let id: string;
     if (this.existing) {
       id = this.existing.id;

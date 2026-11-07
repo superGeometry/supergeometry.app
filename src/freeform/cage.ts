@@ -1334,3 +1334,48 @@ export function insetFaces(cage: Cage, faces: number[], f = 0.3): { cage: Cage; 
   });
   return { cage: { verts, faces: c.faces }, faces: ex.faces };
 }
+
+/**
+ * Extend a surface from points on its open border: every border edge with
+ * both ends picked gets a new face beyond it — outwards, in the surface's own
+ * direction there, as long as the edges are. Returns the new outer points
+ * (picked next, to drag on), or null when no border edge has both ends picked.
+ */
+export function extendBorder(cage: Cage, picked: number[]): { cage: Cage; verts: number[] } | null {
+  const sel = new Set(picked);
+  const border = boundaryEdges(cage).filter(([a, b]) => sel.has(a) && sel.has(b));
+  if (!border.length) return null;
+  // The face each border edge belongs to (it runs a→b in that face).
+  const faceOf = (a: number, b: number) => cage.faces.find((f) => f.some((v, k) => v === a && f[(k + 1) % 4] === b));
+  const centroid = (f: Quad) => mul3(f.reduce((s, i) => add3(s, cage.verts[i]), [0, 0, 0] as Vec3), 0.25);
+  // Outward, in the surface (away from the face, square to the edge), summed per point.
+  const out = new Map<number, Vec3>();
+  let total = 0;
+  for (const [a, b] of border) {
+    const f = faceOf(a, b);
+    if (!f) continue;
+    const A = cage.verts[a];
+    const B = cage.verts[b];
+    const e = sub3(B, A);
+    const el = Math.hypot(...e) || 1;
+    total += el;
+    const mid = mul3(add3(A, B), 0.5);
+    let d = sub3(mid, centroid(f));
+    d = sub3(d, mul3(e, dot3(d, e) / (el * el)));
+    const dl = Math.hypot(...d) || 1;
+    d = mul3(d, 1 / dl);
+    for (const v of [a, b]) out.set(v, add3(out.get(v) ?? [0, 0, 0], d));
+  }
+  const len = total / border.length;
+  const verts = [...cage.verts];
+  const copy = new Map<number, number>();
+  for (const [v, d] of out) {
+    const l = Math.hypot(...d) || 1;
+    copy.set(v, verts.length);
+    verts.push(add3(cage.verts[v], mul3(d, len / l)));
+  }
+  // Each new face runs the border edge the other way (so it faces like its neighbour).
+  const faces = [...cage.faces];
+  for (const [a, b] of border) faces.push([b, a, copy.get(a)!, copy.get(b)!]);
+  return { cage: { verts, faces }, verts: [...copy.values()] };
+}

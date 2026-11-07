@@ -235,11 +235,15 @@ export interface SplitFeature extends FeatureBase {
 }
 
 /** Construction plane. Optionally follows a face (offset along its normal). */
+/** How a construction plane was made (its mark on screen says so). */
+export type PlaneKind = "offset" | "mid" | "3pt" | "curve" | "perp" | "angle" | "parallel";
+
 export interface PlaneFeature extends FeatureBase {
   type: "plane";
   plane: PlaneDef;
   face?: FaceRef;
   offset: number;
+  kind?: PlaneKind;
 }
 
 export interface AxisFeature extends FeatureBase {
@@ -307,6 +311,8 @@ export interface FreeformFeature extends FeatureBase {
   thickness?: number;
   /** Which way the thickness goes from the surface (its normal side is "up"). */
   thickSide?: "up" | "down" | "both";
+  /** Edited with symmetry across this plane (kept for the next edit, and shown). */
+  symmetry?: { origin: Vec3; normal: Vec3 };
 }
 
 /**

@@ -661,12 +661,21 @@ export class UI {
       }
     }
     this.panel.append(row);
-    const buttons = el("div", "panel-buttons");
-    for (const a of spec.actions ?? []) {
-      const b = toolButton(a, true);
-      b.addEventListener("click", () => a.run?.());
-      buttons.append(b);
+    // The card's own actions (Select all, Add detail…) in a row of their own,
+    // inside the card (sharing the Cancel / Done row they were pushed out of it).
+    if (spec.actions?.length) {
+      const acts = el("div", "panel-actions");
+      for (const a of spec.actions) {
+        const b = el("button", "text-btn");
+        b.innerHTML = icons[a.icon] ?? "";
+        b.append(a.label);
+        if (a.disabled) b.disabled = true;
+        b.addEventListener("click", () => a.run?.());
+        acts.append(b);
+      }
+      this.panel.append(acts);
     }
+    const buttons = el("div", "panel-buttons");
     if (spec.onCancel) {
       const c = textButton("Cancel", "Esc", spec.onCancel);
       c.classList.add("panel-cancel");

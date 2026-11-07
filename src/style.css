@@ -3008,3 +3008,21 @@ input.scrubbing {
     padding-bottom: 5px;
   }
 }
+/* A card's sections apart with a dim line: its values, its own actions, Cancel / Done. */
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+#panel:not(.as-list) .panel-actions,
+#panel:not(.as-list) .panel-fields + .panel-buttons,
+#panel:not(.as-list) .panel-actions + .panel-buttons {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  width: 100%;
+}
+.panel-actions .text-btn svg {
+  width: 16px;
+  height: 16px;
+}

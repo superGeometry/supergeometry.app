@@ -315,7 +315,12 @@ export class SelectTool implements Tool {
 
   // --------------------------------------------------------------- menus
 
+  /** The list for what's picked, its groups apart with a dim line. */
   private actions(): ToolItem[] {
+    return withGroups(this.actionList());
+  }
+
+  private actionList(): ToolItem[] {
     const sel = this.app.selection;
     if (!sel.length) return [];
     const head: ToolItem[] = [{ id: "deselect", label: "Deselect All", icon: "deselect", shortcut: "Esc", sub: `${sel.length} ${label(sel[0], sel.length)}`, run: () => this.app.setSelection([]) }];
@@ -353,6 +358,20 @@ export class SelectTool implements Tool {
         });
       }
       head.push({ id: "thicken", label: "Thickness…", icon: "shell", run: () => this.app.setTool(new FreeformTool(this.app, { feature: own() })) });
+    }
+    // A face, edge or point of a freeform: its shape comes from the cage —
+    // fillet, chamfer, offset face… don't apply (they were listed all the same).
+    if (ff?.type === "freeform" && (first.kind === "face" || first.kind === "edge" || first.kind === "vertex")) {
+      const bodies = bodiesOf(sel);
+      const app = this.app;
+      return [
+        ...head,
+        { id: "moveBody", label: "Move/Rotate Body", icon: "move", run: () => app.setTool(new TransformOp(app, "move", bodies)) },
+        { id: "mirror", label: "Mirror", icon: "mirror", run: () => app.setTool(new TransformOp(app, "mirror", bodies)) },
+        { id: "patl", label: "Pattern – Linear", icon: "patternLinear", run: () => app.setTool(new TransformOp(app, "linear", bodies)) },
+        { id: "patc", label: "Pattern – Circular", icon: "patternCircular", run: () => app.setTool(new TransformOp(app, "circular", bodies)) },
+        { id: "deleteBody", label: "Delete Body", icon: "trash", run: () => (app.store.add({ ...app.store.newIdentity("delete"), type: "delete", bodies }), app.setSelection([])) },
+      ];
     }
     switch (sel[0].kind) {
       case "profile":
@@ -998,3 +1017,26 @@ function cap(s: string): string {
 
 /** Which Scale was used last (the button starts that one). */
 const lastScale = { xyz: false };
+
+/** Which group a list entry belongs to (a dim line goes between groups). */
+const GROUP: Record<string, string> = {
+  deselect: "pick", editFreeform: "pick", connect: "pick", fillHole: "pick", thicken: "pick", wholePattern: "pick",
+  move: "move", moveVertex: "move", moveBody: "move", scale: "move", translate: "move", rotate: "move", mirror: "move", patl: "move", patc: "move", copySketch: "move", align: "move",
+  sketch: "make", extrude: "make", revolve: "make", sweep: "make", loft: "make", shell: "make", split: "make", fillet: "make", chamfer: "make", thread: "make", offsetFace: "make", offsetEdge: "make", offset: "make", replace: "make", fill: "make", fillToPlane: "make", text: "make", wrap: "make", proje: "make", projs: "make", total: "make",
+  union: "combine", subtract: "combine", intersect: "combine",
+  axis: "construct", plane: "construct", planePerp: "construct",
+  color: "look", opacity: "look",
+  delete: "delete", deleteBody: "delete",
+};
+
+function withGroups(items: ToolItem[]): ToolItem[] {
+  const out: ToolItem[] = [];
+  let last = "";
+  items.forEach((it, i) => {
+    const g = GROUP[it.id] ?? last;
+    if (i > 0 && g !== last) out.push({ id: `---${i}`, label: "", icon: "more" });
+    out.push(it);
+    last = g;
+  });
+  return out;
+}
