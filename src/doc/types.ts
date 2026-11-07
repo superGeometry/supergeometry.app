@@ -500,6 +500,8 @@ export interface ItemFolder {
   name: string;
   /** Body ids and feature ids. */
   items: string[];
+  /** A subfolder: the folder it sits in (missing: at the top). */
+  parent?: string;
 }
 
 export function emptyDoc(): ProjectDoc {

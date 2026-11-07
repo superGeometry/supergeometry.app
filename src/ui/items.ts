@@ -131,30 +131,56 @@ export class ItemsPanel {
       for (const r of loose) this.row(r, hidden, 0);
     }
 
-    // Folders last, each with what it holds.
-    if (this.folders.length) section(`Folders (${this.folders.length})`);
-    for (const f of this.folders) {
-      const items = f.items.map((id) => byId.get(id)).filter((r): r is Row => !!r);
-      this.folderRow(f, items, hidden);
-      if (!this.collapsed.has(f.id)) for (const r of items) this.row(r, hidden, 1);
-    }
+    // Folders last, each with its subfolders and then what it holds.
+    const ids = new Set(this.folders.map((f) => f.id));
+    const top = this.folders.filter((f) => !f.parent || !ids.has(f.parent));
+    const subs = (f: ItemFolder) => this.folders.filter((x) => x.parent === f.id && x.id !== f.id);
+    const rowsOf = (f: ItemFolder) => f.items.map((id) => byId.get(id)).filter((r): r is Row => !!r);
+    const allRows = (f: ItemFolder, seen = new Set<string>()): Row[] => {
+      if (seen.has(f.id)) return [];
+      seen.add(f.id);
+      return [...rowsOf(f), ...subs(f).flatMap((s) => allRows(s, seen))];
+    };
+    const drawFolder = (f: ItemFolder, depth: number, seen: Set<string>) => {
+      if (seen.has(f.id)) return;
+      seen.add(f.id);
+      this.folderRow(f, allRows(f), hidden, depth);
+      if (this.collapsed.has(f.id)) return;
+      for (const s of subs(f)) drawFolder(s, depth + 1, seen);
+      for (const r of rowsOf(f)) this.row(r, hidden, depth + 1);
+    };
+    if (top.length) section(`Folders (${top.length})`);
+    const drawn = new Set<string>();
+    for (const f of top) drawFolder(f, 0, drawn);
 
     // Grouping bar.
     if (this.checked.size) {
       const bar = el("li", "items-groupbar");
-      const make = el("button", "text-btn primary", `New folder (${this.checked.size})`);
-      make.addEventListener("click", () => void this.makeFolder());
+      // All ticked items in the same folder: the new folder goes inside it.
+      const homes = new Set([...this.checked].map((id) => this.folders.find((f) => f.items.includes(id))?.id ?? ""));
+      const parent = homes.size === 1 ? [...homes][0] || undefined : undefined;
+      const make = el("button", "text-btn primary", `${parent ? "New subfolder" : "New folder"} (${this.checked.size})`);
+      make.addEventListener("click", () => void this.makeFolder(parent));
       const clear = el("button", "text-btn", "Clear");
       clear.addEventListener("click", () => (this.checked.clear(), this.render(this.last)));
       bar.append(make, clear);
-      // Ticked items that are in a folder: Remove takes them out (back among the loose ones).
+      // Ticked items that are in a folder: Remove takes them out - one level up
+      // (into the folder around a subfolder), or back among the loose ones.
       const filed = [...this.checked].filter((id) => inFolder.has(id));
       if (filed.length) {
         const remove = el("button", "text-btn", `Remove (${filed.length})`);
         remove.title = "Take the ticked items out of their folders";
         remove.addEventListener("click", () => {
           this.checked.clear();
-          this.store.commit((d) => (d.folders = (d.folders ?? []).map((f) => ({ ...f, items: f.items.filter((x) => !filed.includes(x)) }))));
+          this.store.commit((d) => {
+            const fs = d.folders ?? [];
+            const up = new Map<string, string[]>();
+            for (const f of fs) {
+              const out = f.items.filter((x) => filed.includes(x));
+              if (out.length && f.parent && fs.some((p) => p.id === f.parent)) up.set(f.parent, [...(up.get(f.parent) ?? []), ...out]);
+            }
+            d.folders = fs.map((f) => ({ ...f, items: [...f.items.filter((x) => !filed.includes(x)), ...(up.get(f.id) ?? [])] }));
+          });
         });
         bar.append(remove);
       }
@@ -166,6 +192,8 @@ export class ItemsPanel {
 
   private row(r: Row, hidden: Set<string>, depth: number): void {
     const li = el("li", `items-row${hidden.has(r.id) ? " hidden-item" : ""}${r.extra ?? ""}${this.checked.has(r.id) ? " checked" : ""}${depth ? " in-folder" : ""}`);
+    // Deeper in subfolders: a step further in each level.
+    if (depth > 1) li.style.paddingLeft = `${18 * depth}px`;
     if (this.picking) {
       const box = document.createElement("input");
       box.type = "checkbox";
@@ -198,8 +226,10 @@ export class ItemsPanel {
     this.list.append(li);
   }
 
-  private folderRow(f: ItemFolder, items: Row[], hidden: Set<string>): void {
-    const li = el("li", "items-row folder-row");
+  /** A folder's row; `items` is everything in it, its subfolders' too. */
+  private folderRow(f: ItemFolder, items: Row[], hidden: Set<string>, depth = 0): void {
+    const li = el("li", `items-row folder-row${depth ? " in-folder" : ""}`);
+    if (depth > 1) li.style.paddingLeft = `${18 * depth}px`;
     const allHidden = items.length > 0 && items.every((r) => hidden.has(r.id));
     const eye = el("button", "icon-btn");
     eye.title = allHidden ? "Show all in folder" : "Hide all in folder";
@@ -229,7 +259,16 @@ export class ItemsPanel {
     const del = el("button", "icon-btn");
     del.title = "Remove folder (keeps what's in it)";
     del.innerHTML = icons.trash;
-    del.addEventListener("click", () => this.store.commit((d) => (d.folders = (d.folders ?? []).filter((x) => x.id !== f.id))));
+    // What it held - items and subfolders - moves up to where it was.
+    del.addEventListener("click", () =>
+      this.store.commit((d) => {
+        const fs = d.folders ?? [];
+        const parent = f.parent && fs.some((p) => p.id === f.parent) ? f.parent : undefined;
+        d.folders = fs
+          .filter((x) => x.id !== f.id)
+          .map((x) => (x.id === parent ? { ...x, items: [...x.items, ...f.items] } : x.parent === f.id ? { ...x, parent } : x));
+      }),
+    );
     li.append(eye, label, ren, del);
     this.list.append(li);
   }
@@ -240,9 +279,10 @@ export class ItemsPanel {
     this.render(this.last);
   }
 
-  private async makeFolder(): Promise<void> {
+  /** A folder of the ticked items; `parent`: inside that folder (a subfolder). */
+  private async makeFolder(parent?: string): Promise<void> {
     const ids = [...this.checked];
-    const name = await this.h.askName("New folder", `Folder ${this.folders.length + 1}`);
+    const name = await this.h.askName(parent ? "New subfolder" : "New folder", `Folder ${this.folders.length + 1}`);
     if (!name) return;
     this.checked.clear();
     this.picking = false;
@@ -250,7 +290,7 @@ export class ItemsPanel {
     // An item lives in one folder at a time.
     this.store.commit((d) => {
       const rest = (d.folders ?? []).map((f) => ({ ...f, items: f.items.filter((x) => !ids.includes(x)) }));
-      d.folders = [...rest, { id: `folder-${Date.now().toString(36)}`, name, items: ids }];
+      d.folders = [...rest, { id: `folder-${Date.now().toString(36)}`, name, items: ids, ...(parent ? { parent } : {}) }];
     });
   }
 }
