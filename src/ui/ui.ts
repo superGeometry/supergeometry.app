@@ -322,6 +322,8 @@ export class UI {
     const r = anchor.getBoundingClientRect();
     this.flyout.innerHTML = "";
     renderTools(this.flyout, item.children ?? [], (child, btn) => this.openFlyout(child, btn), () => this.closeFlyout());
+    // Colour choices show as a grid of circles.
+    this.flyout.classList.toggle("swatch-grid", !!item.children?.length && item.children.every((c) => c.swatch));
     this.flyout.hidden = false;
     // A strip of tools along the bottom (phones, main tools): the options open
     // above it. A column of tools (the sketch tools, also on phones): beside it.
@@ -1456,7 +1458,7 @@ function iconButton(icon: IconName, title: string, run: () => void): HTMLButtonE
   return b;
 }
 
-function textButton(label: string, kbd: string, run: () => void, primary = false): HTMLButtonElement {
+export function textButton(label: string, kbd: string, run: () => void, primary = false): HTMLButtonElement {
   const b = document.createElement("button");
   b.className = primary ? "text-btn primary" : "text-btn";
   b.append(label);

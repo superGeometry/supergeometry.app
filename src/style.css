@@ -264,6 +264,29 @@ kbd {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
   flex: none;
 }
+#flyout.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 44px);
+  gap: 4px;
+  padding: 8px;
+}
+#flyout.swatch-grid .tool {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  justify-content: center;
+}
+#flyout.swatch-grid .tool .swatch {
+  width: 28px;
+  height: 28px;
+}
+#flyout.swatch-grid .tool.active .swatch {
+  box-shadow: 0 0 0 2px var(--chrome-solid), 0 0 0 4px var(--accent);
+}
+#flyout.swatch-grid .tool-label,
+#flyout.swatch-grid .tool-key {
+  display: none;
+}
 .menu-soon {
   font-size: 11px;
   color: var(--muted);
@@ -1463,6 +1486,64 @@ body.items-open #bottom-left {
 }
 .dialog .panel-buttons {
   justify-content: flex-end;
+}
+
+/* Color → Custom…: the body shows each colour as it's chosen, so the view stays clear behind. */
+.dialog-back.see-through {
+  background: transparent;
+}
+.color-dialog {
+  width: min(300px, calc(100vw - 24px));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.color-sv,
+.color-hue {
+  position: relative;
+  border-radius: 8px;
+  touch-action: none;
+  cursor: crosshair;
+}
+.color-sv {
+  height: 170px;
+}
+.color-hue {
+  height: 18px;
+  border-radius: 9px;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+.color-dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.color-hue .color-dot {
+  top: 50%;
+}
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.color-preview {
+  width: 32px;
+  height: 32px;
+}
+.color-hex {
+  flex: 1;
+  min-height: 36px;
+  font: 14px ui-monospace, monospace;
+  color: var(--text);
+  background: #2b2e34;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* File → Open: the projects kept on this device. */

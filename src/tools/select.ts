@@ -21,6 +21,7 @@ import { OffsetEdgeOp } from "./offsetEdge";
 import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { BooleanOp } from "./booleanOp";
+import { pickColor } from "../ui/colorPicker";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
 
 const SOON = "Coming soon";
@@ -630,27 +631,17 @@ export class SelectTool implements Tool {
             icon: "color" as const,
             ...(custom ? { swatch: now } : {}),
             active: custom,
-            run: () => {
-              const input = document.createElement("input");
-              input.type = "color";
-              input.value = now ?? BODY_COLORS[0].hex;
-              input.style.cssText = "position:fixed;left:-100px;top:0;opacity:0";
-              document.body.append(input);
-              const set = (final: boolean) => {
-                const hex = input.value;
-                const write = (d: { colors?: Record<string, string> }) => {
-                  const colors = { ...(d.colors ?? {}) };
-                  for (const b of bodies) colors[b] = hex;
-                  d.colors = colors;
-                };
-                // One undo step for the whole pick: live while choosing, kept on change.
-                if (final) app.store.commit(write);
-                else app.store.transient(write);
-                if (final) input.remove();
+            run: async () => {
+              const before = app.store.doc.colors;
+              const write = (hex: string) => (d: { colors?: Record<string, string> }) => {
+                const colors = { ...(d.colors ?? {}) };
+                for (const b of bodies) colors[b] = hex;
+                d.colors = colors;
               };
-              input.addEventListener("input", () => set(false));
-              input.addEventListener("change", () => set(true));
-              input.click();
+              // One undo step for the whole pick: live while choosing, kept on Done.
+              const hex = await pickColor("Custom colour", now ?? BODY_COLORS[0].hex, (h) => app.store.transient(write(h)));
+              if (hex) app.store.commit(write(hex));
+              else app.store.commit((d) => (d.colors = before));
             },
           };
         })(),
