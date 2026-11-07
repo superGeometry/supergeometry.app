@@ -147,6 +147,17 @@ export class ItemsPanel {
       const clear = el("button", "text-btn", "Clear");
       clear.addEventListener("click", () => (this.checked.clear(), this.render(this.last)));
       bar.append(make, clear);
+      // Ticked items that are in a folder: Remove takes them out (back among the loose ones).
+      const filed = [...this.checked].filter((id) => inFolder.has(id));
+      if (filed.length) {
+        const remove = el("button", "text-btn", `Remove (${filed.length})`);
+        remove.title = "Take the ticked items out of their folders";
+        remove.addEventListener("click", () => {
+          this.checked.clear();
+          this.store.commit((d) => (d.folders = (d.folders ?? []).map((f) => ({ ...f, items: f.items.filter((x) => !filed.includes(x)) }))));
+        });
+        bar.append(remove);
+      }
       this.list.append(bar);
     } else if (this.picking) {
       this.list.append(el("li", "items-empty", "Tick items, then make a folder of them."));
