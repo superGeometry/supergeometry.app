@@ -1354,33 +1354,30 @@ function trimSweepEnd(body: Shape3D, F: Face, by: number, ctx: Ctx): Shape3D | n
   const c = F.center.toTuple() as Vec3;
   for (const spine of ctx.sweeps.values()) {
     const all = wirePoints(spine);
+    // Every place the path passes through F's plane heading out through F
+    // (the end itself, or where an earlier push left it): the one at F. On an
+    // S-bend the plane cuts the path elsewhere too.
+    const side = (p: Vec3) => dot(sub(p, origin), normal);
+    const tolPlane = size * 0.05 + 1e-6;
+    let best: { pts: Vec3[]; out: Vec3; d: number } | null = null;
     for (const way of [all, [...all].reverse()]) {
-      // Walking in from this end of the path: where it crosses F's plane (the
-      // end itself, or where an earlier push left the end), heading out
-      // through F there, close to it.
-      const side = (p: Vec3) => dot(sub(p, origin), normal);
-      const tolPlane = size * 0.05 + 1e-6;
-      let k = -1;
-      for (let j = 0; j < way.length - 1; j++) {
-        if (side(way[j]) >= -tolPlane && side(way[j + 1]) < side(way[j])) {
-          if (side(way[j + 1]) <= tolPlane) {
-            k = j;
-            break;
-          }
-        }
+      for (let k = 0; k < way.length - 1; k++) {
+        const a0 = side(way[k]);
+        const a1 = side(way[k + 1]);
+        if (!(a0 >= -tolPlane && a1 < a0 && a1 <= tolPlane)) continue;
+        const out = norm(sub(way[k], way[k + 1]));
+        if (Math.abs(dot(out, normal)) < 0.98) continue;
+        // (The sweep turns its profile square to the path: a profile drawn a
+        // little off square ends on a plane a hair off the path's end.)
+        const t0 = a0 <= tolPlane && k === 0 ? 0 : Math.min(1, Math.max(0, a0 / (a0 - a1)));
+        const q = add(way[k], scale(sub(way[k + 1], way[k]), t0));
+        const d = dist(q, c);
+        if (d <= size && (!best || d < best.d)) best = { pts: [q, ...way.slice(k + 1)], out, d };
       }
-      if (k < 0) continue;
-      const a0 = side(way[k]);
-      const a1 = side(way[k + 1]);
-      // (The sweep turns its profile square to the path: a profile drawn a
-      // little off square ends on a plane a hair off the path's end.)
-      const t0 = a0 <= tolPlane && a0 >= -tolPlane && k === 0 ? 0 : Math.min(1, Math.max(0, a0 / (a0 - a1)));
-      const q = add(way[k], scale(sub(way[k + 1], way[k]), t0));
-      const pts = [q, ...way.slice(k + 1)];
+    }
+    if (best) {
+      const { pts, out } = best;
       const p0 = pts[0];
-      const out = norm(sub(way[k], way[k + 1]));
-      if (Math.abs(dot(out, normal)) < 0.98) continue;
-      if (dist(p0, c) > size) continue;
       // The piece of path to take off: from the end, `by` along it.
       const piece: Vec3[] = [p0];
       let run = 0;
@@ -1399,11 +1396,13 @@ function trimSweepEnd(body: Shape3D, F: Face, by: number, ctx: Ctx): Shape3D | n
       if (run < by - 1e-9 || i >= pts.length - 1) throw new Error("That's as long as the sweep's whole path or more - it would remove it");
       // Straight line pieces stay a line; a curve is fitted through its points.
       const straight = piece.every((p) => len(sub(sub(p, p0), scale(norm(sub(piece[piece.length - 1], p0)), dot(sub(p, p0), norm(sub(piece[piece.length - 1], p0)))))) < size * 1e-6);
-      const reach = size * 0.05 + 1e-3;
-      const start = add(p0, scale(out, reach));
-      const curve = straight || piece.length < 4 ? makeLine(p0, piece[piece.length - 1]) : makeBSplineApproximation(piece, { tolerance: size * 1e-6 + 1e-7, degMax: 5, degMin: 2 });
+      const lead = size * 0.05 + 1e-3;
+      const start = add(p0, scale(out, lead));
+      const curve = straight || piece.length < 4 ? makeLine(p0, piece[piece.length - 1]) : makeBSplineApproximation(piece, { tolerance: size * 1e-4 + 1e-6, degMax: 5, degMin: 2 });
       const path = assembleWire([makeLine(start, p0), curve]);
-      const r = dist(p0, c) + size;
+      let reach0 = 0;
+      for (const e of F.edges) for (let j = 0; j <= 16; j++) reach0 = Math.max(reach0, dist(e.pointAt(j / 16).toTuple() as Vec3, p0));
+      const r = reach0 * 1.1 + size * 0.02;
       const disc = assembleWire([makeCircle(r, start, scale(out, -1))]);
       const cutter = genericSweep(disc, path, { frenet: false, transitionMode: "round" }) as Shape3D;
       const result = fuzzyBoolean("cut", body, cutter);

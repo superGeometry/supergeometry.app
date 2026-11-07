@@ -111,15 +111,11 @@ export function showAbout(): void {
   const box = el("div", "dialog about");
   const head = el("div", "library-head");
   head.append(el("div", "panel-title", "About supergeometry.app"));
-  const gh = el("a", "text-btn", "On GitHub");
-  gh.href = REPO;
-  gh.target = "_blank";
-  gh.rel = "noopener";
   const closeBtn = el("button", "icon-btn library-close");
   closeBtn.type = "button";
   closeBtn.title = "Close";
   closeBtn.innerHTML = icons.close;
-  head.append(gh, closeBtn);
+  head.append(closeBtn);
   const body = el("div", "about-body");
   body.innerHTML = render(aboutText());
   // The Contents links scroll within the window.

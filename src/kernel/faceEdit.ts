@@ -6,7 +6,7 @@
 // the body is on (planes → half-spaces, cylinders → infinite cylinders). Changing
 // F then only means adding/removing the right slab of E.
 
-import { assembleWire, basicFaceExtrusion, getOC, loft, makeBSplineApproximation, makeCylinder, makeLine, makePolygon, makeSphere, measureArea, measureVolume, cast, Vector, type Face, type Shape3D } from "replicad";
+import { assembleWire, basicFaceExtrusion, getOC, loft, makeFace, makeBSplineApproximation, makeCylinder, makeLine, makePolygon, makeSphere, measureArea, measureVolume, cast, Vector, type Face, type Shape3D } from "replicad";
 import type { PlaneDef, Vec3 } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, xDirFor } from "../geom";
 import { subShapes } from "./health";
@@ -127,6 +127,22 @@ function infiniteCylinder(cy: Cyl, r: number, L0: number): Shape3D {
   return makeCylinder(r, 2 * L, sub(cy.c, scale(cy.a, L)), cy.a) as Shape3D;
 }
 
+/**
+ * g, a round face next to flat face F, is a convex fillet that ends on F
+ * (its axis runs through F, and it rounds the edge between two flat faces it
+ * is tangent to): those two faces' planes, outward. Null otherwise.
+ */
+function filletEnding(body: Shape3D, F: Face, g: Face, cy: Cyl): [PlaneDef, PlaneDef] | null {
+  if (Math.abs(dot(cy.a, planeOf(F).normal)) < 0.05) return null;
+  const tol = sizeOf(body) * 1e-7;
+  const sup = neighbours(body, g).filter((h) => h.geomType === "PLANE" && !h.isSame(F) && tangentTo(cy, planeOf(h), tol));
+  if (sup.length !== 2) return null;
+  const pls = sup.map((h) => planeOf(h)) as [PlaneDef, PlaneDef];
+  // Convex: the axis lies inside the material, behind both faces.
+  if (!pls.every((pl) => dot(sub(cy.c, pl.origin), pl.normal) < 0)) return null;
+  return pls;
+}
+
 /** Faces sharing an edge with F. */
 function neighbours(body: Shape3D, F: Face): Face[] {
   const edges = F.edges;
@@ -138,12 +154,16 @@ function neighbours(body: Shape3D, F: Face): Face[] {
  * that contains `q` (a point just inside the body under F). Bounded by a box.
  */
 export function extendedRegion(body: Shape3D, F: Face, q: Vec3, L: number): Shape3D {
+  return regionAround(body, F, neighbours(body, F), q, L);
+}
+
+/** As extendedRegion, bounded by the given faces round F (those along one of its outlines). */
+function regionAround(body: Shape3D, F: Face, nb: Face[], q: Vec3, L: number): Shape3D {
   const c = body.boundingBox.center as Vec3;
   // Bounding box, bigger than the other tools so no faces coincide with theirs.
   const big = () => halfSpace({ origin: sub(c, [0, 0, 1.5 * L]), xDir: [1, 0, 0], normal: [0, 0, 1] }, 3 * L);
   const keep: Shape3D[] = [];
   const remove: Shape3D[] = [];
-  const nb = neighbours(body, F);
   for (const g of nb) {
     if (g.geomType === "PLANE") {
       const { origin: p, normal: n } = planeOf(g);
@@ -153,6 +173,19 @@ export function extendedRegion(body: Shape3D, F: Face, q: Vec3, L: number): Shap
     } else if (g.geomType === "CYLINDRE") {
       const cy = cylinderOf(g);
       if (!cy) continue;
+      // A rounded edge (a fillet) that ends on F: it carries on along itself,
+      // between the two faces it rounds - not as an endless cylinder, which
+      // carved a groove into the body and left a scrap of the old face standing.
+      const corner = F.geomType === "PLANE" ? filletEnding(body, F, g, cy) : null;
+      if (corner) {
+        for (const pl of corner) {
+          if (nb.some((x) => x.geomType === "PLANE" && Math.abs(dot(planeOf(x).normal, pl.normal)) > 1 - 1e-9 && Math.abs(dot(sub(planeOf(x).origin, pl.origin), pl.normal)) < 1e-6)) continue;
+          keep.push(halfSpace({ origin: pl.origin, normal: scale(pl.normal, -1), xDir: xDirFor(scale(pl.normal, -1)) }, L));
+        }
+        const wedge = halfSpace({ origin: cy.c, normal: corner[0].normal, xDir: xDirFor(corner[0].normal) }, L).intersect(halfSpace({ origin: cy.c, normal: corner[1].normal, xDir: xDirFor(corner[1].normal) }, L));
+        remove.push(wedge.cut(infiniteCylinder(cy, cy.r, L)));
+        continue;
+      }
       const rel = sub(q, cy.c);
       const radial = len(sub(rel, scale(cy.a, dot(rel, cy.a))));
       (radial < cy.r ? keep : remove).push(infiniteCylinder(cy, cy.r, L));
@@ -338,6 +371,8 @@ function faceColumn(body: Shape3D, F: Face, L: number): Shape3D {
   const lift = sizeOf(body) * 1e-3;
   const q0 = sub(p, scale(n, lift));
   if (F.geomType === "PLANE" && convexFace(F)) return extendedRegion(body, F, q0, L);
+  const holed = F.geomType === "PLANE" ? framedColumn(body, F, n, lift, L) : null;
+  if (holed) return holed;
   const tol = sizeOf(body) * 1e-6;
   const sides = neighbours(body, F).map((g): ((q: Vec3) => number) | null => {
     if (g.geomType === "PLANE") {
@@ -386,9 +421,77 @@ function faceColumn(body: Shape3D, F: Face, L: number): Shape3D {
   let E: Shape3D | null = null;
   for (const q of cells.values()) {
     const c = extendedRegion(body, F, q, L);
-    E = E ? E.fuse(c) : c;
+    E = E ? fuseCells(E, c) : c;
   }
   return E!;
+}
+
+/**
+ * A flat face with holes whose outline and holes are each convex (a rim left
+ * round an opening, a plate with a window): the space its outline's
+ * neighbours enclose, less the space each hole's neighbours enclose. Null for
+ * any other face. (Cutting it into cells by every neighbour's surface and
+ * joining them again failed on such a rim.)
+ */
+function framedColumn(body: Shape3D, F: Face, n: Vec3, lift: number, L: number): Shape3D | null {
+  const holes = F.clone().innerWires();
+  if (!holes.length) return null;
+  const outer = F.clone().outerWire();
+  const wireFace = (w: typeof outer): Face | null => {
+    try {
+      return makeFace(w);
+    } catch {
+      return null;
+    }
+  };
+  const loops = [outer, ...holes].map((w) => ({ w, f: wireFace(w) }));
+  if (loops.some((l) => !l.f || !convexFace(l.f))) return null;
+  const all = neighbours(body, F);
+  const along = (w: typeof outer) => all.filter((g) => g.edges.some((e) => w.edges.some((we) => we.isSame(e))));
+  // A point inside a convex loop, just under F.
+  const inside = (w: typeof outer): Vec3 => {
+    const pts = w.edges.flatMap((e) => [0, 0.5].map((t) => tup(e.pointAt(t))));
+    const m = scale(pts.reduce((a, b) => add(a, b), [0, 0, 0] as Vec3), 1 / pts.length);
+    return sub(m, scale(n, lift));
+  };
+  try {
+    let E = regionAround(body, F, along(outer), inside(outer), L);
+    for (const h of holes) E = E.cut(regionAround(body, F, along(h), inside(h), L));
+    return isEmpty(E) ? null : E;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Two of a face's cells joined. They meet face to face, and the plain join
+ * can fail on that (a U-shaped rim across a shell's walls): then once more
+ * with a small tolerance, which lets the shared faces be one.
+ */
+function fuseCells(a: Shape3D, b: Shape3D): Shape3D {
+  try {
+    return a.fuse(b);
+  } catch (err) {
+    const oc = getOC();
+    const algo = new oc.BRepAlgoAPI_Fuse();
+    const args = new oc.NCollection_List_TopoDS_Shape();
+    const tools = new oc.NCollection_List_TopoDS_Shape();
+    try {
+      args.Append(a.wrapped);
+      tools.Append(b.wrapped);
+      algo.SetArguments(args);
+      algo.SetTools(tools);
+      algo.SetFuzzyValue(Math.max(1e-7, Math.max(sizeOf(a), sizeOf(b)) * 1e-6));
+      algo.SetNonDestructive(true);
+      algo.Build(new oc.Message_ProgressRange());
+      if (!algo.IsDone()) throw err;
+      return cast(algo.Shape()) as Shape3D;
+    } finally {
+      algo.delete();
+      args.delete();
+      tools.delete();
+    }
+  }
 }
 
 /** Does a flat face's outline turn the same way at every corner (no inward corners, no holes)? */
