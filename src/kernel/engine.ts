@@ -319,7 +319,12 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "sweep": {
       const spine = pathWire(f.path, ctx);
-      const parts = sourceWires(f.source, ctx).map((w) => genericSweep(w, spine, { frenet: true, transitionMode: "round" }) as Shape3D);
+      // The profile keeps its turn round the path as it goes (OpenCascade's
+      // corrected Frenet), not the path's own Frenet frame: that one flips
+      // half a turn where a bend changes side (an S curve) and is undefined
+      // where the path runs straight, so the tube broke into pieces that
+      // jumped sideways there - a profile off the path's centre most of all.
+      const parts = sourceWires(f.source, ctx).map((w) => genericSweep(w, spine, { frenet: false, transitionMode: "round" }) as Shape3D);
       combine(f.id, f.mode, f.target, fuseAll(parts), false, ctx);
       return;
     }
