@@ -293,9 +293,9 @@ kbd {
 }
 /* An update waiting (its notice put away): More pulses, and so does NEW on
    Update. */
-/* A ring that grows and fades (transform and opacity only: the GPU just
-   moves a layer, no repaint each frame), a few times and then still - an
-   endless glow kept the graphics card busy in every open tab. */
+/* A ring that grows and fades, over and over (transform and opacity only:
+   the GPU just moves a layer, no repaint each frame - the glow it replaced
+   repainted every frame and kept the graphics card busy in every open tab). */
 @keyframes update-pulse {
   0% {
     transform: scale(1);
@@ -321,7 +321,7 @@ body.update-pending #more-btn::after,
   border: 2px solid var(--accent);
   pointer-events: none;
   opacity: 0;
-  animation: update-pulse 1.6s ease-out 6;
+  animation: update-pulse 1.6s ease-out infinite;
 }
 .new-badge {
   align-self: center;
