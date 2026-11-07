@@ -1242,6 +1242,12 @@ body.items-open #bottom-left {
 .items-row.checked {
   background: var(--accent-soft);
 }
+.items-row.selected {
+  background: var(--accent-soft);
+}
+.items-row.selected .items-name {
+  color: var(--accent);
+}
 .items-row.in-folder {
   padding-left: 18px;
 }

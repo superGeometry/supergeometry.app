@@ -236,6 +236,10 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           if (face.clone().innerWires().length) throw new Error("Taper works on shapes without holes");
           const w0 = face.clone().outerWire();
           const k = Math.max(0.002, f.taper!);
+          // Straight-edged shapes: flat sides (a loft makes them curved surfaces,
+          // and then nothing that needs a flat face - sketch on it, move it - works).
+          const flat = taperedPrism(face, c, normal, k, f.distance);
+          if (flat) return flat;
           const w1 = w0.clone().scale(k, c).translate(scale(normal, f.distance));
           try {
             return loft([w0, w1], { ruled: true }) as Shape3D;
@@ -870,6 +874,37 @@ function movePolyhedronVertex(body: Shape3D, at: Vec3, to: Vec3): Shape3D | null
  * plane keeps its unmoved part, and the moved corners get triangles (fanned
  * from the unmoved corner before them); coplanar pieces merge again after.
  */
+/**
+ * A straight-edged shape tapered: its outline, the outline scaled about its
+ * centre at the far end, and a flat four-sided face between each pair of
+ * edges (a scaled edge stays parallel to its original, so each side is flat).
+ * Null when the outline isn't all straight lines or it doesn't come out solid.
+ */
+function taperedPrism(face: Face, c: Vec3, normal: Vec3, k: number, d: number): Shape3D | null {
+  const bb = face.boundingBox;
+  const size = Math.hypot(bb.width, bb.height, bb.depth) || 1;
+  const loop = faceLoop(face, size * 1e-6);
+  if (!loop || loop.length < 3) return null;
+  const off = scale(normal, d);
+  const top = loop.map((p) => add(add(c, scale(sub(p, c), k)), off));
+  const n = loop.length;
+  const polys: Vec3[][] = [[...loop].reverse(), top];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    polys.push([loop[i], loop[j], top[j], top[i]]);
+  }
+  try {
+    const build = (list: Vec3[][]) => makeSolid(list.map((pl) => makePolygon(pl))) as unknown as Shape3D;
+    let solid = build(polys);
+    if (measureVolume(solid) < 0) solid = build(polys.map((pl) => [...pl].reverse()));
+    const v = measureVolume(solid);
+    if (!Number.isFinite(v) || v <= 0 || !shapeValid(solid)) return null;
+    return solid;
+  } catch {
+    return null;
+  }
+}
+
 function movePolyhedronPoints(body: Shape3D, moves: [Vec3, Vec3][]): Shape3D | null {
   const size = Math.hypot(body.boundingBox.width, body.boundingBox.height, body.boundingBox.depth) || 1;
   const tol = size * 1e-6;

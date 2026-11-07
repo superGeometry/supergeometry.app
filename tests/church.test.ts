@@ -168,6 +168,9 @@ if (stone && roof) {
     const v = sp ? Math.abs(measureVolume(sp)) : 0;
     const top = sp ? sp.boundingBox.bounds[1][2] : 0;
     check(`Extrude with Taper ${k}: a clean solid of the right volume, 68 high`, !rt.errors.length && !!sp && isHealthy(healthOf(sp)) && Math.abs(v - want) < want * 1e-6 && Math.abs(top - 238) < 1e-6, `${v.toFixed(1)} mm³, want ${want.toFixed(1)}`);
+    // Its sloped sides are flat faces (planes), so Sketch / Move Face work on them.
+    const kinds = sp ? sp.faces.map((f: any) => f.geomType) : [];
+    check(`Extrude with Taper ${k}: 6 flat faces`, kinds.length === 6 && kinds.every((t: string) => t === "PLANE"), kinds.join(","));
   }
   // From a face (the tower's top), as a beginner would: select it, Extrude, Taper.
   const tw: any[] = [{ id: "tsk", name: "Tower", type: "sketch", plane: XY(), entities: sq }, { id: "tower", name: "Tower", type: "extrude", source: { kind: "profile", sketch: "tsk", regions: regs }, distance: 170, mode: "new" }];

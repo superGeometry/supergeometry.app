@@ -239,7 +239,25 @@ export class ItemsPanel {
     del.innerHTML = icons.trash;
     del.addEventListener("click", (e) => (e.stopPropagation(), r.remove()));
     li.append(eye, label, ren, del);
+    li.dataset.id = r.id;
+    li.classList.toggle("selected", this.selectedIds.has(r.id));
     this.list.append(li);
+  }
+
+  /** What's selected in the view (a body double-clicked, a plane…): its row lights up. */
+  private selectedIds = new Set<string>();
+  markSelected(ids: string[]): void {
+    const next = new Set(ids);
+    if (next.size === this.selectedIds.size && ids.every((id) => this.selectedIds.has(id))) return;
+    this.selectedIds = next;
+    let first: HTMLElement | null = null;
+    for (const li of this.list.querySelectorAll<HTMLElement>("li[data-id]")) {
+      const on = next.has(li.dataset.id!);
+      li.classList.toggle("selected", on);
+      if (on && !first) first = li;
+    }
+    // Scrolled out of sight in a long list: brought into view.
+    if (first && !this.el.hidden) first.scrollIntoView({ block: "nearest" });
   }
 
   /** A folder's row; `items` is everything in it, its subfolders' too. */

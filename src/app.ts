@@ -148,6 +148,8 @@ export class App implements AppContext {
   setSelection(sel: Sel[]): void {
     this.selection = sel;
     this.refreshHighlights();
+    // Selected bodies, planes, axes and images light up in Items too.
+    this.items?.markSelected(sel.flatMap((s) => (s.kind === "body" ? [s.body] : s.kind === "plane" || s.kind === "axis" || s.kind === "image" ? [s.id] : [])));
     if (this.tool === this.selectTool) this.selectTool.refresh();
   }
 
