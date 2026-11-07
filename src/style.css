@@ -1682,6 +1682,13 @@ body.items-open #bottom-left {
   height: 100%;
   object-fit: contain;
 }
+/* A site's own logo: its colours, on its own tile. */
+.library-support-logo.has-logo {
+  background: none;
+}
+.library-support-btn:disabled .library-support-logo.has-logo {
+  filter: saturate(0.6);
+}
 .library-support-name {
   display: flex;
   flex-direction: column;

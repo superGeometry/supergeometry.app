@@ -49,6 +49,8 @@ function supportBox(): HTMLElement {
     b.type = "button";
     const logo = el("span", "library-support-logo");
     if (w.logo) {
+      logo.classList.add("has-logo");
+      if (w.tile) logo.style.background = w.tile;
       const img = el("img", "");
       img.src = w.logo;
       img.alt = "";
@@ -91,7 +93,7 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
       el(
         "div",
         "library-welcome",
-        "A free 3D design app in your browser: sketch, extrude, round and cut, then export for 3D printing. Pick up one of your projects, start a new one, or open a .super file. Everything stays on this device.",
+        "A free 3D design (CAD) app in your browser: sketch an idea, turn it into a solid part and take it wherever it's going next - a 3D printer, a laser cutter, a workshop or another CAD program. Pick up one of your projects, start a new one, or open a .super file. Everything stays on this device.",
       ),
     );
     if (entries.length) box.append(el("div", "library-section", "Your projects"));
