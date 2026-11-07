@@ -72,6 +72,14 @@ export class FreeformTool implements Tool {
 
   // Scene objects.
   private surface = new Mesh(new BufferGeometry(), new MeshStandardMaterial({ color: 0xb9c6dc, roughness: 0.5, metalness: 0.05, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+  /**
+   * Where one face meets the next, drawn on the smooth surface itself:
+   * without them the faces of a smooth shape all ran together, hard to tell
+   * apart while picking. Hidden behind the surface where it turns away.
+   */
+  private faceEdges: LineSegments2;
+  /** Which surface points the face outlines join (pairs), for the layout shown. */
+  private faceEdgeIdx: Uint32Array = new Uint32Array(0);
   private lines = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x5f8fe8, transparent: true, opacity: 0.85, depthTest: false }));
   private dots = new Points(new BufferGeometry(), dotMaterial({ color: 0xffffff, size: isCoarse ? 13 : 9 }));
   // Picked points / edges / faces stand out: thick lines (a plain line is
@@ -120,6 +128,7 @@ export class FreeformTool implements Tool {
     this.typing = new DragTyping(app);
     this.marks = new LineSegments2(new LineSegmentsGeometry(), app.view.lineMaterial(SEL, 4, false));
     this.hoverMarks = new LineSegments2(new LineSegmentsGeometry(), app.view.lineMaterial(HOVER, 2.5, false));
+    this.faceEdges = new LineSegments2(new LineSegmentsGeometry(), app.view.lineMaterial(0x2f3b52, 1.6, true));
     this.markFill.renderOrder = 67;
     // Zoom to fit frames the cage being shaped (its points: the smooth shape lies inside them).
     this.dots.userData.fit = true;
@@ -139,7 +148,7 @@ export class FreeformTool implements Tool {
     if (this.sym) queueMicrotask(() => this.drawSymPlane());
     this.symMark.renderOrder = 72;
     this.symMark.visible = false;
-    view.overlay.add(this.symPlane, this.symMark, this.surface, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots);
+    view.overlay.add(this.symPlane, this.symMark, this.surface, this.faceEdges, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots);
     // Editing an existing freeform: hide its finished body while the cage is out.
     if (this.existing) view.setHidden(new Set([...this.app.store.doc.hidden, this.existing.id]));
     this.app.setSelection([]);
@@ -148,7 +157,7 @@ export class FreeformTool implements Tool {
     this.app.ui.setBottom([]);
     if (this.choosingPlane) {
       // Nothing shown yet: the origin planes (and flat faces) to put it on.
-      for (const o of [this.surface, this.lines, this.dots]) o.visible = false;
+      for (const o of [this.surface, this.faceEdges, this.lines, this.dots]) o.visible = false;
       view.setOriginPlanesVisible(true);
       this.app.ui.setHint("Select a plane or a flat face to place the surface on.");
       this.app.ui.showPanel({ title: "Freeform surface", items: [], onCancel: () => this.cancel() });
@@ -208,6 +217,7 @@ export class FreeformTool implements Tool {
     view.setOriginPlanesVisible(false);
     // (A sprite's geometry is shared by every sprite: only taken off, not disposed.)
     view.overlay.remove(this.symMark);
+    view.overlay.remove(this.faceEdges);
     for (const o of [this.symPlane, this.surface, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots]) {
       view.overlay.remove(o);
       o.geometry.dispose();
@@ -219,7 +229,7 @@ export class FreeformTool implements Tool {
     this.app.ui.setHint(null);
     this.app.ui.setLabel(0, 0, null);
     this.typing.hideBox();
-    for (const o of [this.marks, this.hoverMarks]) {
+    for (const o of [this.marks, this.hoverMarks, this.faceEdges]) {
       o.geometry.dispose();
       view.releaseLineMaterial(o.material);
     }
@@ -797,7 +807,7 @@ export class FreeformTool implements Tool {
       this.choosingPlane = false;
       this.app.setHover(null);
       this.app.view.setOriginPlanesVisible(false);
-      for (const o of [this.surface, this.lines, this.dots]) o.visible = true;
+      for (const o of [this.surface, this.faceEdges, this.lines, this.dots]) o.visible = true;
       this.startEditing();
       return;
     }
@@ -1237,6 +1247,8 @@ export class FreeformTool implements Tool {
       g.setAttribute("position", new BufferAttribute(pos, 3));
       g.setAttribute("normal", new BufferAttribute(smoothNormals(pos, tri), 3));
       g.setIndex(new BufferAttribute(tri, 1));
+      // The faces' outlines: each face's grid border, once per shared edge.
+      this.faceEdgeIdx = faceBorders(plan);
     } else {
       const pa = g.getAttribute("position") as BufferAttribute;
       const na = g.getAttribute("normal") as BufferAttribute;
@@ -1246,6 +1258,12 @@ export class FreeformTool implements Tool {
       na.needsUpdate = true;
     }
     g.computeBoundingSphere();
+    const sp = g.getAttribute("position").array as Float32Array;
+    const fe: number[] = new Array(this.faceEdgeIdx.length * 3);
+    this.faceEdgeIdx.forEach((v, k) => ((fe[k * 3] = sp[v * 3]), (fe[k * 3 + 1] = sp[v * 3 + 1]), (fe[k * 3 + 2] = sp[v * 3 + 2])));
+    setLines(this.faceEdges, fe);
+    // (While a new surface's plane is still being chosen: not shown yet.)
+    this.faceEdges.visible = this.surface.visible && fe.length > 0;
     const edges = cageEdges(this.cage).flatMap(([a, b]) => [...this.cage.verts[a], ...this.cage.verts[b]]);
     setPositions(this.lines, edges);
     setPositions(this.dots, this.cage.verts.flat());
@@ -1465,4 +1483,25 @@ function placementOf(features: readonly Feature[], id: string): Placement {
     fwd: (v) => steps.reduce((p, f) => apply(f.op, p, false), v),
     inv: (v) => [...steps].reverse().reduce((p, f) => apply(f.op, p, true), v),
   };
+}
+
+/** The smooth surface's face outlines (each cage face's grid border), as line segment indices, shared edges once. */
+function faceBorders(plan: SubdivPlan): Uint32Array {
+  const seen = new Set<string>();
+  const out: number[] = [];
+  const seg = (a: number, b: number) => {
+    const k = a < b ? `${a},${b}` : `${b},${a}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(a, b);
+  };
+  const n = plan.n;
+  for (const g of plan.grids)
+    for (let k = 0; k < n; k++) {
+      seg(g[k][0], g[k + 1][0]);
+      seg(g[k][n], g[k + 1][n]);
+      seg(g[0][k], g[0][k + 1]);
+      seg(g[n][k], g[n][k + 1]);
+    }
+  return Uint32Array.from(out);
 }
