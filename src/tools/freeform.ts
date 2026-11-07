@@ -13,7 +13,7 @@ import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../ge
 import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
-import { dotMaterial, planeMarkMaterial } from "../view/viewport";
+import { dotMaterial, planeMarkMaterial, PLANE_MARK_SIZE } from "../view/viewport";
 import { isCoarse, screenClass } from "../device";
 import { DragTyping, type DragTypingTarget } from "./dragTyping";
 import { Gimbal, GIMBAL_AXES, type GimbalPart } from "./gimbal";
@@ -1067,8 +1067,8 @@ export class FreeformTool implements Tool {
     g.computeBoundingSphere();
     this.symPlane.renderOrder = 66;
     // Its mark at a corner (the symmetry symbol), so it reads as the mirror, not a plane of the model.
-    this.symMark.position.set(...P(-0.85, 0.85));
-    this.symMark.scale.set(r * 0.22, r * 0.22, 1);
+    this.symMark.position.set(...P(-0.92, 0.92));
+    this.symMark.scale.set(2 * r * PLANE_MARK_SIZE, 2 * r * PLANE_MARK_SIZE, 1);
     this.app.view.requestRender();
   }
 
