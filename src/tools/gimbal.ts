@@ -123,6 +123,30 @@ export class Gimbal {
   private layout(): void {
     this.group.position.copy(this.center);
     this.group.scale.setScalar(this.scale());
+    this.faceView();
+  }
+
+  /** The direction last looked from (parts shown or put aside for it). */
+  private looked = new Vector3();
+
+  /**
+   * Parts seen edge-on step aside: looking straight at a face (the view cube),
+   * an arc whose plane runs towards you is a line lying right over an arrow
+   * and took its taps; an arrow pointing at you is a dot over the centre; a
+   * square edge-on is a sliver. None of them can be dragged usefully like that.
+   */
+  private usable(part: GimbalPart): boolean {
+    if (!this.allow(part)) return false;
+    if (part.kind === "center") return true;
+    const along = Math.abs(this.looked.dot(new Vector3(...this.axes[part.i])));
+    return part.kind === "axis" ? along < 0.97 : along > 0.26;
+  }
+
+  private faceView(): void {
+    const d = this.view.cam.camera.getWorldDirection(new Vector3());
+    if (d.distanceToSquared(this.looked) < 1e-8) return;
+    this.looked.copy(d);
+    for (const { part, obj } of this.parts) obj.visible = this.usable(part);
   }
 
   private screen(local: Vector3): [number, number] | null {
@@ -133,9 +157,10 @@ export class Gimbal {
   hit(p: ToolPointer): GimbalPart | null {
     const tol = Math.max(10, p.tol * 1.2);
     const c = this.screen(new Vector3());
+    this.faceView();
     if (c && this.allow({ kind: "center" }) && Math.hypot(c[0] - p.x, c[1] - p.y) < tol) return { kind: "center" };
     for (let i = 0; i < 3; i++) {
-      if (!this.allow({ kind: "plane", i: i as 0 | 1 | 2 })) continue;
+      if (!this.usable({ kind: "plane", i: i as 0 | 1 | 2 })) continue;
       const u = new Vector3(...this.axes[(i + 1) % 3]);
       const v = new Vector3(...this.axes[(i + 2) % 3]);
       const m = u.clone().add(v).multiplyScalar(0.33);
@@ -145,15 +170,16 @@ export class Gimbal {
       if (quad.length === 4 && inPoly(p.x, p.y, quad)) return { kind: "plane", i: i as 0 | 1 | 2 };
     }
     let best: { part: GimbalPart; d: number } | null = null;
+    let arrow: { part: GimbalPart; d: number } | null = null;
     for (let i = 0; i < 3; i++) {
       const dir = new Vector3(...this.axes[i]);
       const a = this.screen(dir.clone().multiplyScalar(0.18));
       const b = this.screen(dir.clone().multiplyScalar(1.02));
-      if (a && b && this.allow({ kind: "axis", i: i as 0 | 1 | 2 })) {
+      if (a && b && this.usable({ kind: "axis", i: i as 0 | 1 | 2 })) {
         const d = segDist(p.x, p.y, a, b);
-        if (d < tol && (!best || d < best.d)) best = { part: { kind: "axis", i: i as 0 | 1 | 2 }, d };
+        if (d < tol && (!arrow || d < arrow.d)) arrow = { part: { kind: "axis", i: i as 0 | 1 | 2 }, d };
       }
-      const pts = this.allow({ kind: "ring", i: i as 0 | 1 | 2 }) ? arcPoints(this.axes, i, 16).map((q) => this.screen(q)) : [];
+      const pts = this.usable({ kind: "ring", i: i as 0 | 1 | 2 }) ? arcPoints(this.axes, i, 16).map((q) => this.screen(q)) : [];
       for (let k = 0; k < pts.length - 1; k++) {
         const s0 = pts[k];
         const s1 = pts[k + 1];
@@ -162,7 +188,8 @@ export class Gimbal {
         if (d < tol && (!best || d < best.d)) best = { part: { kind: "ring", i: i as 0 | 1 | 2 }, d };
       }
     }
-    return best?.part ?? null;
+    // An arrow within reach wins over an arc that also is (the arc runs close by its tip).
+    return arrow?.part ?? best?.part ?? null;
   }
 
   /** Brighten the part under the pointer / being dragged. */
