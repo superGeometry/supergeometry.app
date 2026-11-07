@@ -2,7 +2,8 @@ import type { DocStore } from "../doc/store";
 import type { EdgeRef, ExtrudeSource, FaceRef, Feature, PinDef, PlaneDef, SketchEntity, SketchFeature, Vec3 } from "../doc/types";
 import type { KernelClient } from "../kernel/client";
 import type { RegenResult } from "../kernel/protocol";
-import { arrangement, regionRef } from "../sketch/regions";
+import { arrangement, materialRegions, pointInRegion, regionRef, type Region } from "../sketch/regions";
+import { pointInPoly } from "../sketch/curves";
 import type { ToolItem, UI } from "../ui/ui";
 import type { PointerHandler } from "../view/input";
 import type { Highlight, PickHit, Viewport } from "../view/viewport";
@@ -132,11 +133,44 @@ export function sourcesOf(app: AppContext, sel: Sel[]): ExtrudeSource[] {
     }
   }
   for (const [sketch, idx] of bySketch) {
-    if (!app.store.find<SketchFeature>(sketch)) continue;
-    const regions = arrangement(app.sketchCurves(sketch)).regions;
-    out.unshift({ kind: "profile", sketch, regions: idx.map((i) => regions[i]).filter(Boolean).map(regionRef) });
+    const sk = app.store.find<SketchFeature>(sketch);
+    if (!sk) continue;
+    const curves = app.sketchCurves(sketch);
+    const regions = arrangement(curves).regions;
+    out.unshift({ kind: "profile", sketch, regions: wholeShapes(regions, idx.map((i) => regions[i]).filter(Boolean), sk.entities, curves).map(regionRef) });
   }
   return out;
+}
+
+/**
+ * In a sketch on a face, the face's outline cuts what was drawn into pieces. A
+ * piece tapped off the face is the whole shape drawn (a flange drawn round a
+ * pylon's top came out as a ring — the pylon's top left 6 deep in it); a piece
+ * on the face stays just that piece (a window drawn on a wall).
+ */
+function wholeShapes(all: Region[], tapped: Region[], drawnEntities: SketchEntity[], curves: SketchEntity[]): Region[] {
+  const outline = curves.filter((e) => e.id.startsWith("bnd-"));
+  if (!outline.length || !tapped.length) return tapped;
+  const inside = (m: Region, q: [number, number]) => pointInPoly(q, m.outer.poly) && !m.holes.some((h) => pointInPoly(q, h.poly));
+  let onFace: Region[];
+  let drawn: Region[];
+  try {
+    onFace = materialRegions(arrangement(outline));
+    drawn = materialRegions(arrangement(drawnEntities));
+  } catch {
+    return tapped;
+  }
+  const out = new Set<Region>();
+  for (const r of tapped) {
+    const q = pointInRegion(r);
+    const shape = onFace.some((m) => inside(m, q)) ? null : drawn.find((m) => inside(m, q));
+    if (!shape) {
+      out.add(r);
+      continue;
+    }
+    for (const a of all) if (inside(shape, pointInRegion(a))) out.add(a);
+  }
+  return [...out];
 }
 
 /**

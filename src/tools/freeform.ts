@@ -463,6 +463,17 @@ export class FreeformTool implements Tool {
         { type: "number", label: "Width", value: l.size[0], kind: "length", min: 0.01, onInput: (v) => (this.setLive({ size: [v, l.size[1]] as unknown as Vec3 }), this.frameSoon()) },
         { type: "number", label: "Depth", value: l.size[1], kind: "length", min: 0.01, onInput: (v) => (this.setLive({ size: [l.size[0], v] as unknown as Vec3 }), this.frameSoon()) },
         { type: "slider", label: "Faces", value: l.rows, min: 1, max: 8, step: 1, onInput: (v) => this.setLive({ rows: v }) },
+        // Where its middle is, from the origin: it lands on the middle of the
+        // face tapped, which is rarely a round number (a base plate's top was
+        // 1.43 off centre once a bumper ran along one edge) — ΔX / ΔY from there
+        // were sums to do.
+        ...([0, 1, 2] as const).map((k) => ({
+          type: "number" as const,
+          label: `Centre ${"XYZ"[k]}`,
+          value: Math.round(l.at[k] * 1000) / 1000,
+          kind: "length" as const,
+          onInput: (v: number) => this.setLive({ at: l.at.map((x, i) => (i === k ? v : x)) as Vec3 }),
+        })),
       ];
     if (l.kind === "shape") {
       const round = l.prim !== "box";

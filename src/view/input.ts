@@ -47,6 +47,8 @@ interface Tracked {
   y: number;
   button: number;
   shift: boolean;
+  /** When the finger touched (the event's own time). */
+  at: number;
 }
 
 export class InputRouter {
@@ -109,7 +111,7 @@ export class InputRouter {
       // Synthetic/expired pointers can't be captured; tracking still works.
     }
     const [x, y] = this.local(e);
-    const t: Tracked = { id: e.pointerId, type, x0: x, y0: y, x, y, button: e.button, shift: e.shiftKey };
+    const t: Tracked = { id: e.pointerId, type, x0: x, y0: y, x, y, button: e.button, shift: e.shiftKey, at: e.timeStamp };
     this.pointers.set(e.pointerId, t);
 
     if (type === "touch" && this.pointers.size === 2) {
@@ -265,7 +267,10 @@ export class InputRouter {
   private hoverFrame = 0;
 
   private emitTap(t: Tracked): void {
-    const now = performance.now();
+    // By when the finger came down, not when the tap is handled: the first tap
+    // of a double tap can open a tool that takes a while (Extrude on a shape),
+    // and the second, handled after it, counted as a tap on its own.
+    const now = t.at;
     const near = Math.hypot(t.x - this.lastTap.x, t.y - this.lastTap.y) < 20;
     const count = now - this.lastTap.t < DOUBLE_TAP_MS && near ? this.lastTap.count + 1 : 1;
     this.lastTap = { t: now, x: t.x, y: t.y, count };

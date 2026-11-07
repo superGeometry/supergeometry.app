@@ -277,6 +277,20 @@ export class SelectTool implements Tool {
   }
 
   /** Called by the app when a top-level tool needs a selection first. */
+  /**
+   * A pick made in Items (a phone's surest way to pick a body): a tool waiting
+   * for one takes it — Repair Body sat on "select body" while the pod was
+   * picked in the list. False when nothing waits for it.
+   */
+  pickFromList(s: Sel): boolean {
+    if (!this.pending || !this.pending.accepts.includes(s.kind)) return false;
+    const run = this.pending.run;
+    this.pending = null;
+    this.app.setSelection([s]);
+    run();
+    return true;
+  }
+
   waitFor(label: string, accepts: Sel["kind"][], run: () => void): void {
     this.pending = { label, accepts, run };
     this.app.setSelection([]);

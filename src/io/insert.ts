@@ -72,9 +72,9 @@ function insertProject(app: AppContext, features: Feature[], name: string): void
   app.ui.toast(`Inserted ${renamed.length} steps from ${name}`);
 }
 
-export async function insertImage(app: AppContext, plane: PlaneDef = GROUND): Promise<void> {
+export async function insertImage(app: AppContext, plane: PlaneDef = GROUND): Promise<ImageFeature | null> {
   const file = await pickFile("image/*");
-  if (!file) return;
+  if (!file) return null;
   const src = await new Promise<string>((resolve) => {
     const r = new FileReader();
     r.onload = () => resolve(r.result as string);
@@ -86,7 +86,8 @@ export async function insertImage(app: AppContext, plane: PlaneDef = GROUND): Pr
   const width = 100;
   const f: ImageFeature = { ...app.store.newIdentity("image"), type: "image", plane, src, width, height: (width * img.height) / img.width, opacity: 0.8 };
   app.store.add(f);
-  app.ui.toast("Image placed on the ground plane (100 mm wide). Edit it from History.");
+  app.ui.toast("Image placed on the floor, 100 mm wide: stand it up, place and size it here");
+  return f;
 }
 
 /** Create a named variable (optionally from a field's current value); returns its name. */

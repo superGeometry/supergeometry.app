@@ -90,7 +90,12 @@ export function planeSlot(app: AppContext, label: string, get: () => PlaneDef | 
     rejectHint: "Tap a flat face or a plane (or pick XY / XZ / YZ)",
     filled: () => !!get(),
     pick: { profiles: false, edges: false, planes: true },
-    presets: ["XY", "XZ", "YZ"].map((id) => ({ label: id, apply: () => ((name = `${id} plane`), (shown = null), set(app.view.planeOf(id)!)) })),
+    // The project's own planes by name too (Replace Face onto a plane 320 up:
+    // a thin sheet among the bodies, easy to miss with a finger).
+    presets: [
+      ...["XY", "XZ", "YZ"].map((id) => ({ label: id, apply: () => ((name = `${id} plane`), (shown = null), set(app.view.planeOf(id)!)) })),
+      ...app.view.construction.planes.map((c) => ({ label: c.name, apply: () => ((name = c.name), (shown = null), set(c.plane)) })),
+    ],
     shows: () => (shown ? [shown] : []),
     accept(hit) {
       if (hit.kind === "plane") {
@@ -207,6 +212,11 @@ export function facesSlot(app: AppContext, label: string, get: () => FaceRef[], 
     filled: () => optional || get().length > 0,
     pick: { profiles: false, edges: false, planes: false, axes: false },
     shows: () => picked,
+    // Start the list over: an open face isn't there to be tapped again (when
+    // editing a shell, a wrong one couldn't be taken out).
+    get presets() {
+      return get().length ? [{ label: "Clear", apply: () => ((picked.length = 0), set([])) }] : [];
+    },
     accept(hit) {
       if (hit.kind !== "face") return false;
       const ref = faceRefOf(app, hit);

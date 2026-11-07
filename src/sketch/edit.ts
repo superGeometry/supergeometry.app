@@ -1229,14 +1229,22 @@ export function carryConstraints(before: SketchEntity[], after: SketchEntity[], 
 
 // ------------------------------------------------------ more shapes
 
-/** Arc by its centre: from `start` round to the direction of `toward`, the short way. */
-export function centreArc(id: string, c: Vec2, start: Vec2, toward: Vec2): SketchEntity | null {
+/**
+ * Arc by its centre: from `start` round to the direction of `toward`, the
+ * short way — or anticlockwise (angles typed: 90° to 270° is the left half,
+ * where the short way can't tell a half circle's sides apart).
+ */
+export function centreArc(id: string, c: Vec2, start: Vec2, toward: Vec2, anticlockwise = false): SketchEntity | null {
   const r = Math.hypot(start[0] - c[0], start[1] - c[1]);
   if (r < 1e-9) return null;
   const t0 = Math.atan2(start[1] - c[1], start[0] - c[0]);
   let sw = Math.atan2(toward[1] - c[1], toward[0] - c[0]) - t0;
-  while (sw > Math.PI) sw -= 2 * Math.PI;
-  while (sw < -Math.PI) sw += 2 * Math.PI;
+  if (anticlockwise) {
+    while (sw <= 1e-9) sw += 2 * Math.PI;
+    while (sw > 2 * Math.PI) sw -= 2 * Math.PI;
+  }
+  while (!anticlockwise && sw > Math.PI) sw -= 2 * Math.PI;
+  while (!anticlockwise && sw < -Math.PI) sw += 2 * Math.PI;
   if (Math.abs(sw) < 1e-6) return null;
   const at = (t: number): Vec2 => [c[0] + r * Math.cos(t), c[1] + r * Math.sin(t)];
   return { id, kind: "arc", a: start, m: at(t0 + sw / 2), b: at(t0 + sw) };

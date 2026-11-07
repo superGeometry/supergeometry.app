@@ -409,6 +409,11 @@ export class SketchTool implements Tool {
           this.plane = originOnPlane({ origin: info.plane.origin, normal: info.plane.normal, xDir });
           this.attachedTo = { body: best.body, center: info.center, normal: info.normal, area: info.area };
           this.app.ui.toast("Sketching on the face in front of you");
+        } else if (view.construction.planes.some((c) => Math.abs(dot(c.plane.normal, normal)) > 0.9999)) {
+          // Planes of the project's own face this way (a blade's tip plane,
+          // seen from the top): pick one in the card, not the origin plane.
+          this.phase = "plane";
+          this.plane = null;
         } else this.app.ui.toast("Sketching on the origin plane (tap Exit and pick a face to sketch on one)");
       }
     }
@@ -430,6 +435,9 @@ export class SketchTool implements Tool {
           { type: "button", label: "XY (floor)", onClick: pick("XY") },
           { type: "button", label: "XZ (front)", onClick: pick("XZ") },
           { type: "button", label: "YZ (side)", onClick: pick("YZ") },
+          // The project's own planes by name: on a phone a plane 211 up is a
+          // thin sheet among the bodies, easy to miss with a finger.
+          ...this.app.view.construction.planes.map((c) => ({ type: "button" as const, label: c.name, onClick: pick(c.id) })),
         ],
       });
       this.updateMenu();
@@ -963,6 +971,10 @@ export class SketchTool implements Tool {
               this.pts[0] = i ? [this.pts[0][0], v] : [v, this.pts[0][1]];
               // Typed: no longer on what it snapped to.
               this.startRef = this.startSnap = this.firstSnap = null;
+              // Nor does the finger's spot say which way a typed size goes: an
+              // ellipse's Length went up because the tap had snapped 2 below
+              // the centre typed. With no pointer, it goes along X (0°).
+              if (isTouchDevice) this.cursor = null;
               this.refreshPreview();
             },
           }))
@@ -977,6 +989,15 @@ export class SketchTool implements Tool {
         // takes the length and the direction (0° right, 90° up), Done places it.
         // Or how far across and up it goes: a slope ("in 10, up 12") with no angle to work out.
         else if (this.pts.length && isTouchDevice) items.push(...firstAt(), lock("len", "Length"), lock("ang", "Angle", "angle"), lock("dx", "Across"), lock("dy", "Up"));
+        break;
+      case "arc":
+        // By its centre, on a phone: where the centre is, the radius and where
+        // it starts, then where it ends (degrees, 0° right, round anticlockwise)
+        // — a nacelle's lip round a centre at 257 snapped to 260.
+        if (isTouchDevice && memory.arc === "center") {
+          if (this.pts.length === 1) items.push(...firstAt(), lock("r", "Radius"), lock("a0", "Start angle", "angle"));
+          else if (this.pts.length === 2) items.push(lock("a1", "End angle", "angle"));
+        }
         break;
       case "rect":
         if (this.pts.length === 1 && memory.rect !== "3pt") items.push(...firstAt(), lock("w", "Width"), lock("h", "Height"));
@@ -1119,7 +1140,7 @@ export class SketchTool implements Tool {
     // A shape being drawn with a size typed in the card: Enter (or Done) puts it
     // there — typing Width 100, Height 150 and pressing Enter did nothing; it
     // still waited for a second tap, which on a phone lands wherever the finger is.
-    const typed = this.pts.length > 0 && ["rect", "circle", "polygon", "ellipse", "line"].includes(k);
+    const typed = this.pts.length > 0 && (["rect", "circle", "polygon", "ellipse", "line"].includes(k) || (k === "arc" && memory.arc === "center"));
     ui.showPanel(items.length ? { title: k === "fillet" && memory.corner === "chamfer" ? "Chamfer" : titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined, onDone: k === "spline" && this.pts.length >= 2 ? () => this.finishSpline(false) : typed ? () => this.finishTyped() : undefined } : null);
   }
 
@@ -1213,9 +1234,10 @@ export class SketchTool implements Tool {
   down(p: ToolPointer): boolean {
     if (this.phase !== "draw") return false;
     if (this.kind === "patternLinear" && this.startPatternDrag(p)) return true;
-    // Only the gimbal grabs right away; geometry drags start once the pointer moves (dragStart).
-    if (this.kind === "select") return this.startGimbalDrag(p);
-    if (this.kind === "move" && this.startGimbalDrag(p)) return true;
+    // Drags (the gimbal's too) start once the pointer moves (dragStart): a
+    // gimbal grabbed on the press took every tap near it — with a point picked
+    // by mistake, Move/Rotate could select nothing (Apply (0)).
+    if (this.kind === "select") return false;
     if (this.kind === "scale" && this.startScaleDrag(p)) return true;
     // Arc with both ends placed: a drag anywhere bends it (no need to hit a spot).
     if (this.kind === "arc" && this.pts.length === 2 && this.arcM) {
@@ -1464,6 +1486,7 @@ export class SketchTool implements Tool {
   private swipe: { base: SketchEntity[]; last: { x: number; y: number }; cut: number; now?: SketchEntity[] } | null = null;
 
   dragStart(p: ToolPointer): boolean {
+    if (this.phase === "draw" && (this.kind === "select" || this.kind === "move") && this.startGimbalDrag(p)) return true;
     // Trim (Cut): a swipe that starts on a curve trims every piece it crosses
     // (one undo step). A swipe from empty space still moves the view.
     if (this.phase === "draw" && this.kind === "trim" && memory.trim === "cut" && this.sketchId) {
@@ -2212,6 +2235,20 @@ export class SketchTool implements Tool {
         const ang = Math.atan2(c[1] - a[1], c[0] - a[0]);
         return [a[0] + Math.cos(ang) * r, a[1] + Math.sin(ang) * r];
       }
+      case "arc": {
+        if (memory.arc !== "center") return c;
+        const deg = (x: number) => (x * Math.PI) / 180;
+        if (this.pts.length === 1 && (L.r !== undefined || L.a0 !== undefined)) {
+          const r = L.r ?? Math.hypot(c[0] - a[0], c[1] - a[1]);
+          const ang = L.a0 !== undefined ? deg(L.a0) : Math.atan2(c[1] - a[1], c[0] - a[0]);
+          return [a[0] + Math.cos(ang) * r, a[1] + Math.sin(ang) * r];
+        }
+        if (this.pts.length === 2 && L.a1 !== undefined) {
+          const r = Math.hypot(this.pts[1][0] - a[0], this.pts[1][1] - a[1]);
+          return [a[0] + Math.cos(deg(L.a1)) * r, a[1] + Math.sin(deg(L.a1)) * r];
+        }
+        return c;
+      }
       case "ellipse": {
         if (this.pts.length === 1 && L.rx !== undefined) {
           const ang = Math.atan2(c[1] - a[1], c[0] - a[0]);
@@ -2522,7 +2559,7 @@ export class SketchTool implements Tool {
       case "arc":
         if (!b) return null;
         if (!c) return { id, kind: "line", a, b };
-        if (memory.arc === "center") return centreArc(id, a, b, c);
+        if (memory.arc === "center") return centreArc(id, a, b, c, this.locks.a1 !== undefined);
         return arcFrom3(a, c, b) ? { id, kind: "arc", a, m: c, b } : null;
       case "rect": {
         if (!b) return null;
@@ -3239,10 +3276,11 @@ export class SketchTool implements Tool {
     const c = this.curveAt(p);
     // Mirror: with something selected, the next line tapped (even one of the
     // selection) is the mirror axis — Shift+tap adds to the selection instead.
-    if (c && this.kind === "mirror" && this.selected.size && !p.shift && count < 2) {
-      const e = [...this.entities, ...this.boundary].find((x) => x.id === c.id);
-      if (e?.kind !== "line") return this.app.ui.toast("The mirror axis must be a straight line");
-      this.edit.mirrorLine = [e.a, e.b];
+    // (Anything else tapped joins the selection: on a phone, with no Shift, a
+    // second circle to mirror was refused as "not a straight line".)
+    const tappedLine = c && [...this.entities, ...this.boundary].find((x) => x.id === c.id && x.kind === "line");
+    if (c && this.kind === "mirror" && this.selected.size && !p.shift && count < 2 && tappedLine?.kind === "line" && !this.selected.has(c.id)) {
+      this.edit.mirrorLine = [tappedLine.a, tappedLine.b];
       return this.applyTransform();
     }
     // …or an axis (the upright one through the origin, for a shape drawn on one
@@ -3311,7 +3349,9 @@ export class SketchTool implements Tool {
   /** A world / construction axis under the pointer, lying along the sketch plane, as a line in it. */
   private axisLineAt(p: ToolPointer): [Vec2, Vec2] | null {
     // X/Y on the ground, Z on an upright sketch, …
-    const hit = this.app.view.pick(p.x, p.y, { curves: false, profiles: false, bodies: false, planes: false, axes: true, worldAxes: true, edgeTolPx: p.tol });
+    // Axes only: a model edge along the same line (a revolved casing's seam,
+    // under a flange's centre line) was caught instead.
+    const hit = this.app.view.pick(p.x, p.y, { curves: false, profiles: false, bodies: false, edges: false, vertices: false, images: false, planes: false, axes: true, worldAxes: true, edgeTolPx: p.tol });
     const ax = hit?.kind === "axis" ? this.app.view.axisOf(hit.id) : undefined;
     const plane = this.plane!;
     if (!ax || Math.abs(dot(ax.plane.normal, plane.normal)) > 1e-6) return null;
@@ -3667,7 +3707,15 @@ export class SketchTool implements Tool {
         items.push(dimField("Diameter", "diameter"));
         break;
       case "ellipse":
-        items.push(dimField("Length", "dx"), dimField("Width", "dy"));
+        // Turned by an angle typed (a blade section 30° to the flow): the
+        // rectangle had one, the ellipse didn't — and Move/Rotate is a long way round.
+        items.push(dimField("Length", "dx"), dimField("Width", "dy"), {
+          type: "number",
+          label: "Angle",
+          value: Math.round(((((e.rotation * 180) / Math.PI) % 180) + 180) % 180 * 1e6) / 1e6,
+          kind: "angle",
+          onInput: (v) => set({ rotation: (v * Math.PI) / 180 }),
+        });
         break;
       case "polygon":
         items.push(dimField("Radius", "radius"), { type: "number", label: "Sides", value: e.sides, kind: "int", min: 3, onInput: (v) => set({ sides: Math.max(3, Math.min(64, v)) }) });

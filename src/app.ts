@@ -92,6 +92,7 @@ export class App implements AppContext {
       // selection (tapped again, it leaves) — Subtract needs two bodies, and
       // the second one replaced the first.
       selectBody: (id) => {
+        if (this.tool === this.selectTool && this.selectTool.pickFromList({ kind: "body", body: id })) return;
         const had = this.selection.filter((s) => s.kind === "body");
         this.setTool(null);
         if (!isTouchDevice || !had.length || had.length !== this.selection.length) return this.setSelection([{ kind: "body", body: id }]);
@@ -565,7 +566,7 @@ export class App implements AppContext {
               { id: "vars", label: "Edit Variables", icon: "variable", sub: `${this.store.doc.variables.length} defined`, run: () => void editVariables(this) },
             ],
           },
-          { id: "image", label: "Image", icon: "image", run: () => void insertImage(this) },
+          { id: "image", label: "Image", icon: "image", run: () => void insertImage(this).then((f) => f && this.setTool(new ImageOp(this, f))) },
           { id: "file", label: "File", icon: "file", sub: "STEP, STL, OBJ, DXF, SVG", run: () => void insertFile(this) },
           { id: "project", label: "Project", icon: "file", sub: ".super", run: () => void insertFile(this) },
         ],
@@ -593,7 +594,18 @@ export class App implements AppContext {
             id: "axis",
             label: "Axis",
             icon: "axis",
-            run: wait("Axis", ["face", "edge"], () => {
+            // An axis along X, Y or Z needs nothing to pick: in an empty
+            // project (a jet engine's centre line, first thing) "select face
+            // or edge" was a dead end.
+            children: [
+              ...(["X", "Y", "Z"] as const).map((k, i) => ({
+                id: `axis${k}`,
+                label: `Along ${k}`,
+                icon: "axis" as const,
+                sub: "through a point you type",
+                run: () => this.setTool(new AxisOp(this, [0, 0, 0], [i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0])),
+              })),
+              { id: "axisPick", label: "From Face or Edge", icon: "axis" as const, run: wait("Axis", ["face", "edge"], () => {
               const s = this.selection[0];
               if (s.kind === "face") {
                 const f = this.view.body(s.body)?.faces[s.face];
@@ -604,7 +616,8 @@ export class App implements AppContext {
                 const ax = e && (e.type === "CIRCLE" ? circleAxis(e.start, e.mid, e.end, e.dir) : { origin: e.start, dir: e.dir });
                 if (ax) this.setTool(new AxisOp(this, ax.origin, ax.dir));
               }
-            }),
+            }) },
+            ],
           },
         ],
       },

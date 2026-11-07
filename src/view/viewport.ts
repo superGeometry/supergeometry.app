@@ -163,7 +163,8 @@ export class Viewport {
   private light = new DirectionalLight(0xffffff, 1.6);
   private lineMaterials: LineMaterial[] = [];
   private sketches: SketchView[] = [];
-  private construction: { planes: ConstructionInfo[]; axes: ConstructionInfo[] } = { planes: [], axes: [] };
+  /** The construction planes and axes shown (read: listed by name where a tap would pick one). */
+  construction: { planes: ConstructionInfo[]; axes: ConstructionInfo[] } = { planes: [], axes: [] };
   private showOriginPlanes = false;
   private clip: Plane | null = null;
   private bodyMat: MeshStandardMaterial;

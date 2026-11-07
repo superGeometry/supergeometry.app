@@ -11,7 +11,6 @@ import {
   getOC,
   genericSweep,
   importSTEP,
-  importSTL,
   loft,
   makeCompound,
   iterTopo,
@@ -291,7 +290,18 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         return;
       }
       if (Math.abs(f.angle) > 360 + 1e-6) throw new Error("More than one turn needs a Travel along the axis (or it overlaps itself)");
-      const turn = () => sourceFaces(f.source, ctx).map(({ face }) => revolution(face, axis.origin, axis.dir, f.angle));
+      const whole = Math.abs(Math.abs(f.angle) - 360) < 1e-6;
+      const turnFace = (face: Face): Shape3D => {
+        // A whole ellipse turned all the way round is a ring with one face and
+        // no edges: later unions break it (a combustor ring took one fuel
+        // nozzle, then came out inside out). Two halves, joined, are sound.
+        if (whole && face.edges.length === 1 && face.edges[0].geomType === "ELLIPSE") {
+          const half = revolution(face, axis.origin, axis.dir, 180) as Shape3D;
+          return half.fuse(half.clone().rotate(180, axis.origin, axis.dir));
+        }
+        return revolution(face, axis.origin, axis.dir, f.angle) as Shape3D;
+      };
+      const turn = () => sourceFaces(f.source, ctx).map(({ face }) => turnFace(face));
       let parts: Shape3D[];
       try {
         parts = turn();
@@ -411,6 +421,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         bodies.set(f.target, out);
         return;
       }
+      let open: number | undefined;
       for (const t of f.tools) {
         const tool = need(bodies, t);
         const solids = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;
@@ -418,7 +429,24 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         if (!solids(target) || !solids(tool))
           throw new Error("One of these is an open surface (e.g. a freeform with a hole), not a solid. Close it first: tap an edge of the hole → Fill hole, or give it a Thickness — then Union.");
         const before = f.op === "union" ? solids(target) + solids(tool) : 0;
+        const prev = target;
         target = f.op === "union" ? target.fuse(tool) : f.op === "subtract" ? target.cut(tool) : target.intersect(tool);
+        // A join that leaves a gap (a coil wound round a hollowed cowl: one
+        // edge left open where the two met): the tolerant join closes it.
+        if (f.op === "union") {
+          open ??= openEdges(prev).length;
+          let now = openEdges(target).length;
+          if (now > open + openEdges(tool).length) {
+            try {
+              const fz = fuzzyBoolean("fuse", prev, tool);
+              const nz = openEdges(fz).length;
+              if (nz < now && booleanVolumeOk("fuse", prev, tool, fz)) [target, now] = [fz, nz];
+            } catch {
+              // keep the plain result: the usual checks speak for it
+            }
+          }
+          open = now;
+        }
         // A union joins: a body that doesn't touch would only be grouped with it, not joined.
         if (f.op === "union" && solids(target) >= before) throw new Error("These bodies don't touch — Union needs them to overlap or touch (move one onto the other first)");
         bodies.delete(t);
@@ -435,8 +463,16 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     case "split": {
       const body = need(bodies, f.body);
       const half = halfSpace(f.plane, body);
-      const a = body.intersect(half);
-      const b = body.cut(half);
+      let a: Shape3D, b: Shape3D;
+      try {
+        a = body.intersect(half);
+        b = body.cut(half);
+      } catch {
+        // Faces lying on the plane (a coil's end drawn on it) can stop the
+        // plain split: the tolerant one treats them as on it.
+        a = fuzzyBoolean("common", body, half);
+        b = fuzzyBoolean("cut", body, half);
+      }
       if (isEmpty(a) || isEmpty(b)) throw new Error("The plane doesn't cut through the body");
       bodies.set(f.body, b);
       bodies.set(f.id, a);
@@ -466,7 +502,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       if (!shape) {
         const bytes = Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0));
         const blob = new Blob([bytes]);
-        shape = (f.format === "step" ? await importSTEP(blob) : await importSTL(blob)) as Shape3D;
+        shape = (f.format === "step" ? await importSTEP(blob) : readSTL(bytes)) as Shape3D;
         if (isEmpty(shape)) throw new Error("The file contains no solid geometry");
         importCache.set(f.data, shape);
       }
@@ -1277,7 +1313,11 @@ function booleanVolumeOk(op: "fuse" | "cut", a: Shape3D, b: Shape3D, r: Shape3D)
     const va = Math.abs(measureVolume(a));
     const vb = Math.abs(measureVolume(b));
     const v = isEmpty(r) ? 0 : measureVolume(r);
-    const tol = (va + vb) * 1e-6 + 1e-9;
+    // A big many-faced body measures a little differently once a join splits
+    // its faces (a jet engine's casing: 2 to 75 mm³ in 1.9 litres) — more than
+    // the name raised on its pylon (158 mm³) could stand under a closer check.
+    // A boolean gone wrong is off by about the smaller shape, or more.
+    const tol = (va + vb) * 1e-5 + Math.min(va, vb) * 0.6 + 1e-9;
     if (!Number.isFinite(v) || v < -tol) return false;
     return op === "fuse" ? v >= Math.max(va, vb) - tol && v <= va + vb + tol : v <= va + tol && v >= va - vb - tol;
   } catch {
@@ -1680,6 +1720,48 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
 function staysClosed(before: Shape3D, after: Shape3D): Shape3D {
   if (openEdges(after).length > openEdges(before).length) throw new Error("That would tear the body open — try a smaller value, or another face");
   return after;
+}
+
+/**
+ * An STL file as a body. OpenCascade's reader hands back a compound holding
+ * the mesh's shell (replicad's importSTL wanted the shell itself and threw on
+ * every file — the app's own STL exports too). One closed shell: a solid, its
+ * flat triangles merged; anything else stays loose faces for Repair to close.
+ */
+function readSTL(bytes: Uint8Array): Shape3D {
+  const oc = getOC();
+  const name = `stl-${Math.random().toString(36).slice(2)}.stl`;
+  oc.FS.writeFile(`/${name}`, bytes);
+  const reader = new oc.StlAPI_Reader();
+  const read = new oc.TopoDS_Shell();
+  try {
+    if (!reader.Read(read, name)) throw new Error("This STL file couldn't be read");
+    const shells = [...iterTopo(read, "shell")];
+    if (shells.length === 1) {
+      try {
+        const unify = new oc.ShapeUpgrade_UnifySameDomain(shells[0], true, true, false);
+        unify.Build();
+        const merged = unify.Shape();
+        unify.delete();
+        const mk = new oc.BRepBuilderAPI_MakeSolid();
+        for (const sh of iterTopo(merged, "shell")) mk.Add(oc.TopoDS.Shell(sh));
+        const solid = cast(mk.Solid()) as Shape3D;
+        mk.delete();
+        let v = measureVolume(solid);
+        if (v < 0) {
+          oc.BRepLib.OrientClosedSolid(solid.wrapped);
+          v = measureVolume(solid);
+        }
+        if (v > 0 && !openEdges(solid).length) return solid;
+      } catch {
+        // fall through: loose faces
+      }
+    }
+    return cast(read) as Shape3D;
+  } finally {
+    oc.FS.unlink(`/${name}`);
+    reader.delete();
+  }
 }
 
 function need(bodies: Bodies, id: string): Shape3D {

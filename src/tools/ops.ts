@@ -4,7 +4,7 @@
 import type { ThreadFeature } from "../doc/types";
 import { defaultPitch, threadLabel } from "../kernel/threads";
 import type { AxisFeature, AxisRef, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
-import { add, cross, dot, len, norm, niceStep, scale, sub, xDirFor } from "../geom";
+import { FRONT, GROUND, RIGHT, add, cross, dot, len, norm, niceStep, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { evaluate, fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
@@ -12,6 +12,9 @@ import { FeatureOp } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
 import { axisSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
 import { faceIndexOf, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
+import { SketchTool } from "./sketch";
+import { faceBeforeShell } from "./shellFace";
+import { entityPolylines } from "../sketch/curves";
 import { arrangement, drawnRegions, regionRef } from "../sketch/regions";
 import { DimWidget } from "./annotate";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
@@ -221,7 +224,39 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
    * (on a phone a tapped region opens Extrude straight away): it joins the
    * profile — tapped again, it leaves. So several regions go up together.
    */
-  tap(p: ToolPointer): void {
+  tap(p: ToolPointer, count = 1): void {
+    // The second tap of a double tap on a shape: open its sketch to edit it
+    // (the first tap already opened Extrude, which took the second as "leave
+    // the profile" — double-tapping to edit a shape worked only now and then).
+    if (count >= 2 && this.feature.distance === 0 && this.feature.source.kind === "profile") {
+      // On its outline or inside it (the middle of a 7 × 2 blade section is
+      // too far from its edges for a finger): the piece of it nearest the tap.
+      // (Worked out on the sketch's plane: its curves aren't picked while Extrude is open.)
+      const sk = this.app.store.doc.features.find((f): f is SketchFeature => f.id === (this.feature.source as { sketch: string }).sketch && f.type === "sketch");
+      const at = sk && this.app.view.rayToPlane(p.x, p.y, sk.plane);
+      if (sk && at) {
+        const y = cross(sk.plane.normal, sk.plane.xDir);
+        const d = sub(at, sk.plane.origin);
+        const uv = [dot(d, sk.plane.xDir), dot(d, y)];
+        let best: { id: string; d: number } | null = null;
+        for (const e of sk.entities)
+          for (const poly of entityPolylines(e))
+            for (let i = 1; i < poly.length; i++) {
+              const [a, b] = [poly[i - 1], poly[i]];
+              const ab = [b[0] - a[0], b[1] - a[1]];
+              const t = Math.max(0, Math.min(1, ((uv[0] - a[0]) * ab[0] + (uv[1] - a[1]) * ab[1]) / (ab[0] ** 2 + ab[1] ** 2 || 1)));
+              const dd = Math.hypot(a[0] + ab[0] * t - uv[0], a[1] + ab[1] * t - uv[1]);
+              if (!best || dd < best.d) best = { id: e.id, d: dd };
+            }
+        if (best) {
+          const tool = new SketchTool(this.app, { sketchId: sk.id });
+          this.app.setSelection([]);
+          this.app.setTool(tool);
+          tool.preselect([best.id]);
+          return;
+        }
+      }
+    }
     if (this.feature.distance === 0 && this.regionTap(p)) return;
     super.tap(p);
   }
@@ -230,8 +265,14 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     this.frame = sourceFrame(this.app, this.feature.source);
   }
 
+  /** When it opened (a tap on a shape opens it straight away). */
+  private openedAt = performance.now();
+
   down(p: ToolPointer): boolean {
     if (!this.handle.hit(p)) return false;
+    // The second tap of a double tap on a small shape lands on the arrow just
+    // drawn there: a tap still (to open the sketch), not a grab of the arrow.
+    if (this.feature.distance === 0 && performance.now() - this.openedAt < 450) return false;
     this.dragging = { from: p, d0: this.feature.distance };
     this.handle.setHot(true);
     return true;
@@ -640,10 +681,25 @@ export class LoftOp extends FeatureOp<LoftFeature> {
 export class ShellOp extends FeatureOp<ShellFeature> {
   readonly id = "shell";
 
+  /** The body's faces before it's hollowed (the screen shows the preview once a face is picked). */
+  private original: FaceRef[];
+
   constructor(app: AppContext, body: string, faces: FaceRef[], existing?: ShellFeature) {
     super(app, { ...app.store.newIdentity("shell"), type: "shell", body, faces, thickness: 1 }, existing);
-    this.slots = [facesSlot(app, "Open faces", () => this.feature.faces, (f) => (this.feature.faces = f), true)];
+    this.original = (app.view.body(body)?.faces ?? []).map((f) => ({ body, center: f.center, normal: f.normal, area: f.area }));
+    this.slots = [facesSlot(app, "Open faces", () => this.feature.faces, (f) => (this.feature.faces = f.map((r) => this.onOriginal(r))), true)];
     this.active = 0;
+  }
+
+  /**
+   * A face tapped on the preview, as the face of the body it came from: with
+   * one end already open, the next end is seen — and tapped — from inside, on
+   * the hollowed preview's inner wall (a core cowl's front stayed shut: that
+   * face isn't on the body being shelled). The flat face of the body parallel
+   * to it, at most a wall away.
+   */
+  private onOriginal(r: FaceRef): FaceRef {
+    return r.body === this.feature.body ? faceBeforeShell(this.original, r, this.feature.thickness) : r;
   }
 
   enter(): void {
@@ -1338,7 +1394,17 @@ export class ScaleFaceOp extends FeatureOp<ScaleFaceFeature> {
   }
 
   protected items(): PanelItem[] {
-    return [this.num("Scale U", "factors.0", "number", { min: 0.0001 }), this.num("Scale V", "factors.1", "number", { min: 0.0001 })];
+    // Along which way, said in X / Y / Z when it lines up ("U" and "V" mean
+    // nothing to a beginner narrowing a pylon's top along the engine).
+    const along = (d: Vec3) => {
+      const k = d.findIndex((x) => Math.abs(x) > 0.999);
+      return k >= 0 ? ` (along ${"XYZ"[k]})` : "";
+    };
+    const v = cross(this.feature.face.normal, this.feature.u);
+    return [
+      this.num(`Scale U${along(this.feature.u)}`, "factors.0", "number", { min: 0.0001 }),
+      this.num(`Scale V${along(v)}`, "factors.1", "number", { min: 0.0001 }),
+    ];
   }
 
   protected ready(): boolean {
@@ -1471,7 +1537,25 @@ export class ImageOp extends FeatureOp<ImageFeature> {
   }
 
   protected items(): PanelItem[] {
+    // Which of the three main planes it stands on, and where its middle is on
+    // it (from the origin, as in a sketch there): a side view to trace has to
+    // stand up on the front plane at its real size — dragging couldn't turn it
+    // off the floor, nor put it anywhere exactly.
+    const pl = this.feature.plane;
+    const on = ([["floor", GROUND], ["front", FRONT], ["side", RIGHT]] as const).find(([, q]) => Math.abs(dot(q.normal, pl.normal)) > 0.999)?.[0] ?? "";
+    const y = cross(pl.normal, pl.xDir);
+    const place = (u: number, v: number, base = pl) => {
+      const yy = cross(base.normal, base.xDir);
+      this.feature.plane = { ...base, origin: add(add(scale(base.xDir, u), scale(yy, v)), scale(base.normal, dot(pl.origin, pl.normal) * (base === pl ? 1 : 0))) };
+      this.onDraftChanged();
+      this.update();
+    };
+    const u0 = dot(pl.origin, pl.xDir);
+    const v0 = dot(pl.origin, y);
     return [
+      { type: "choice", label: "On", options: [{ id: "floor", label: "Floor" }, { id: "front", label: "Front" }, { id: "side", label: "Side" }], value: on, onChange: (id) => (place(u0, v0, { floor: GROUND, front: FRONT, side: RIGHT }[id as "floor"]), this.render()) },
+      { type: "number", label: "X", value: u0, kind: "length", onInput: (v) => place(v, dot(this.feature.plane.origin, cross(this.feature.plane.normal, this.feature.plane.xDir))) },
+      { type: "number", label: "Y", value: v0, kind: "length", onInput: (v) => place(dot(this.feature.plane.origin, this.feature.plane.xDir), v) },
       this.num("Width", "width", "length", { min: 0.001, onInput: (v) => ((this.feature.height = v * this.aspect), this.update()) }),
       { type: "number", label: "Opacity", value: this.feature.opacity, kind: "number", min: 0.05, onInput: (v) => ((this.feature.opacity = Math.min(1, v)), this.update()) },
     ];
