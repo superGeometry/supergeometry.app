@@ -944,6 +944,14 @@ export class App implements AppContext {
     name.addEventListener("focus", () => name.select());
     this.store.onChange(show);
     show();
+    // The saved mark at the end of the name: a tick once every change is on this device.
+    const mark = () => {
+      const saved = this.store.saved;
+      name.classList.toggle("saving", !saved);
+      name.title = `Project name - click to rename\n${saved ? "Saved on this device" : "Saving…"}`;
+    };
+    this.store.onSavedState(mark);
+    mark();
   }
 
   /**

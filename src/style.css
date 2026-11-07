@@ -124,6 +124,24 @@ kbd {
   -webkit-user-select: text;
   user-select: text;
 }
+/* The saved mark at its end: a tick once every change is on this device, a
+   faint dot while one is being written (not while the name is typed). */
+.project-name {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.4l3 3 6-6.4' fill='none' stroke='%237fd39a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 15px 15px;
+}
+.project-name.saving {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3' fill='none' stroke='%239aa3b2' stroke-width='1.6'/%3E%3C/svg%3E");
+}
+.project-name:focus {
+  background-image: none;
+}
+/* (Room for it: beats the phones' narrower padding.) */
+#topbar .project-name {
+  padding-right: 28px;
+}
 .project-name:hover {
   border-color: var(--line);
 }

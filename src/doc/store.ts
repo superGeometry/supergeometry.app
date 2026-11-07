@@ -298,18 +298,40 @@ export class DocStore {
   async flush(): Promise<void> {
     if (!this.loaded) return;
     clearTimeout(this.saveTimer);
+    const v = this.edits;
     const text = JSON.stringify(this.doc);
     await idbSet("autosave", text);
+    this.wrote(v);
     this.onSaved?.(text);
     await this.saveHistory(text);
   }
 
+  /** Every change made is written to this device (false from a change until its save is done). */
+  saved = true;
+  private edits = 0;
+  private savedListeners = new Set<Listener>();
+  onSavedState(fn: Listener): void {
+    this.savedListeners.add(fn);
+  }
+  private setSaved(on: boolean): void {
+    if (this.saved === on) return;
+    this.saved = on;
+    this.savedListeners.forEach((fn) => fn());
+  }
+  /** A save of the state after change `v` is written: saved, unless more came since. */
+  private wrote(v: number): void {
+    if (v === this.edits) this.setSaved(true);
+  }
+
   private changed(): void {
+    this.edits++;
+    this.setSaved(false);
     this.listeners.forEach((fn) => fn());
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => {
+      const v = this.edits;
       const text = JSON.stringify(this.doc);
-      void idbSet("autosave", text);
+      void idbSet("autosave", text).then(() => this.wrote(v));
       this.onSaved?.(text);
       // The undo steps less eagerly: they're bigger, and only matter after a reload.
       clearTimeout(this.historyTimer);
