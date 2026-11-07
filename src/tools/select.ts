@@ -442,7 +442,6 @@ export class SelectTool implements Tool {
       { id: "split", label: "Split Body", icon: "split", disabled: !app.view.bodyList.length || !plane, why: "Needs a body", run: () => this.splitWith(plane!) },
       { id: "revolve", label: "Revolve", icon: "revolve", shortcut: "R", run: () => src && app.setTool(new RevolveOp(app, src)) },
       { id: "sweep", label: "Sweep", icon: "sweep", shortcut: "W", run: () => src && app.setTool(new SweepOp(app, src)) },
-      { id: "fill", label: "Fill", icon: "fill", disabled: true, why: SOON },
       { id: "offset", label: "Offset Edge", icon: "offset", shortcut: "O", run: inSketch("offset") },
       { id: "projs", label: "Project as Sketch", icon: "project", disabled: true, why: SOON },
       { id: "proje", label: "Project as Edge", icon: "projectEdge", disabled: true, why: SOON },
@@ -481,7 +480,6 @@ export class SelectTool implements Tool {
       { id: "split", label: "Split Body", icon: "split", disabled: !flat || app.view.bodyList.length < 2, why: "Needs another body to split", run: () => this.splitWith(info!.plane!, s.body) },
       { id: "revolve", label: "Revolve", icon: "revolve", ...needFlat, run: () => src && app.setTool(new RevolveOp(app, src)) },
       { id: "sweep", label: "Sweep", icon: "sweep", ...needFlat, run: () => src && app.setTool(new SweepOp(app, src)) },
-      { id: "fill", label: "Fill", icon: "fill", disabled: true, why: SOON },
       // What else works on the face itself (patterns, mirror, translate, move
       // body are body tools: they're offered when the body is selected).
       { id: "replace", label: "Replace Face", icon: "replaceFace", ...needFlat, run: () => ref && app.setTool(new ReplaceFaceOp(app, ref)) },

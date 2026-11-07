@@ -709,7 +709,6 @@ export class App implements AppContext {
               this.ui.toast("Repair added to History - it notes what it fixed");
             }),
           },
-          { id: "fill", label: "Fill", icon: "fill", disabled: true, why: SOON },
           { id: "replace", label: "Replace Face", icon: "replaceFace", disabled: true, why: SOON },
           { id: "proje", label: "Project as Edge", icon: "projectEdge", disabled: true, why: SOON },
           { id: "wrap", label: "Wrap & Emboss", icon: "wrap", disabled: true, why: SOON },
