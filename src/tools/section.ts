@@ -10,6 +10,8 @@ export interface SectionState {
   plane: PlaneDef;
   offset: number;
   flipped: boolean;
+  /** Cut from a face: how far inside it the cut starts (a hair, so the face shows the cut); a plane placed there goes on the face. */
+  inset?: number;
 }
 
 export interface SectionHost extends AppContext {
@@ -74,7 +76,8 @@ export class SectionTool implements Tool {
     if (!plane) return;
     this.app.view.setOriginPlanesVisible(false);
     // A face is cut slightly inside so the face itself shows the section.
-    this.app.setSection({ plane, offset: hit?.kind === "face" ? -this.app.view.cam.worldPerPixel(this.app.view.height) : 0, flipped: false });
+    const inset = hit?.kind === "face" ? -this.app.view.cam.worldPerPixel(this.app.view.height) : 0;
+    this.app.setSection({ plane, offset: inset, flipped: false, inset });
     this.showControls();
   }
 
@@ -88,10 +91,22 @@ export class SectionTool implements Tool {
       items: [
         { type: "number", label: "Offset", value: s.offset, kind: "length", onInput: (v) => this.setOffset(v) },
         { type: "button", label: "Flip", icon: "flip", onClick: () => (this.app.setSection({ ...s, flipped: !this.app.section!.flipped }), this.showControls()) },
+        { type: "button", label: "Place Plane", icon: "plane", onClick: () => this.placePlane() },
       ],
       actions: [{ id: "delete", label: "Delete Section", icon: "trash", run: () => (this.app.setSection(null), this.handle?.dispose(), (this.handle = null), this.askForPlane()) }],
       onDone: () => this.app.setTool(null),
     });
+  }
+
+  /** A construction plane where the cut is now (to sketch on, split with...). */
+  private placePlane(): void {
+    const s = this.app.section;
+    if (!s) return;
+    const id = this.app.store.newIdentity("plane", "Section Plane");
+    // Exactly where the cut is - on the face itself while the cut is still the hair inside it.
+    const untouched = s.inset !== undefined && Math.abs(s.offset - s.inset) < 1e-9;
+    this.app.store.add({ ...id, type: "plane", kind: "offset", plane: s.plane, offset: untouched ? 0 : s.offset });
+    this.app.ui.toast(`${id.name} placed on the cut`);
   }
 
   private setOffset(v: number): void {

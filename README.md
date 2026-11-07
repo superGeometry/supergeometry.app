@@ -294,7 +294,8 @@ sketch. A sketch stays in view until every region of it is used.
 - **Colour** - ten soft colours or **Custom…** for any colour; and how
   see-through a body is.
 - **Section View** - cut the view (not the part) to look inside; the cut
-  shows as a solid face with a thick outline.
+  shows as a solid face with a thick outline. **Place Plane** in its card
+  puts a construction plane where the cut is (to sketch on or split with).
 - **Measure** - distances and angles; pin a measurement to keep it.
 
 ---

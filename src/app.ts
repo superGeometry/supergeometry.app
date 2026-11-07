@@ -208,7 +208,8 @@ export class App implements AppContext {
     const face = s?.kind === "face" ? this.view.body(s.body)?.faces[s.face] : undefined;
     if (face?.plane) {
       // Cut a hair inside the face so the face itself shows the cut.
-      this.setSection({ plane: face.plane, offset: -this.view.cam.worldPerPixel(this.view.height), flipped: false });
+      const inset = -this.view.cam.worldPerPixel(this.view.height);
+      this.setSection({ plane: face.plane, offset: inset, flipped: false, inset });
     } else if (this.lastSection) this.setSection(this.lastSection);
     this.setTool(new SectionTool(this));
   }

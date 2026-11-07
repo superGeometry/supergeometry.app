@@ -97,7 +97,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     title: "Bottom left",
     items: [
       { icon: "undo", name: "Undo / Redo", text: "Step back and forward (Ctrl Z / Ctrl Y)." },
-      { icon: "section", name: "Section View", text: "Cut the view open to see inside - the cut shows as a solid face with a thick outline; tap again to hide it (it's remembered)." },
+      { icon: "section", name: "Section View", text: "Cut the view open to see inside - the cut shows as a solid face with a thick outline; tap again to hide it (it's remembered). Place Plane in its card puts a construction plane where the cut is." },
       { icon: "measure", name: "Measure", text: "Distances, angles and sizes between anything you tap; pin them to keep them on screen." },
       { icon: "isolate", name: "Isolate", text: "Show only the selected bodies (and sketches drawn on their faces - tap a shape on one to extrude, offset... it); tap again to show everything." },
     ],
