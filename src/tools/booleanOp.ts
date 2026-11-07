@@ -102,7 +102,7 @@ export class BooleanOp extends FeatureOp<BooleanFeature> {
     const r = this.app.view.canvas.getBoundingClientRect();
     want.forEach(([body, sign], i) => {
       const m = this.marks[i];
-      m.textContent = sign;
+      m.title = sign === "+" ? "Changed" : "Changed with";
       m.classList.toggle("minus", sign !== "+");
       // (Where the body was: in the preview a subtracted body is used up.)
       if (this.app.view.bodyList.some((b) => b.id === body)) this.centers.set(body, bodyCenter(this.app, [body]));

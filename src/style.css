@@ -3057,6 +3057,25 @@ input.scrubbing {
 .bool-mark.minus {
   background: #d9534f;
 }
+/* The sign as two bars (a font's + and − sit on its baseline, off the middle). */
+.bool-mark::before,
+.bool-mark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+}
+.bool-mark::after {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+.bool-mark.minus::after {
+  display: none;
+}
 .bool-mark[hidden] {
   display: none;
 }
