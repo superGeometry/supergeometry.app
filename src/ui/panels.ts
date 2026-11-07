@@ -8,7 +8,7 @@ import type { Viewport } from "../view/viewport";
 import type { UI } from "./ui";
 import { el } from "./ui";
 
-export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnits: (u: Units) => void): void {
+export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnits: (u: Units) => void, isolatedNames: () => string[] = () => []): void {
   ui.addRight("fit", "fit", "Zoom to fit (F)", () => view.fitAll(), () => "Fit");
   ui.addRight("snap", "magnet", "Snapping", (host) => {
     const s = settings.value;
@@ -115,7 +115,7 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
   }, () => ({ shaded: "Shaded", wireframe: "Wire", xray: "X-Ray" })[settings.value.shader]);
 
   ui.addRight("shot", "camera", "Screenshot", () => {
-    void view.screenshot().then((blob) => {
+    void view.screenshot({ project: store.doc.name, isolated: isolatedNames() }).then((blob) => {
       if (!blob) return;
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);

@@ -82,7 +82,13 @@ export class App implements AppContext {
     document.getElementById("viewcube-host")!.append(cube.el);
     // The orbit centre button sits at the cube's bottom left (Views at its bottom right).
     cube.el.append(new PivotButton(this.view, (t) => this.ui.toast(t)).el);
-    setupRightColumn(this.ui, this.view, this.store, (u) => this.setUnits(u));
+    // Screenshots name the isolated bodies and surfaces (when isolating).
+    const isolatedNames = () =>
+      (this.isolated ?? []).flatMap((id) => {
+        const b = this.view.bodyList.find((x) => x.id === id);
+        return b ? [this.store.doc.names?.[id] ?? b.name ?? "Body"] : [];
+      });
+    setupRightColumn(this.ui, this.view, this.store, (u) => this.setUnits(u), isolatedNames);
     this.pinLayer = new PinLayer(this.view);
     // ƒx buttons on number fields create named variables.
     this.ui.variableFactory = (current) => createVariable(this, current);

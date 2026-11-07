@@ -1308,8 +1308,12 @@ export class Viewport {
   }
 
   /** PNG of the current view. */
-  /** The view as a PNG, with a see-through supergeometry.app mark at the top left. */
-  async screenshot(): Promise<Blob | null> {
+  /**
+   * The view as a PNG, with see-through marks at the bottom right: the
+   * project's name, the isolated bodies' names (when isolating), and the
+   * supergeometry.app logo and name.
+   */
+  async screenshot(label?: { project: string; isolated?: string[] }): Promise<Blob | null> {
     const logo = await watermarkLogo();
     // Render and copy straight away (the drawing buffer isn't kept after this task).
     this.render();
@@ -1323,16 +1327,44 @@ export class Viewport {
     const px = this.canvas.width / Math.max(1, this.canvas.clientWidth);
     const pad = 14 * px;
     const icon = 26 * px;
+    const font = (weight: number, size: number) => `${weight} ${size * px}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    const right = out.width - pad;
     g.globalAlpha = 0.45;
-    if (logo) g.drawImage(logo, pad, pad, icon, icon);
-    g.font = `750 ${20 * px}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
     g.textBaseline = "middle";
-    const x = pad + (logo ? icon + 8 * px : 0);
-    const y = pad + icon / 2;
-    g.fillStyle = "#cfd6e4";
-    g.fillText("supergeometry", x, y);
+    // Bottom line: logo, "supergeometry" and ".app", ending at the right edge.
+    let y = out.height - pad - icon / 2;
+    g.font = font(750, 20);
+    const tld = g.measureText(".app").width;
+    const name = g.measureText("supergeometry").width;
     g.fillStyle = "#3d8bff";
-    g.fillText(".app", x + g.measureText("supergeometry").width, y);
+    g.fillText(".app", right - tld, y);
+    g.fillStyle = "#cfd6e4";
+    g.fillText("supergeometry", right - tld - name, y);
+    if (logo) g.drawImage(logo, right - tld - name - 8 * px - icon, y - icon / 2, icon, icon);
+    // Above it, right-aligned: the isolated bodies, then the project's name.
+    g.textAlign = "right";
+    const maxW = out.width * 0.6;
+    const fit = (s: string) => {
+      if (g.measureText(s).width <= maxW) return s;
+      while (s.length > 1 && g.measureText(`${s}…`).width > maxW) s = s.slice(0, -1);
+      return `${s.trimEnd()}…`;
+    };
+    y -= icon / 2 + 6 * px;
+    const names = label?.isolated ?? [];
+    if (names.length) {
+      g.font = font(500, 13);
+      g.fillStyle = "#cfd6e4";
+      y -= 8 * px;
+      g.fillText(fit(names.join(", ")), right, y);
+      y -= 8 * px + 4 * px;
+    }
+    if (label?.project) {
+      g.font = font(650, 16);
+      g.fillStyle = "#e8e9ec";
+      y -= 10 * px;
+      g.fillText(fit(label.project), right, y);
+    }
+    g.textAlign = "left";
     g.globalAlpha = 1;
     return new Promise((resolve) => out.toBlob(resolve, "image/png"));
   }
