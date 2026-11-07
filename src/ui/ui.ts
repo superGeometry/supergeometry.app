@@ -432,7 +432,12 @@ export class UI {
     this.hint.textContent = text ?? "";
     this.hintText = text;
     this.hint.hidden = !text || !settings.value.showHints;
+    // How tall it is (a long hint wraps to more lines): the sketch tools column keeps clear of it.
+    if (!this.hint.hidden) {
+      document.documentElement.style.setProperty("--hint-h", `${Math.ceil(this.hint.offsetHeight)}px`);
+    }
   }
+
 
   private hintText: string | null = null;
 

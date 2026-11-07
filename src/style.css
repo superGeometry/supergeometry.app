@@ -2307,15 +2307,20 @@ html[data-screen="tablet"] #more-menu {
 /* Phones upright: the guide text at the bottom, above undo/redo, across the
    whole width (not over the panels at the top). */
 @media (max-width: 720px) and (orientation: portrait) {
+  /* As wide as its words (up to a comfortable line), centred - not a band
+     across the whole screen. */
   body #hint {
     top: auto;
     bottom: calc(122px + var(--safe-b));
-    left: calc(8px + var(--safe-l, 0px));
-    right: calc(8px + var(--safe-r));
-    transform: none;
-    max-width: none;
-    width: auto;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: min(300px, calc(100vw - 32px - var(--safe-l, 0px) - var(--safe-r, 0px)));
+    padding: 6px 12px;
+    border-radius: 10px;
     font-size: 12px;
+    line-height: 1.35;
     text-align: center;
     z-index: 9;
   }
@@ -2647,7 +2652,7 @@ html[data-screen="phone"] .numpad .np-grip {
     max-height: calc(100vh - 134px - var(--safe-t) - var(--safe-b));
   }
   html body.sketching:has(#hint:not([hidden])) #toolbar {
-    max-height: calc(100vh - 194px - var(--safe-t) - var(--safe-b));
+    max-height: calc(100vh - 134px - var(--hint-h, 63px) - var(--safe-t) - var(--safe-b));
   }
 }
 /* Full screen on phones: the browser's bars are gone, so the edges come in -

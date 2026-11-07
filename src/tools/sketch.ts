@@ -133,7 +133,7 @@ function hintOf(kind: Kind): string {
   if (kind === "circle" && memory.circle === "2pt") return "Tap two points across the circle (its diameter).";
   if (kind === "circle" && memory.circle === "3pt") return "Tap three points the circle passes through.";
   if (kind === "fillet" && memory.corner === "chamfer") return "Tap a corner where two lines meet to cut it off straight (or tap the two lines).";
-  if (kind === "spline" && memory.spline === "draw") return isTouchDevice ? "Press and draw with one finger, like a pencil (two fingers move the view). It becomes a few clean lines, arcs and curves; end where you began to close it." : "Press and drag to draw, like a pencil. Let go: it becomes a few clean lines, arcs and curves. End where you began to close it.";
+  if (kind === "spline" && memory.spline === "draw") return isTouchDevice ? "Draw with one finger, like a pencil (two move the view). End where you began to close it." : "Press and drag to draw, like a pencil. End where you began to close it.";
   return HINTS[kind];
 }
 
