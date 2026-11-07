@@ -15,6 +15,8 @@ import {
   makeCompound,
   iterTopo,
   makeBSplineApproximation,
+  makeCircle,
+  makeLine,
   makeCylinder,
   makeHelix,
   isShape3D,
@@ -74,6 +76,8 @@ interface Ctx {
    * be rebuilt exactly (e.g. stretched along X/Y/Z, which other bodies can't be).
    */
   freeforms: Map<string, { feature: Extract<Feature, { type: "freeform" }>; m: Affine }>;
+  /** The paths sweeps ran along (by sweep): an offset of a sweep's end follows its path back. */
+  sweeps: Map<string, Wire>;
 }
 
 interface CacheEntry {
@@ -135,7 +139,7 @@ async function run(features: Feature[]) {
   useSafeBooleans();
   const errors: FeatureError[] = [];
   const notes: FeatureError[] = [];
-  let ctx: Ctx = { bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map() };
+  let ctx: Ctx = { bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map() };
   let key = "";
   const next: CacheEntry[] = [];
   let hit = true;
@@ -151,7 +155,7 @@ async function run(features: Feature[]) {
     if (cached) {
       entry = cached;
     } else {
-      const out: Ctx = { bodies: new Map(ctx.bodies), sketches: new Map(ctx.sketches), planes: new Map(ctx.planes), axes: new Map(ctx.axes), freeforms: new Map(ctx.freeforms) };
+      const out: Ctx = { bodies: new Map(ctx.bodies), sketches: new Map(ctx.sketches), planes: new Map(ctx.planes), axes: new Map(ctx.axes), freeforms: new Map(ctx.freeforms), sweeps: new Map(ctx.sweeps) };
       entry = { key, ctx: out };
       if (!f.suppressed) {
         try {
@@ -254,6 +258,13 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         const body = need(bodies, f.target);
         const face = resolveFace(body, f.source.face);
         const d = f.mode === "cut" ? -Math.abs(f.distance) : f.mode === "join" ? Math.abs(f.distance) : f.distance;
+        // The end of a sweep pushed in: shortened along its path, the new end
+        // square to the path there (not the old end's plane slid along).
+        const trimmed = d < 0 ? trimSweepEnd(body, face, -d, ctx) : null;
+        if (trimmed) {
+          bodies.set(f.target, staysClosed(body, trimmed));
+          return;
+        }
         try {
           const out = staysClosed(body, offsetFace(body, face, d));
           // Hair-thin faces left behind (a face pushed over a fillet): a straight push is cleaner.
@@ -326,6 +337,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // jumped sideways there - a profile off the path's centre most of all.
       const parts = sourceWires(f.source, ctx).map((w) => genericSweep(w, spine, { frenet: false, transitionMode: "round" }) as Shape3D);
       combine(f.id, f.mode, f.target, fuseAll(parts), false, ctx);
+      ctx.sweeps.set(f.id, spine);
       return;
     }
 
@@ -1305,6 +1317,83 @@ function pathWire(path: PathRef, ctx: Ctx): Wire {
   }
   const edges: Edge[] = path.edges.map((r) => resolveEdge(need(ctx.bodies, r.body), r));
   return assembleWire(edges);
+}
+
+/** A wire's points in order along it, close together (curves sampled finely). */
+function wirePoints(w: Wire): Vec3[] {
+  const pts: Vec3[] = [];
+  for (const e of w.edges) {
+    const n = e.geomType === "LINE" ? 1 : 200;
+    let seg: Vec3[] = [];
+    for (let i = 0; i <= n; i++) seg.push(e.pointAt(i / n).toTuple() as Vec3);
+    // Edges run end to end, each its own way round.
+    if (pts.length && dist(seg[seg.length - 1], pts[pts.length - 1]) < dist(seg[0], pts[pts.length - 1])) seg = seg.reverse();
+    if (pts.length === 0 && w.edges.length > 1) {
+      const next = w.edges[1];
+      const ends = [next.pointAt(0).toTuple() as Vec3, next.pointAt(1).toTuple() as Vec3];
+      const near = (p: Vec3) => Math.min(...ends.map((q) => dist(p, q)));
+      if (near(seg[0]) < near(seg[seg.length - 1])) seg = seg.reverse();
+    }
+    pts.push(...(pts.length ? seg.slice(1) : seg));
+  }
+  return pts;
+}
+
+/**
+ * Face F of `body` is the end of a sweep (square to its path's end, the path
+ * ending on it): cut `by` off along the path, so the tube is that much
+ * shorter and its new end is square to the path where it now ends. A disc
+ * wider than the end is swept along that last piece of the path (starting a
+ * little past the end) and cut away. Null when F isn't a sweep's end.
+ */
+function trimSweepEnd(body: Shape3D, F: Face, by: number, ctx: Ctx): Shape3D | null {
+  if (F.geomType !== "PLANE" || !ctx.sweeps.size) return null;
+  const { origin, normal } = planeOf(F);
+  const bb = F.boundingBox;
+  const size = Math.hypot(bb.width, bb.height, bb.depth);
+  const c = F.center.toTuple() as Vec3;
+  for (const spine of ctx.sweeps.values()) {
+    const all = wirePoints(spine);
+    for (const pts of [all, [...all].reverse()]) {
+      // pts runs from this end of the path inwards.
+      const p0 = pts[0];
+      const out = norm(sub(pts[0], pts[1]));
+      if (Math.abs(dot(out, normal)) < 0.98) continue;
+      // (The sweep turns its profile square to the path: a profile drawn a
+      // little off square ends on a plane a hair off the path's end.)
+      if (Math.abs(dot(sub(p0, origin), normal)) > size * 0.05 + 1e-6) continue;
+      if (dist(p0, c) > size) continue;
+      // The piece of path to take off: from the end, `by` along it.
+      const piece: Vec3[] = [p0];
+      let run = 0;
+      let i = 1;
+      for (; i < pts.length; i++) {
+        const step = dist(pts[i - 1], pts[i]);
+        if (run + step >= by) {
+          const t = (by - run) / step;
+          piece.push(add(pts[i - 1], scale(sub(pts[i], pts[i - 1]), t)));
+          run = by;
+          break;
+        }
+        run += step;
+        piece.push(pts[i]);
+      }
+      if (run < by - 1e-9 || i >= pts.length - 1) throw new Error("That's as long as the sweep's whole path or more - it would remove it");
+      // Straight line pieces stay a line; a curve is fitted through its points.
+      const straight = piece.every((p) => len(sub(sub(p, p0), scale(norm(sub(piece[piece.length - 1], p0)), dot(sub(p, p0), norm(sub(piece[piece.length - 1], p0)))))) < size * 1e-6);
+      const reach = size * 0.05 + 1e-3;
+      const start = add(p0, scale(out, reach));
+      const curve = straight || piece.length < 4 ? makeLine(p0, piece[piece.length - 1]) : makeBSplineApproximation(piece, { tolerance: size * 1e-6 + 1e-7, degMax: 5, degMin: 2 });
+      const path = assembleWire([makeLine(start, p0), curve]);
+      const r = dist(p0, c) + size;
+      const disc = assembleWire([makeCircle(r, start, scale(out, -1))]);
+      const cutter = genericSweep(disc, path, { frenet: false, transitionMode: "round" }) as Shape3D;
+      const result = fuzzyBoolean("cut", body, cutter);
+      if (isEmpty(result)) throw new Error("That would remove the whole sweep");
+      return result;
+    }
+  }
+  return null;
 }
 
 function resolveAxis(a: AxisRef, ctx: Ctx): { origin: Vec3; dir: Vec3 } {
