@@ -3,6 +3,10 @@
 const svg = (body: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
+/** A plane (lower right) with a small symbol above its corner. */
+const planeWith = (mark: string) =>
+  svg(`<path d="M6 19l5-5h11l-5 5z"/><text x="7" y="11" font-size="11" font-family="system-ui, sans-serif" text-anchor="middle" fill="currentColor" stroke="none">${mark}</text>`);
+
 export const icons = {
   // The usual share mark: a box with an arrow leaving it.
   share: svg('<path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/>'),
@@ -51,6 +55,15 @@ export const icons = {
   replaceFace: svg('<rect x="4" y="9" width="12" height="11"/><path d="M8 9l4-5h8l-4 5M20 4v11l-4 5"/>'),
   projectEdge: svg('<rect x="4" y="12" width="16" height="8"/><path d="M8 4h8l-2 8h-4z" stroke-dasharray="2 2"/>'),
   plane: svg('<path d="M3 15l6-6h12l-6 6z"/>'),
+  // Each kind of plane: the plane with its mark in the corner (the same mark it
+  // has in the view).
+  planeOffset: planeWith("⇡"),
+  planeMid: planeWith("⇹"),
+  plane3pt: planeWith("∴"),
+  planeCurve: planeWith("∿"),
+  planePerp: planeWith("⊥"),
+  planeAngle: planeWith("∠"),
+  planeParallel: planeWith("∥"),
   axis: svg('<path d="M4 20L20 4" stroke-dasharray="3 2"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>'),
   align: svg('<path d="M4 3v18"/><rect x="7" y="6" width="9" height="4"/><rect x="7" y="14" width="13" height="4"/>'),
   translate: svg('<path d="M4 12h16M16 8l4 4-4 4"/>'),
