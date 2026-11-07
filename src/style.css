@@ -2214,6 +2214,16 @@ body.history-open #topbar {
     max-width: calc(100vw - 16px);
   }
 }
+/* Tablets: File / More open from the top bar's left edge too (like phones), so
+   they drop into the view instead of over History docked on the right. */
+html[data-screen="tablet"] .menu-wrap {
+  position: static;
+}
+html[data-screen="tablet"] #file-menu,
+html[data-screen="tablet"] #more-menu {
+  left: 0;
+  top: 44px;
+}
 @media (max-height: 600px) and (min-width: 721px) {
   body #topbar {
     max-width: calc(100vw - 380px);
@@ -2629,6 +2639,18 @@ html[data-screen="phone"] .numpad .np-grip {
 html[data-screen="phone"] body.is-fullscreen {
   --safe-b: 4px;
   --safe-t: max(0px, calc(env(safe-area-inset-top, 0px) - 14px));
+}
+/* Full screen on tablets (or opened from the home screen): the same - the home
+   bar's inset left an empty strip along the bottom. */
+@media (pointer: coarse) {
+  html[data-screen="tablet"] body.is-fullscreen {
+    --safe-b: 4px;
+  }
+}
+@media (pointer: coarse) and (display-mode: standalone), (pointer: coarse) and (display-mode: fullscreen) {
+  html[data-screen="tablet"] body {
+    --safe-b: 4px;
+  }
 }
 /* "Use the whole screen?": one short line with its two buttons. */
 .fs-banner {
