@@ -1,10 +1,11 @@
 import { getPath, setPath } from "../doc/params";
-import type { ExtrudeSource, Feature, SketchFeature } from "../doc/types";
+import type { ExtrudeSource, Feature, SketchFeature, Vec2 } from "../doc/types";
 import type { FieldKind, PanelItem, ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import type { PickHit, PickOptions } from "../view/viewport";
 import { hitToSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
-import { arrangement, drawnRegions, resolveRegion } from "../sketch/regions";
+import { arrangement, materialRegions, pointInRegion, resolveRegion, type Region } from "../sketch/regions";
+import { pointInPoly } from "../sketch/curves";
 
 /** Something the user has to point at (an axis, a path, faces to remove, …). */
 export interface Slot {
@@ -301,21 +302,28 @@ function allRegionsUsed(app: AppContext, sketch: string, features: Feature[]): b
     const arr = arrangement(app.sketchCurves(sketch));
     // Only what was drawn counts (not the outline of the face it's on: window
     // sketches on a wall stayed in view after every window was cut).
-    const drawn = new Set(drawnRegions(arr, arrangement(app.store.find<SketchFeature>(sketch)?.entities ?? [])).map((r) => arr.regions.indexOf(r)));
-    if (drawn.size <= 1 && arr.regions.length <= 1) return true;
-    const used = new Set<number>();
+    const drawn = materialRegions(arrangement(app.store.find<SketchFeature>(sketch)?.entities ?? []));
+    if (drawn.length <= 1 && arr.regions.length <= 1) return true;
+    const used: Region[] = [];
     const add = (s: ExtrudeSource) => {
       if (s.kind !== "profile" || s.sketch !== sketch) return;
       for (const ref of s.regions) {
         const r = resolveRegion(arr, ref);
-        if (r) used.add(arr.regions.indexOf(r));
+        if (r) used.push(r);
       }
     };
     for (const g of features) {
       if (g.type === "extrude" || g.type === "revolve" || g.type === "sweep") add(g.source);
       else if (g.type === "loft") g.sections.forEach(add);
     }
-    return [...drawn].every((i) => used.has(i));
+    // Every shape drawn has been made into something. (Matched shape by shape,
+    // not piece by piece: where the drawing meets an edge in its plane — the
+    // corner of a rounded button and the same corner of the body made from
+    // it, sampled a little differently — slivers are left that no one would
+    // use; the sketch stayed in view and its face-wide region took every later
+    // tap on that face.)
+    const inside = (m: Region, q: Vec2) => pointInPoly(q, m.outer.poly) && !m.holes.some((h) => pointInPoly(q, h.poly));
+    return drawn.every((m) => used.some((r) => inside(m, pointInRegion(r))));
   } catch {
     return true;
   }

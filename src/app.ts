@@ -1,3 +1,5 @@
+import { isTouchDevice } from "./device";
+import { circleAxis } from "./tools/slots";
 import { CurvePointPlaneOp, EdgeAnglePlaneOp, FacePointPlaneOp, ThreePointPlaneOp } from "./tools/planeOps";
 import { DocStore, parseProject } from "./doc/store";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
@@ -86,7 +88,16 @@ export class App implements AppContext {
     this.ui.variableNames = () => this.store.doc.variables.map((v) => v.name);
     settings.onChange(() => this.showPins());
     this.items = new ItemsPanel(this.store, {
-      selectBody: (id) => (this.setTool(null), this.setSelection([{ kind: "body", body: id }])),
+      // A phone: like taps in the view, each body tapped in Items joins the
+      // selection (tapped again, it leaves) — Subtract needs two bodies, and
+      // the second one replaced the first.
+      selectBody: (id) => {
+        const had = this.selection.filter((s) => s.kind === "body");
+        this.setTool(null);
+        if (!isTouchDevice || !had.length || had.length !== this.selection.length) return this.setSelection([{ kind: "body", body: id }]);
+        const i = had.findIndex((s) => s.kind === "body" && s.body === id);
+        this.setSelection(i >= 0 ? had.filter((_, k) => k !== i) : [...had, { kind: "body", body: id }]);
+      },
       editSketch: (id) => this.setTool(new SketchTool(this, { sketchId: id })),
       selectPlane: (id) => (this.setTool(null), this.setSelection([{ kind: "plane", id }])),
       deleteBody: (id) => this.store.add({ ...this.store.newIdentity("delete"), type: "delete", bodies: [id] }),
@@ -294,6 +305,9 @@ export class App implements AppContext {
     this.ui.refreshRight();
     this.showPins();
     this.view.setBodyColors(this.store.doc.colors ?? {}, this.store.doc.opacity ?? {});
+    // New planes, sketches and names show in Items now, not once a long rebuild
+    // has finished (a plane just made wasn't there to tap for seconds).
+    this.items.render(this.result);
     void this.regenerate();
   }
 
@@ -586,7 +600,9 @@ export class App implements AppContext {
                 if (f) this.setTool(new AxisOp(this, f.center, f.normal));
               } else if (s.kind === "edge") {
                 const e = this.view.body(s.body)?.edges[s.edge];
-                if (e) this.setTool(new AxisOp(this, e.start, e.dir));
+                // A round edge: through its centre.
+                const ax = e && (e.type === "CIRCLE" ? circleAxis(e.start, e.mid, e.end, e.dir) : { origin: e.start, dir: e.dir });
+                if (ax) this.setTool(new AxisOp(this, ax.origin, ax.dir));
               }
             }),
           },
@@ -897,8 +913,10 @@ export class App implements AppContext {
       if (!this.tool.undo()) this.ui.toast("Nothing to undo in this edit yet (Cancel leaves it unchanged)");
       return this.updateUndo();
     }
-    if (this.tool instanceof SketchTool) this.tool.stopDrawing();
-    else if (this.tool !== this.selectTool) this.setTool(null);
+    if (this.tool instanceof SketchTool) {
+      if (this.tool.undoPoint()) return;
+      this.tool.stopDrawing();
+    } else if (this.tool !== this.selectTool) this.setTool(null);
     this.store.undo();
   }
   private redo(): void {

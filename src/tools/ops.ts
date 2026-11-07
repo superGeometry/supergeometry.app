@@ -1779,18 +1779,18 @@ export class AxisOp extends FeatureOp<AxisFeature> {
   }
 
   protected hint(): string {
-    return "Construction axis. Done to keep it.";
+    return "Construction axis through the point shown — type where it should pass (X / Y / Z). Done to keep it.";
   }
 
+  /**
+   * Where it passes through, typed: it used to be kept at once through the
+   * middle of the face tapped (a fan's axis level with its pivot, 215 up,
+   * couldn't be made).
+   */
   protected items(): PanelItem[] {
-    return [];
+    return [this.num("X", "origin.0", "length"), this.num("Y", "origin.1", "length"), this.num("Z", "origin.2", "length")];
   }
 
-  enter(): void {
-    super.enter();
-    // Nothing to adjust: commit right away (it stays editable from History).
-    this.done();
-  }
 }
 
 export const planeFromNormal = (origin: Vec3, normal: Vec3): PlaneDef => ({ origin, normal: norm(normal), xDir: xDirFor(norm(normal)) });

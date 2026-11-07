@@ -1,6 +1,6 @@
 // Reusable pick slots: axis, plane, direction, path, faces, profiles.
 
-import type { AxisRef, EdgeRef, ExtrudeSource, FaceRef, PathRef, PlaneDef, SketchFeature, Vec3 } from "../doc/types";
+import type { AxisFeature, AxisRef, EdgeRef, ExtrudeSource, FaceRef, PathRef, PlaneDef, SketchFeature, Vec3 } from "../doc/types";
 import { cross, dot, len, norm, scale, sub, add, toPlane, toWorld } from "../geom";
 import { closestOnPrim, entityPrims } from "../sketch/curves";
 import { explode } from "../sketch/edit";
@@ -23,7 +23,14 @@ export function axisSlot(app: AppContext, label: string, get: () => AxisRef | nu
     describe: () => (get() ? name || "Axis" : "Tap a line, edge or axis"),
     filled: () => !!get(),
     pick: { profiles: false, curves: true, planes: false, axes: true, worldAxes: true },
-    presets: WORLD_AXES.map((a) => ({ label: a.label, apply: () => ((name = `${a.label} axis`), (shown = null), set({ origin: [0, 0, 0], dir: a.dir })) })),
+    presets: [
+      ...WORLD_AXES.map((a) => ({ label: a.label, apply: () => ((name = `${a.label} axis`), (shown = null), set({ origin: [0, 0, 0], dir: a.dir })) })),
+      // The project's own axes, by name: a thin dashed line far off is hard to
+      // tap (a fan's axis tap caught the yoke's edge in front of it).
+      ...app.store.features
+        .filter((f): f is AxisFeature => f.type === "axis" && !f.suppressed)
+        .map((f) => ({ label: f.name, apply: () => ((name = f.name), (shown = { kind: "axis", id: f.id } as Sel), set({ origin: f.origin, dir: f.dir, ref: { kind: "axis" as const, feature: f.id } })) })),
+    ],
     shows: () => (shown ? [shown] : []),
     accept(hit) {
       if (hit.kind === "curve") {

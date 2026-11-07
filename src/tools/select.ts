@@ -1,3 +1,4 @@
+import { circleAxis } from "./slots";
 import { isTouchDevice } from "../device";
 import { BODY_COLORS, BODY_OPACITY, bodyColor } from "../doc/types";
 import type { DeleteGeomFeature, FreeformFeature, EdgeRef, ExtrudeSource, FaceRef, ImageFeature, PlaneDef, SketchFeature, Vec3 } from "../doc/types";
@@ -5,7 +6,7 @@ import { arrangement } from "../sketch/regions";
 import { projectPolyline } from "../sketch/edit";
 import type { ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
-import { add, dot, len, planeY, scale, sub } from "../geom";
+import { add, dot, len, originOnPlane, planeY, scale, sub } from "../geom";
 import { evaluate, fmtLen } from "../units";
 import { DimWidget } from "./annotate";
 import { Gimbal, IN_PLANE } from "./gimbal";
@@ -123,9 +124,12 @@ export class SelectTool implements Tool {
     // A finger on a thin shape (a ruler's tick, a letter) is always on its
     // outline too: one tap takes the shape under it (to extrude); a double
     // tap opens the sketch to edit. (A mouse can aim for one or the other.)
-    if (hit?.kind === "curve" && count < 2 && isTouchDevice && !this.pending) {
+    // (Also while a tool waits for a shape: Loft took no taps on a thin blade tip.)
+    if (hit?.kind === "curve" && count < 2 && isTouchDevice && (!this.pending || this.pending.accepts.includes("profile"))) {
       const under = this.app.view.pick(p.x, p.y, { edgeTolPx: 0, curves: false, profiles: true, edges: false, vertices: false });
-      if (under?.kind === "profile" && under.sketch === hit.sketch) hit = under;
+      // A shape of another sketch under the finger wins too: a path drawn from
+      // the middle of the circle to sweep along opened its sketch instead.
+      if (under?.kind === "profile") hit = under;
     }
     // Tapping a line/curve/point of a finished sketch opens it for editing, with that piece selected.
     if ((hit?.kind === "curve" || hit?.kind === "point") && !this.pending) {
@@ -481,7 +485,19 @@ export class SelectTool implements Tool {
       { id: "moveBody", label: "Move/Rotate Body", icon: "move", run: () => app.setTool(new TransformOp(app, "move", bodies)) },
       // A round edge (a hole's rim, a shank's end): thread the round face it bounds — in a small hole the rim is what a finger hits.
       ...(info?.type === "CIRCLE" && sel.length === 1 ? [{ id: "thread", label: "Thread", icon: "thread" as const, run: () => app.startThread() }] : []),
-      { id: "axis", label: "Axis – Along Edge", icon: "axis", disabled: !straight, why: "Needs a straight edge", run: () => info && app.setTool(new AxisOp(app, info.start, info.dir)) },
+      // Along a straight edge; through the centre of a round one (a rim, a hole).
+      {
+        id: "axis",
+        label: info?.type === "CIRCLE" ? "Axis – Through Centre" : "Axis – Along Edge",
+        icon: "axis",
+        disabled: !straight && info?.type !== "CIRCLE",
+        why: "Needs a straight or round edge",
+        run: () => {
+          if (!info) return;
+          const ax = info.type === "CIRCLE" ? circleAxis(info.start, info.mid, info.end, info.dir) : { origin: info.start, dir: info.dir };
+          if (ax) app.setTool(new AxisOp(app, ax.origin, ax.dir));
+        },
+      },
       { id: "planePerp", label: "Plane – Perp. to Edge", icon: "plane", run: () => info && app.setTool(new PlaneOp(app, { origin: info.mid, normal: info.dir, xDir: perpTo(info.dir) }, undefined)) },
       { id: "translate", label: "Translate", icon: "translate", shortcut: "N", run: () => app.setTool(new TransformOp(app, "translate", bodies)) },
       { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: () => app.setTool(new TransformOp(app, "rotate", bodies)) },
@@ -753,7 +769,7 @@ export class SelectTool implements Tool {
     if (!info?.plane) return;
     const ref = faceRefOf(this.app, s)!;
     this.app.setSelection([]);
-    const tool = new SketchTool(this.app, { plane: info.plane, attachedTo: ref });
+    const tool = new SketchTool(this.app, { plane: originOnPlane(info.plane), attachedTo: ref });
     this.app.setTool(tool);
     if (kind) tool.setKind(kind as SketchKind);
   }

@@ -47,6 +47,18 @@ export function xDirFor(normal: Vec3): Vec3 {
 
 
 /** Round to a "nice" step (0.1, 0.5, 1, 5, 10, …) close to `raw`. */
+/**
+ * The same plane with its origin where the model's origin falls on it: a
+ * sketch on a face then measures X / Y from the model's origin (a face's own
+ * centre moves as things are added to it — the pole typed at 0, 0 on a base
+ * with letters and buttons landed at -0.9, 1.2).
+ */
+export function originOnPlane(p: PlaneDef): PlaneDef {
+  const n = p.normal;
+  const k = (p.origin[0] * n[0] + p.origin[1] * n[1] + p.origin[2] * n[2]) / (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+  return { ...p, origin: [n[0] * k, n[1] * k, n[2] * k] };
+}
+
 export function niceStep(raw: number): number {
   const p = Math.pow(10, Math.floor(Math.log10(raw)));
   const m = raw / p;

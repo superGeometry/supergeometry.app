@@ -6,7 +6,7 @@
 
 import { Box3, BufferAttribute, BufferGeometry, DoubleSide, LineBasicMaterial, LineSegments, Mesh, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
 import type { Feature, FreeformFeature, PlaneDef, TransformFeature, Vec3 } from "../doc/types";
-import { applyPlan, archBridge, borderChains, cachedPlan, planIndices, smoothNormals, type SubdivPlan, bridgeChains, bridgeFaces, moveTurnScale, shapeCage, sweepFace, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
+import { applyPlan, archBridge, planeCage, borderChains, cachedPlan, planIndices, smoothNormals, type SubdivPlan, bridgeChains, bridgeFaces, moveTurnScale, shapeCage, sweepFace, type Chain, boundaryEdges, bridgeLoops, cageEdgeKey, cageEdges, deleteFaces, extrudeFaces, fillHole, holeLoops, insertEdgeLoop, insetFaces, isClosed, primitiveCage, refineCage, selfCrossings, subdivide, type Cage, type CagePrimitive } from "../freeform/cage";
 import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
@@ -29,6 +29,8 @@ type Pick = { kind: "vert"; i: number } | { kind: "edge"; e: [number, number] } 
  */
 type Live =
   | { kind: "shape"; prim: "box" | "cylinder" | "sphere"; size: Vec3; rows: number }
+  /** A new flat surface on the plane picked: its width, depth and faces in the card. */
+  | { kind: "sheet"; size: [number, number]; rows: number; at: Vec3; x: Vec3; y: Vec3; n: Vec3 }
   | { kind: "sweep"; base: Cage; face: number; steps: number; length: number; bend: number; taper: number; size: number }
   | { kind: "inset"; base: Cage; faces: number[]; amount: number }
   | { kind: "bridge"; base: Cage; fa: number; fb: number; arch: number; segments: number; span: number };
@@ -192,7 +194,7 @@ export class FreeformTool implements Tool {
   private hint(): void {
     if (this.placing) return this.app.ui.setHint("Drag the gimbal (or type Move values) to put it in place first. Then tap points, edges or faces to shape it.");
     // A phone has no Shift: there every tap adds, a second tap drops it.
-    if (this.live && this.live.kind !== "shape") return this.app.ui.setHint("Shape it with the sliders in the card. Tap the model (or take the next step) to keep it.");
+    if (this.live && this.live.kind !== "shape" && this.live.kind !== "sheet") return this.app.ui.setHint("Shape it with the sliders in the card. Tap the model (or take the next step) to keep it.");
     if (this.live) return this.app.ui.setHint("Set the size and rows in the card, then tap faces to shape it.");
     const more = isCoarse ? "Tap more to add; tap a face again for the one behind it" : "Shift+tap adds; click a face again for the one behind it";
     this.app.ui.setHint(
@@ -205,7 +207,7 @@ export class FreeformTool implements Tool {
   private panel(): void {
     const n = this.selectedVerts().length;
     const items: PanelItem[] = this.liveItems();
-    if (n && (!this.live || this.live.kind === "shape")) {
+    if (n && (!this.live || this.live.kind === "shape" || this.live.kind === "sheet")) {
       // Exact values (a phone can't type while dragging), from where the points are now.
       this.fieldBase = null;
       // Nothing moved yet: no offset, no turn — and every scale factor 1 (0 flattened the points).
@@ -260,7 +262,7 @@ export class FreeformTool implements Tool {
         },
       );
     }
-    const liveTitle = { shape: "New shape", sweep: "Pulled out", inset: "Inset", bridge: "Bridge" };
+    const liveTitle = { shape: "New shape", sheet: "New surface", sweep: "Pulled out", inset: "Inset", bridge: "Bridge" };
     this.app.ui.showPanel({
       title: this.live ? `Freeform · ${liveTitle[this.live.kind]}` : `Freeform${n ? ` · ${n} point${n > 1 ? "s" : ""}` : ""}`,
       items,
@@ -410,6 +412,10 @@ export class FreeformTool implements Tool {
     if (l.kind === "shape") {
       next = shapeCage(l.prim, l.size, l.rows);
       if (this.placing) picks = next.verts.map((_, i) => ({ kind: "vert" as const, i }));
+    } else if (l.kind === "sheet") {
+      const flat = planeCage(l.size, Math.max(1, Math.round(l.rows)));
+      next = { faces: flat.faces, verts: flat.verts.map((v) => add(l.at, add(add(scale(l.x, v[0]), scale(l.y, v[1])), scale(l.n, v[2])))) };
+      if (this.placing) picks = next.verts.map((_, i) => ({ kind: "vert" as const, i }));
     } else if (l.kind === "sweep") {
       const r = sweepFace(l.base, l.face, l);
       if (r) ((next = r.cage), (picks = [{ kind: "face", f: r.face }]));
@@ -452,6 +458,12 @@ export class FreeformTool implements Tool {
     const l = this.live;
     if (!l) return [];
     const mm = (v: number) => fmtLen(v);
+    if (l.kind === "sheet")
+      return [
+        { type: "number", label: "Width", value: l.size[0], kind: "length", min: 0.01, onInput: (v) => (this.setLive({ size: [v, l.size[1]] as unknown as Vec3 }), this.frameSoon()) },
+        { type: "number", label: "Depth", value: l.size[1], kind: "length", min: 0.01, onInput: (v) => (this.setLive({ size: [l.size[0], v] as unknown as Vec3 }), this.frameSoon()) },
+        { type: "slider", label: "Faces", value: l.rows, min: 1, max: 8, step: 1, onInput: (v) => this.setLive({ rows: v }) },
+      ];
     if (l.kind === "shape") {
       const round = l.prim !== "box";
       const out: PanelItem[] = [
@@ -618,7 +630,11 @@ export class FreeformTool implements Tool {
     const ed = bestE as { d: number; e: [number, number] } | null;
     const fc = bestF as { d: number; f: number; mid: number } | null;
     const faceAt = fc ? fc.mid : Infinity;
-    if (pt && pt.d <= Math.min(ed?.d ?? Infinity, faceAt)) return { kind: "vert", i: pt.i };
+    // A point gets a few pixels' start on the edges running out of it: a tap a
+    // fingertip's wobble from a point lies right on those edges (aiming at the
+    // nine inner points of a sheet picked three edges).
+    const slack = Math.min(10, p.tol * 0.4);
+    if (pt && pt.d <= Math.min((ed?.d ?? Infinity) + slack, faceAt)) return { kind: "vert", i: pt.i };
     if (ed && ed.d < faceAt) return { kind: "edge", e: ed.e };
     if (fc) return { kind: "face", f: fc.f };
     if (pt) return { kind: "vert", i: pt.i };
@@ -677,6 +693,9 @@ export class FreeformTool implements Tool {
       const n = norm(at.plane.normal);
       const y = cross(n, x);
       this.cage = { faces: this.cage.faces, verts: this.cage.verts.map((v) => add(at.at, add(add(scale(x, v[0]), scale(y, v[1])), scale(n, v[2])))) };
+      // Its size and faces in the card, like a new box (a 50 × 30 pad was a
+      // 60 × 60 sheet to be scaled by 0.83 and 0.5).
+      this.live = { kind: "sheet", size: [60, 60], rows: 4, at: at.at, x, y, n };
       this.choosingPlane = false;
       this.app.setHover(null);
       this.app.view.setOriginPlanesVisible(false);

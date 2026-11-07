@@ -1,7 +1,7 @@
 import { isTouchDevice } from "../device";
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
-import { dot, GROUND, niceStep as niceStepOf, planeY, toPlane } from "../geom";
+import { dot, GROUND, niceStep as niceStepOf, originOnPlane, planeY, toPlane } from "../geom";
 import { addStrict, constraintError, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
@@ -406,7 +406,7 @@ export class SketchTool implements Tool {
           .sort((a, b) => b.n - a.n)[0];
         const info = best && view.body(best.body)?.faces[best.face];
         if (best && info?.plane) {
-          this.plane = { origin: info.plane.origin, normal: info.plane.normal, xDir };
+          this.plane = originOnPlane({ origin: info.plane.origin, normal: info.plane.normal, xDir });
           this.attachedTo = { body: best.body, center: info.center, normal: info.normal, area: info.area };
           this.app.ui.toast("Sketching on the face in front of you");
         } else this.app.ui.toast("Sketching on the origin plane (tap Exit and pick a face to sketch on one)");
@@ -814,6 +814,9 @@ export class SketchTool implements Tool {
       t("extend", "Extend", "extend", "E"),
       t("split", "Split", "splitLine"),
       t("move", "Move/Rotate", "move", "M"),
+      // Turned about a point tapped (a tie rod a quarter way round the axis
+      // centre): the code had it, the menu didn't.
+      t("rotate", "Rotate About", "rotateAxis"),
       t("scale", "Scale", "scale", "S"),
       {
         ...t(memory.pattern, "Pattern", memory.pattern),
@@ -890,7 +893,11 @@ export class SketchTool implements Tool {
     this.edit.extendFrom = this.edit.alignFrom = undefined;
     this.edit.filletFrom = undefined;
     // A circular pattern always asks for its centre.
-    if (kind === "patternCircular") this.edit.pivot = undefined;
+    if (kind === "patternCircular" || kind === "rotate") this.edit.pivot = undefined;
+    // Move starts from nothing (it shared ΔX with the linear pattern's spacing:
+    // an ellipse only meant to be turned 20° also moved 10 across).
+    if (kind === "move") ((this.edit.dx = 0), (this.edit.dy = 0), (this.edit.moveRot = 0));
+    if (kind === "patternLinear" && Math.hypot(this.edit.dx, this.edit.dy) < 1e-12) this.edit.dx = 10;
     this.finishFillet();
     this.clearPreviewJoin();
     this.edit.mirrorLine = undefined;
@@ -943,6 +950,23 @@ export class SketchTool implements Tool {
     });
     const selCount = this.selected.size;
     const apply = (label: string, fn: () => void): PanelItem => ({ type: "button", label, icon: "check", onClick: fn, primary: true });
+    // A finger lands a few pixels off and the grid there can be 5 px a step:
+    // where the first point is, typed (X / Y), right after it's tapped.
+    const firstAt = (): PanelItem[] =>
+      isTouchDevice && this.pts.length === 1
+        ? ([0, 1] as const).map((i) => ({
+            type: "number" as const,
+            label: i ? "Y" : "X",
+            value: Math.round(this.pts[0][i] * 100) / 100,
+            kind: "length" as const,
+            onInput: (v: number) => {
+              this.pts[0] = i ? [this.pts[0][0], v] : [v, this.pts[0][1]];
+              // Typed: no longer on what it snapped to.
+              this.startRef = this.startSnap = this.firstSnap = null;
+              this.refreshPreview();
+            },
+          }))
+        : [];
     switch (k) {
       case "line":
         // With the numpad, the length is typed in the box by the line itself.
@@ -952,20 +976,37 @@ export class SketchTool implements Tool {
         // length on (and the next point is often off the screen) — so the card
         // takes the length and the direction (0° right, 90° up), Done places it.
         // Or how far across and up it goes: a slope ("in 10, up 12") with no angle to work out.
-        else if (this.pts.length && isTouchDevice) items.push(lock("len", "Length"), lock("ang", "Angle", "angle"), lock("dx", "Across"), lock("dy", "Up"));
+        else if (this.pts.length && isTouchDevice) items.push(...firstAt(), lock("len", "Length"), lock("ang", "Angle", "angle"), lock("dx", "Across"), lock("dy", "Up"));
         break;
       case "rect":
-        if (this.pts.length === 1 && memory.rect !== "3pt") items.push(lock("w", "Width"), lock("h", "Height"));
+        if (this.pts.length === 1 && memory.rect !== "3pt") items.push(...firstAt(), lock("w", "Width"), lock("h", "Height"));
         break;
       case "circle":
-        if (this.pts.length === 1 && memory.circle !== "3pt") items.push(lock("r", "Diameter"));
+        if (this.pts.length === 1 && memory.circle !== "3pt") items.push(...firstAt(), lock("r", "Diameter"));
         break;
       case "polygon":
         items.push({ type: "number", label: "Sides", value: memory.sides, kind: "int", min: 3, onInput: (v) => ((memory.sides = Math.max(3, Math.min(64, v))), this.refreshPreview(), this.updateMenu()) });
-        if (this.pts.length === 1) items.push(lock("r", "Radius"));
+        if (this.pts.length === 1) items.push(...firstAt(), lock("r", "Radius"));
+        break;
+      case "spline":
+        // The point just placed, typed exactly (no grid gets every point).
+        if (isTouchDevice && this.pts.length)
+          items.push(
+            ...([0, 1] as const).map((i) => ({
+              type: "number" as const,
+              label: i ? "Y" : "X",
+              value: Math.round(this.pts[this.pts.length - 1][i] * 100) / 100,
+              kind: "length" as const,
+              onInput: (v: number) => {
+                const q = this.pts[this.pts.length - 1];
+                this.pts[this.pts.length - 1] = i ? [q[0], v] : [v, q[1]];
+                this.refreshPreview();
+              },
+            })),
+          );
         break;
       case "ellipse":
-        if (this.pts.length === 1) items.push(lock("rx", "Length"));
+        if (this.pts.length === 1) items.push(...firstAt(), lock("rx", "Length"));
         if (this.pts.length === 2) items.push(lock("ry", "Width"));
         break;
       case "text":
@@ -1079,7 +1120,7 @@ export class SketchTool implements Tool {
     // there — typing Width 100, Height 150 and pressing Enter did nothing; it
     // still waited for a second tap, which on a phone lands wherever the finger is.
     const typed = this.pts.length > 0 && ["rect", "circle", "polygon", "ellipse", "line"].includes(k);
-    ui.showPanel(items.length ? { title: k === "fillet" && memory.corner === "chamfer" ? "Chamfer" : titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined, onDone: typed ? () => this.finishTyped() : undefined } : null);
+    ui.showPanel(items.length ? { title: k === "fillet" && memory.corner === "chamfer" ? "Chamfer" : titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined, onDone: k === "spline" && this.pts.length >= 2 ? () => this.finishSpline(false) : typed ? () => this.finishTyped() : undefined } : null);
   }
 
   /** Pick a .ttf / .otf / .woff file and use it for the text. */
@@ -1737,7 +1778,9 @@ export class SketchTool implements Tool {
     if (this.phase === "plane") return this.pickPlane(p);
     if (this.edit.picking) return this.pickForEdit(p);
     // A tap on empty space finishes what's waiting for Apply (like elsewhere).
-    if (this.isSelectionTool() && this.selected.size && this.transformPending() && !this.curveAt(p) && !p.shift) {
+    // (Not while a turn still needs its centre: that tap is the centre.)
+    const needsCentre = (this.kind === "rotate" || this.kind === "patternCircular") && !this.edit.pivot;
+    if (this.isSelectionTool() && this.selected.size && this.transformPending() && !needsCentre && !this.curveAt(p) && !p.shift) {
       this.applyTransform();
       // Done with it: nothing left selected, so the next empty tap doesn't do it again.
       return this.clearSelection();
@@ -1754,16 +1797,16 @@ export class SketchTool implements Tool {
       case "patternLinear":
         return this.tapSelect(p, count);
       case "patternCircular":
+      case "rotate":
         // With curves selected and no centre yet, the tap places the centre (snapping to points).
         if (this.selected.size && !this.edit.pivot && !p.shift) {
           const s = this.snap(p);
           if (s) this.edit.pivot = s.uv;
           this.updatePanel();
           this.refreshPreview();
-          return this.setHint("Set the count and angle, then Apply. Tap the Center field to move the centre.");
+          return this.setHint(this.kind === "rotate" ? "Set the angle, then Apply. Tap the Center field to move the centre." : "Set the count and angle, then Apply. Tap the Center field to move the centre.");
         }
         return this.tapSelect(p, count);
-      case "rotate":
       case "mirror":
         return this.tapSelect(p, count);
       case "delete":
@@ -1892,7 +1935,7 @@ export class SketchTool implements Tool {
     } else if (hit.kind === "face") {
       const info = this.app.view.body(hit.body)?.faces[hit.face];
       if (!info?.plane) return this.app.ui.toast("Pick a flat face");
-      this.plane = info.plane;
+      this.plane = originOnPlane(info.plane);
       this.attachedTo = { body: hit.body, center: info.center, normal: info.normal, area: info.area };
     } else if (hit.kind === "profile") {
       // Tapping an existing sketch continues it.
@@ -2537,6 +2580,19 @@ export class SketchTool implements Tool {
    */
   stopDrawing(): void {
     if (this.pts.length) this.resetDrawing();
+  }
+
+  /**
+   * Undo while points are being placed that aren't in the drawing yet (a
+   * spline, an arc's ends): the last point goes. True when that was the undo.
+   */
+  undoPoint(): boolean {
+    if (!this.pts.length || this.kind === "line") return false;
+    this.pts.pop();
+    if (!this.pts.length) this.resetDrawing();
+    this.updatePanel();
+    this.refreshPreview();
+    return true;
   }
 
   private resetDrawing(): void {
@@ -3189,6 +3245,15 @@ export class SketchTool implements Tool {
       this.edit.mirrorLine = [e.a, e.b];
       return this.applyTransform();
     }
+    // …or an axis (the upright one through the origin, for a shape drawn on one
+    // side): it used to clear the selection.
+    if (!c && this.kind === "mirror" && this.selected.size && !p.shift) {
+      const line = this.axisLineAt(p);
+      if (line) {
+        this.edit.mirrorLine = line;
+        return this.applyTransform();
+      }
+    }
     // Double tap (or Mirror's first tap): the whole shape the curve belongs to (joined end to end).
     if (c && (count >= 2 || (this.kind === "mirror" && !this.selected.size && !p.shift))) {
       const chain = connectedChain(this.entities, c.id);
@@ -3243,6 +3308,18 @@ export class SketchTool implements Tool {
     this.refreshPreview();
   }
 
+  /** A world / construction axis under the pointer, lying along the sketch plane, as a line in it. */
+  private axisLineAt(p: ToolPointer): [Vec2, Vec2] | null {
+    // X/Y on the ground, Z on an upright sketch, …
+    const hit = this.app.view.pick(p.x, p.y, { curves: false, profiles: false, bodies: false, planes: false, axes: true, worldAxes: true, edgeTolPx: p.tol });
+    const ax = hit?.kind === "axis" ? this.app.view.axisOf(hit.id) : undefined;
+    const plane = this.plane!;
+    if (!ax || Math.abs(dot(ax.plane.normal, plane.normal)) > 1e-6) return null;
+    const o = ax.plane.origin;
+    const d = ax.plane.normal;
+    return [toPlane(plane, o), toPlane(plane, [o[0] + d[0], o[1] + d[1], o[2] + d[2]])];
+  }
+
   private pickForEdit(p: ToolPointer): void {
     if (this.edit.picking === "pivot") {
       const s = this.snap(p);
@@ -3252,14 +3329,9 @@ export class SketchTool implements Tool {
       const e = c && this.entities.find((x) => x.id === c.id);
       if (e?.kind === "line") this.edit.mirrorLine = [e.a, e.b];
       else {
-        // Or a world axis lying in the sketch plane (X/Y on the ground, …).
-        const hit = this.app.view.pick(p.x, p.y, { curves: false, profiles: false, bodies: false, planes: false, axes: true, worldAxes: true, edgeTolPx: p.tol });
-        const ax = hit?.kind === "axis" ? this.app.view.axisOf(hit.id) : undefined;
-        const plane = this.plane!;
-        if (!ax || Math.abs(dot(ax.plane.normal, plane.normal)) > 1e-6) return this.app.ui.toast("Pick a straight line or an axis in the sketch plane");
-        const o = ax.plane.origin;
-        const d = ax.plane.normal;
-        this.edit.mirrorLine = [toPlane(plane, o), toPlane(plane, [o[0] + d[0], o[1] + d[1], o[2] + d[2]])];
+        const line = this.axisLineAt(p);
+        if (!line) return this.app.ui.toast("Pick a straight line or an axis in the sketch plane");
+        this.edit.mirrorLine = line;
       }
     }
     this.edit.picking = undefined;
@@ -3374,7 +3446,10 @@ export class SketchTool implements Tool {
    * tap right on a corner. The rounded corner appears; type its radius, Enter.
    */
   private tapFillet(p: ToolPointer): void {
-    if (this.filletEdit) return this.finishFillet();
+    // A tap while the last one's radius is showing keeps it — and, on another
+    // corner, rounds that one too (four corners took eight taps).
+    const kept = !!this.filletEdit;
+    if (kept) this.finishFillet();
     const w = this.app.view.rayToPlane(p.x, p.y, this.plane!);
     if (!w) return;
     const uv = toPlane(this.plane!, w);
@@ -3392,6 +3467,7 @@ export class SketchTool implements Tool {
         return d < tol && (!best || d < best.d) ? { p: q, d } : best;
       }, null);
       if (corner) return this.startFillet((r) => (memory.corner === "chamfer" ? chamferCorner(base, corner.p, r, tol * 0.01 + 1e-6) : filletCorner(base, corner.p, r, tol * 0.01 + 1e-6)));
+      if (kept) return;
       const c = this.curveAt(p);
       if (!c) return this.tapEmpty();
       if (base.find((x) => x.id === c.id)?.kind !== "line") return this.app.ui.toast("Pick a line (or tap a corner)");
