@@ -808,6 +808,8 @@ export class App implements AppContext {
       // Unanswered: it goes away by itself (More → Fullscreen is always there).
       setTimeout(away, 15_000);
       document.addEventListener("fullscreenchange", () => isFull() && away());
+      // A click or tap on the workspace answers it too ("not now").
+      document.getElementById("view")?.addEventListener("pointerdown", away, { once: true, capture: true });
     }
     // Help and Tutorial: placeholders for now.
     // A newer build out? A notice offers to update; More → Reset cache does it now.
