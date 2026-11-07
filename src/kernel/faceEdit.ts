@@ -495,13 +495,35 @@ function offsetByContinuation(body: Shape3D, F: Face, d: number): Shape3D {
     return add(add(p, scale(dir, d / rise)), outward(k, t));
   };
   const liftedAt = (k: number, t: number): Vec3 => add(add(tup(edges[k].pointAt(t)), scale(n, eps)), outward(k, t));
-  // Corners: shared by two edges, moved the same way for both (halfway between their two estimates).
+  // Corners: shared by two edges. Where the two neighbours meet along an edge
+  // of the body (a box's corner edge), the corner slides along that edge to
+  // the new plane - it stays on both neighbours. Each neighbour on its own
+  // would move it its own way (a wall at 45° and one square to F disagree,
+  // and halfway between them leaves both: slanted slivers stood up as fins).
+  // Without such an edge: halfway between their two estimates.
   const m = order.length;
+  const fEdges = F.edges;
+  const bodyEdges = body.edges.filter((e) => !fEdges.some((fe) => fe.isSame(e)));
+  const alongEdge = (v: Vec3): Vec3 | null => {
+    for (const e of bodyEdges) {
+      const [a, b] = ends(e);
+      const atStart = dist(a, v) < tol * 10;
+      if (!atStart && dist(b, v) >= tol * 10) continue;
+      const dt = 1e-3;
+      const q = tup(e.pointAt(atStart ? dt : 1 - dt));
+      const dir = norm(sub(q, v));
+      const rise = dot(dir, n);
+      if (Math.abs(rise) < 0.15) continue;
+      return add(v, scale(dir, d / rise));
+    }
+    return null;
+  };
   const corner: Vec3[] = order.map(({ k, rev }, i) => {
     const prev = order[(i - 1 + m) % m];
     const a = movedAt(k, rev ? 1 : 0);
     const b = movedAt(prev.k, prev.rev ? 0 : 1);
-    return scale(add(a, b), 0.5);
+    const v = ends(edges[k])[rev ? 1 : 0];
+    return alongEdge(v) ?? scale(add(a, b), 0.5);
   });
   const lowerCorner: Vec3[] = order.map(({ k, rev }) => liftedAt(k, rev ? 1 : 0));
   const lowerEdges = eps

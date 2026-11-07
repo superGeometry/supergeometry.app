@@ -94,7 +94,13 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     super.enter();
     // A new one: the other tools that can start from the same shape, beside it
     // in the column (drag the arrow: Extrude; tap one of these: that tool).
-    if (!this.existing) {
+    if (this.offsetsFace()) {
+      // Offset Face: the face moves (its neighbours follow) - not an extrusion, so none of those tools.
+      this.app.ui.setTools([
+        ...(screenClass() === "phone" ? [{ id: "cancel", label: "Cancel", icon: "close" as const, shortcut: "Esc", run: () => this.cancel() }] : []),
+        { id: "offsetFace", label: "Offset Face", icon: "offsetFace", active: true, sub: "drag the arrow", run: () => {} },
+      ]);
+    } else if (!this.existing) {
       const src = this.feature.source;
       const sections: ExtrudeSource[] = src.kind === "profile" ? src.regions.map((r) => ({ ...src, regions: [r] })) : [src];
       this.app.ui.setTools([
@@ -151,14 +157,24 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     return this.feature.source.kind === "profile" ? this.feature.source.sketch : undefined;
   }
 
+  /** A face of its own body pushed or pulled: Offset Face (the face moves; the faces around it follow). */
+  private offsetsFace(): boolean {
+    const src = this.feature.source;
+    return src.kind === "face" && this.feature.mode !== "new" && this.feature.target === src.face.body;
+  }
+
   protected hint(): string {
+    if (this.offsetsFace()) return "Drag the arrow or type how far the face moves: out adds, negative moves it in. The faces around it follow.";
     return "Drag the arrow or type a distance. Negative values cut.";
   }
 
   protected items(): PanelItem[] {
     const src = this.feature.source;
+    const distance = this.num("Distance", "distance", "length", { onInput: (v) => this.setDistance(v), inBox: true });
+    // (No Join / Cut / New or taper: those make it an extrusion.)
+    if (this.offsetsFace()) return [distance];
     return [
-      this.num("Distance", "distance", "length", { onInput: (v) => this.setDistance(v), inBox: true }),
+      distance,
       modeChoice(
         () => this.feature.mode,
         (m) => {
