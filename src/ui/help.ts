@@ -62,7 +62,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     title: "Values and cards",
     items: [
       { icon: "numpad", name: "Value boxes", text: "Every drag shows a value box by the pointer that stays when you let go: tap it to type. Just type while dragging - it goes into that box. Press on a box and drag left or right to turn the value down or up like a wheel. The model follows each key as you type (one undo step for the whole value). On the numpad a minus stays when you type over a negative value; ⌫ first clears it all, sign too, to type it positive." },
-      { icon: "menu", name: "Tool cards", text: "A tool's values, its own actions and Cancel / Done, apart with dim lines. Drag the card (or the numpad) by its grip where you want it - remembered per screen type; double-tap the grip to let it place itself again." },
+      { icon: "menu", name: "Tool cards", text: "A tool's values, its own actions and Cancel / Done, apart with dim lines. Drag the card (or the numpad) by its grip where you want it - remembered per screen type; double-tap the card's grip to fold it down to its name, and again to open it." },
       { icon: "line", name: "Exact points on touch screens", text: "Right after the first tap of a line, rectangle, circle… the card has X / Y for that point; a line also takes Length and Angle, or Across and Up for a slope; an arc by centre takes the centre, Radius and the Start and End angles." },
     ],
   },
@@ -90,7 +90,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "numpad", name: "Numpad", text: "Tap to switch the on-screen numpad on or off: value boxes then open it instead of the keyboard. Typing replaces the value; ↵ applies it." },
       { icon: "display", name: "Display", text: "Shaded, wireframe or X-ray; edges and hidden edges." },
       { icon: "camera", name: "Screenshot", text: "Save a picture of the view, marked faintly at the bottom right with the project's name, the isolated bodies (when isolating) and supergeometry.app." },
-      { icon: "history", name: "History", text: "Every step in order. Tap one to change it, hover to see what it works on, the eye switches it off, the bin deletes it (two taps, as every delete button: the first turns it red). Select several (Ctrl/Shift+click) to group them: fold, rename, switch all off or on, ungroup." },
+      { icon: "history", name: "History", text: "Every step in order. Tap one to change it, hover to see what it works on, the eye switches it off, the bin deletes it (two taps, as in Items and the projects: the first turns it red). Select several (Ctrl/Shift+click) to group them: fold, rename, switch all off or on, ungroup." },
     ],
   },
   {

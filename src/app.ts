@@ -5,6 +5,7 @@ import { DocStore, parseProject } from "./doc/store";
 import { SUPPORT, openSupport } from "./ui/support";
 import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, renameProject, setCurrentProject } from "./doc/library";
 import { showLibrary } from "./ui/library";
+import { showAbout } from "./ui/about";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
 import { createVariable, editVariables, insertFile, insertImage } from "./io/insert";
@@ -137,13 +138,15 @@ export class App implements AppContext {
     this.tool.enter?.();
 
     this.ui.setStatus("Loading geometry kernel…");
-    Promise.all([this.kernel.ready, this.store.load().then(() => this.attachLibrary())])
+    const loaded = this.store.load().then(() => this.attachLibrary());
+    // Every visit starts at the projects, with a welcome: shown as soon as the
+    // projects are read, while the geometry kernel is still loading behind it.
+    void loaded.then(() => this.showProjects(true, true));
+    Promise.all([this.kernel.ready, loaded])
       .then(async () => {
         this.ui.setStatus(null);
         await this.regenerate();
         this.view.fitAll(false);
-        // Every visit starts at the projects, with a welcome.
-        void this.showProjects(true);
       })
       .catch((err) => this.ui.setStatus(`Could not start the geometry kernel: ${err.message ?? err}`));
   }
@@ -843,9 +846,8 @@ export class App implements AppContext {
       this.ui.refreshHint();
     });
     moreItem("m-tutorial", () => {});
-    // About → the project on GitHub; support → MakerWorld (new tab, no access back to this page).
-    const openTab = (url: string) => window.open(url, "_blank", "noopener");
-    moreItem("m-about", () => openTab("https://github.com/superGeometry/supergeometry.app"));
+    // About: the README, in the app. Support links open in a new tab (no access back to this page).
+    moreItem("m-about", () => showAbout());
     // Support: a short list of ways (each opens in a new tab). One without a link yet says so.
     const donateList = document.getElementById("m-donate-list")!;
     on("m-donate", () => {
@@ -1076,9 +1078,9 @@ export class App implements AppContext {
   /** Full screen from the projects window (null: not offered here). */
   private fullscreen: { isFull(): boolean; toggle(): void } | null = null;
 
-  private async showProjects(welcome = false): Promise<void> {
-    // The open one with its picture as it looks now.
-    if (this.projectId) await this.keepInLibrary(JSON.stringify(this.store.doc), true);
+  private async showProjects(welcome = false, starting = false): Promise<void> {
+    // The open one with its picture as it looks now (starting: nothing has changed, nor is it drawn yet).
+    if (this.projectId && !starting) await this.keepInLibrary(JSON.stringify(this.store.doc), true);
     const entries = await libraryEntries();
     showLibrary(entries, this.projectId, {
       open: (id) => void this.openKept(id),

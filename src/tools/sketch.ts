@@ -846,8 +846,7 @@ export class SketchTool implements Tool {
         children: (["patternLinear", "patternCircular"] as const).map((k) => ({ id: k, label: k === "patternLinear" ? "Linear" : "Circular", icon: k, active: this.kind === k, run: () => ((memory.pattern = k), this.setKind(k)) })),
       },
       // With curves selected, Delete removes them right away; else it's the tap-to-delete tool.
-      // (Two taps when it deletes; one when it only picks the tool.)
-      t("delete", "Delete", "trash", "Del", { confirm: !!(this.selected.size || this.selPts.length), run: () => (this.selected.size || this.selPts.length ? this.deleteSelected() : this.setKind("delete")) }),
+      t("delete", "Delete", "trash", "Del", { run: () => (this.selected.size || this.selPts.length ? this.deleteSelected() : this.setKind("delete")) }),
     ]);
     // With curves selected the button shows (and flips) their type; otherwise the type of new curves.
     const sel = this.entities.filter((e) => this.selected.has(e.id));

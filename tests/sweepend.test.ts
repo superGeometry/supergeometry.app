@@ -38,6 +38,21 @@ for (const d of [4, 20]) {
   check("…both ends round and profile-sized (square to the path, not a slanted oval)", ends.length === 2 && ends.every((f) => Math.abs(measureArea(f) - A) < A * 1e-3), ends.map((f) => measureArea(f).toFixed(3)).join(", "));
 }
 
+// Pushed in twice (the second push finds the end where the first left it).
+{
+  const off = (id: string, center: number[], normal: number[], d: number) => ({ id, name: id, type: "extrude", source: { kind: "face", face: { body: BODY, center, normal, area: A } }, distance: -d, mode: "auto", target: BODY });
+  const first = off("off1", [0, 86.28285598162046, 43.4103407849028], [0, 0.6567807448042061, -0.7540815958863021], 4);
+  await regenerate([...doc.features, first]);
+  const s1 = debugBodies().get(BODY)!;
+  const end1 = s1.faces.filter((f) => f.geomType === "PLANE").sort((a, b) => a.center.z - b.center.z)[0];
+  const L1 = Math.abs(measureVolume(s1)) / A;
+  const r: any = await regenerate([...doc.features, first, off("off2", end1.center.toTuple(), end1.normalAt().toTuple(), 10)]);
+  const s = debugBodies().get(BODY)!;
+  const L = Math.abs(measureVolume(s)) / A;
+  const ends = s.faces.filter((f) => f.geomType === "PLANE");
+  check("pushed in again: about 10 shorter still, both ends round", !r.errors.length && Math.abs(L1 - L - 10) < 0.6 && ends.length === 2 && ends.every((f) => Math.abs(measureArea(f) - A) < A * 1e-3), `${L1.toFixed(2)} → ${L.toFixed(2)}; ends ${ends.map((f) => measureArea(f).toFixed(3)).join(", ")}`);
+}
+
 // A profile centred on its path (the fan's guard spoke): exactly that much shorter.
 {
   const r1 = 1.4;

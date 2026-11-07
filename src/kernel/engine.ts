@@ -1354,14 +1354,32 @@ function trimSweepEnd(body: Shape3D, F: Face, by: number, ctx: Ctx): Shape3D | n
   const c = F.center.toTuple() as Vec3;
   for (const spine of ctx.sweeps.values()) {
     const all = wirePoints(spine);
-    for (const pts of [all, [...all].reverse()]) {
-      // pts runs from this end of the path inwards.
-      const p0 = pts[0];
-      const out = norm(sub(pts[0], pts[1]));
-      if (Math.abs(dot(out, normal)) < 0.98) continue;
+    for (const way of [all, [...all].reverse()]) {
+      // Walking in from this end of the path: where it crosses F's plane (the
+      // end itself, or where an earlier push left the end), heading out
+      // through F there, close to it.
+      const side = (p: Vec3) => dot(sub(p, origin), normal);
+      const tolPlane = size * 0.05 + 1e-6;
+      let k = -1;
+      for (let j = 0; j < way.length - 1; j++) {
+        if (side(way[j]) >= -tolPlane && side(way[j + 1]) < side(way[j])) {
+          if (side(way[j + 1]) <= tolPlane) {
+            k = j;
+            break;
+          }
+        }
+      }
+      if (k < 0) continue;
+      const a0 = side(way[k]);
+      const a1 = side(way[k + 1]);
       // (The sweep turns its profile square to the path: a profile drawn a
       // little off square ends on a plane a hair off the path's end.)
-      if (Math.abs(dot(sub(p0, origin), normal)) > size * 0.05 + 1e-6) continue;
+      const t0 = a0 <= tolPlane && a0 >= -tolPlane && k === 0 ? 0 : Math.min(1, Math.max(0, a0 / (a0 - a1)));
+      const q = add(way[k], scale(sub(way[k + 1], way[k]), t0));
+      const pts = [q, ...way.slice(k + 1)];
+      const p0 = pts[0];
+      const out = norm(sub(way[k], way[k + 1]));
+      if (Math.abs(dot(out, normal)) < 0.98) continue;
       if (dist(p0, c) > size) continue;
       // The piece of path to take off: from the end, `by` along it.
       const piece: Vec3[] = [p0];

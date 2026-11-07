@@ -24,8 +24,6 @@ export interface ToolItem {
   swatch?: string;
   /** Small icons after the label (e.g. ⟲ + what a toggle switches to). */
   trailing?: IconName[];
-  /** Deletes something: two taps (see twoTap). Default: when its icon is the bin. */
-  confirm?: boolean;
   run?(): void;
 }
 
@@ -591,8 +589,11 @@ export class UI {
     this.panelVersion++;
     this.panel.innerHTML = "";
     this.panel.hidden = !spec;
-    // Closed: next time it's placed afresh.
-    if (!spec) return void (this.panelSide = -1);
+    // Closed: next time it's placed afresh (and whole).
+    if (!spec) {
+      this.panel.classList.remove("folded");
+      return void (this.panelSide = -1);
+    }
     // A short list, like a right-click menu: each value with its box after the
     // name. It hangs under the tool's value box on the model (or by the pointer).
     this.panel.classList.add("as-list");
@@ -669,8 +670,7 @@ export class UI {
         const b = el("button", it.primary ? "text-btn primary" : "text-btn");
         if (it.icon) b.innerHTML = icons[it.icon];
         b.append(it.label);
-        if (it.icon === "trash") twoTap(b, `panel:${it.label}`, it.onClick);
-        else b.addEventListener("click", it.onClick);
+        b.addEventListener("click", it.onClick);
         row.append(b);
       }
     }
@@ -684,8 +684,7 @@ export class UI {
         b.innerHTML = icons[a.icon] ?? "";
         b.append(a.label);
         if (a.disabled) b.disabled = true;
-        if (a.icon === "trash") twoTap(b, `action:${a.id}`, () => a.run?.());
-        else b.addEventListener("click", () => a.run?.());
+        b.addEventListener("click", () => a.run?.());
         acts.append(b);
       }
       this.panel.append(acts);
@@ -901,11 +900,11 @@ export class UI {
   /**
    * The grip along the card's top (like the numpad's): drag it to put the card
    * where you want - it opens there from then on, on this kind of screen.
-   * Double-tap it: back to finding its own place.
+   * Double-tap it: the card folds to just its name (and back again).
    */
   private panelGrip(): HTMLElement {
     const grip = el("div", "panel-grip");
-    grip.title = "Drag to move · double-tap to let it place itself";
+    grip.title = "Drag to move · double-tap to fold or unfold";
     grip.append(el("span", ""));
     let drag: { id: number; dx: number; dy: number; moved: boolean } | null = null;
     grip.addEventListener("pointerdown", (e) => {
@@ -927,8 +926,10 @@ export class UI {
       e.stopPropagation();
       if (drag.moved) this.savePanelSpot({ x: parseFloat(this.panel.style.left), y: parseFloat(this.panel.style.top) });
       else if (performance.now() - this.lastGripTap < 350) {
-        this.savePanelSpot(null);
-        this.panelSide = -1;
+        this.lastGripTap = 0;
+        this.panel.classList.toggle("folded");
+        // Kept whole on screen, folded or not.
+        this.putPanel(this.panel.offsetLeft, this.panel.offsetTop);
       } else this.lastGripTap = performance.now();
       drag = null;
       this.panelDragging = false;
@@ -1352,18 +1353,15 @@ function renderTools(host: HTMLElement, all: ToolItem[], onFlyout: (item: ToolIt
       continue;
     }
     const b = toolButton(item, true);
-    if (!item.children?.length && !item.disabled && (item.confirm ?? item.icon === "trash")) {
-      twoTap(b, `tool:${item.id}:${item.label}`, () => (item.run?.(), after?.()));
-    } else
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (item.disabled) return;
-        if (item.children?.length) onFlyout(item, b);
-        else {
-          item.run?.();
-          after?.();
-        }
-      });
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (item.disabled) return;
+      if (item.children?.length) onFlyout(item, b);
+      else {
+        item.run?.();
+        after?.();
+      }
+    });
     host.append(b);
   }
 }

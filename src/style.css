@@ -293,19 +293,35 @@ kbd {
 }
 /* An update waiting (its notice put away): More pulses, and so does NEW on
    Update. */
+/* A ring that grows and fades (transform and opacity only: the GPU just
+   moves a layer, no repaint each frame), a few times and then still - an
+   endless glow kept the graphics card busy in every open tab. */
 @keyframes update-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(61, 139, 255, 0.7);
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
   }
-  50% {
-    box-shadow: 0 0 0 6px rgba(61, 139, 255, 0);
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
   }
 }
 body.update-pending #more-btn {
+  position: relative;
   color: #fff;
   background: var(--accent);
-  animation: update-pulse 1.6s ease-in-out infinite;
+}
+body.update-pending #more-btn::after,
+.new-badge::after,
+.library-full.pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  opacity: 0;
+  animation: update-pulse 1.6s ease-out 6;
 }
 .new-badge {
   align-self: center;
@@ -316,11 +332,15 @@ body.update-pending #more-btn {
   color: #fff;
   font: 700 10px/1.4 system-ui, sans-serif;
   letter-spacing: 0.04em;
-  animation: update-pulse 1.6s ease-in-out infinite;
+  position: relative;
+}
+.library-full.pulse {
+  position: relative;
 }
 @media (prefers-reduced-motion: reduce) {
-  body.update-pending #more-btn,
-  .new-badge {
+  body.update-pending #more-btn::after,
+  .new-badge::after,
+  .library-full.pulse::after {
     animation: none;
   }
 }
@@ -1473,6 +1493,86 @@ body.items-open #bottom-left {
   width: min(780px, calc(100vw - 24px));
   max-height: min(86vh, calc(100vh - 24px - var(--safe-t) - var(--safe-b)));
   padding: 14px;
+}
+/* More → About: the README, read in the app. */
+.dialog.about {
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(88vh, calc(100vh - 24px - var(--safe-t) - var(--safe-b)));
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.about-body {
+  overflow: auto;
+  min-height: 0;
+  padding: 0 4px 8px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.about-body h1 {
+  font-size: 22px;
+  margin: 8px 0 6px;
+}
+.about-body h2 {
+  font-size: 18px;
+  margin: 22px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.about-body h3 {
+  font-size: 15px;
+  margin: 16px 0 4px;
+}
+.about-body p,
+.about-body ul,
+.about-body ol {
+  margin: 6px 0;
+}
+.about-body ul,
+.about-body ol {
+  padding-left: 22px;
+}
+.about-body li {
+  margin: 3px 0;
+}
+.about-body a {
+  color: var(--accent);
+}
+.about-body code {
+  font: 12.5px ui-monospace, Consolas, monospace;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.16);
+}
+.about-body pre {
+  overflow: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.12);
+}
+.about-body pre code {
+  padding: 0;
+  background: none;
+}
+.about-body hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 18px 0;
+}
+.about-table {
+  overflow: auto;
+}
+.about-body table {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+.about-body th,
+.about-body td {
+  border: 1px solid var(--line);
+  padding: 5px 8px;
+  text-align: left;
+  vertical-align: top;
 }
 .library-head {
   display: flex;
@@ -3106,6 +3206,10 @@ html[data-screen="phone"] body.is-fullscreen {
 }
 #panel .panel-grip:active {
   cursor: grabbing;
+}
+/* Folded (double-tap on the grip): just the grip and the window's name. */
+#panel.folded > :not(.panel-grip):not(.panel-title) {
+  display: none !important;
 }
 
 /* No scroll bars inside the windows: a thin one shows outside the window's

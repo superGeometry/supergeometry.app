@@ -136,7 +136,8 @@ Isolate (show only the selected bodies).
 **The tool card** - the values for whatever you're doing (sizes, counts,
 options), its own actions, and Cancel / Done, each apart with a dim line. It
 keeps clear of what you're drawing; drag it by its grip where you want it
-(remembered per screen type), double-tap the grip to let it place itself.
+(remembered per screen type), double-tap the grip to fold it down to its
+name (and again to open it).
 
 ---
 
@@ -358,15 +359,16 @@ can't be rebuilt after a change, it's marked and the reason is shown.
 
 ## Tips for phones, tablets and headsets
 
-- **Deleting takes two taps**, everywhere (Items, History, the project gallery,
-  Delete in the tools): the first turns the bin red, the second deletes. It
-  goes back by itself after 3 seconds, or at a tap anywhere else.
+- **Deleting takes two taps** in Items, History and the project gallery: the
+  first turns the bin red, the second deletes. It goes back by itself after 3
+  seconds, or at a tap anywhere else. Delete in the tools and in a tool's
+  window takes one tap (Undo brings it back).
 - Tools show as icons: press and hold one to see its name.
 - With a pen, fingers are ignored while the pen touches the screen.
 - iPad / Android: **More → Fullscreen** gives the whole screen. On phones and
   tablets the app offers to be **installed on the home screen** (or More →
   Install app); on iPhone/iPad it's *Share → Add to Home Screen*.
-- The app asks to go full screen when it opens. The tool card fits the widest
+- The window the app opens with has a **Full screen** button. The tool card fits the widest
   clear gap along the bottom (beside undo/redo on a phone on its side), and a
   tool's options open beside a column of tools instead of over it.
 - Fit frames the model in the part of the screen the columns and bars leave

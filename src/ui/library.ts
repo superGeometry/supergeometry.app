@@ -120,6 +120,8 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
     fsBtn = el("button", "text-btn library-full");
     fsBtn.type = "button";
     fsBtn.addEventListener("click", () => fs.toggle());
+    // The welcome points it out (a few pulses): the app works best with the whole screen.
+    if (opts.welcome && !fs.isFull()) fsBtn.classList.add("pulse");
     paintFull();
     head.append(fsBtn);
   }

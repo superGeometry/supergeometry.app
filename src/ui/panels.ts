@@ -6,7 +6,7 @@ import { settings, type Settings } from "../settings";
 import { UNIT_LABEL, units } from "../units";
 import type { Viewport } from "../view/viewport";
 import type { UI } from "./ui";
-import { el, twoTap } from "./ui";
+import { el } from "./ui";
 
 export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnits: (u: Units) => void, isolatedNames: () => string[] = () => []): void {
   ui.addRight("fit", "fit", "Zoom to fit (F)", () => view.fitAll(), () => "Fit");
@@ -84,7 +84,8 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
         const row = choiceRow(v.name, false, () => (view.cam.restore(v), ui.closePopover()));
         const del = el("button", "icon-btn small", "✕");
         del.title = "Delete view";
-        twoTap(del, `view:${v.name}`, () => {
+        del.addEventListener("click", (e) => {
+          e.stopPropagation();
           store.commit((d) => (d.views = d.views.filter((x) => x.name !== v.name)));
           showViews();
         });
