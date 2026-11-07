@@ -11,6 +11,8 @@ import type { Viewport } from "../view/viewport";
 import { sketchToWorld } from "../view/viewport";
 
 export const CONSTRAINT_BUTTONS: { type: ConstraintType | "hv"; label: string; glyph: string; key: string }[] = [
+  // Lock / unlock first: the one reached for most.
+  { type: "fix", label: "Lock", glyph: "🔒", key: "L" },
   { type: "parallel", label: "Parallel", glyph: "∥", key: "A" },
   { type: "perpendicular", label: "Perpendicular", glyph: "⟂", key: "P" },
   { type: "tangent", label: "Tangent", glyph: "T", key: "T" },
@@ -20,7 +22,6 @@ export const CONSTRAINT_BUTTONS: { type: ConstraintType | "hv"; label: string; g
   { type: "hv", label: "Horizontal/Vertical", glyph: "H/V", key: "V" },
   { type: "equal", label: "Equal", glyph: "=", key: "E" },
   { type: "symmetric", label: "Symmetry", glyph: "⇋", key: "S" },
-  { type: "fix", label: "Lock", glyph: "🔒", key: "L" },
   { type: "distance", label: "Distance", glyph: "↔", key: "D" },
 ];
 
