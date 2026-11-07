@@ -400,8 +400,8 @@ can't be rebuilt after a change, it's marked and the reason is shown.
 - **A "Working…" spinner**: the geometry engine is busy; complex steps can
   take a moment. **Stop** next to it drops the work and takes back the change
   that started it (like an undo).
-- **A change you expected isn't there yet**: when a newer version is out, a
-  notice offers to update. **More → Update** loads the newest
+- **A change you expected isn't there yet**: when a newer version is out,
+  **More** pulses and its **Update** item says NEW. **More → Update** loads the newest
   version right away (your project is kept).
 
 ---

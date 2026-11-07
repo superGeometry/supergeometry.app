@@ -1,5 +1,6 @@
 // Newer version available? The page checks the site now and then (and when
-// you come back to it); if a new build is out, a notice offers to update.
+// you come back to it); if a new build is out, More pulses and its Update
+// item carries a NEW badge - no notice over the work.
 // Updating - or More → Update - clears the browser's stored copies of
 // the app's files and reloads. Your project is saved first and stays.
 
@@ -22,31 +23,8 @@ async function liveBuild(): Promise<string | null> {
 }
 
 export class Updates {
-  private banner = el("div", "update-banner compact-banner");
-  private shownFor: string | null = null;
-
   /** `beforeReload` saves the project before the page is reloaded. */
   constructor(private beforeReload: () => Promise<void>) {
-    this.banner.hidden = true;
-    const text = el("span", "", "Update available");
-    const now = el("button", "text-btn primary", "Update");
-    now.addEventListener("click", () => void this.reset());
-    this.banner.append(text, now);
-    this.banner.addEventListener("pointerdown", (e) => e.stopPropagation());
-    document.body.append(this.banner);
-    // No "Later": a click or tap on the workspace puts it away (More → Update
-    // is always there).
-    // Put away with an update still waiting: More pulses, and its Update item
-    // carries a pulsing NEW, until it's done.
-    document.getElementById("view")?.addEventListener(
-      "pointerdown",
-      () => {
-        if (this.banner.hidden) return;
-        this.banner.hidden = true;
-        this.markPending();
-      },
-      { capture: true },
-    );
     // Only a built site has a build to compare (not the dev server).
     if (!loadedBuild()) return;
     setTimeout(() => void this.check(), 20_000);
@@ -61,15 +39,12 @@ export class Updates {
     if (item && !item.querySelector(".new-badge")) item.append(el("span", "new-badge", "NEW"));
   }
 
-  /** Is a newer build out? Shows the notice (once per build). Returns whether it is. */
+  /** Is a newer build out? Marks More if so. Returns whether it is. */
   async check(): Promise<boolean> {
     const mine = loadedBuild();
     const live = await liveBuild();
     if (!mine || !live || live === mine) return false;
-    if (this.shownFor !== live) {
-      this.shownFor = live;
-      this.banner.hidden = false;
-    }
+    this.markPending();
     return true;
   }
 
@@ -78,7 +53,6 @@ export class Updates {
    * workers) and reload from the site. The project is saved first.
    */
   async reset(): Promise<void> {
-    this.banner.hidden = true;
     await this.beforeReload();
     try {
       if ("caches" in window) for (const k of await caches.keys()) await caches.delete(k);

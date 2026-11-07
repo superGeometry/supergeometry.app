@@ -26,7 +26,7 @@ import { SketchTool } from "./tools/sketch";
 import { bodiesOf, edgeRefOf, faceRefOf, sameSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tools/tool";
 import { setupRightColumn } from "./ui/panels";
 import type { ToolItem } from "./ui/ui";
-import { el, UI } from "./ui/ui";
+import { UI } from "./ui/ui";
 import { setUnits, setVariables } from "./units";
 import { InputRouter } from "./view/input";
 import { ViewCube } from "./view/viewcube";
@@ -818,27 +818,14 @@ export class App implements AppContext {
       if (isFull()) return void (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.());
       goFull();
     });
-    // On opening, on every device: offer full screen (a browser only allows it
-    // from a tap, so it has to be asked). Not where it can't be done, or already is.
+    // The welcome window (and File → Open) has a Full screen button too (a
+    // browser only allows it from a tap). Not where it can't be done, or where
+    // the app already has the whole screen (installed).
     const canFull = !!(root.requestFullscreen || root.webkitRequestFullscreen) && (document.fullscreenEnabled ?? true);
-    const already = () => isFull() || matchMedia("(display-mode: fullscreen)").matches || matchMedia("(display-mode: standalone)").matches;
-    if (canFull && !already()) {
-      const banner = el("div", "update-banner compact-banner");
-      banner.addEventListener("pointerdown", (e) => e.stopPropagation());
-      const yes = el("button", "text-btn primary", "Full screen");
-      const away = () => banner.remove();
-      yes.addEventListener("click", () => (away(), goFull()));
-      // No "Not now": a click on the workspace (or waiting) puts it away.
-      banner.append(el("span", "", "Use the whole screen?"), yes);
-      setTimeout(() => !already() && document.body.append(banner), 800);
-      // Unanswered: it goes away by itself (More → Fullscreen is always there).
-      setTimeout(away, 15_000);
-      document.addEventListener("fullscreenchange", () => isFull() && away());
-      // A click or tap on the workspace answers it ("not now").
-      document.getElementById("view")?.addEventListener("pointerdown", away, { once: true, capture: true });
-    }
+    const installed = matchMedia("(display-mode: fullscreen)").matches || matchMedia("(display-mode: standalone)").matches;
+    this.fullscreen = canFull && !installed ? { isFull, toggle: () => (isFull() ? void (document.exitFullscreen?.() ?? doc.webkitExitFullscreen?.()) : goFull()) } : null;
     // Help and Tutorial: placeholders for now.
-    // A newer build out? A notice offers to update; More → Update does it now.
+    // A newer build out? More pulses and its Update item says NEW.
     this.updates = new Updates(() => this.store.flush());
     moreItem("m-update", () => void this.confirmReset());
     // Phones and tablets: an offer to add the app to the home screen (More → Install app too).
@@ -1092,6 +1079,9 @@ export class App implements AppContext {
   }
 
   /** File → Open: the projects kept on this device, and Open file… for any other. */
+  /** Full screen from the projects window (null: not offered here). */
+  private fullscreen: { isFull(): boolean; toggle(): void } | null = null;
+
   private async showProjects(welcome = false): Promise<void> {
     // The open one with its picture as it looks now.
     if (this.projectId) await this.keepInLibrary(JSON.stringify(this.store.doc), true);
@@ -1110,7 +1100,7 @@ export class App implements AppContext {
         else await renameProject(id, name);
         return name;
       },
-    }, { welcome });
+    }, { welcome, fullscreen: this.fullscreen });
   }
 
   private async openKept(id: string): Promise<void> {

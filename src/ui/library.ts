@@ -76,7 +76,19 @@ function supportBox(): HTMLElement {
   return box;
 }
 
-export function showLibrary(entries: LibraryEntry[], currentId: string | null, act: LibraryActions, opts: { welcome?: boolean } = {}): void {
+const FULL =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>';
+const UNFULL =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>';
+
+export interface LibraryOptions {
+  /** The app's opening: a welcome and a few words on it. */
+  welcome?: boolean;
+  /** A Full screen button (null: not offered). */
+  fullscreen?: { isFull(): boolean; toggle(): void } | null;
+}
+
+export function showLibrary(entries: LibraryEntry[], currentId: string | null, act: LibraryActions, opts: LibraryOptions = {}): void {
   const back = el("div", "dialog-back");
   const box = el("div", "dialog library");
   if (opts.welcome) box.classList.add("welcome");
@@ -92,6 +104,23 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
   closeBtn.type = "button";
   closeBtn.title = "Close";
   closeBtn.innerHTML = icons.close;
+  // Full screen: the window stays (pick a project next); the button follows the state.
+  let fsBtn: HTMLButtonElement | null = null;
+  const fs = opts.fullscreen;
+  const paintFull = () => {
+    if (!fsBtn || !fs) return;
+    const on = fs.isFull();
+    fsBtn.innerHTML = on ? UNFULL : FULL;
+    fsBtn.append(on ? "Exit full screen" : "Full screen");
+  };
+  if (fs) {
+    fsBtn = el("button", "text-btn library-full");
+    fsBtn.type = "button";
+    fsBtn.title = "Use the whole screen";
+    fsBtn.addEventListener("click", () => fs.toggle());
+    paintFull();
+    head.append(fsBtn);
+  }
   head.append(newBtn, fileBtn, closeBtn);
   box.append(head);
   if (opts.welcome) {
@@ -109,7 +138,11 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
   const close = () => {
     back.remove();
     window.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("fullscreenchange", paintFull);
+    document.removeEventListener("webkitfullscreenchange", paintFull);
   };
+  document.addEventListener("fullscreenchange", paintFull);
+  document.addEventListener("webkitfullscreenchange", paintFull);
   const onKey = (e: KeyboardEvent) => {
     // A question asked over it (Delete?) has the keys.
     if (back.nextElementSibling?.classList.contains("dialog-back")) return;
