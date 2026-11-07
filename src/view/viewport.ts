@@ -1395,7 +1395,7 @@ function hatched<M extends MeshBasicMaterial>(m: M): M {
  */
 const PLANE_MARKS: Record<string, string> = { offset: "⇡", mid: "⇹", "3pt": "∴", curve: "∿", perp: "⊥", angle: "∠", parallel: "∥", symmetry: "⧖" };
 /** Its size, as a part of the plane's width. */
-export const PLANE_MARK_SIZE = 0.012;
+export const PLANE_MARK_SIZE = 0.024;
 const markMats = new Map<string, SpriteMaterial>();
 export function planeMarkMaterial(kind: string): SpriteMaterial {
   let m = markMats.get(kind);
