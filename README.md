@@ -150,7 +150,9 @@ Sketches on a face measure X / Y from the model's origin.
 
 **Drawing tools:** Line (keeps going from the last point; tap the first point
 to close), Arc (two ends, then the bend - or by centre), Spline (smooth curve through points;
-*Fit* or *Control* points), Rectangle (diagonal / centre / 3 points), Circle
+*Fit* or *Control* points, or *Draw*: press and drag freehand like a pencil - the stroke
+is cleaned up into a few lines, arcs and smooth curves, corners kept, so an extrusion
+gets a handful of faces, not hundreds; end where you began to close it), Rectangle (diagonal / centre / 3 points), Circle
 (centre, 2 points or 3 points), Ellipse (with an Angle), Polygon, Text (pick a font - Sans, Serif, Mono, Narrow, Bold caps,
 Script - or **Import font…** a .ttf / .otf / .woff of your own), Project
 (copies body edges or other sketches' curves here).

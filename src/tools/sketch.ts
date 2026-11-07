@@ -1,4 +1,5 @@
 import { isTouchDevice } from "../device";
+import { simplifyStroke } from "../sketch/freehand";
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
 import { dot, GROUND, niceStep as niceStepOf, originOnPlane, planeY, toPlane } from "../geom";
@@ -132,10 +133,21 @@ function hintOf(kind: Kind): string {
   if (kind === "circle" && memory.circle === "2pt") return "Tap two points across the circle (its diameter).";
   if (kind === "circle" && memory.circle === "3pt") return "Tap three points the circle passes through.";
   if (kind === "fillet" && memory.corner === "chamfer") return "Tap a corner where two lines meet to cut it off straight (or tap the two lines).";
+  if (kind === "spline" && memory.spline === "draw") return isTouchDevice ? "Press and draw with one finger, like a pencil (two fingers move the view). It becomes a few clean lines, arcs and curves; end where you began to close it." : "Press and drag to draw, like a pencil. Let go: it becomes a few clean lines, arcs and curves. End where you began to close it.";
   return HINTS[kind];
 }
 
-const memory = { arc: "3pt" as "3pt" | "center", circle: "center" as "center" | "2pt" | "3pt", corner: "round" as "round" | "chamfer", textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control", sides: 6, fillet: 2, offset: 2, textSize: storedTextSize(), textAlign: "left" as TextAlign };
+/** How a spline's points are taken (Draw makes fit splines). */
+const splineMode = (): "fit" | "control" => (memory.spline === "control" ? "control" : "fit");
+
+/** "2 lines, 1 curve" - what a freehand stroke was made into. */
+function describePieces(es: SketchEntity[]): string {
+  const n = (k: string) => es.filter((e) => e.kind === k).length;
+  const part = (c: number, one: string, many: string) => (c ? `${c} ${c === 1 ? one : many}` : "");
+  return [part(n("line"), "line", "lines"), part(n("arc"), "arc", "arcs"), part(n("circle"), "circle", "circles"), part(n("spline"), "curve", "curves")].filter(Boolean).join(", ");
+}
+
+const memory = { arc: "3pt" as "3pt" | "center", circle: "center" as "center" | "2pt" | "3pt", corner: "round" as "round" | "chamfer", textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control" | "draw", sides: 6, fillet: 2, offset: 2, textSize: storedTextSize(), textAlign: "left" as TextAlign };
 
 /** The text size survives a reload (a ruler's 3.5 mm numbers came back at 10 mm after one). */
 function storedTextSize(): number {
@@ -806,7 +818,7 @@ export class SketchTool implements Tool {
       t("select", "Select", "pointer", "V"),
       t("line", "Line", "line", "L"),
       t("arc", "Arc", "arc", "A", { sub: memory.arc === "center" ? "Center" : "3 Points", children: variant("arc", "arc", [["3pt", "3 Points"], ["center", "Center"]]) }),
-      t("spline", "Spline", "spline", "I", { sub: memory.spline === "fit" ? "Fit" : "Control", children: variant("spline", "spline", [["fit", "Fit points"], ["control", "Control points"]]) }),
+      t("spline", "Spline", "spline", "I", { sub: memory.spline === "fit" ? "Fit" : memory.spline === "draw" ? "Draw" : "Control", children: variant("spline", "spline", [["fit", "Fit points"], ["control", "Control points"], ["draw", "Draw (freehand)"]]) }),
       t("rect", "Rectangle", "rect", "R", { sub: { diagonal: "Diagonal", center: "Center", "3pt": "3 Points" }[memory.rect], children: variant("rect", "rect", [["center", "Center"], ["diagonal", "Diagonal"], ["3pt", "3 Points"]]) }),
       t("circle", "Circle", "circle", "C", { sub: { center: "Center", "2pt": "2 Points", "3pt": "3 Points" }[memory.circle], children: variant("circle", "circle", [["center", "Center"], ["2pt", "2 Points"], ["3pt", "3 Points"]]) }),
       t("ellipse", "Ellipse", "ellipse"),
@@ -1239,6 +1251,8 @@ export class SketchTool implements Tool {
     // by mistake, Move/Rotate could select nothing (Apply (0)).
     if (this.kind === "select") return false;
     if (this.kind === "scale" && this.startScaleDrag(p)) return true;
+    // Spline > Draw: the press starts a pencil stroke (a mouse's right / middle drag still turns / moves the view).
+    if (this.kind === "spline" && memory.spline === "draw") return this.startStroke(p);
     // Arc with both ends placed: a drag anywhere bends it (no need to hit a spot).
     if (this.kind === "arc" && this.pts.length === 2 && this.arcM) {
       const uv = this.uvAt(p);
@@ -1280,6 +1294,7 @@ export class SketchTool implements Tool {
       this.swipe.last = { x: p.x, y: p.y };
       return;
     }
+    if (this.stroke) return this.strokeTo(p);
     if (this.patDrag) return this.dragPattern(p);
     if (this.scaleDrag) return this.dragScale(p);
     if (this.arcBend) {
@@ -1307,6 +1322,11 @@ export class SketchTool implements Tool {
 
   /** A second finger came down to pinch: whatever was being placed isn't. */
   breakOff(): void {
+    // A second finger: the stroke was the start of a pinch, not a drawing.
+    if (this.stroke) {
+      this.stroke = null;
+      this.clearOverlays();
+    }
     // The first point was being dragged out: it isn't placed either.
     if (this.dragging && !this.pressPlace && this.pts.length === 1) this.pts = [];
     this.pressPlace = false;
@@ -1385,6 +1405,7 @@ export class SketchTool implements Tool {
       if (sw.cut && sw.now) this.commit(sw.now, carryConstraints(sw.base, sw.now, this.constraints));
       return;
     }
+    if (this.stroke) return this.endStroke(p);
     if (this.patDrag) return this.endPatternDrag();
     if (this.scaleDrag) {
       // The factor stays in the panel: Apply (or an empty tap) scales.
@@ -1432,6 +1453,71 @@ export class SketchTool implements Tool {
     const ax = Array.isArray(a) ? a[0] : a?.x;
     const ay = Array.isArray(a) ? a[1] : a?.y;
     if (ax !== undefined && ay !== undefined && Math.hypot(ax - p.x, ay - p.y) > 12) this.addPoint(this.cursor.uv, 1);
+  }
+
+  // ------------------------------------------- Spline > Draw (freehand)
+
+  /** The pencil stroke under way: its points (sketch units) and what its start snapped to. */
+  private stroke: { pts: Vec2[]; startRef: PointRef | null; last: { x: number; y: number }; frame: number } | null = null;
+
+  private startStroke(p: ToolPointer): boolean {
+    // Onto an existing point only (the grid would kink the stroke's start).
+    const s = this.snap(p);
+    const uv = s?.ref ? s.uv : this.uvAt(p);
+    if (!uv) return false;
+    this.resetDrawing();
+    this.stroke = { pts: [uv], startRef: s?.ref ?? null, last: { x: p.x, y: p.y }, frame: 0 };
+    return true;
+  }
+
+  private strokeTo(p: ToolPointer): void {
+    const st = this.stroke!;
+    // Every pixel or so is plenty (the simplifier thins it anyway).
+    if (Math.hypot(p.x - st.last.x, p.y - st.last.y) < 1.5) return;
+    const uv = this.uvAt(p);
+    if (!uv) return;
+    st.pts.push(uv);
+    st.last = { x: p.x, y: p.y };
+    // One redraw per frame, however often the pointer reports.
+    st.frame ||= requestAnimationFrame(() => {
+      if (this.stroke !== st) return;
+      st.frame = 0;
+      this.clearOverlays();
+      this.drawGhosts([{ id: "stroke", kind: "polyline", points: st.pts, closed: false }]);
+      this.app.view.requestRender();
+    });
+  }
+
+  private endStroke(p: ToolPointer): void {
+    const st = this.stroke!;
+    this.stroke = null;
+    if (st.frame) cancelAnimationFrame(st.frame);
+    this.clearOverlays();
+    // The end snaps onto an existing point (not the grid).
+    const s = this.snap(p);
+    let endRef: PointRef | null = null;
+    if (s?.ref && st.pts.length > 1) {
+      st.pts.push(s.uv);
+      endRef = s.ref;
+    }
+    const wpp = this.app.view.cam.worldPerPixel(this.app.view.height);
+    const { pieces, closed } = simplifyStroke(st.pts, wpp * 2.5, wpp * 18);
+    if (!pieces.length) return this.refreshPreview();
+    const es: SketchEntity[] = pieces.map((x) => (x.kind === "spline" ? { id: uid(), kind: "spline", points: x.points, closed: x.closed, mode: "fit" } : { id: uid(), ...x }) as SketchEntity);
+    const startP = (e: SketchEntity): PointRef | null => (e.kind === "line" || e.kind === "arc" ? { e: e.id, p: "a" } : e.kind === "spline" && !e.closed ? { e: e.id, p: "k0" } : null);
+    const endP = (e: SketchEntity): PointRef | null => (e.kind === "line" || e.kind === "arc" ? { e: e.id, p: "b" } : e.kind === "spline" && !e.closed ? { e: e.id, p: `k${e.points.length - 1}` } : null);
+    const cs: SketchConstraint[] = [];
+    const co = (a: PointRef | null, b: PointRef | null) => a && b && cs.push({ id: uid(), type: "coincident", pts: [a, b] });
+    // The pieces stay joined where one ends and the next begins (and round the loop).
+    for (let i = 1; i < es.length; i++) co(endP(es[i - 1]), startP(es[i]));
+    if (closed && es.length) co(endP(es[es.length - 1]), startP(es[0]));
+    // Started / ended on an existing point: tied to it.
+    if (settings.value.autoConstrain && !closed) {
+      co(startP(es[0]), st.startRef);
+      co(endP(es[es.length - 1]), endRef);
+    }
+    this.commitAdd(es, cs);
+    this.app.ui.toast(`Drawn: ${describePieces(es)}`);
   }
 
   /** What an arc's second tap (its other end) snapped to. */
@@ -2491,7 +2577,7 @@ export class SketchTool implements Tool {
 
   private finishSpline(closed: boolean): void {
     const shut = closed && this.pts.length >= 3;
-    if (this.pts.length >= 2) this.commitAdd([{ id: uid(), kind: "spline", points: this.pts, closed: shut, mode: memory.spline }]);
+    if (this.pts.length >= 2) this.commitAdd([{ id: uid(), kind: "spline", points: this.pts, closed: shut, mode: splineMode() }]);
     if (shut) return this.shapeClosed();
     this.resetDrawing();
   }
@@ -2613,7 +2699,7 @@ export class SketchTool implements Tool {
         return rx > 1e-9 && ry > 1e-9 ? { id, kind: "ellipse", center: a, rx, ry, rotation: rot } : null;
       }
       case "spline":
-        return pts.length >= 2 ? { id, kind: "spline", points: pts, closed: false, mode: memory.spline } : null;
+        return pts.length >= 2 ? { id, kind: "spline", points: pts, closed: false, mode: splineMode() } : null;
     }
     return null;
   }

@@ -70,6 +70,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     title: "In a sketch",
     items: [
       { icon: "line", name: "Line, Arc, Spline, Rectangle, Circle…", text: "Tap points to draw. Type a value while drawing (or use the numpad) to set an exact size. Arcs by 3 points or by centre; circles by centre, 2 or 3 points. Guides (on a curve, midpoints, extensions, parallel, perpendicular, crossings) are kept as constraints." },
+      { icon: "spline", name: "Spline > Draw (freehand)", text: "Press and drag to draw, like a pencil (on touch: one finger draws, two move the view). When you let go the stroke is cleaned up into a few pieces: straight parts become lines, round parts arcs, the rest smooth curves through as few points as keep them within a couple of pixels of what you drew; sharp corners stay corners. End where you began to close it (a round loop becomes a circle), then extrude it like any shape. Starting or ending on a point joins it there." },
       { icon: "project", name: "Project", text: "Copy body edges or curves of other sketches into this sketch." },
       { icon: "offset", name: "Offset Edge", text: "A parallel copy of a curve (or a whole outline) at a distance. Tap empty space to finish." },
       { icon: "sketchFillet", name: "Fillet / Chamfer", text: "Round or bevel a corner where lines or arcs meet; tap the next corner to go on." },
