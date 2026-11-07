@@ -58,8 +58,8 @@ export class ItemsPanel {
 
   toggle(open?: boolean): void {
     const on = this.el.classList.toggle("open", open);
-    // Phones: one panel at a time (Items or History).
-    if (on && window.innerWidth <= 720) {
+    // Phones and narrow tablets (an iPad mini upright): one panel at a time (Items or History).
+    if (on && window.innerWidth < 760) {
       document.getElementById("history")?.classList.remove("open");
       document.body.classList.remove("history-open");
     }

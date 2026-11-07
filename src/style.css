@@ -2918,6 +2918,13 @@ html[data-screen="phone"] body #panel.as-list .panel-buttons > :first-child {
     top: calc(56px + var(--safe-t)) !important;
   }
 }
+/* Tablets upright with History open: the column moves up beside History, so
+   the view cube goes left of it (it sat half under the column). */
+@media (min-width: 721px) and (max-width: 1100px) and (min-height: 501px) {
+  html body.history-open #viewcube-host {
+    right: calc(318px + var(--safe-r));
+  }
+}
 @media (min-width: 721px) and (min-height: 501px) {
   /* Items open: the bar centres in the room right of it (it overlapped Items on a tablet). */
   html body.items-open #topbar {
@@ -2927,6 +2934,11 @@ html[data-screen="phone"] body #panel.as-list .panel-buttons > :first-child {
   html body.items-open.history-open #topbar {
     left: calc(274px + (100vw - 274px - 266px) / 2) !important;
     max-width: calc(100vw - 548px) !important;
+  }
+  /* History open alone: the bar centres in the room left of it (it ran under History). */
+  html body.history-open:not(.items-open) #topbar {
+    left: calc(8px + (100vw - 8px - 266px) / 2) !important;
+    max-width: calc(100vw - 290px) !important;
   }
 }
 /* Working… sits below the hint line (they overlapped at the top). */
