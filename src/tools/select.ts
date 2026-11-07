@@ -471,6 +471,8 @@ export class SelectTool implements Tool {
       { id: "align", label: "Align", icon: "align", disabled: true, why: SOON },
       { id: "thread", label: "Thread", icon: "thread", disabled: !one || !info?.round, why: "Needs one round face (a shank or a hole)", run: () => app.startThread() },
       { id: "offsetFace", label: "Offset Face", icon: "offsetFace", shortcut: "E", active: true, disabled: !one || !offsettable(info?.type), why: "Needs one flat or round face", run: () => src && app.setTool(new ExtrudeOp(app, src)) },
+      // A line on this face, parallel to an edge (tapped next): Offset Edge started from the face.
+      { id: "offsetFromEdge", label: "Offset from Edge", icon: "offsetEdge", ...needFlat, run: () => app.setTool(new OffsetEdgeOp(app, undefined, { body: s.body, face: s.face })) },
       { id: "fillet", label: "Fillet", icon: "fillet", shortcut: "F", run: () => this.edgesOfFaces("fillet") },
       { id: "chamfer", label: "Chamfer", icon: "chamfer", run: () => this.edgesOfFaces("chamfer") },
       { id: "extrude", label: "Extrude", icon: "extrude", ...needFlat, run: () => src && app.setTool(new ExtrudeOp(app, src, undefined, "new")) },

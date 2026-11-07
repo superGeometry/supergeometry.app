@@ -35,9 +35,11 @@ export class OffsetEdgeOp extends FeatureOp<SketchFeature> {
   /** Why there's no line (the edge across the face, the line off it). */
   private problem: string | null = null;
 
-  constructor(app: AppContext, start?: { body: string; edge: number }) {
+  /** Started from an edge (Offset Edge) or from the face (Offset from Edge): the other is tapped next. */
+  constructor(app: AppContext, start?: { body: string; edge: number }, onFace?: { body: string; face: number }) {
     super(app, { ...app.store.newIdentity("sketch", "Offset Edge"), type: "sketch", plane: placeholder(), entities: [], log: [{ op: "Offset Edge", n: 1 }] });
     if (start) this.takeEdge(start.body, start.edge);
+    if (onFace) this.takeFace(onFace.body, onFace.face);
     this.slots = [this.edgeSlot(), this.faceSlot()];
     this.finishWhenPicked = false;
   }
@@ -70,19 +72,20 @@ export class OffsetEdgeOp extends FeatureOp<SketchFeature> {
       pick: { profiles: false, planes: false, edges: false, vertices: false, curves: false },
       rejectHint: "Tap a flat face",
       shows: () => (this.face ? [this.face.sel] : []),
-      accept: (hit) => {
-        if (hit.kind !== "face") return false;
-        const body = this.app.view.body(hit.body);
-        const plane = body?.faces[hit.face]?.plane;
-        if (!body || !plane) return false;
-        this.face = { body, face: hit.face, plane, sel: { kind: "face", body: hit.body, face: hit.face } };
-        const ref = faceRefOf(this.app, { body: hit.body, face: hit.face });
-        if (ref) this.feature.attachedTo = ref;
-        this.feature.plane = plane;
-        this.sync();
-        return true;
-      },
+      accept: (hit) => hit.kind === "face" && this.takeFace(hit.body, hit.face),
     };
+  }
+
+  private takeFace(id: string, face: number): boolean {
+    const body = this.app.view.body(id);
+    const plane = body?.faces[face]?.plane;
+    if (!body || !plane) return false;
+    this.face = { body, face, plane, sel: { kind: "face", body: id, face } };
+    const ref = faceRefOf(this.app, { body: id, face });
+    if (ref) this.feature.attachedTo = ref;
+    this.feature.plane = plane;
+    this.sync();
+    return true;
   }
 
   /** The line from the picks and the distance, into the sketch. */
@@ -120,7 +123,7 @@ export class OffsetEdgeOp extends FeatureOp<SketchFeature> {
 
   protected hint(): string {
     if (this.problem) return `⚠ ${this.problem}`;
-    if (!this.edge) return "Tap a straight edge: the line runs alongside it.";
+    if (!this.edge) return this.face ? "Tap a straight edge: the line on this face runs alongside it." : "Tap a straight edge: the line runs alongside it.";
     if (!this.face) return "Tap the flat face to draw the line on.";
     return "The line runs across the face, edge to edge. Type the distance (below 0: the other side of the edge).";
   }
