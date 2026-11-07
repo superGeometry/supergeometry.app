@@ -99,7 +99,7 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
       el(
         "div",
         "library-welcome",
-        "A free 3D design (CAD) app in your browser: sketch an idea, turn it into a solid part and take it wherever it's going next - a 3D printer, a laser cutter, a workshop or another CAD program. Pick up one of your projects, start a new one, or open a .super file. Everything stays on this device.",
+        "A free parametric, history-based 3D CAD app in your browser: sketch an idea, turn it into a solid part and take it wherever it's going next - a 3D printer, a laser cutter, a workshop or another CAD program. Everything stays on this device only.",
       ),
     );
     if (entries.length) box.append(el("div", "library-section", "Your projects"));
@@ -195,7 +195,7 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
   grid.dataset.ownBar = "";
   box.append(grid);
   box.append(supportBox());
-  box.append(el("div", "dialog-note library-note", "Kept in this browser on this device (Update keeps them). Clearing this site's data in the browser's settings deletes them - save the ones that matter as files too."));
+  box.append(el("div", "dialog-note library-note", "Clearing this site's data in the browser's settings deletes your projects - save the ones that matter as files too."));
   back.append(box);
   back.addEventListener("pointerdown", (ev) => ev.target === back && close());
   window.addEventListener("keydown", onKey, true);
