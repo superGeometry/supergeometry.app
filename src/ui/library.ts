@@ -60,6 +60,12 @@ function supportBox(): HTMLElement {
     const text = el("span", "library-support-name");
     text.append(el("b", "", w.name), el("span", "", w.url ? w.sub : "Coming soon"));
     b.append(logo, text);
+    if (w.tag) {
+      const tag = el("span", "library-support-tag");
+      tag.innerHTML = w.tag.icon;
+      tag.append(w.tag.text);
+      b.append(tag);
+    }
     if (w.url) {
       b.title = `${w.name} - opens in a new tab`;
       b.addEventListener("click", () => openSupport(w.url));

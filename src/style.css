@@ -1682,6 +1682,24 @@ body.items-open #bottom-left {
   height: 100%;
   object-fit: contain;
 }
+/* MakerWorld's Boost, as their pages show it: a rocket and the word, in violet. */
+.library-support-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 4px 8px 4px 6px;
+  border-radius: 7px;
+  background: rgba(176, 108, 255, 0.16);
+  color: #c08cff;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.library-support-tag svg {
+  width: 15px;
+  height: 15px;
+}
 /* A site's own logo: its colours, on its own tile. */
 .library-support-logo.has-logo {
   background: none;
