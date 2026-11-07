@@ -11,6 +11,7 @@ import { debugBodies, regenerate } from "../src/kernel/engine";
 import { healthOf, isHealthy } from "../src/kernel/repair";
 import { arrangement, materialRegions, regionRef } from "../src/sketch/regions";
 import { textOutlines } from "../src/sketch/textLayout";
+import { entityPolylines } from "../src/sketch/curves";
 
 setOC(await (opencascade as unknown as () => Promise<any>)());
 let failed = 0;
@@ -32,8 +33,9 @@ for (let mm = 0; mm <= CM * 10; mm++) {
 for (let cm = 0; cm <= CM; cm++) {
   // Centred under its tick (the Text tool's Align: Centre).
   const ns = textOutlines(font, String(cm), [ZERO + cm * 10, W - 9 - 1.5 - TEXT], TEXT, 0, "center");
-  const xs = ns.flatMap((e: any) => e.points.map((p: number[]) => p[0]));
-  if (Math.abs((Math.min(...xs) + Math.max(...xs)) / 2 - (ZERO + cm * 10)) > 1e-9) check(`${cm} centred on its tick`, false);
+  const xs = ns.flatMap((e: any) => entityPolylines(e).flat().map((p) => p[0]));
+  // (Its curves are fitted within a few thousandths of the letter height.)
+  if (Math.abs((Math.min(...xs) + Math.max(...xs)) / 2 - (ZERO + cm * 10)) > TEXT * 3e-3) check(`${cm} centred on its tick`, false);
   marks.push(...ns.map((e: any, i: number) => ({ ...e, id: `n${cm}-${i}` })));
 }
 
@@ -55,7 +57,9 @@ const s = debugBodies().get("ruler")!;
 check("every step builds", !r.errors.length, r.errors.map((e: any) => `${e.feature}: ${e.message}`).join("; "));
 check("one clean solid", r.bodies.length === 1 && isHealthy(healthOf(s)), `${r.bodies.length} bodies, ${ms} ms, ${s.faces.length} faces`);
 const removed = L * W * T - Math.abs(measureVolume(s));
-check("exactly the scale's area × 0.6 mm taken away", Math.abs(removed - area * DEPTH) < area * DEPTH * 1e-3, `${removed.toFixed(3)} mm³ vs ${(area * DEPTH).toFixed(3)} (${regions.length} shapes, ${area.toFixed(1)} mm²)`);
+// OpenCascade's volume of a solid with spline sides (the numbers' curves) is
+// an estimate a few tenths of a percent out - their faces' areas are exact.
+check("the scale's area × 0.6 mm taken away", Math.abs(removed - area * DEPTH) < area * DEPTH * 3e-3, `${removed.toFixed(3)} mm³ vs ${(area * DEPTH).toFixed(3)} (${regions.length} shapes, ${area.toFixed(1)} mm²)`);
 check("151 ticks and 16 numbers cut", regions.length >= 151 + 16, `${regions.length} regions`);
 const bb = s.boundingBox.bounds;
 check("still 160 × 30 × 3", Math.abs(bb[1][0] - bb[0][0] - L) < 1e-6 && Math.abs(bb[1][1] - bb[0][1] - W) < 1e-6 && Math.abs(bb[1][2] - bb[0][2] - T) < 1e-6);

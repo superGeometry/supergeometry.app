@@ -136,19 +136,23 @@ function corners(p: Vec2[], loop: boolean, k: number, minTurn: number): number[]
   return out;
 }
 
-/** A run between two corners, as one curve within tol. */
-function fitRun(run: Vec2[], tol: number): FreehandPiece {
+/**
+ * A run between two corners, as one curve within tol. `exact`: the points lie
+ * on the true curve (a font's outline, not a hand's wobble) - lines and arcs
+ * must keep to tol itself.
+ */
+export function fitRun(run: Vec2[], tol: number, exact = false): FreehandPiece {
   const a = run[0];
   const b = run[run.length - 1];
   const L = length(run);
   const chord = dist(a, b);
   // Straight enough (a freehand line wobbles a little more than the tolerance).
-  const lineTol = Math.min(Math.max(tol * 1.6, L * 0.015), tol * 4);
+  const lineTol = exact ? tol : Math.min(Math.max(tol * 1.6, L * 0.015), tol * 4);
   if (chord > 0 && run.every((p) => segDist(p, a, b) <= lineTol)) return { kind: "line", a, b };
   // Round enough: an arc (not almost a full turn, and not a huge flat one).
   const c = fitCircle(run);
   if (c && c.r < chord * 20 + L) {
-    const arcTol = Math.min(Math.max(tol * 1.5, c.r * 0.02), tol * 2.5);
+    const arcTol = exact ? tol : Math.min(Math.max(tol * 1.5, c.r * 0.02), tol * 2.5);
     if (run.every((p) => Math.abs(dist(p, c.c) - c.r) <= arcTol)) {
       let sweep = 0;
       for (let i = 1; i < run.length; i++) {
@@ -177,14 +181,18 @@ function fitRun(run: Vec2[], tol: number): FreehandPiece {
  * handful and add the stroke point where the spline strays furthest, until it
  * doesn't.
  */
-function fitSpline(run: Vec2[], loop: boolean, tol: number): Vec2[] {
+export function fitSpline(run: Vec2[], loop: boolean, tol: number): Vec2[] {
   const n = run.length;
+  // Too few points to thin out (a tiny curve): all of them.
+  if (n <= (loop ? 4 : 3)) return run.slice();
   const PER = 12;
   const idx: number[] = loop ? [0, 1, 2, 3].map((i) => Math.floor((i * n) / 4)) : [0, Math.floor(n / 2), n - 1];
   // The worst stroke point (and how far): each one measured against the spans
   // around its own (the curve near it), not the whole curve - long strokes stay quick.
   const worst = (ix: number[]): [number, number] => {
-    const curve = splinePoints(ix.map((i) => run[i]), loop, "fit", PER);
+    let curve = splinePoints(ix.map((i) => run[i]), loop, "fit", PER);
+    // Down to its two ends: a straight span (sampled like the others).
+    if (curve.length === 2) curve = Array.from({ length: PER + 1 }, (_, k) => [curve[0][0] + ((curve[1][0] - curve[0][0]) * k) / PER, curve[0][1] + ((curve[1][1] - curve[0][1]) * k) / PER] as Vec2);
     const spans = loop ? ix.length : ix.length - 1;
     let w = -1;
     let wd = tol;

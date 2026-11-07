@@ -154,7 +154,8 @@ to close), Arc (two ends, then the bend - or by centre), Spline (smooth curve th
 is cleaned up into a few lines, arcs and smooth curves, corners kept, so an extrusion
 gets a handful of faces, not hundreds; end where you began to close it), Rectangle (diagonal / centre / 3 points), Circle
 (centre, 2 points or 3 points), Ellipse (with an Angle), Polygon, Text (pick a font - Sans, Serif, Mono, Narrow, Bold caps,
-Script - or **Import font…** a .ttf / .otf / .woff of your own), Project
+Script - or **Import font…** a .ttf / .otf / .woff of your own; each letter keeps the font's curves as
+a few lines, arcs and smooth curves, so extruded text has a face per side, not hundreds), Project
 (copies body edges or other sketches' curves here).
 
 **Exact points on touch screens:** right after the first tap of a line,

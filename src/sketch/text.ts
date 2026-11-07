@@ -12,6 +12,7 @@ import bebas from "@fontsource/bebas-neue/files/bebas-neue-latin-400-normal.woff
 import pacifico from "@fontsource/pacifico/files/pacifico-latin-400-normal.woff?url";
 import type { SketchEntity, Vec2 } from "../doc/types";
 import { textOutlines, type TextAlign } from "./textLayout";
+import { uid } from "./edit";
 
 /** The fonts to choose from (id → name, file). Imported ones are added at runtime. */
 export const FONTS: { id: string; name: string; url?: string }[] = [
@@ -72,7 +73,31 @@ export async function importFont(file: File): Promise<string> {
   return id;
 }
 
+/**
+ * The last few texts laid out (at the origin): fitting the curves takes a
+ * moment, and the preview asks again on every pointer move while placing.
+ */
+const recent = new Map<string, SketchEntity[]>();
+
+/** A copy moved by d, with new ids. */
+function shifted(es: SketchEntity[], d: Vec2): SketchEntity[] {
+  const m = (p: Vec2): Vec2 => [p[0] + d[0], p[1] + d[1]];
+  return es.map((e) => {
+    const c = { ...e, id: uid() } as SketchEntity & Record<string, unknown>;
+    for (const k of ["a", "b", "m", "center"] as const) if (Array.isArray(c[k])) c[k] = m(c[k] as Vec2);
+    if (Array.isArray(c.points)) c.points = (c.points as Vec2[]).map(m);
+    return c;
+  });
+}
+
 /** Outline entities for `text` with its baseline-left at `at`, cap height ≈ size. */
 export async function textEntities(text: string, at: Vec2, size: number, angle = 0, fontId = "roboto", align: TextAlign = "left"): Promise<SketchEntity[]> {
-  return textOutlines(await loadFont(fontId), text, at, size, angle, align);
+  const key = [fontId, size, angle, align, text].join("|");
+  let es = recent.get(key);
+  if (!es) {
+    es = textOutlines(await loadFont(fontId), text, [0, 0], size, angle, align);
+    recent.set(key, es);
+    if (recent.size > 8) recent.delete(recent.keys().next().value!);
+  }
+  return shifted(es, at);
 }
