@@ -25,7 +25,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     title: "Top bar",
     items: [
       { icon: "file", name: "File", text: "New, open and save projects (.super); export STL or 3MF for 3D printing, STEP for other CAD programs, DXF of a sketch (tap it in Items first) for laser cutters and CNC. The share mark next to each sends the file straight to another app (phones and tablets)." },
-      { icon: "body", name: "Items", text: "Every body, sketch, plane and image, with an eye to hide or show it. Each kind (Bodies, Sketches, Planes & axes, Images) folds away under its heading; a plane's icon shows how it was made. Group things into folders (Select, tick them, New folder); tick items all in one folder for New subfolder inside it. Remove takes ticked items out of their folder (one level up). A tool waiting for a body takes one tapped here." },
+      { icon: "body", name: "Items", text: "Every body, sketch, plane and image, with an eye to hide or show it. Each kind (Bodies, Sketches, Planes & axes, Images) folds away under its heading; a plane's icon shows how it was made. Group things into folders (Select, tick them, New folder); tick items all in one folder for New subfolder inside it. Remove takes ticked items out of their folder (one level up); Move, then tick a folder or subfolder, puts them in it. A tool waiting for a body takes one tapped here." },
       { icon: "more", name: "More", text: "Fullscreen, Reset cache & update (loads the newest version), this Help, About, and support links." },
     ],
   },

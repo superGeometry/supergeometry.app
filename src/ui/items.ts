@@ -37,6 +37,8 @@ export class ItemsPanel {
   /** Rows ticked for grouping (Ctrl/Shift+click, or the checkboxes in Select mode). */
   private checked = new Set<string>();
   private picking = false;
+  /** Move pressed: the folders get ticks - the one ticked takes the ticked items. */
+  private moving = false;
   private collapsed = new Set<string>();
   private last: RegenResult | null = null;
 
@@ -81,7 +83,7 @@ export class ItemsPanel {
     // click that's in progress would swallow that click).
     const d = this.store.doc;
     const sig = JSON.stringify([
-      d.hidden, d.names, d.folders, this.h.isolated(), [...this.checked], this.picking, [...this.collapsed],
+      d.hidden, d.names, d.folders, this.h.isolated(), [...this.checked], this.picking, this.moving, [...this.collapsed],
       result?.bodies.map((b) => [b.id, b.name]),
       d.features.filter((f) => ["sketch", "plane", "axis", "image"].includes(f.type)).map((f) => [f.id, f.name, f.type]),
     ]);
@@ -154,6 +156,7 @@ export class ItemsPanel {
     for (const f of top) drawFolder(f, 0, drawn);
 
     // Grouping bar.
+    if (!this.checked.size) this.moving = false;
     if (this.checked.size) {
       const bar = el("li", "items-groupbar");
       // All ticked items in the same folder: the new folder goes inside it.
@@ -183,6 +186,14 @@ export class ItemsPanel {
           });
         });
         bar.append(remove);
+      }
+      // Move: then tick the folder (or subfolder) they go into.
+      if (this.folders.length) {
+        const move = el("button", `text-btn${this.moving ? " primary" : ""}`, this.moving ? "Cancel move" : `Move (${this.checked.size})`);
+        move.title = "Move the ticked items into another folder";
+        move.addEventListener("click", () => ((this.moving = !this.moving), this.render(this.last)));
+        bar.append(move);
+        if (this.moving) bar.append(el("span", "items-groupbar-hint", "Tick the folder to move them into."));
       }
       this.list.append(bar);
     } else if (this.picking) {
@@ -228,8 +239,17 @@ export class ItemsPanel {
 
   /** A folder's row; `items` is everything in it, its subfolders' too. */
   private folderRow(f: ItemFolder, items: Row[], hidden: Set<string>, depth = 0): void {
-    const li = el("li", `items-row folder-row${depth ? " in-folder" : ""}`);
+    const li = el("li", `items-row folder-row${depth ? " in-folder" : ""}${this.moving ? " move-target" : ""}`);
     if (depth > 1) li.style.paddingLeft = `${18 * depth}px`;
+    // Moving: tick this folder to put the ticked items in it.
+    if (this.moving) {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.className = "items-check";
+      box.title = `Move into ${f.name}`;
+      box.addEventListener("change", () => this.moveInto(f.id));
+      li.append(box);
+    }
     const allHidden = items.length > 0 && items.every((r) => hidden.has(r.id));
     const eye = el("button", "icon-btn");
     eye.title = allHidden ? "Show all in folder" : "Hide all in folder";
@@ -271,6 +291,14 @@ export class ItemsPanel {
     );
     li.append(eye, label, ren, del);
     this.list.append(li);
+  }
+
+  /** The ticked items into folder `id` (out of whichever folder they were in). */
+  private moveInto(id: string): void {
+    const ids = [...this.checked];
+    this.checked.clear();
+    this.moving = false;
+    this.store.commit((d) => (d.folders = (d.folders ?? []).map((f) => ({ ...f, items: f.id === id ? [...f.items.filter((x) => !ids.includes(x)), ...ids] : f.items.filter((x) => !ids.includes(x)) }))));
   }
 
   private check(id: string, on: boolean): void {

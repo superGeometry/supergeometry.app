@@ -1265,7 +1265,17 @@ body.items-open #bottom-left {
   background: var(--chrome-solid);
   border-top: 1px solid var(--line);
 }
-/* Three buttons (New folder, Clear, Remove) on one row inside Items. */
+/* Moving: what to do next, under the buttons; the folders to pick stand out. */
+.items-groupbar-hint {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 2px;
+}
+.folder-row.move-target {
+  background: var(--accent-soft);
+}
+/* The buttons (New folder, Clear, Remove, Move) inside Items, wrapping as needed. */
 .items-groupbar .text-btn {
   padding: 0 9px;
   font-size: 12.5px;
