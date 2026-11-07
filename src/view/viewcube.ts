@@ -4,10 +4,7 @@ import {
   BoxGeometry,
   CanvasTexture,
   DirectionalLight,
-  EdgesGeometry,
   Group,
-  LineBasicMaterial,
-  LineSegments,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -54,7 +51,8 @@ export class ViewCube {
   private scene = new Scene();
   private camera = new OrthographicCamera(-1.05, 1.05, 1.05, -1.05, 0.1, 10);
   private faces: Mesh[] = [];
-  private hover = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial({ color: 0x3d8bff, transparent: true, opacity: 0.55, depthTest: false }));
+  /** The zone under the pointer, lit on every face it's on (an edge: two, a corner: three) - one button. */
+  private hovers = [0, 1, 2].map(() => new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial({ color: 0x3d8bff, transparent: true, opacity: 0.5, depthTest: false })));
   private raycaster = new Raycaster();
   private lastKey = "";
   private dragged = false;
@@ -66,19 +64,22 @@ export class ViewCube {
     this.canvas.style.width = this.canvas.style.height = `${PX}px`;
     this.el.append(this.canvas);
     this.renderer = new WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Drawn at least twice its size and scaled down: smooth edges and lettering
+    // on every screen (it was jagged at 1×).
+    this.renderer.setPixelRatio(Math.min(3, Math.max(2, window.devicePixelRatio * 1.5)));
     this.renderer.setSize(PX, PX, false);
 
     const cube = new Group();
+    const aniso = this.renderer.capabilities.getMaxAnisotropy();
     for (const f of FACES) {
-      const mesh = new Mesh(new PlaneGeometry(1, 1), new MeshLambertMaterial({ map: labelTexture(f.label) }));
+      const map = labelTexture(f.label);
+      map.anisotropy = aniso;
+      const mesh = new Mesh(new PlaneGeometry(1, 1), new MeshLambertMaterial({ map }));
       mesh.matrixAutoUpdate = false;
       mesh.matrix.copy(basis(f.u, f.up, f.n).setPosition(new Vector3(...f.n).multiplyScalar(0.5)));
       cube.add(mesh);
       this.faces.push(mesh);
     }
-    const edges = new LineSegments(new EdgesGeometry(new BoxGeometry(1, 1, 1)), new LineBasicMaterial({ color: 0x8b93a3 }));
-    cube.add(edges);
     // Small world axes at the cube's corner.
     for (const [d, c] of [[[1, 0, 0], 0xe0584f], [[0, 1, 0], 0x5fbf5a], [[0, 0, 1], 0x4f8ce0]] as [Vec3, number][]) {
       const g = new BoxGeometry(d[0] ? 0.55 : 0.025, d[1] ? 0.55 : 0.025, d[2] ? 0.55 : 0.025);
@@ -86,11 +87,14 @@ export class ViewCube {
       m.position.set(-0.5 + d[0] * 0.275, -0.5 + d[1] * 0.275, -0.5 + d[2] * 0.275);
       cube.add(m);
     }
-    this.hover.visible = false;
-    this.hover.matrixAutoUpdate = false;
-    this.hover.renderOrder = 5;
-    this.scene.add(cube, this.hover, new AmbientLight(0xffffff, 1.6));
-    const light = new DirectionalLight(0xffffff, 1.2);
+    for (const h of this.hovers) {
+      h.visible = false;
+      h.matrixAutoUpdate = false;
+      h.renderOrder = 5;
+    }
+    // Soft light: the sides a little darker than the face turned to you, like the panels' greys.
+    this.scene.add(cube, ...this.hovers, new AmbientLight(0xffffff, 2.1));
+    const light = new DirectionalLight(0xffffff, 0.75);
     light.position.set(0.5, -1, 2);
     this.camera.add(light);
     this.scene.add(this.camera);
@@ -156,31 +160,29 @@ export class ViewCube {
   }
 
   private setHover(zone: Vec3 | null): void {
-    this.hover.visible = !!zone;
     this.canvas.style.cursor = zone ? "pointer" : "grab";
-    if (zone) {
-      // A small tile at the zone, on the face of the axis with a ±1 that faces us most.
-      const n = new Vector3(...zone);
-      const dir = new Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion);
-      const axes = [0, 1, 2].filter((i) => zone[i] !== 0).sort((a, b) => Math.abs(dir.getComponent(b)) - Math.abs(dir.getComponent(a)));
-      const k = axes[0];
+    // A tile on each face the zone touches: a face's middle, both halves of an
+    // edge, all three squares of a corner - they're one button, so they light together.
+    const on = zone ? [0, 1, 2].filter((k) => zone[k] !== 0) : [];
+    this.hovers.forEach((h, j) => {
+      const k = on[j];
+      h.visible = k !== undefined;
+      if (k === undefined || !zone) return;
       const f = FACES.find((x) => x.n[k] === zone[k])!;
       // Matches zoneAt(): the middle 0.6 of each axis is "face", the outer 0.2 "edge".
-      const size = [0, 1, 2].map((i) => (zone[i] === 0 ? 0.6 : 0.2));
-      const center = n.clone().multiplyScalar(0.4);
+      const size = new Vector3(...[0, 1, 2].map((i) => (zone[i] === 0 ? 0.6 : 0.2)));
+      const center = new Vector3(...zone).multiplyScalar(0.4);
       center.setComponent(k, zone[k] * 0.502);
-      const u = new Vector3(...f.u);
-      const up = new Vector3(...f.up);
-      const su = Math.abs(u.dot(new Vector3(size[0], size[1], size[2])));
-      const sv = Math.abs(up.dot(new Vector3(size[0], size[1], size[2])));
-      this.hover.matrix.copy(basis(f.u, f.up, f.n).multiply(new Matrix4().makeScale(su, sv, 1)).setPosition(center));
-    }
+      const su = Math.abs(new Vector3(...f.u).dot(size));
+      const sv = Math.abs(new Vector3(...f.up).dot(size));
+      h.matrix.copy(basis(f.u, f.up, f.n).multiply(new Matrix4().makeScale(su, sv, 1)).setPosition(center));
+    });
     this.lastKey = "";
   }
 
   private render(): void {
     const main = this.view.camera;
-    const key = main.quaternion.toArray().map((x) => x.toFixed(4)).join() + this.hover.visible + this.hover.matrix.elements[12];
+    const key = main.quaternion.toArray().map((x) => x.toFixed(4)).join() + this.hovers.map((h) => (h.visible ? h.matrix.elements.slice(12, 15).join() : "-")).join();
     if (key === this.lastKey) return;
     this.lastKey = key;
     this.camera.quaternion.copy(main.quaternion);
@@ -194,31 +196,42 @@ function basis(u: Vec3, up: Vec3, n: Vec3): Matrix4 {
   return new Matrix4().makeBasis(new Vector3(...u), new Vector3(...up), new Vector3(...n));
 }
 
+/** A face of the cube in the app's greys and lettering, drawn large (sharp when scaled down). */
 function labelTexture(text: string): CanvasTexture {
+  const S = 512;
   const c = document.createElement("canvas");
-  c.width = c.height = 128;
+  c.width = c.height = S;
   const g = c.getContext("2d")!;
-  g.fillStyle = "#4a505c";
-  g.fillRect(0, 0, 128, 128);
-  g.strokeStyle = "#6b7383";
-  g.lineWidth = 6;
-  g.strokeRect(3, 3, 122, 122);
-  // Zone borders: the middle is the face view, the outer bands edges (45°), the corners iso views.
-  g.strokeStyle = "rgba(160, 170, 190, 0.35)";
-  g.lineWidth = 2;
-  for (const v of [25.6, 102.4]) {
+  // The face: the panels' grey, a slightly lighter rim where the faces meet.
+  g.fillStyle = "#3a3e46";
+  g.fillRect(0, 0, S, S);
+  g.fillStyle = "#454a54";
+  const rim = S * 0.035;
+  g.beginPath();
+  // (Older browsers have no roundRect: a square one then.)
+  if (g.roundRect) g.roundRect(rim, rim, S - 2 * rim, S - 2 * rim, S * 0.06);
+  else g.rect(rim, rim, S - 2 * rim, S - 2 * rim);
+  g.fill();
+  // Zone borders (faint): the middle is the face view, the bands edges (45°), the corners iso views.
+  g.strokeStyle = "rgba(255, 255, 255, 0.07)";
+  g.lineWidth = S * 0.008;
+  for (const v of [0.2 * S, 0.8 * S]) {
     g.beginPath();
-    g.moveTo(v, 0);
-    g.lineTo(v, 128);
-    g.moveTo(0, v);
-    g.lineTo(128, v);
+    g.moveTo(v, rim);
+    g.lineTo(v, S - rim);
+    g.moveTo(rim, v);
+    g.lineTo(S - rim, v);
     g.stroke();
   }
-  g.fillStyle = "#e9ecf1";
-  g.font = `600 ${text.length > 5 ? 22 : 26}px system-ui, sans-serif`;
+  // The outline where the faces meet: the line colour of the panels.
+  g.strokeStyle = "rgba(255, 255, 255, 0.16)";
+  g.lineWidth = S * 0.012;
+  g.strokeRect(g.lineWidth / 2, g.lineWidth / 2, S - g.lineWidth, S - g.lineWidth);
+  g.fillStyle = "#e8e9ec";
+  g.font = `650 ${Math.round(S * (text.length > 5 ? 0.15 : 0.17))}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
   g.textAlign = "center";
   g.textBaseline = "middle";
-  g.fillText(text, 64, 66);
+  g.fillText(text, S / 2, S * 0.515);
   const t = new CanvasTexture(c);
   t.colorSpace = SRGBColorSpace;
   return t;
