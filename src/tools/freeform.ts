@@ -1067,7 +1067,7 @@ export class FreeformTool implements Tool {
     g.computeBoundingSphere();
     this.symPlane.renderOrder = 66;
     // Its mark at a corner (the symmetry symbol), so it reads as the mirror, not a plane of the model.
-    this.symMark.position.set(...P(-0.92, 0.92));
+    this.symMark.position.set(...P(-0.95, 0.95));
     this.symMark.scale.set(2 * r * PLANE_MARK_SIZE, 2 * r * PLANE_MARK_SIZE, 1);
     this.app.view.requestRender();
   }

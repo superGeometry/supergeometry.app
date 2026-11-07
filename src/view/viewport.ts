@@ -1395,7 +1395,7 @@ function hatched<M extends MeshBasicMaterial>(m: M): M {
  */
 const PLANE_MARKS: Record<string, string> = { offset: "⇡", mid: "⇹", "3pt": "∴", curve: "∿", perp: "⊥", angle: "∠", parallel: "∥", symmetry: "⧖" };
 /** Its size, as a part of the plane's width. */
-export const PLANE_MARK_SIZE = 0.08;
+export const PLANE_MARK_SIZE = 0.045;
 const markMats = new Map<string, SpriteMaterial>();
 export function planeMarkMaterial(kind: string): SpriteMaterial {
   let m = markMats.get(kind);
@@ -1404,7 +1404,7 @@ export function planeMarkMaterial(kind: string): SpriteMaterial {
   // Drawn large and scaled down smoothly: crisp when zoomed in (a 64 px one pixelated).
   c.width = c.height = 256;
   const g = c.getContext("2d")!;
-  g.fillStyle = kind === "symmetry" ? "#c79bff" : "#c3c8d2";
+  g.fillStyle = kind === "symmetry" ? "#a98bd6" : "#8f96a3";
   g.font = "176px system-ui, sans-serif";
   g.textAlign = "center";
   g.textBaseline = "middle";
@@ -1412,7 +1412,7 @@ export function planeMarkMaterial(kind: string): SpriteMaterial {
   const tex = new CanvasTexture(c);
   tex.colorSpace = SRGBColorSpace;
   tex.anisotropy = 8;
-  m = new SpriteMaterial({ map: tex, transparent: true, depthTest: false, opacity: 0.9 });
+  m = new SpriteMaterial({ map: tex, transparent: true, depthTest: false, opacity: 0.6 });
   markMats.set(kind, m);
   return m;
 }
