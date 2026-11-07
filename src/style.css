@@ -1472,7 +1472,7 @@ body.items-open #bottom-left {
 .library-grid {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: 180px;
+  grid-auto-columns: 200px;
   gap: 10px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -1550,8 +1550,8 @@ body.items-open #bottom-left {
 .library-info {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 6px 4px 6px 10px;
+  gap: 0;
+  padding: 6px 2px 6px 10px;
 }
 .library-text {
   flex: 1;
@@ -1567,7 +1567,7 @@ body.items-open #bottom-left {
   color: var(--muted);
 }
 .library-info .icon-btn {
-  width: 30px;
+  width: 28px;
   height: 30px;
   background: none;
   color: var(--muted);

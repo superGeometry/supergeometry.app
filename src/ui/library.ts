@@ -9,6 +9,8 @@ export interface LibraryActions {
   open(id: string): void;
   openFile(): void;
   download(id: string): void;
+  /** Resolves with the new name (null: kept as it was). */
+  rename(id: string, name: string): Promise<string | null>;
   remove(id: string): Promise<void>;
 }
 
@@ -82,13 +84,26 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
     });
     const info = el("div", "library-info");
     const text = el("div", "library-text");
-    text.append(el("div", "library-name", e.name), el("div", "library-date", when(e.modified)));
+    const nameEl = el("div", "library-name", e.name);
+    nameEl.title = e.name;
+    text.append(nameEl, el("div", "library-date", when(e.modified)));
+    const ren = el("button", "icon-btn");
+    ren.type = "button";
+    ren.title = "Rename";
+    ren.innerHTML = icons.rename;
+    ren.addEventListener("click", async () => {
+      const name = await act.rename(e.id, e.name);
+      if (!name) return;
+      e.name = name;
+      nameEl.textContent = nameEl.title = name;
+      pic.title = isOpen ? "Open now" : `Open “${name}”`;
+    });
     const dl = el("button", "icon-btn");
     dl.type = "button";
     dl.title = "Save as a .super file";
     dl.innerHTML = DOWNLOAD;
     dl.addEventListener("click", () => act.download(e.id));
-    info.append(text, dl);
+    info.append(text, ren, dl);
     if (!isOpen) {
       const del = el("button", "icon-btn danger");
       del.type = "button";

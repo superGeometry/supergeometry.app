@@ -2,7 +2,7 @@ import { isTouchDevice } from "./device";
 import { circleAxis } from "./tools/slots";
 import { CurvePointPlaneOp, EdgeAnglePlaneOp, FacePointPlaneOp, ThreePointPlaneOp } from "./tools/planeOps";
 import { DocStore, parseProject } from "./doc/store";
-import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, setCurrentProject } from "./doc/library";
+import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, renameProject, setCurrentProject } from "./doc/library";
 import { showLibrary } from "./ui/library";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
@@ -1089,6 +1089,14 @@ export class App implements AppContext {
       openFile: () => this.open(),
       download: (id) => void this.downloadKept(id),
       remove: (id) => forgetProject(id),
+      rename: async (id, current) => {
+        const name = (await this.ui.dialog("Rename project", [{ key: "name", label: "Name", value: current }]))?.name.trim();
+        if (!name || name === current) return null;
+        // The open one through its document (the top bar and its autosave follow).
+        if (id === this.projectId) this.store.commit((d) => (d.name = name));
+        else await renameProject(id, name);
+        return name;
+      },
     });
   }
 

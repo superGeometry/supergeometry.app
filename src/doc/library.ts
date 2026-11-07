@@ -65,6 +65,21 @@ export function projectText(id: string): Promise<string | null> {
   return idbGet(docKey(id));
 }
 
+/** A kept project's new name (in its document too). Its place in the list stays. */
+export async function renameProject(id: string, name: string): Promise<void> {
+  const text = await idbGet(docKey(id));
+  if (text) {
+    try {
+      const doc = JSON.parse(text);
+      doc.name = name;
+      await idbSet(docKey(id), JSON.stringify(doc));
+    } catch {
+      // unreadable: the list's name still changes
+    }
+  }
+  await editIndex((list) => list.map((e) => (e.id === id ? { ...e, name } : e)));
+}
+
 export async function forgetProject(id: string): Promise<void> {
   await editIndex((list) => list.filter((e) => e.id !== id));
   await idbDel(docKey(id));
