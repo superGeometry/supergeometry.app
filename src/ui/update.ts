@@ -36,12 +36,29 @@ export class Updates {
     document.body.append(this.banner);
     // No "Later": a click or tap on the workspace puts it away (More → Reset
     // cache & update is always there).
-    document.getElementById("view")?.addEventListener("pointerdown", () => (this.banner.hidden = true), { capture: true });
+    // Put away with an update still waiting: More pulses, and its Reset cache &
+    // update item carries a pulsing NEW, until it's done.
+    document.getElementById("view")?.addEventListener(
+      "pointerdown",
+      () => {
+        if (this.banner.hidden) return;
+        this.banner.hidden = true;
+        this.markPending();
+      },
+      { capture: true },
+    );
     // Only a built site has a build to compare (not the dev server).
     if (!loadedBuild()) return;
     setTimeout(() => void this.check(), 20_000);
     setInterval(() => void this.check(), 10 * 60_000);
     document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && void this.check());
+  }
+
+  /** More pulses; its Reset cache & update item gets a NEW badge. */
+  private markPending(): void {
+    document.body.classList.add("update-pending");
+    const item = document.getElementById("m-update");
+    if (item && !item.querySelector(".new-badge")) item.append(el("span", "new-badge", "NEW"));
   }
 
   /** Is a newer build out? Shows the notice (once per build). Returns whether it is. */
