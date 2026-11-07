@@ -99,10 +99,26 @@ export async function exportBodies(features: Feature[], format: ExportFormat, on
   const shapes = [...ctx.bodies.entries()].filter(([id]) => !only || only.includes(id));
   if (shapes.length === 0) throw new Error("Nothing to export");
   const names = bodyNames(features, [...ctx.bodies.keys()], numbers);
+  if (format === "mesh") {
+    // As fine as the STL (the view's own mesh is coarser, for speed).
+    const out = shapes.map(([id, s]) => {
+      const m = s.mesh({ tolerance: PRINT_TOLERANCE, angularTolerance: PRINT_ANGLE });
+      return { id, positions: m.vertices, indices: m.triangles };
+    });
+    return new Blob([JSON.stringify(out)], { type: "application/json" });
+  }
   return format === "step"
     ? exportSTEP(shapes.map(([id, shape]) => ({ shape, name: names.get(id)! })))
-    : await makeCompound(shapes.map(([, s]) => s.clone())).blobSTL({ binary: true, tolerance: 0.02, angularTolerance: 0.1 });
+    : await makeCompound(shapes.map(([, s]) => s.clone())).blobSTL({ binary: true, tolerance: PRINT_TOLERANCE, angularTolerance: PRINT_ANGLE });
 }
+
+/**
+ * How finely a mesh for printing (STL, 3MF) follows curved surfaces: within
+ * 0.01 mm, and a facet per 0.05 rad (under 3°). Slicers draw each facet flat,
+ * so round faces showed as polygons at the view's coarser setting.
+ */
+const PRINT_TOLERANCE = 0.01;
+const PRINT_ANGLE = 0.05;
 
 export async function regenerate(features: Feature[]): Promise<RegenResult> {
   const t0 = performance.now();

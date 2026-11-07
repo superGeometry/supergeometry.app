@@ -71,7 +71,8 @@ export interface RegenResult {
   ms: number;
 }
 
-export type ExportFormat = "stl" | "step";
+/** "mesh": each body as triangles, as finely as an STL (for a 3MF), JSON: { id, positions, indices }[]. */
+export type ExportFormat = "stl" | "step" | "mesh";
 
 export type Request =
   | { type: "init" }

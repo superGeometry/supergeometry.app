@@ -1211,8 +1211,17 @@ export class App implements AppContext {
     try {
       this.ui.setStatus("Exporting 3MF…");
       const step = await this.kernel.export(this.store.doc.features, "step", bodies.map((b) => b.id));
+      // A fine mesh, as for STL (the view's is coarse: round faces came out faceted in the slicer).
+      const fine = JSON.parse(await (await this.kernel.export(this.store.doc.features, "mesh", bodies.map((b) => b.id))).text()) as { id: string; positions: number[]; indices: number[] }[];
       const names = this.store.doc.names ?? {};
-      const blob = await exportThreeMF(bodies.map((b) => ({ name: names[b.id] ?? b.name, positions: b.positions, indices: b.indices, color: this.store.doc.colors?.[b.id] })), this.store.doc.name, step);
+      const blob = await exportThreeMF(
+        bodies.map((b) => {
+          const m = fine.find((x) => x.id === b.id);
+          return { name: names[b.id] ?? b.name, positions: m ? new Float32Array(m.positions) : b.positions, indices: m ? new Uint32Array(m.indices) : b.indices, color: this.store.doc.colors?.[b.id] };
+        }),
+        this.store.doc.name,
+        step,
+      );
       await this.deliver(blob, `${this.store.doc.name}.3mf`, how);
     } catch (err) {
       this.ui.toast(`Export failed: ${(err as Error).message}`, "error");
