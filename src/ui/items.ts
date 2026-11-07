@@ -51,6 +51,12 @@ export class ItemsPanel {
     document.getElementById("items-close")!.addEventListener("click", () => this.toggle(false));
     const pick = document.getElementById("items-pick")!;
     pick.addEventListener("click", () => {
+      // Ticks made with Ctrl/Shift+click (Select off): Select clears them.
+      if (!this.picking && this.checked.size) {
+        this.checked.clear();
+        this.render(this.last);
+        return;
+      }
       this.picking = !this.picking;
       if (!this.picking) this.checked.clear();
       pick.classList.toggle("on", this.picking);
@@ -164,9 +170,8 @@ export class ItemsPanel {
       const parent = homes.size === 1 ? [...homes][0] || undefined : undefined;
       const make = el("button", "text-btn primary", `${parent ? "New subfolder" : "New folder"} (${this.checked.size})`);
       make.addEventListener("click", () => void this.makeFolder(parent));
-      const clear = el("button", "text-btn", "Clear");
-      clear.addEventListener("click", () => (this.checked.clear(), this.render(this.last)));
-      bar.append(make, clear);
+      // (No Clear: Select at the top again clears the ticks.)
+      bar.append(make);
       // Ticked items that are in a folder: Remove takes them out - one level up
       // (into the folder around a subfolder), or back among the loose ones.
       const filed = [...this.checked].filter((id) => inFolder.has(id));

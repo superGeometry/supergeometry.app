@@ -1275,7 +1275,7 @@ body.items-open #bottom-left {
 .folder-row.move-target {
   background: var(--accent-soft);
 }
-/* The buttons (New folder, Clear, Remove, Move) inside Items, wrapping as needed. */
+/* The buttons (New folder, Remove, Move) inside Items, wrapping as needed. */
 .items-groupbar .text-btn {
   padding: 0 9px;
   font-size: 12.5px;
