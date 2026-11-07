@@ -2220,6 +2220,23 @@ body.headset .vc-roll {
   width: 30px;
   height: 30px;
 }
+/* The mouse over the cube: its four buttons light up (so they're found), the
+   one under the pointer brighter still. */
+@media (hover: hover) {
+  .vc-roll {
+    transition: background 0.12s, color 0.12s;
+  }
+  #viewcube:hover .vc-roll {
+    color: var(--text);
+    background: var(--chrome);
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  #viewcube:hover .vc-roll:hover {
+    color: #fff;
+    background: var(--accent);
+    box-shadow: none;
+  }
+}
 
 /* ---------- top bar at the top centre, on every device (clear of the corners,
    where tablets put their own buttons in fullscreen and the view cube sits) */
