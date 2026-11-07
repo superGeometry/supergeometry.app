@@ -322,8 +322,6 @@ export class UI {
     const r = anchor.getBoundingClientRect();
     this.flyout.innerHTML = "";
     renderTools(this.flyout, item.children ?? [], (child, btn) => this.openFlyout(child, btn), () => this.closeFlyout());
-    // Colour choices show as a grid of circles.
-    this.flyout.classList.toggle("swatch-grid", !!item.children?.length && item.children.every((c) => c.swatch));
     this.flyout.hidden = false;
     // A strip of tools along the bottom (phones, main tools): the options open
     // above it. A column of tools (the sketch tools, also on phones): beside it.
@@ -589,11 +587,10 @@ export class UI {
     this.panelVersion++;
     this.panel.innerHTML = "";
     this.panel.hidden = !spec;
-    // Closed: next time it's placed afresh (and whole).
-    if (!spec) {
-      this.panel.classList.remove("folded");
-      return void (this.panelSide = -1);
-    }
+    // Closed: next time it's placed afresh (and whole). Folded stays folded
+    // (a sketch closes and reopens its card for each thing tapped) until
+    // another tool starts: unfoldPanel.
+    if (!spec) return void (this.panelSide = -1);
     // A short list, like a right-click menu: each value with its box after the
     // name. It hangs under the tool's value box on the model (or by the pointer).
     this.panel.classList.add("as-list");
@@ -939,6 +936,11 @@ export class UI {
     return grip;
   }
   private lastGripTap = 0;
+
+  /** A new tool's card opens whole (a folded one stays folded while the same tool goes on). */
+  unfoldPanel(): void {
+    this.panel.classList.remove("folded");
+  }
 
   /** The card at this spot, kept whole on screen. */
   private putPanel(x: number, y: number): void {

@@ -176,6 +176,7 @@ export class App implements AppContext {
     this.input.handler = next;
     this.hover = null;
     this.ui.closeFlyout();
+    this.ui.unfoldPanel();
     next.enter?.();
     this.updateUndo();
     // Leaving an operation drops its preview.
