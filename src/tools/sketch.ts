@@ -2,7 +2,7 @@ import { isTouchDevice } from "../device";
 import { simplifyStroke } from "../sketch/freehand";
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
-import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, planeY, roundSig, scale as scale3, sub as sub3, toPlane } from "../geom";
+import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, patternSpacing, planeY, roundSig, scale as scale3, sub as sub3, toPlane } from "../geom";
 import { addForUser, addStrict, constraintError, constraintName, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { nearestSnap } from "../sketch/snapPick";
@@ -17,7 +17,8 @@ import {
   connectedChain,
   angleLines,
   explode,
-  alignLine,
+  alignOne,
+  alignShape,
   endNear,
   joinCollinear,
   extend,
@@ -100,7 +101,7 @@ const HINTS: Record<Kind, string> = {
   scale: "Tap curves to select, then set the factor and Apply.",
   patternLinear: "Tap curves to select, then set count and spacing.",
   patternCircular: "Tap curves to select (double-tap for a whole shape), then tap the centre to turn them around.",
-  rotate: "Tap curves to select, set the pivot and angle.",
+  rotate: "Tap curves to select (double-tap: a whole shape), then tap the point to turn them around - an end, a midpoint or another shape's centre. The whole selection turns about that point, rigidly, by the angle: its own centre swings round it.",
   mirror: "Tap a shape to select it (Shift+tap: single curves), then tap the line to mirror it across - any line, even one of its own edges.",
   trim: "Tap the part of a curve to cut away (between crossings), or swipe across several. Join mode: tap a line to merge it with the line on the same axis it touches.",
   align: "Tap the line to move, then the line it should line up with (the first one moves onto the second one's axis).",
@@ -873,7 +874,7 @@ export class SketchTool implements Tool {
       t("move", "Move/Rotate", "move", "M"),
       // Turned about a point tapped (a tie rod a quarter way round the axis
       // centre): the code had it, the menu didn't.
-      t("rotate", "Rotate About", "rotateAxis"),
+      t("rotate", "Rotate About", "rotateAxis", undefined, { sub: "a point you tap" }),
       t("scale", "Scale", "scale", "S"),
       {
         ...t(memory.pattern, "Pattern", memory.pattern),
@@ -958,19 +959,29 @@ export class SketchTool implements Tool {
     // Move starts from nothing (it shared ΔX with the linear pattern's spacing:
     // an ellipse only meant to be turned 20° also moved 10 across).
     if (kind === "move") ((this.edit.dx = 0), (this.edit.dy = 0), (this.edit.moveRot = 0));
-    if (kind === "patternLinear" && Math.hypot(this.edit.dx, this.edit.dy) < 1e-12) this.edit.dx = 10;
+    // A linear pattern starts with its first copy just clear of the selection.
+    if (kind === "patternLinear") this.autoPatternSpacing();
     this.finishFillet();
     this.clearPreviewJoin();
     this.edit.mirrorLine = undefined;
     // Editing tools keep the selection; drawing tools start clean.
-    if (!["move", "scale", "patternLinear", "patternCircular", "rotate", "mirror", "select", "delete"].includes(kind)) this.selected.clear();
+    if (!["move", "scale", "patternLinear", "patternCircular", "rotate", "mirror", "select", "delete", "align"].includes(kind)) this.selected.clear();
+    // Align with a line already selected: that's the one that moves - next, what to align it with.
+    // (A whole shape selected: tap its edge to align, then the line.)
+    let alignHint: string | undefined;
+    if (kind === "align" && this.selected.size === 1 && this.entities.find((e) => e.id === [...this.selected][0])?.kind === "line") {
+      this.edit.alignFrom = [...this.selected][0];
+      this.selected.clear();
+      alignHint = "Now tap the line to align it with (it moves onto that line's axis).";
+    } else if (kind === "align" && this.selected.size > 1) alignHint = "Tap the edge of the selected shape to line up, then the line to align it with (the whole shape moves).";
     this.clearOverlays();
     this.hideLineDim();
     this.refreshDistanceDim();
     this.showSelection();
     this.updateMenu();
     this.updatePanel();
-    this.setHint();
+    this.setHint(alignHint);
+    if (kind === "align" && this.edit.alignFrom) this.app.setSelection([{ kind: "curve", sketch: this.sketchId ?? "", entity: this.edit.alignFrom }]);
   }
 
   private setHint(extra?: string): void {
@@ -1165,7 +1176,7 @@ export class SketchTool implements Tool {
       case "patternCircular":
       case "rotate":
         items.push(
-          { type: "slot", label: "Center", value: this.edit.pivot ? `${trimNum(this.edit.pivot[0])}, ${trimNum(this.edit.pivot[1])}` : k === "patternCircular" ? "Tap the centre" : "Origin (tap to set)", active: this.edit.picking === "pivot", filled: !!this.edit.pivot, onClick: () => ((this.edit.picking = "pivot"), this.updatePanel()) },
+          { type: "slot", label: k === "rotate" ? "Turn around" : "Center", value: this.edit.pivot ? `${trimNum(this.edit.pivot[0])}, ${trimNum(this.edit.pivot[1])}` : k === "patternCircular" ? "Tap the centre" : "Tap a point", active: this.edit.picking === "pivot", filled: !!this.edit.pivot, onClick: () => ((this.edit.picking = "pivot"), this.updatePanel()) },
           ...(k === "patternCircular" ? [{ type: "number", label: "Count", value: this.edit.count, kind: "int", min: 2, onInput: (v: number) => ((this.edit.count = v), this.refreshPreview()) } as PanelItem] : []),
           k === "patternCircular"
             ? { type: "number", label: "Angle", value: this.edit.patAngle, kind: "angle", onInput: (v) => ((this.edit.patAngle = v), this.refreshPreview()) }
@@ -2004,7 +2015,7 @@ export class SketchTool implements Tool {
         if (memory.trim === "join") return this.tapCurve(p, (id, uv) => this.tapJoin(id, uv));
         return this.tapCurve(p, (id, uv) => this.commitEdit(this.trimHere(this.entities, id, uv)));
       case "align":
-        return this.tapCurve(p, (id) => this.tapAlign(id));
+        return this.tapCurve(p, (id, uv) => this.tapAlign(id, uv));
       case "extend":
         return this.tapCurve(p, (id, uv) => this.tapExtend(id, uv));
       case "split":
@@ -3057,6 +3068,23 @@ export class SketchTool implements Tool {
     }
     if (this.kind === "offset" && this.edit.offsetOf) ghosts.push(...this.offsetResult());
     if (this.isSelectionTool() && this.selected.size) ghosts.push(...this.transformed(true));
+    // Rotate About: the point it turns around, and the path the selection's centre takes round it.
+    if ((this.kind === "rotate" || this.kind === "patternCircular") && this.edit.pivot && this.selected.size) {
+      const pv = this.edit.pivot;
+      this.drawCentreMark(pv);
+      const c = centroidOf(this.entities.filter((e) => this.selected.has(e.id)));
+      const r = Math.hypot(c[0] - pv[0], c[1] - pv[1]);
+      const sweep = ((this.kind === "rotate" ? this.edit.angle : this.edit.patAngle) * Math.PI) / 180;
+      if (r > 1e-9 && Math.abs(sweep) > 1e-9) {
+        const a0 = Math.atan2(c[1] - pv[1], c[0] - pv[0]);
+        const at = (t: number): Vec2 => [pv[0] + r * Math.cos(a0 + sweep * t), pv[1] + r * Math.sin(a0 + sweep * t)];
+        const n = Math.max(8, Math.ceil(Math.abs(sweep) / 0.1));
+        this.drawGhosts([
+          { id: "rot-radius", kind: "line", a: pv, b: c },
+          { id: "rot-path", kind: "polyline", points: Array.from({ length: n + 1 }, (_, i) => at(i / n)), closed: false },
+        ], 0x9fb4d6, true);
+      }
+    }
     this.drawGhosts(ghosts);
     // Mirror: the axis (picked, or the line under the pointer) with a mirror mark on it.
     if (this.kind === "mirror" && this.selected.size) {
@@ -3358,26 +3386,40 @@ export class SketchTool implements Tool {
    * Extend in two taps: the half of the first curve, then the half of the
    * second - both picked ends run along their own line/circle until they meet.
    */
-  private tapAlign(id: string): void {
+  /** Align's first pick, as a line: the line, or the side of a shape that was tapped. */
+  private alignEdge: Extract<SketchEntity, { kind: "line" }> | null = null;
+
+  private tapAlign(id: string, uv: Vec2): void {
     const all = [...this.entities, ...this.boundary];
     const e = all.find((x) => x.id === id);
-    if (e?.kind !== "line") return this.app.ui.toast("Align works on lines");
+    // A line, or the side of a rectangle / polygon / outline that was tapped.
+    const side = sideNear(e, uv);
+    if (!side) return this.app.ui.toast("Align works on lines and the sides of shapes");
     const first = this.edit.alignFrom;
     if (!first) {
       if (id.startsWith("bnd-")) return this.app.ui.toast("Pick a line of this sketch to move (face edges stay)");
       this.edit.alignFrom = id;
+      this.alignEdge = side;
+      // A shape (not a lone line): it moves as a whole - with the rest of the selection it's part of.
+      if (e?.kind !== "line") this.selected.add(id);
+      else if (!this.selected.has(id)) this.selected.clear();
+      this.showSelection();
       this.app.setSelection([{ kind: "curve", sketch: this.sketchId ?? "", entity: id }]);
-      return this.setHint("Now tap the line it should line up with.");
+      return this.setHint("Now tap the line to align it with (the first one moves).");
     }
+    const edge = this.alignEdge ?? (all.find((x) => x.id === first) as Extract<SketchEntity, { kind: "line" }> | undefined);
     this.edit.alignFrom = undefined;
+    this.alignEdge = null;
     this.app.setSelection([]);
     this.setHint();
-    if (first === id) return;
-    const next = alignLine(this.entities, first, e);
-    if (!next) return this.app.ui.toast("Those lines can't be aligned");
-    // Constraints that held the old position would pull it back: keep the rest.
-    const moved = new Set(next.filter((x, i) => x !== this.entities[i]).map((x) => x.id));
-    this.commit(next, this.constraints.filter((c) => c.type === "coincident" || c.type === "horizontal" || c.type === "vertical" || !refsOf(c).some((r) => moved.has(r))));
+    if (first === id || !edge || edge.kind !== "line") return;
+    // A whole shape (several curves selected, or a rectangle / polygon): it moves as one.
+    const shape = (this.selected.size > 1 && this.selected.has(first)) || all.find((x) => x.id === first)?.kind !== "line" ? new Set([...this.selected, first]) : null;
+    this.selected.clear();
+    this.showSelection();
+    const res = shape ? alignShape(this.entities, this.constraints, shape, edge, side) : alignOne(this.entities, this.constraints, first, side);
+    if (!res) return this.app.ui.toast("Those lines can't be aligned");
+    this.commit(res.entities, res.constraints);
   }
 
   /** Trim's Join mode: a line and the line on its axis it touches become one. */
@@ -3665,7 +3707,32 @@ export class SketchTool implements Tool {
     return op.down(p);
   }
 
+  /** The spacing a linear pattern was given on its own (null once typed / dragged). */
+  private patAuto: number | null = null;
+
+  /** Spacing = the selection's size along the pattern's direction, plus a fifth (copies don't overlap it). */
+  private autoPatternSpacing(): void {
+    const L = Math.hypot(this.edit.dx, this.edit.dy);
+    const dir: Vec2 = L > 1e-12 ? [this.edit.dx / L, this.edit.dy / L] : [Math.cos(this.patAng), Math.sin(this.patAng)];
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const e of this.entities)
+      if (this.selected.has(e.id))
+        for (const poly of entityPolylines(e))
+          for (const q of poly) {
+            const t = q[0] * dir[0] + q[1] * dir[1];
+            lo = Math.min(lo, t);
+            hi = Math.max(hi, t);
+          }
+    const s = patternSpacing(hi > lo ? hi - lo : 0, L > 1e-12 ? L : 10);
+    this.edit.dx = dir[0] * s;
+    this.edit.dy = dir[1] * s;
+    this.patAuto = s;
+  }
+
   private selectionChanged(): void {
+    // A pattern's spacing that wasn't set by hand follows what's selected.
+    if (this.kind === "patternLinear" && this.patAuto !== null && Math.abs(Math.hypot(this.edit.dx, this.edit.dy) - this.patAuto) < 1e-9) this.autoPatternSpacing();
     if (this.regionArrow && (this.selected.size || this.selPts.length)) this.hideRegionArrow();
     this.updateMenu();
     this.refreshDistanceDim();
@@ -4238,7 +4305,7 @@ function phoneScreen(): boolean {
 }
 
 function titleOf(k: string): string {
-  const t: Record<string, string> = { patternLinear: "Pattern – Linear", patternCircular: "Pattern – Circular", rotate: "Rotate Around Axis", rect: "Rectangle", offset: "Offset Edge", polyline: "Outline" };
+  const t: Record<string, string> = { patternLinear: "Pattern – Linear", patternCircular: "Pattern – Circular", rotate: "Rotate About", rect: "Rectangle", offset: "Offset Edge", polyline: "Outline" };
   return t[k] ?? k[0].toUpperCase() + k.slice(1);
 }
 

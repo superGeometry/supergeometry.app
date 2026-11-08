@@ -4,7 +4,7 @@
 import type { ThreadFeature } from "../doc/types";
 import { defaultPitch, threadLabel } from "../kernel/threads";
 import type { AxisFeature, AxisRef, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
-import { FRONT, GROUND, RIGHT, add, cross, dot, len, norm, niceStep, scale, sub, xDirFor } from "../geom";
+import { FRONT, GROUND, RIGHT, add, cross, dot, len, norm, niceStep, patternSpacing, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { evaluate, fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
@@ -847,7 +847,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
         : kind === "mirror"
           ? { kind: "mirror", plane: { origin: [0, 0, 0], xDir: [0, 1, 0], normal: [1, 0, 0] } }
           : kind === "linear"
-            ? { kind: "linear", dir: [1, 0, 0], spacing: 20, count: 3 }
+            ? { kind: "linear", dir: [1, 0, 0], spacing: patternSpacing(bodyExtent(app, bodies, [1, 0, 0]), 20), count: 3 }
             : kind === "circular"
               ? { kind: "circular", axis: { origin: [0, 0, 0], dir: [0, 0, 1] }, count: 6, angle: 360 }
               : { kind: "move", translate: [0, 0, 0], rotate: { origin: center, axis: [0, 0, 1], angle: 0 } };
@@ -936,7 +936,12 @@ export class TransformOp extends FeatureOp<TransformFeature> {
 
   private applyDir(): void {
     const o = this.feature.op;
-    if (o.kind === "linear" && this.dir) o.dir = this.dir;
+    if (o.kind === "linear" && this.dir) {
+      // A new pattern's spacing (not typed yet) follows the direction: the copies just clear of the bodies.
+      const was = patternSpacing(bodyExtent(this.app, this.feature.bodies, o.dir), 20);
+      if (!this.existing && Math.abs(o.spacing - was) < 1e-9) o.spacing = patternSpacing(bodyExtent(this.app, this.feature.bodies, this.dir), 20);
+      o.dir = this.dir;
+    }
     if (this.kind === "translate" && o.kind === "move" && this.dir) o.translate = scale(this.dir, this.distance);
   }
 
@@ -1625,6 +1630,22 @@ function axisIndex(a: Vec3): number {
 
 function axisName(a?: Vec3): string {
   return ["X", "Y", "Z"][a ? Math.max(0, axisIndex(a)) : 2];
+}
+
+/** How far the bodies reach along a direction (their size that way). */
+export function bodyExtent(app: AppContext, bodies: string[], dir: Vec3): number {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const id of bodies) {
+    const p = app.view.body(id)?.positions;
+    if (!p) continue;
+    for (let i = 0; i < p.length; i += 3) {
+      const t = p[i] * dir[0] + p[i + 1] * dir[1] + p[i + 2] * dir[2];
+      if (t < lo) lo = t;
+      if (t > hi) hi = t;
+    }
+  }
+  return hi > lo ? hi - lo : 0;
 }
 
 export function bodyCenter(app: AppContext, bodies: string[]): Vec3 {

@@ -438,7 +438,8 @@ export class SelectTool implements Tool {
       { id: "axis", label: "Axis – Perp. to Face", icon: "axis", run: () => frame && app.setTool(new AxisOp(app, frame.base, frame.normal)) },
       { id: "plane", label: "Plane – Offset", icon: "plane", run: () => plane && app.setTool(new PlaneOp(app, plane, undefined)) },
       { id: "text", label: "Text", icon: "text", run: inSketch("text") },
-      { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: inSketch("rotate") },
+      // In the sketch: the shape turns about a point you tap (not a 3D axis).
+      { id: "rotate", label: "Rotate About", icon: "rotateAxis", sub: "a point you tap", run: inSketch("rotate") },
       { id: "mirror", label: "Mirror", icon: "mirror", run: inSketch("mirror") },
       { id: "loft", label: "Loft", icon: "loft", run: () => app.setTool(new LoftOp(app, sourcesOf(app, sel).flatMap(splitRegions), sel)) },
       { id: "split", label: "Split Body", icon: "split", disabled: !app.view.bodyList.length || !plane, why: "Needs a body", run: () => this.splitWith(plane!) },

@@ -66,6 +66,15 @@ export function roundSig(v: number, sig = 2): number {
   return Math.round(v / p) * p;
 }
 
+/**
+ * A linear pattern's spacing to start with: the copy clear of the original
+ * (its size along the pattern plus a fifth), not a fixed 10 / 20 that piled
+ * copies on top of a big part. `fallback` when there's no size to go by.
+ */
+export function patternSpacing(extent: number, fallback = 10): number {
+  return extent > 1e-9 ? roundSig(extent * 1.2) : fallback;
+}
+
 export function niceStep(raw: number): number {
   const p = Math.pow(10, Math.floor(Math.log10(raw)));
   const m = raw / p;

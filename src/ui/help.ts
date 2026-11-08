@@ -75,7 +75,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "offset", name: "Offset Edge", text: "A parallel copy of a curve (or a whole outline) at a distance. Tap empty space to finish." },
       { icon: "sketchFillet", name: "Fillet / Chamfer", text: "Round or bevel a corner where lines or arcs meet; tap the next corner to go on." },
       { icon: "trim", name: "Trim / Join", text: "Cut away the piece of a curve between crossings (tap, or swipe across several) - or join two lines on the same axis." },
-      { icon: "mirror", name: "Mirror, Move/Rotate, Pattern", text: "Mirror the selected shapes across a line or an axis; Move/Rotate with its gimbal (Rotate About a tapped centre); Pattern in a row or round a centre." },
+      { icon: "mirror", name: "Mirror, Move/Rotate, Pattern", text: "Mirror the selected shapes across a line or an axis; Move/Rotate with its gimbal (turns about the selection's own centre); Rotate About turns the whole selection rigidly about a point you tap - an end, a midpoint or another shape's centre - so its own centre swings round that point (the dotted arc shows the path); Pattern in a row or round a centre." },
       { icon: "alignLine", name: "Align", text: "Move a line onto another line's axis; lines joined to it stretch along." },
       { icon: "extend", name: "Extend", text: "Carry a line or arc on until it meets another curve." },
       { icon: "constraints", name: "Constraints", text: "Rules that keep the drawing in shape: horizontal, parallel, equal, a fixed distance… shown as small faint marks, a colour per kind. A new rule replaces the ones in its way (an old angle or parallel), and says which; locked points stay put. Dragging a point onto another joins them." },

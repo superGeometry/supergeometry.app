@@ -3,7 +3,7 @@
 
 import type { PlaneDef, SketchConstraint, SketchEntity, Vec2, Vec3 } from "../doc/types";
 import { roundSig, toPlane } from "../geom";
-import { constraintError, pointOf, pointsOf, refsOf } from "./constraints";
+import { constraintError, pointOf, pointsOf, refsOf, solve } from "./constraints";
 import { arcFrom3, closestOnPrim, entityCorners, entityPrims, evalPrim, isClosedPrim, primSegments, samplePrim, type Prim } from "./curves";
 
 export function uid(): string {
@@ -1277,6 +1277,60 @@ export function alignLine(entities: SketchEntity[], id: string, target: SketchEn
   }
   if (near2(ends.a, ends.b, tol)) return null;
   return entities.map((e) => (e.id === id ? { ...ln, a: ends.a, b: ends.b } : moved.get(e.id) ?? e));
+}
+
+/**
+ * Align, as the tool does it: line `id` moves onto `target`'s axis (lines
+ * joined to it slide along), and only it - the target and the rest stay put
+ * when the sketch's constraints are solved again. Constraints the move breaks
+ * (an old angle, a size) go; joins stay.
+ */
+export function alignOne(entities: SketchEntity[], constraints: SketchConstraint[], id: string, target: LineE): { entities: SketchEntity[]; constraints: SketchConstraint[] } | null {
+  const next = alignLine(entities, id, target);
+  if (!next) return null;
+  return settleMoved(next, constraints, new Set(next.filter((x, i) => x !== entities[i]).map((x) => x.id)), target.id);
+}
+
+/**
+ * Align a whole shape: turned (the short way) and slid so its `edge` lies on
+ * `target`'s axis; it moves as one, nothing else does.
+ */
+export function alignShape(entities: SketchEntity[], constraints: SketchConstraint[], shape: Set<string>, edge: LineE, target: LineE): { entities: SketchEntity[]; constraints: SketchConstraint[] } | null {
+  const de: Vec2 = [edge.b[0] - edge.a[0], edge.b[1] - edge.a[1]];
+  const dt: Vec2 = [target.b[0] - target.a[0], target.b[1] - target.a[1]];
+  const le = Math.hypot(...de);
+  const lt = Math.hypot(...dt);
+  if (le < 1e-12 || lt < 1e-12 || shape.has(target.id)) return null;
+  let ang = Math.atan2(dt[1], dt[0]) - Math.atan2(de[1], de[0]);
+  // The short way round: a line has no direction.
+  while (ang > Math.PI / 2) ang -= Math.PI;
+  while (ang <= -Math.PI / 2) ang += Math.PI;
+  const mid: Vec2 = [(edge.a[0] + edge.b[0]) / 2, (edge.a[1] + edge.b[1]) / 2];
+  const turn = rotateXf(mid, ang);
+  const on = projectOnLine(mid, target.a, target.b);
+  const xf: Xf = (p) => {
+    const q = turn(p);
+    return [q[0] + on[0] - mid[0], q[1] + on[1] - mid[1]];
+  };
+  const next = entities.map((e) => (shape.has(e.id) ? transformEntity(e, xf) : e));
+  return settleMoved(next, constraints, shape, target.id);
+}
+
+/**
+ * After an align: keep the constraints still met (and joins, which the solve
+ * restores), drop the rest, and solve with the target held still.
+ */
+function settleMoved(next: SketchEntity[], constraints: SketchConstraint[], moved: Set<string>, target: string): { entities: SketchEntity[]; constraints: SketchConstraint[] } {
+  let size = 1;
+  for (const e of next) for (const q of pointsOf(e)) size = Math.max(size, Math.abs(q.at[0]), Math.abs(q.at[1]));
+  // What the move broke (a join to something that stayed, an old angle) would
+  // pull it back: only the constraints still met stay.
+  const kept = constraints.filter((c) => !refsOf(c).some((r) => moved.has(r)) || constraintError(next, [c]) < size * 1e-7);
+  const r = solve(next, kept, { fixed: new Set([target]) });
+  if (r.ok) return { entities: r.entities, constraints: kept };
+  // Couldn't settle: the constraints on what moved go (it stays where it was put).
+  const rest = kept.filter((c) => !refsOf(c).some((x) => moved.has(x)));
+  return { entities: next, constraints: rest };
 }
 
 /**

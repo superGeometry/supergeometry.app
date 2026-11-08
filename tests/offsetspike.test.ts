@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import type { SketchEntity, Vec2 } from "../src/doc/types";
 import { defaultOffset, offsetChain } from "../src/sketch/edit";
 import { closestOnPrim, entityPrims } from "../src/sketch/curves";
+import { patternSpacing, roundSig } from "../src/geom";
 
 const L = (id: string, a: Vec2, b: Vec2): SketchEntity => ({ id, kind: "line", a, b });
 // Sketch 11's outline (closed, clockwise as drawn).
@@ -52,6 +53,14 @@ const checks: [string, () => void][] = [
     assert.equal(defaultOffset({ id: "r", kind: "rect", center: [0, 0], w: 3000, h: 400, rotation: 0 }), 40);
     // Sketch 11's first side (2470 long): 250, not 2.
     assert.equal(defaultOffset(L("s", P[0], P[1])), 250);
+  }],
+  ["pattern spacing starts just clear of the shape", () => {
+    assert.equal(patternSpacing(100), 120);
+    assert.equal(patternSpacing(2350), 2800);
+    assert.equal(patternSpacing(0), 10);
+    assert.equal(patternSpacing(0, 20), 20);
+    assert.ok(patternSpacing(37) > 37);
+    assert.equal(roundSig(0.0347), 0.035);
   }],
   ["Sketch 11 outline offset inward 840 doesn't cross it", () => checkOffset(loop(P), -840, "in 840")],
   ["Sketch 11 outline at many distances, both ways", () => {
