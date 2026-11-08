@@ -3138,7 +3138,9 @@ export class SketchTool implements Tool {
     if (!a || !c) return undefined;
     const last = this.pts[this.pts.length - 1];
     const deg = (x: number) => Math.round(((x * 180) / Math.PI) * 1e4) / 1e4;
-    const e = this.buildShape([...this.pts, c]);
+    // Not moved off the point just placed (a finger lifted there): the shape as it starts (an ellipse half as wide as long).
+    const still = this.pts.length > 1 && Math.hypot(c[0] - last[0], c[1] - last[1]) < 1e-12;
+    const e = this.buildShape(still ? this.pts : [...this.pts, c]);
     switch (key) {
       case "len":
         return Math.hypot(c[0] - last[0], c[1] - last[1]);
@@ -3616,6 +3618,9 @@ export class SketchTool implements Tool {
         return this.selectionChanged();
       }
     }
+    // Inside a closed shape and not right on its outline (a finger's reach is
+    // wide - half of it): the shape itself, with its extrude arrow.
+    if (this.kind === "select" && count < 2 && !p.shift && !this.curveAt({ ...p, tol: p.tol * 0.5 }) && this.tapRegion(p)) return;
     const c = this.curveAt(p);
     // Mirror: with something selected, the next line tapped (even one of the
     // selection) is the mirror axis - Shift+tap adds to the selection instead.
