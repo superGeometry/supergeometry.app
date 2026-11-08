@@ -468,8 +468,11 @@ function solveGroup(entities: SketchEntity[], live: SketchConstraint[], opts: So
     if (drags.length) {
       // Pulled towards the pointer (smallest change elsewhere), then put exactly
       // back on the constraints: the target only says where to go, they always win.
-      xs = lm(xs, 1e-3, true, t, Math.min(30, it));
-      xs = lm(xs, 1e-8, false, t, it);
+      // (The pull pass only has to get near: once a step gains next to nothing
+      // it stops - it used to run all 30 steps every frame, as the pull never
+      // reaches zero; the exact pass stops once the constraints are met.)
+      xs = lm(xs, 1e-3, true, t, Math.min(30, it), 1e-6, false, 1e-7);
+      xs = lm(xs, 1e-8, false, t, it, 1e-10, true, 1e-9);
     } else {
       // A noticeable pull first (smallest change), then almost none (exact constraints).
       xs = lm(xs, 1e-3, false, t, Math.min(30, it));
@@ -521,7 +524,7 @@ function solveGroup(entities: SketchEntity[], live: SketchConstraint[], opts: So
    * Levenberg–Marquardt from `from`. `t` < 1 asks for only that part of the
    * way (the rest of the starting residuals is left), for stepping gradually.
    */
-  function lm(from: number[], weight: number, withDrag: boolean, t: number, maxIt: number): number[] {
+  function lm(from: number[], weight: number, withDrag: boolean, t: number, maxIt: number, minGain = 1e-10, untilMet = false, lambda0 = 1e-3): number[] {
     const keep = 1 - t;
     const flat = (ev: { parts: number[][]; dr: number[][] }) => {
       const out: number[] = [];
@@ -546,7 +549,9 @@ function solveGroup(entities: SketchEntity[], live: SketchConstraint[], opts: So
     let ev = evalAll(m, withDrag);
     let r = R(x);
     let cost = dot(r, r);
-    let lambda = 1e-3;
+    // (Starting next to the answer - the exact pass of a drag - hardly any
+    // damping: Gauss-Newton gets there in a step or two, damped it crept.)
+    let lambda = lambda0;
     const n = x.length;
     let extra = 0;
     for (let it = 0; it < maxIt + extra && cost > 1e-24 && performance.now() < deadline; it++) {
@@ -647,7 +652,14 @@ function solveGroup(entities: SketchEntity[], live: SketchConstraint[], opts: So
         lambda *= 10;
       }
       // Done: nothing left to gain.
-      if (!improved || gain < 1e-10) break;
+      if (!improved || gain < minGain) break;
+      // Exact pass of a drag: the constraints are met (far inside what counts as
+      // solved) - the tiny pull left doesn't need more steps.
+      if (untilMet && t >= 1) {
+        let worst = 0;
+        for (const rr of ev.parts) for (const v of rr) worst = Math.max(worst, Math.abs(v));
+        if (worst < tol * 1e-4) break;
+      }
     }
     return x;
   }
