@@ -159,6 +159,9 @@ class Numpad {
       (e) => {
         const t = e.target as HTMLElement;
         if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad && !t.dataset.scrubbed && t !== this.target) this.open(t);
+        // A tap in the box it's open on: the caret goes where it was tapped (or
+        // what's selected by hand) - keys add there instead of replacing it all.
+        else if (t instanceof HTMLInputElement && t === this.target && !t.dataset.scrubbed) requestAnimationFrame(() => this.takeCaret(t));
       },
       true,
     );
@@ -207,6 +210,15 @@ class Numpad {
   private close(): void {
     this.el.hidden = true;
     this.target = null;
+  }
+
+  /** Where the box's own caret / selection is now (put there by a tap or a drag across the text). */
+  private takeCaret(t: HTMLInputElement): void {
+    if (t !== this.target || t.selectionStart === null || t.selectionEnd === null) return;
+    this.selStart = t.selectionStart;
+    this.selEnd = t.selectionEnd;
+    // A caret placed on purpose: what's there stays, the next key adds to it.
+    if (this.selStart === this.selEnd) this.fresh = false;
   }
 
   private showSelection(): void {
@@ -359,11 +371,8 @@ function scrubbable(input: HTMLInputElement): void {
     moved = false;
     // A mouse doesn't focus the box until it's known to be a click.
     if (e.pointerType === "mouse" && document.activeElement !== input) e.preventDefault();
-    try {
-      input.setPointerCapture(e.pointerId);
-    } catch {
-      // synthetic pointers can't be captured
-    }
+    // (Held only once it's a drag: held from the press, a tap couldn't put
+    // the caret where it was tapped - it went to the start.)
   });
   input.addEventListener("pointermove", (e) => {
     if (!start || e.pointerId !== start.id) return;
@@ -371,6 +380,11 @@ function scrubbable(input: HTMLInputElement): void {
     if (!moved && Math.abs(dx) < 6) return;
     if (!moved) {
       moved = true;
+      try {
+        input.setPointerCapture(e.pointerId);
+      } catch {
+        // synthetic pointers can't be captured
+      }
       input.dataset.scrubbed = "1";
       input.classList.add("scrubbing");
       pad?.closeIf(input);

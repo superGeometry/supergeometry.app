@@ -37,6 +37,8 @@ export class VariableTags {
   private boxName = el("span", "vtag-box-name");
   private boxValue = el("span", "vtag-box-value");
   private hook = () => this.layout();
+  /** One undo step per opening of the box (not one for everything ever typed in it). */
+  private undoGroup = {};
 
   constructor(
     private view: Viewport,
@@ -116,6 +118,7 @@ export class VariableTags {
 
   private open(name: string): void {
     this.openName = name;
+    this.undoGroup = {};
     this.boxName.textContent = `${MARK[this.kindOf(name)]} ${name} =`;
     this.input.dataset.kind = this.kindOf(name);
     this.input.value = this.exprOf(name);
@@ -159,8 +162,8 @@ export class VariableTags {
     this.input.size = Math.max(4, this.input.value.length + 1);
     if (!text) return void this.input.classList.add("invalid");
     let ok = false;
-    // Key by key (or a drag): one undo step.
-    mergingCommits(this.input, () => (ok = this.app.setVariable(name, text)));
+    // Key by key (or a drag), this opening: one undo step.
+    mergingCommits(this.undoGroup, () => (ok = this.app.setVariable(name, text)));
     this.input.classList.toggle("invalid", !ok);
     this.showValue();
   }
