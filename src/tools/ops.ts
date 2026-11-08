@@ -21,7 +21,7 @@ import { DimWidget } from "./annotate";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
 import { DragTyping, type DragTypingTarget } from "./dragTyping";
 import { isTouchDevice } from "../device";
-import { CopyToggle, linkMode } from "./copyToggle";
+import { CopyToggle, copyMode, linkMode } from "./copyToggle";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 
 type Mode = "auto" | "new" | "join" | "cut";
@@ -1750,6 +1750,233 @@ export class ImageOp extends FeatureOp<ImageFeature> {
     this.dragging = null;
     this.gimbal.setHot(null);
   }
+}
+
+// ------------------------------------------------------------- move plane
+
+/** v turned by ang (radians) about the unit axis k. */
+function turn(v: Vec3, k: Vec3, ang: number): Vec3 {
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  return add(add(scale(v, c), scale(cross(k, v), s)), scale(k, dot(k, v) * (1 - c)));
+}
+
+/**
+ * Move / turn a construction plane with its gimbal (its own axes: the plane's
+ * x, y and normal). With Copy on, the original stays and a new plane is made;
+ * the new one is selected after, so the next drag copies again. A plane that
+ * follows a face keeps following it while it's only moved along its normal
+ * (its offset changes); any other move makes it a plane of its own.
+ */
+export class PlaneMoveOp extends FeatureOp<PlaneFeature> {
+  readonly id = "plane";
+  private gimbal: Gimbal;
+  private copyToggle: CopyToggle;
+  private typing = new DragTyping(this.app);
+  /** The plane at the start (resolved), and where its square is drawn: the pivot. */
+  private base: PlaneDef;
+  private pivot: Vec3;
+  /** The move so far, along the gimbal's axes, and the turn (about one axis at a time). */
+  private moved: Vec3 = [0, 0, 0];
+  private turned: { axis: Vec3; angle: number } | null = null;
+  /** Turned once already (then turned about another axis): no longer on its face. */
+  private detached = false;
+  private dragging: { from: ToolPointer; part: GimbalPart; t0: Vec3; turned: { axis: Vec3; angle: number } | null } | null = null;
+  private copy = copyMode.on;
+  private copyId: { id: string; name: string };
+
+  constructor(app: AppContext, existing: PlaneFeature) {
+    super(app, existing, existing);
+    this.base = app.view.planeOf(existing.id) ?? existing.plane;
+    this.pivot = app.view.planeShownAt(existing.id) ?? this.base.origin;
+    this.copyId = app.store.newIdentity("plane", "Plane");
+    this.gimbal = new Gimbal(app.view, { axes: planeAxes(this.base) });
+    this.gimbal.setCenter(this.pivot);
+    this.copyToggle = new CopyToggle(app.view, () => this.gimbal.origin, (on) => ((this.copy = on), this.render(), this.update()));
+  }
+
+  protected hint(): string {
+    return this.copy ? "Drag the gimbal to place a copy of the plane - tap empty space when done." : "Drag the gimbal to move or turn the plane - tap empty space when done.";
+  }
+
+  protected items(): PanelItem[] {
+    return [{ type: "toggle", label: "Copy", value: this.copy, onChange: (v) => ((this.copy = copyMode.on = v), this.render(), this.update()) }];
+  }
+
+  protected ready(): boolean {
+    return this.copy || len(this.moved) > 1e-9 || !!this.turned?.angle || this.detached;
+  }
+
+  private worldMove(): Vec3 {
+    const [ax, ay, an] = planeAxes(this.base);
+    return add(add(scale(ax, this.moved[0]), scale(ay, this.moved[1])), scale(an, this.moved[2]));
+  }
+
+  /** The plane after the move: turned about the pivot, then moved. */
+  private apply(): void {
+    const b = this.base;
+    const o = this.existing!;
+    const t = this.turned;
+    const rot = (v: Vec3) => (t && t.angle ? turn(v, t.axis, (t.angle * Math.PI) / 180) : v);
+    const d = this.worldMove();
+    const f = this.feature;
+    if (!this.detached && !t?.angle && Math.hypot(this.moved[0], this.moved[1]) < 1e-9) {
+      // Only along the normal: just its offset changes (a plane on a face stays on it).
+      f.face = o.face;
+      f.plane = o.plane;
+      f.offset = o.offset + this.moved[2];
+    } else {
+      f.face = undefined;
+      f.offset = 0;
+      f.plane = { origin: add(add(this.pivot, rot(sub(b.origin, this.pivot))), d), xDir: norm(rot(b.xDir)), normal: norm(rot(b.normal)) };
+    }
+    if (f.exprs?.offset) {
+      delete f.exprs.offset;
+      if (!Object.keys(f.exprs).length) f.exprs = undefined;
+    }
+    const at = add(this.pivot, d);
+    this.gimbal.setCenter(at);
+    this.app.view.showPlaneAt(this.copy ? this.copyId.id : o.id, at, o.id);
+  }
+
+  protected onDraftChanged(): void {
+    this.apply();
+  }
+
+  /** With Copy: the moved plane is a new one, the original stays. */
+  protected featuresWith() {
+    return this.copy ? [...this.app.store.features, this.copied()] : super.featuresWith();
+  }
+
+  private copied(): PlaneFeature {
+    return { ...structuredClone(this.feature), ...this.copyId, kind: this.feature.kind ?? "offset" };
+  }
+
+  protected done(): void {
+    if (!this.ready()) return this.app.setTool(null);
+    const f = this.copy ? this.copied() : this.feature;
+    if (this.copy) this.app.store.add(f);
+    else this.app.store.update(f.id, f);
+    this.app.setTool(null);
+    // Selected, gimbal and all: the next drag moves (or copies) it again.
+    this.app.setSelection([{ kind: "plane", id: f.id }]);
+  }
+
+  exit(): void {
+    this.gimbal.dispose();
+    this.copyToggle.dispose();
+    super.exit();
+  }
+
+  hover(p: ToolPointer | null): void {
+    this.gimbal.setHot(p && !this.dragging ? this.gimbal.hit(p) : this.dragging?.part ?? null);
+  }
+
+  down(p: ToolPointer): boolean {
+    const part = this.gimbal.hit(p);
+    if (!part) return false;
+    // A turn about another axis than the last one: what's done so far becomes the start.
+    if (part.kind === "ring" && this.turned?.angle && len(sub(this.turned.axis, this.gimbal.axes[part.i])) > 1e-6) {
+      this.apply();
+      this.pivot = add(this.pivot, this.worldMove());
+      this.base = this.feature.plane;
+      this.moved = [0, 0, 0];
+      this.turned = null;
+      this.detached = true;
+      this.gimbal.dispose();
+      this.gimbal = new Gimbal(this.app.view, { axes: planeAxes(this.base) });
+      this.gimbal.setCenter(this.pivot);
+    }
+    this.dragging = { from: p, part, t0: [...this.moved] as Vec3, turned: this.turned && { ...this.turned } };
+    this.gimbal.setHot(part);
+    return true;
+  }
+
+  drag(p: ToolPointer): void {
+    const dr = this.dragging;
+    if (!dr) return;
+    this.typing.track(p);
+    if (this.typing.active) return;
+    const view = this.app.view;
+    const step = niceStep(view.cam.worldPerPixel(view.height) * 4);
+    const snap = (v: number) => (p.shift ? v : Math.round(v / step) * step);
+    const part = dr.part;
+    const ax = this.gimbal.axes;
+    const at = add(this.pivot, add(add(scale(ax[0], dr.t0[0]), scale(ax[1], dr.t0[1])), scale(ax[2], dr.t0[2])));
+    if (part.kind === "axis") {
+      const d = snap(axisDrag(view, at, ax[part.i], dr.from, p));
+      this.moved = [...dr.t0] as Vec3;
+      this.moved[part.i] += d;
+      this.boxAt(p, fmtLen(d));
+    } else if (part.kind === "plane" || part.kind === "center") {
+      // In the square's plane (the screen's for the centre).
+      const n: Vec3 = part.kind === "plane" ? ax[part.i] : (view.cam.viewDir().toArray() as Vec3);
+      const pl = { origin: at, normal: n, xDir: xDirFor(n) };
+      const a = view.rayToPlane(dr.from.x, dr.from.y, pl);
+      const b = view.rayToPlane(p.x, p.y, pl);
+      if (!a || !b) return;
+      const d = sub(b, a);
+      this.moved = [0, 1, 2].map((i) => dr.t0[i] + snap(dot(d, ax[i]))) as Vec3;
+      this.boxAt(p, fmtLen(len(sub(this.moved, dr.t0))));
+    } else {
+      const axis = ax[part.i];
+      const c = view.toScreen(at);
+      if (!c) return;
+      const ang = (q: { x: number; y: number }) => Math.atan2(q.y - c[1], q.x - c[0]);
+      // Screen y points down, so a visual counter-clockwise turn is a negative atan2 change.
+      const facing = dot(axis, view.cam.viewDir().toArray() as Vec3) < 0 ? 1 : -1;
+      let deg = ((-(ang(p) - ang(dr.from)) * 180) / Math.PI) * facing;
+      deg = ((deg + 540) % 360) - 180;
+      const a0 = dr.turned?.angle ?? 0;
+      this.turned = { axis, angle: p.shift ? a0 + deg : Math.round((a0 + deg) / 5) * 5 };
+      this.boxAt(p, `${Math.round(this.turned.angle * 10) / 10}°`);
+    }
+    this.update();
+  }
+
+  up(): void {
+    this.dragging = null;
+    this.typing.reset();
+    this.app.ui.setLabel(0, 0, null);
+    this.gimbal.setHot(null);
+    this.render();
+  }
+
+  /** A value typed while dragging (or in its box after): the distance or angle of that part. */
+  private dragTarget(): DragTypingTarget | null {
+    const dr = this.dragging;
+    if (!dr) return null;
+    const part = dr.part;
+    const dragDir = norm(sub(this.moved, dr.t0));
+    return {
+      kind: part.kind === "ring" ? "angle" : "length",
+      apply: (v) => {
+        if (part.kind === "ring") this.turned = { axis: this.gimbal.axes[part.i], angle: (dr.turned?.angle ?? 0) + v };
+        else if (part.kind === "axis") {
+          this.moved = [...dr.t0] as Vec3;
+          this.moved[part.i] += v;
+        } else if (len(dragDir) > 0.5) this.moved = add(dr.t0, scale(dragDir, v));
+        this.update();
+      },
+      commit: () => ((this.dragging = null), this.gimbal.setHot(null), this.done()),
+      cancel: () => ((this.moved = [...dr.t0] as Vec3), (this.turned = dr.turned), this.update()),
+    };
+  }
+
+  private boxAt(p: ToolPointer, text: string): void {
+    const t = this.dragTarget();
+    if (t) this.typing.box(p, text, t);
+  }
+
+  dragKey(e: KeyboardEvent): boolean {
+    const t = this.dragTarget();
+    return !!t && this.typing.key(e, t);
+  }
+}
+
+/** A plane's own gimbal axes: its x, its y and its normal. */
+export function planeAxes(p: PlaneDef): Vec3[] {
+  return [p.xDir, cross(p.normal, p.xDir), p.normal];
 }
 
 // ------------------------------------------------------------------- split

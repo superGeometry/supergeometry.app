@@ -1,7 +1,7 @@
 import { circleAxis } from "./slots";
 import { isTouchDevice } from "../device";
 import { BODY_COLORS, BODY_OPACITY, bodyColor } from "../doc/types";
-import type { DeleteGeomFeature, FreeformFeature, EdgeRef, ExtrudeSource, FaceRef, ImageFeature, PlaneDef, SketchFeature, Vec3 } from "../doc/types";
+import type { DeleteGeomFeature, FreeformFeature, EdgeRef, ExtrudeSource, FaceRef, ImageFeature, PlaneDef, PlaneFeature, SketchFeature, Vec3 } from "../doc/types";
 import { arrangement } from "../sketch/regions";
 import { projectPolyline } from "../sketch/edit";
 import type { ToolItem } from "../ui/ui";
@@ -18,7 +18,7 @@ import { isClosed } from "../freeform/cage";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 import { connectEdges } from "../doc/freeformConnect";
 import { OffsetEdgeOp } from "./offsetEdge";
-import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
+import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MoveFaceOp, PlaneMoveOp, PlaneOp, planeAxes, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { BooleanOp } from "./booleanOp";
 import { pickColor } from "../ui/colorPicker";
@@ -91,12 +91,15 @@ export class SelectTool implements Tool {
     if (this.gimbal?.hit(p)) {
       const s = this.app.selection[0];
       const img = s?.kind === "image" ? this.app.store.find<ImageFeature>(s.id) : undefined;
+      const plane = s?.kind === "plane" ? this.app.store.find<PlaneFeature>(s.id) : undefined;
       // A vertex: its gimbal moves just that corner (the faces around it follow).
       const at = s?.kind === "vertex" ? this.app.view.vertexOf(s.body, s.vertex) : undefined;
       const edge = s?.kind === "edge" ? this.edgeRefs()[0] : undefined;
       const op = img
         ? new ImageOp(this.app, img)
-        : s?.kind === "vertex" && at
+        : plane
+          ? new PlaneMoveOp(this.app, plane)
+          : s?.kind === "vertex" && at
           ? new MoveFaceOp(this.app, { vertex: { body: s.body, at } })
           : edge
             ? new MoveFaceOp(this.app, { edge })
@@ -282,6 +285,15 @@ export class SelectTool implements Tool {
         const pl = img.plane;
         this.gimbal = new Gimbal(this.app.view, { axes: [pl.xDir, planeY(pl), pl.normal], parts: IN_PLANE });
         this.gimbal.setCenter(pl.origin);
+      }
+    } else if (first.kind === "plane" && sel.length === 1) {
+      // A plane of the model (not an origin one): its gimbal moves or turns it, Copy beside it.
+      const pl = this.app.store.find<PlaneFeature>(first.id)?.type === "plane" ? this.app.view.planeOf(first.id) : undefined;
+      if (pl) {
+        this.gimbal = new Gimbal(this.app.view, { axes: planeAxes(pl) });
+        this.gimbal.setCenter(this.app.view.planeShownAt(first.id) ?? pl.origin);
+        const g = this.gimbal;
+        this.copyToggle = new CopyToggle(this.app.view, () => g.origin);
       }
     } else if (first.kind === "edge") {
       const e = this.edgeRefs()[0];

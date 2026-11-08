@@ -862,6 +862,25 @@ export class Viewport {
     return ORIGIN_PLANES[id] ?? this.construction.planes.find((c) => c.id === id)?.plane;
   }
 
+  /** The middle of a construction plane's square as drawn (on the plane). */
+  planeShownAt(id: string): Vec3 | undefined {
+    const p = this.planeOf(id);
+    if (!p) return undefined;
+    const mid = this.planeCentres.get(id);
+    if (!mid || ORIGIN_PLANES[id]) return p.origin;
+    const n = new Vector3(...p.normal).normalize();
+    const c = new Vector3(...mid);
+    return c.addScaledVector(n, -c.clone().sub(new Vector3(...p.origin)).dot(n)).toArray() as Vec3;
+  }
+
+  /** A moved (or copied) plane's square goes with it - the size of the one it came from. */
+  showPlaneAt(id: string, at: Vec3, like = id): void {
+    this.planeCentres.set(id, at);
+    const s = this.planeSizes.get(like);
+    if (s !== undefined) this.planeSizes.set(id, s);
+    this.requestRender();
+  }
+
   axisOf(id: string): ConstructionInfo | undefined {
     const w = WORLD_AXIS_DIRS[id];
     if (w) return { id, name: `${id} axis`, plane: { origin: [0, 0, 0], normal: w, xDir: w[2] ? [1, 0, 0] : [0, 0, 1] } };
