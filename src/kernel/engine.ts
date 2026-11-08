@@ -470,8 +470,12 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         // The tolerant cut can leave faces that don't meet up where the plain one
         // is clean (a direction switch's slot through the housing's shelled top).
         else if (!shapeValid(out) && shapeValid(target)) {
-          const plain = target.cut(all);
-          if (solidsIn(plain) && shapeValid(plain) && booleanVolumeOk("cut", target, all, plain)) out = plain;
+          try {
+            const plain = target.cut(all);
+            if (solidsIn(plain) && shapeValid(plain) && booleanVolumeOk("cut", target, all, plain)) out = plain;
+          } catch {
+            // No plain cut either (it can come back empty): the tolerant one goes on to be checked.
+          }
         }
         if (!f.keepTools) for (const t of f.tools) bodies.delete(t);
         // Kept as it was: the result is a body of its own.
@@ -1608,7 +1612,12 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
     // Fuse and cut keep their faces tidy like the usual booleans do.
     return op === "common" ? out : (unify(out, Math.max(sizeOf(a), sizeOf(b))) as Shape3D);
   } catch {
-    return op === "cut" ? a.cut(b) : op === "fuse" ? a.fuse(b) : a.intersect(b);
+    try {
+      return op === "cut" ? a.cut(b) : op === "fuse" ? a.fuse(b) : a.intersect(b);
+    } catch {
+      // Neither way gave a shape (OpenCascade's "shape is null"): say so plainly.
+      throw new Error("The geometry engine couldn't work this out where these meet - try moving one a little");
+    }
   } finally {
     algo.delete();
     args.delete();
