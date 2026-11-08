@@ -2,7 +2,7 @@ import { isTouchDevice } from "../device";
 import { simplifyStroke } from "../sketch/freehand";
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
-import { dot, GROUND, niceStep as niceStepOf, originOnPlane, planeY, toPlane } from "../geom";
+import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, planeY, scale as scale3, sub as sub3, toPlane } from "../geom";
 import { addForUser, addStrict, constraintError, constraintName, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { nearestSnap } from "../sketch/snapPick";
@@ -92,7 +92,7 @@ const HINTS: Record<Kind, string> = {
   ellipse: "Tap the center, the end of the long axis, then the width.",
   polygon: "Tap the center, then a corner.",
   text: "Tap where the text should start.",
-  project: "Tap body edges or curves of other sketches to project them here (double-tap: the whole sketch).",
+  project: "Tap body edges or curves of other sketches to project them here (double-tap: the whole sketch) - or tap curves of this sketch, then a parallel plane or face to project them there.",
   offset: "Tap a curve to offset it.",
   fillet: "Tap a corner where two lines meet.",
   move: "Tap curves to select, then type the offset and Apply.",
@@ -914,6 +914,7 @@ export class SketchTool implements Tool {
     this.hideRegionArrow();
     // Another tool picked: still sketching, Exit Sketch calms down.
     if (kind !== "select") this.exitPulse = false;
+    this.projectOut = [];
     this.kind = kind;
     this.pts = [];
     this.locks = {};
@@ -1271,7 +1272,7 @@ export class SketchTool implements Tool {
     if (this.kind === "project") {
       const hit = this.app.view.pick(p.x, p.y, { profiles: false, planes: false, axes: false, edgeTolPx: p.tol });
       this.app.setHover(
-        hit?.kind === "edge" ? { kind: "edge", body: hit.body, edge: hit.edge } : hit?.kind === "curve" && hit.sketch !== this.sketchId ? { kind: "curve", sketch: hit.sketch, entity: hit.entity } : null,
+        hit?.kind === "edge" ? { kind: "edge", body: hit.body, edge: hit.edge } : hit?.kind === "curve" ? { kind: "curve", sketch: hit.sketch, entity: hit.entity } : null,
       );
       return;
     }
@@ -3945,8 +3946,53 @@ export class SketchTool implements Tool {
     );
   }
 
+  /** Curves of this sketch picked to project out: next, the plane or face they go to. */
+  private projectOut: string[] = [];
+
+  /** Where the picked curves of this sketch go: a plane or face parallel to it. */
+  private projectOutTo(target: PlaneDef): void {
+    const from = this.plane!;
+    if (Math.abs(dot(from.normal, target.normal)) < 1 - 1e-6) return this.app.ui.toast("That isn't parallel to this sketch - tap a plane or flat face facing the same way", "error");
+    // This sketch's own axes, moved straight across onto the target: the curves keep their coordinates.
+    const d = dot(sub3(target.origin, from.origin), from.normal);
+    if (Math.abs(d) < 1e-9) return this.app.ui.toast("That's this sketch's own plane - tap a parallel plane or face away from it", "error");
+    const plane: PlaneDef = { origin: add3(from.origin, scale3(from.normal, d)), xDir: from.xDir, normal: from.normal };
+    const ids = new Set(this.projectOut);
+    const entities = this.entities.filter((e) => ids.has(e.id)).map((e) => ({ ...structuredClone(e), id: uid() }) as SketchEntity);
+    if (!entities.length) return;
+    const ident = this.app.store.newIdentity("sketch");
+    this.app.store.add({ ...ident, type: "sketch", plane, entities, constraints: [] });
+    this.projectOut = [];
+    this.selected.clear();
+    this.showSelection();
+    this.setHint();
+    this.app.ui.toast(`Projected ${entities.length === 1 ? "1 curve" : `${entities.length} curves`} to ${ident.name}`);
+  }
+
   private tapProject(p: ToolPointer): void {
-    const hit = this.app.view.pick(p.x, p.y, { profiles: false, planes: false, axes: false, edgeTolPx: p.tol });
+    // A curve of this sketch: picked to project out (to a parallel plane or face, tapped next).
+    const own = this.sketchId ? this.app.view.pick(p.x, p.y, { curves: this.sketchId, profiles: false, bodies: false, planes: false, axes: false, images: false, edgeTolPx: p.tol }) : null;
+    const hit = own?.kind === "curve" && own.sketch === this.sketchId ? own : this.app.view.pick(p.x, p.y, { profiles: false, planes: true, axes: false, edgeTolPx: p.tol });
+    if (hit?.kind === "curve" && hit.sketch === this.sketchId) {
+      const i = this.projectOut.indexOf(hit.entity);
+      if (i >= 0) this.projectOut.splice(i, 1);
+      else this.projectOut.push(hit.entity);
+      this.selected = new Set(this.projectOut);
+      this.showSelection();
+      return this.setHint(this.projectOut.length ? "Now tap where to project to: a plane or a flat face parallel to this sketch (or tap more curves)" : undefined);
+    }
+    if (this.projectOut.length) {
+      if (hit?.kind === "plane") {
+        const pl = this.app.view.planeOf(hit.id);
+        if (pl) return this.projectOutTo(pl);
+      }
+      if (hit?.kind === "face" || hit?.kind === "edge") {
+        const b = this.app.view.body(hit.body);
+        const face = hit.kind === "face" ? b?.faces[hit.face] : undefined;
+        if (face?.plane) return this.projectOutTo(face.plane);
+      }
+      return this.app.ui.toast("Tap a plane or a flat face parallel to this sketch");
+    }
     if (hit?.kind === "curve" && hit.sketch !== this.sketchId) {
       const all = this.app.sketchCurves(hit.sketch).filter((e) => !e.id.startsWith("bnd-") && !e.construction);
       const last = this.projectedFrom;
