@@ -57,13 +57,15 @@ const DEFAULTS: Settings = {
   showHiddenEdges: false,
   showPinned: true,
   degrees: "decimal",
-  showConstraints: true,
+  // The Constraints column (Auto constrain, Show constraints): closed - the
+  // constraints themselves are in the card of what's selected.
+  showConstraints: false,
   autoConstrain: true,
   showConstraintGlyphs: true,
   // On by default on touch screens (phones, tablets, headsets).
   numpad: isTouchDevice,
   showHints: true,
-  version: 3,
+  version: 4,
 };
 
 type Listener = (s: Settings) => void;
@@ -85,6 +87,8 @@ class SettingsStore {
     if ((saved.version ?? 1) < 2) this.value = { ...this.value, ortho: true, showConstraints: true, version: 2 };
     // v3: the on-screen numpad starts on for phones, tablets and headsets (off on computers).
     if ((saved.version ?? 1) < 3) this.value = { ...this.value, numpad: isTouchDevice, version: 3 };
+    // v4: the Constraints column starts closed (it got in the way; the Constraints button opens it).
+    if ((saved.version ?? 1) < 4) this.value = { ...this.value, showConstraints: false, version: 4 };
   }
 
   set<K extends keyof Settings>(key: K, v: Settings[K]): void {
