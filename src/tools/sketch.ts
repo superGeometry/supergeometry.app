@@ -1015,6 +1015,9 @@ export class SketchTool implements Tool {
     this.hideRegionArrow();
     // Another tool picked: still sketching, Exit Sketch calms down.
     if (kind !== "select") this.exitPulse = false;
+    // The last line's length box (touch, numpad on) belongs to Line: it goes
+    // (keeping what was typed) - it stayed up in Select, holding the numpad.
+    if (kind !== "line") this.closeLineBox();
     // Project with curves of this sketch already picked: those are what gets
     // projected - next it only asks where to.
     this.projectOut = kind === "project" ? this.entities.filter((e) => this.selected.has(e.id)).map((e) => e.id) : [];

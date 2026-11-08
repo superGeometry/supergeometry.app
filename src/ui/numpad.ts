@@ -139,7 +139,8 @@ class Numpad {
     // Opening: focusing a numpad box, or tapping one (focus can be unreliable on touch).
     document.addEventListener("focusin", (e) => {
       const t = e.target as HTMLElement;
-      if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad && t !== this.target) this.open(t);
+      // Already up (moving on to another box): it stays where it is.
+      if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad && t !== this.target) this.open(t, !this.el.hidden);
     });
     document.addEventListener(
       "pointerdown",
@@ -149,6 +150,9 @@ class Numpad {
         // A numpad box opens on a plain tap (the click): pressing and dragging
         // sideways scrubs its value instead.
         if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad) return;
+        // Sketching: a tap on the drawing places the next point - the numpad
+        // stays where it was put (it moves on to the next size box).
+        if (t instanceof HTMLCanvasElement && document.body.classList.contains("sketching")) return;
         // A tap anywhere else puts the numpad away.
         if (this.target) this.close();
       },
@@ -158,7 +162,7 @@ class Numpad {
       "click",
       (e) => {
         const t = e.target as HTMLElement;
-        if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad && !t.dataset.scrubbed && t !== this.target) this.open(t);
+        if (t instanceof HTMLInputElement && t.dataset.numpad === "1" && settings.value.numpad && !t.dataset.scrubbed && t !== this.target) this.open(t, !this.el.hidden);
         // A tap in the box it's open on: the caret goes where it was tapped (or
         // what's selected by hand) - keys add there instead of replacing it all.
         else if (t instanceof HTMLInputElement && t === this.target && !t.dataset.scrubbed) requestAnimationFrame(() => this.takeCaret(t));
@@ -186,7 +190,9 @@ class Numpad {
     if (!this.el.hidden) this.place();
   }
 
-  open(input: HTMLInputElement): void {
+  open(input: HTMLInputElement, stay = false): void {
+    // Moving on to another box: it stays right where it is (setFx re-places it).
+    const at = stay ? { left: this.el.style.left, top: this.el.style.top } : null;
     this.target = input;
     this.fresh = true;
     // A formula in the box already: ƒx is on.
@@ -197,14 +203,42 @@ class Numpad {
     this.selEnd = input.value.length;
     this.showSelection();
     this.el.hidden = false;
-    this.place();
-    // Its box goes away (the tool finished, or another one took over): so does the numpad.
+    if (at) {
+      this.el.style.left = at.left;
+      this.el.style.top = at.top;
+    } else this.place();
+    // Its box goes away (the tool finished, or another one took over): so does
+    // the numpad - unless, sketching, a new size box took its place (the next
+    // line's length): it carries on there, right where it is.
+    // (Placing a point puts the old box away a moment before the next one shows:
+    // it waits a little for that one before going.)
+    let waited = 0;
     const watch = () => {
-      if (!this.target) return;
-      if (!this.target.isConnected) return this.close();
+      const t = this.target;
+      if (!t || t !== input) return;
+      // Gone, or hidden (a size box put away when its tool ends).
+      if (!t.isConnected || !t.getClientRects().length) {
+        const sketching = document.body.classList.contains("sketching");
+        const next = sketching ? this.nextBox(t) : null;
+        if (next) return this.open(next, true);
+        if (!sketching || ++waited > 30) return this.close();
+      }
       requestAnimationFrame(watch);
     };
     requestAnimationFrame(watch);
+  }
+
+  /** A size box on screen to type into next (the one by the drawing first, then the card's). */
+  private nextBox(was: HTMLInputElement): HTMLInputElement | null {
+    // The same kind of box as the one that went: the size box by the drawing,
+    // or the card's - not whatever box is on screen once the tool's done.
+    const sel = was.closest(".dim-widget") ? ".dim-widget.editable input[data-numpad='1']" : was.closest("#panel") ? "#panel input[data-numpad='1']" : null;
+    if (!sel) return null;
+    return [...document.querySelectorAll<HTMLInputElement>(sel)].find((i) => i.getClientRects().length > 0 && !i.disabled) ?? null;
+  }
+
+  get shown(): boolean {
+    return !this.el.hidden;
   }
 
   private close(): void {
@@ -464,5 +498,6 @@ function scrubbable(input: HTMLInputElement): void {
 export function openNumpad(input: HTMLInputElement): void {
   if (!settings.value.numpad) return;
   pad ??= new Numpad();
-  pad.open(input);
+  // Already up (the next size box while sketching): it stays where it is.
+  pad.open(input, pad.shown);
 }
