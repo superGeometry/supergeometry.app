@@ -672,6 +672,24 @@ export class SketchTool implements Tool {
     return chips.length ? [{ type: "chips", label: "Constraints", chips }] : [];
   }
 
+  /**
+   * Explode: the rectangle / polygon becomes its sides as lines, still joined
+   * at the corners (a rectangle's stay square, its width and height become
+   * two sides' lengths) - the same lines a corner drag makes. The lines are
+   * selected, so their card (and Delete constraints, to free them) is right there.
+   */
+  private explodeShape(id: string): void {
+    const e = this.entities.find((x) => x.id === id);
+    const out = e && explodeJoined(e, this.constraints, uid);
+    if (!out) return;
+    this.commit(this.entities.flatMap((x) => (x.id === id ? out.lines : [x])), out.constraints);
+    this.selected = new Set(out.lines.map((l) => l.id));
+    for (const l of out.lines) this.pickSeq.set(l.id, ++this.seq);
+    this.selPts = [];
+    this.selectionChanged();
+    this.app.ui.toast(`${out.lines.length} lines, joined at the corners`);
+  }
+
   /** Ends of the selected curves sitting on another end without being joined. */
   private endGaps(): [PointRef, PointRef][] {
     return this.selected.size ? touchingEnds(this.entities, this.constraints, this.selected) : [];
@@ -4348,7 +4366,7 @@ export class SketchTool implements Tool {
     items.push(
       ...this.constraintChips(),
       { type: "toggle", label: "Construction", value: !!e.construction, onChange: () => this.toggleConstruction() },
-      ...(e.kind === "rect" || e.kind === "polygon" ? [{ type: "button", label: "Explode", icon: "line", onClick: () => this.commit(this.entities.flatMap((x) => (x.id === id ? explode(x) : [x]))) } as PanelItem] : []),
+      ...(e.kind === "rect" || e.kind === "polygon" ? [{ type: "button", label: "Explode", icon: "line", onClick: () => this.explodeShape(id) } as PanelItem] : []),
       ...this.deleteConstraintsItem(),
       { type: "button", label: "Delete", icon: "trash", onClick: () => this.deleteSelected() },
     );
