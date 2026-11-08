@@ -18,7 +18,7 @@ import {
 import type { PlaneDef, SketchEntity, Vec2 } from "../doc/types";
 import { toWorld } from "../geom";
 import { entityPrims, evalPrim, isClosedPrim, SPLINE_PER_SPAN, splineSpanAt, splineSpans, type Prim } from "../sketch/curves";
-import { arrangement, resolveRegion, type Arrangement, type Loop, type Piece, type RegionRef } from "../sketch/regions";
+import { arrangement, resolveRegion, type Arrangement, type Loop, type LoopRef, type Piece, type RegionRef } from "../sketch/regions";
 
 /** Faces for the referenced regions of a sketch (one face per region, holes included). */
 export function regionFaces(entities: SketchEntity[], plane: PlaneDef, refs: RegionRef[]): Face[] {
@@ -69,7 +69,92 @@ function loopWire(arr: Arrangement, loop: Loop, plane: PlaneDef): Wire {
       return assembleWire([makeEllipse(Math.max(p.rx, p.ry), Math.min(p.rx, p.ry), toWorld(plane, p.c), plane.normal, xDir)]);
     }
   }
-  return assembleWire(loop.pieces.map((r) => pieceEdge(arr, arr.pieces[r.piece], plane)));
+  return assembleWire(
+    roundRuns(arr, loop).map((run) =>
+      run.length === 1 ? pieceEdge(arr, arr.pieces[run[0].piece], plane) : circleOf(arr, run[0]) ? arcThrough(arr, run, plane) : splineThrough(arr, run, plane),
+    ),
+  );
+}
+
+/** The circle a piece lies on (an arc or a circle of the sketch), if any. */
+function circleOf(arr: Arrangement, r: LoopRef): { c: Vec2; r: number } | null {
+  const p = arr.prims[arr.pieces[r.piece].prim];
+  return p.t === "circle" ? { c: p.c, r: p.r } : null;
+}
+
+/**
+ * The loop's pieces in runs: pieces next to each other on the same circle
+ * (one circle split by a line ending on it, or an arc drawn as two arcs) are
+ * one run - one edge, so the side extruded from it is one round face. Each
+ * piece its own edge left a line down the round side: later unions and
+ * threads failed on it.
+ */
+function roundRuns(arr: Arrangement, loop: Loop): LoopRef[][] {
+  const refs = loop.pieces;
+  const n = refs.length;
+  const size = Math.max(1, ...arr.prims.map((p) => (p.t === "circle" ? p.r : 0)));
+  const same = (i: number, j: number) => {
+    const a = circleOf(arr, refs[i]);
+    const b = circleOf(arr, refs[j]);
+    if (a && b) return Math.hypot(a.c[0] - b.c[0], a.c[1] - b.c[1]) < size * 1e-9 && Math.abs(a.r - b.r) < size * 1e-9;
+    // One spline, on from where the last piece of it stopped.
+    const pi = arr.pieces[refs[i].piece];
+    const pj = arr.pieces[refs[j].piece];
+    if (pi.prim !== pj.prim || arr.prims[pi.prim].t !== "spline" || refs[i].reversed !== refs[j].reversed) return false;
+    const gap = refs[i].reversed ? pi.t0 - pj.t1 : pj.t0 - pi.t1;
+    return Math.abs(gap - Math.round(gap)) < 1e-9;
+  };
+  if (n < 2) return refs.map((r) => [r]);
+  // Start where a run starts (not halfway round one).
+  let s = 0;
+  while (s < n && same((s + n - 1) % n, s)) s++;
+  if (s === n) return [refs]; // the whole loop is one circle
+  const runs: LoopRef[][] = [];
+  for (let k = 0; k < n; k++) {
+    const i = (s + k) % n;
+    if (k > 0 && same((i + n - 1) % n, i)) runs[runs.length - 1].push(refs[i]);
+    else runs.push([refs[i]]);
+  }
+  return runs;
+}
+
+/** One edge along a run of pieces of the same spline (its exact cubic spans). */
+function splineThrough(arr: Arrangement, run: LoopRef[], plane: PlaneDef): Edge {
+  const fwd = run[0].reversed ? [...run].reverse() : run;
+  const first = arr.pieces[fwd[0].piece];
+  const last = arr.pieces[fwd[fwd.length - 1].piece];
+  const p = arr.prims[first.prim];
+  let t1 = last.t1;
+  while (t1 <= first.t0 + 1e-12) t1 += 1;
+  const a = first.poly[0];
+  const b = last.poly[last.poly.length - 1];
+  const poly = fwd.flatMap((r, k) => (k ? arr.pieces[r.piece].poly.slice(1) : arr.pieces[r.piece].poly));
+  return exactSpline(p, first.t0, t1, plane, a, b) ?? bspline(poly, plane);
+}
+
+/** One arc along a run of pieces on the same circle (a whole circle if it closes). */
+function arcThrough(arr: Arrangement, run: LoopRef[], plane: PlaneDef): Edge {
+  const pts: Vec2[] = [];
+  for (const r of run) {
+    const poly = arr.pieces[r.piece].poly;
+    const seq = r.reversed ? [...poly].reverse() : poly;
+    pts.push(...(pts.length ? seq.slice(1) : seq));
+  }
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const c = circleOf(arr, run[0])!;
+  if (Math.hypot(a[0] - b[0], a[1] - b[1]) < c.r * 1e-9) return makeCircle(c.r, toWorld(plane, c.c), plane.normal);
+  // Through the ends (shared with the neighbours) and the point halfway along.
+  const lens = [0];
+  for (let i = 1; i < pts.length; i++) lens.push(lens[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const half = lens[lens.length - 1] / 2;
+  const i = Math.max(1, lens.findIndex((l) => l >= half));
+  const t = (half - lens[i - 1]) / Math.max(1e-300, lens[i] - lens[i - 1]);
+  const q: Vec2 = [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t];
+  // Onto the circle (the polyline's chord sags inside it).
+  const d = Math.hypot(q[0] - c.c[0], q[1] - c.c[1]) || 1;
+  const m: Vec2 = [c.c[0] + ((q[0] - c.c[0]) * c.r) / d, c.c[1] + ((q[1] - c.c[1]) * c.r) / d];
+  return makeThreePointArc(w(plane, a), w(plane, m), w(plane, b));
 }
 
 function pieceEdge(arr: Arrangement, pc: Piece, plane: PlaneDef): Edge {
