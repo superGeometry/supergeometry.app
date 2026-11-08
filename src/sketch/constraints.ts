@@ -909,6 +909,105 @@ export function addResolving(
   return { constraints: all, removed: [], result: first };
 }
 
+/**
+ * Which existing constraints give way first when a new one is asked for: an
+ * angle or orientation the new one restates, then sizes, then shape links;
+ * joins (coincident) and locks last of all - the user meant to keep those.
+ */
+function yieldRank(c: SketchConstraint): number {
+  if (c.type === "dim" && c.prop === "angle") return 0;
+  if (c.type === "horizontal" || c.type === "vertical" || c.type === "parallel" || c.type === "perpendicular") return 1;
+  if (c.type === "dim" || c.type === "distance") return 2;
+  if (c.type === "equal" || c.type === "symmetric" || c.type === "midpoint" || c.type === "tangent" || c.type === "concentric") return 3;
+  if (c.type === "coincident") return 4;
+  return 5;
+}
+
+/**
+ * A constraint the user asked for (a button press): it goes in. `first` (the
+ * first-picked curve) stays put where that makes sense - only when the new
+ * constraints also reach something else to move; a constraint on one curve
+ * alone (Horizontal on a line) has to move that curve. If what is already there
+ * doesn't allow it, the existing constraints in its way give way (angles and
+ * orientations first, then sizes; joins and locks only as a last resort), as
+ * few as possible. Refused (ok false) only when even that can't make it work.
+ */
+export function addForUser(
+  entities: SketchEntity[],
+  existing: SketchConstraint[],
+  added: SketchConstraint[],
+  first?: string,
+): { ok: boolean; constraints: SketchConstraint[]; removed: SketchConstraint[]; result: SolveResult } {
+  const refs = new Set(added.flatMap(refsOf));
+  const all = [...existing, ...added];
+  const holdFirst = !!first && refs.has(first) && [...refs].some((r) => r !== first) && !added.every((c) => c.type === "fix");
+  const tries: SolveOptions[] = holdFirst ? [{ fixed: new Set([first!]) }, {}] : [{}];
+  // No curve may all but vanish for it (a line squashed to a speck "is" any
+  // direction): unless the new constraint sizes that very curve, each keeps
+  // a good part of its size.
+  const sized = new Set(added.filter((c) => c.type === "dim" || c.type === "equal").flatMap(refsOf));
+  const before = new Map(entities.map((e) => [e.id, curveSize(e)]));
+  const sane = (r: SolveResult) => r.ok && r.entities.every((e) => sized.has(e.id) || curveSize(e) >= 0.2 * (before.get(e.id) ?? 0));
+  let last: SolveResult | null = null;
+  for (const o of tries) {
+    const r = solveFine(entities, all, o);
+    if (sane(r)) return { ok: true, constraints: all, removed: [], result: r };
+    last = r;
+  }
+  // What can be in its way: constraints on the curves it touches, then on their neighbours.
+  const ring1 = existing.filter((c) => refsOf(c).some((r) => refs.has(r)));
+  const near1 = new Set([...refs, ...ring1.flatMap(refsOf)]);
+  const ring2 = existing.filter((c) => !ring1.includes(c) && refsOf(c).some((r) => near1.has(r)));
+  // Lowest rank first; within a rank, newest first.
+  const order = (list: SketchConstraint[]) =>
+    list
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => yieldRank(a.c) - yieldRank(b.c) || b.i - a.i)
+      .map((x) => x.c);
+  // Locks stay: the user set them to hold things where they are.
+  const cands = [...order(ring1), ...order(ring2)].filter((c) => c.type !== "fix");
+  const attempt = (cs: SketchConstraint[]) => {
+    for (const o of tries) {
+      const r = solveFine(entities, cs, o);
+      if (sane(r)) return r;
+    }
+    return null;
+  };
+  // One is usually enough: try each alone (the most willing first).
+  for (const c of cands) {
+    const rest = all.filter((x) => x !== c);
+    const r = attempt(rest);
+    if (r) return { ok: true, constraints: rest, removed: [c], result: r };
+  }
+  // Else take them away in that order until it works, then put back any that weren't needed.
+  const removed: SketchConstraint[] = [];
+  let rest = all;
+  for (const c of cands) {
+    rest = rest.filter((x) => x !== c);
+    removed.push(c);
+    let r = attempt(rest);
+    if (!r) continue;
+    for (const back of [...removed].reverse()) {
+      const withBack = all.filter((x) => rest.includes(x) || x === back);
+      const rb = attempt(withBack);
+      if (rb) {
+        rest = withBack;
+        removed.splice(removed.indexOf(back), 1);
+        r = rb;
+      }
+    }
+    return { ok: true, constraints: rest, removed, result: r };
+  }
+  return { ok: false, constraints: existing, removed: [], result: last! };
+}
+
+/** Short name of a constraint for messages ("angle dimension", "parallel"). */
+export function constraintName(c: SketchConstraint): string {
+  if (c.type === "dim") return `${c.prop === "angle" ? "angle" : (c.prop ?? "size")} dimension`;
+  if (c.type === "fix") return "lock";
+  return c.type;
+}
+
 /** Largest residual of the constraints on these entities as they are (0 = all met). */
 export function constraintError(entities: SketchEntity[], constraints: SketchConstraint[]): number {
   const m = new Map(entities.map((e) => [e.id, e]));

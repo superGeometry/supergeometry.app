@@ -3,7 +3,7 @@ import { simplifyStroke } from "../sketch/freehand";
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
 import { dot, GROUND, niceStep as niceStepOf, originOnPlane, planeY, toPlane } from "../geom";
-import { addStrict, constraintError, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
+import { addForUser, addStrict, constraintError, constraintName, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { nearestSnap } from "../sketch/snapPick";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
@@ -719,11 +719,12 @@ export class SketchTool implements Tool {
     // Equal: a size dimension on the curves picked after the first would fight it - drop those.
     const others = new Set(curves.slice(1).map((e) => e.id));
     const kept = type === "equal" ? this.constraints.filter((c) => !(c.type === "dim" && c.curves?.length === 1 && others.has(c.curves[0]) && ["length", "radius", "diameter"].includes(c.prop ?? ""))) : this.constraints;
-    // Strict: a constraint that contradicts the ones already there isn't added.
-    const res = addStrict(this.entities, kept, cs, first && type !== "fix" ? { fixed: new Set([first]) } : {});
-    if (!res.ok) return this.refused();
+    // It goes in: the existing constraints in its way (an angle, a parallel...) give way and are named.
+    const res = addForUser(this.entities, kept, cs, first);
+    if (!res.ok) return this.app.ui.toast("Locked points stop that - unlock them first (select, then Unlock)", "error");
     this.commit(res.result.entities, res.constraints);
     if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
+    else if (res.removed.length) this.app.ui.toast(`Replaced ${[...new Set(res.removed.map(constraintName))].join(", ")}`);
     this.clearSelection();
   }
 
@@ -3800,6 +3801,14 @@ export class SketchTool implements Tool {
           // Strict: a size the other constraints don't allow isn't taken.
           const next = setDim(base, id, prop, v, expr);
           const added = next.filter((c) => !base.includes(c));
+          // An angle typed in (0 to make it level) goes in like the H/V button: what's in its way gives way.
+          if (kind === "angle") {
+            const ra = addForUser(this.entities, next.filter((c) => base.includes(c)), added);
+            if (!ra.ok) return this.refused();
+            this.commit(ra.result.entities, ra.constraints);
+            if (ra.removed.length) this.app.ui.toast(`Replaced ${[...new Set(ra.removed.map(constraintName))].join(", ")}`);
+            return;
+          }
           const res = addStrict(this.entities, next.filter((c) => base.includes(c)), added);
           if (!res.ok) return this.refused();
           this.commit(this.entities, res.constraints);

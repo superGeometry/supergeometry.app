@@ -78,7 +78,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "mirror", name: "Mirror, Move/Rotate, Pattern", text: "Mirror the selected shapes across a line or an axis; Move/Rotate with its gimbal (Rotate About a tapped centre); Pattern in a row or round a centre." },
       { icon: "alignLine", name: "Align", text: "Move a line onto another line's axis; lines joined to it stretch along." },
       { icon: "extend", name: "Extend", text: "Carry a line or arc on until it meets another curve." },
-      { icon: "constraints", name: "Constraints", text: "Rules that keep the drawing in shape: horizontal, parallel, equal, a fixed distance… shown as small faint marks, a colour per kind. A rule that contradicts the ones already there isn't added - remove the old one first (or switch Auto constrain off). Dragging a point onto another joins them." },
+      { icon: "constraints", name: "Constraints", text: "Rules that keep the drawing in shape: horizontal, parallel, equal, a fixed distance… shown as small faint marks, a colour per kind. A new rule replaces the ones in its way (an old angle or parallel), and says which; locked points stay put. Dragging a point onto another joins them." },
       { icon: "lineDashed", name: "Construction", text: "Helper lines that guide the drawing but don't make faces. Tap to switch the selection or new lines." },
     ],
   },
