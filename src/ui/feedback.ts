@@ -139,7 +139,8 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
   // Bug report: the project's file as a code block, so the bug can be opened and seen.
   const file = project?.();
   const fileCode = file ? codeBlock(file) : "";
-  const tooBig = fileCode.length > MAX_POST - MAX_TEXT - 500;
+  /** Not even with an empty description (the head and the version line counted). */
+  const neverFits = fileCode.length > MAX_POST - 200;
   const fileRow = el("label", "feedback-info");
   const fileBox = document.createElement("input");
   fileBox.type = "checkbox";
@@ -147,7 +148,7 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
   const fileHow = el("span", "feedback-how");
   if (file) {
     fileText.append("Add this project's file as code: ", el("code", "", `${file.name}.super`), ` (${sizeText(file.json.length)}). Anyone who reads the post can open it.`);
-    if (tooBig) {
+    if (neverFits) {
       fileBox.disabled = true;
       fileHow.textContent = " Too big for a Reddit post (it takes 40,000 characters at most).";
     }
@@ -178,6 +179,11 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
   };
   const fileHead = (body: string) => `${body ? "\n\n" : ""}Project file (\`${file!.name}.super\`):\n\n`;
   const withFile = () => !!file && kind === "bug" && fileBox.checked;
+  /** The whole post with the file in it fits Reddit's 40,000 characters (the description counts too). */
+  const postFits = () => {
+    const body = bodyText();
+    return (body + fileHead(body) + fileCode).length <= MAX_POST;
+  };
   /** The file fits in the address (filled in); longer, it's copied for pasting. */
   const fileFits = () => {
     const body = bodyText();
@@ -185,10 +191,18 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
   };
 
   const paint = () => {
-    post.disabled = !title.value.trim();
-    const copy = withFile() && !fileFits();
+    const over = withFile() && !postFits();
+    post.disabled = !title.value.trim() || over;
+    const copy = withFile() && !over && !fileFits();
     postLabel.textContent = copy ? "Copy file and open Reddit" : "Open Reddit";
-    if (file && !tooBig) fileHow.textContent = !withFile() ? "" : copy ? " Too long to fill in: it's copied, paste it into the post where it says so." : "";
+    if (file && !neverFits)
+      fileHow.textContent = !withFile()
+        ? ""
+        : over
+          ? ` With this description the post is over Reddit's 40,000 characters: shorten it by ${(bodyText().length + fileHead(bodyText()).length + fileCode.length - MAX_POST).toLocaleString("en")} characters, or untick the file.`
+          : copy
+            ? " Too long to fill in: it's copied, paste it into the post where it says so."
+            : "";
   };
   title.addEventListener("input", paint);
   text.addEventListener("input", paint);
@@ -209,13 +223,14 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
     infoBox.checked = id === "bug";
     // The file: only on a bug report, on by default there.
     fileRow.hidden = !file || id !== "bug";
-    fileBox.checked = !!file && !tooBig && id === "bug";
+    fileBox.checked = !!file && !neverFits && id === "bug";
     paint();
   };
 
   const send = () => {
     const t = title.value.trim();
     if (!t) return void title.focus();
+    if (withFile() && !postFits()) return;
     let body = bodyText();
     if (withFile()) {
       if (fileFits()) body += fileHead(body) + fileCode;
