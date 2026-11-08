@@ -19,6 +19,22 @@ export function setVariables(v: Variable[]): void {
   variables = v;
 }
 
+/**
+ * A variable's value as shown: "220 mm" is just "220" when mm is the unit in
+ * use (it goes without saying). Formulas are shown as they are.
+ */
+export function bareExpr(expr: string): string {
+  const m = /^\s*(-?\d*\.?\d+)\s*(mm|cm|m|in|ft)\s*$/i.exec(expr);
+  return m && m[2].toLowerCase() === current ? m[1] : expr.trim();
+}
+
+/** Typed as a plain number where the value had a unit ("220 mm" → "300"): it keeps that unit ("300 mm"). */
+export function withUnitOf(typed: string, original: string): string {
+  const t = typed.trim();
+  const unit = /^\s*-?\d*\.?\d+\s*(mm|cm|m|in|ft)\s*$/i.exec(original)?.[1];
+  return unit && /^-?\d*\.?\d+$/.test(t) ? `${t} ${unit}` : t;
+}
+
 /** mm → display string in the current unit. */
 export function fmtLen(mm: number, digits = 3): string {
   const v = mm / UNIT_MM[current];

@@ -5,7 +5,7 @@ import type { Feature, ImageFeature, PlaneDef, SketchEntity, SketchFeature } fro
 import { GROUND } from "../geom";
 import { uid } from "../sketch/edit";
 import type { AppContext } from "../tools/tool";
-import { evaluate, fmtLen, setVariables } from "../units";
+import { bareExpr, evaluate, fmtLen, setVariables, withUnitOf } from "../units";
 import { DIALOG_ACTION } from "../ui/dialogAction";
 import { parseSVG } from "./svg";
 
@@ -127,7 +127,7 @@ export async function editVariables(app: AppContext): Promise<void> {
     const list = app.store.doc.variables;
     const v = await app.ui.dialog(
       "Variables",
-      list.map((x) => ({ key: x.name, label: x.name, value: x.expr })),
+      list.map((x) => ({ key: x.name, label: x.name, value: bareExpr(x.expr) })),
       list.length
         ? "Change a value to update every feature that uses it. Clear a value to delete the variable."
         : "No variables yet. Make one, then use it in any field, e.g. width*2 or wall + 1mm.",
@@ -135,7 +135,8 @@ export async function editVariables(app: AppContext): Promise<void> {
     );
     if (!v) return;
     if (list.length) {
-      const next = list.filter((x) => v[x.name]?.trim()).map((x) => ({ name: x.name, expr: v[x.name].trim() }));
+      // Shown without the unit in use ("220"): a plain number keeps the unit it had.
+      const next = list.filter((x) => v[x.name]?.trim()).map((x) => ({ name: x.name, expr: withUnitOf(v[x.name], x.expr) }));
       setVariables(next);
       const bad = next.find((x) => evaluate(x.expr) === null);
       if (bad) {

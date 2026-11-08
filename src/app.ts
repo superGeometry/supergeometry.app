@@ -107,6 +107,15 @@ export class App implements AppContext {
     this.pinLayer = new PinLayer(this.view);
     this.varTags = new VariableTags(this.view, {
       variables: () => this.store.doc.variables,
+      check: (name, expr, kind) => {
+        const list = this.store.doc.variables;
+        setVariables(list.map((v) => (v.name === name ? { name, expr } : v)));
+        try {
+          return evaluate(expr, "number") === null ? null : evaluate(name, kind);
+        } finally {
+          setVariables(list);
+        }
+      },
       setVariable: (name, expr) => {
         const list = this.store.doc.variables;
         const next = list.map((v) => (v.name === name ? { name, expr } : v));

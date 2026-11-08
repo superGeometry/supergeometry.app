@@ -11,7 +11,7 @@ import type { Variable, Vec3 } from "../doc/types";
 import type { VarKind, VarTag } from "../doc/varAnchors";
 import { numpadInput, openNumpad } from "../ui/numpad";
 import { el } from "../ui/ui";
-import { evaluate, fmtLen, trim } from "../units";
+import { bareExpr, toDisplay, trim, withUnitOf } from "../units";
 import type { Viewport } from "../view/viewport";
 
 const MARK: Record<VarKind, string> = { length: "↔", angle: "∠", number: "#" };
@@ -20,6 +20,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 export interface VariableTagsHost {
   variables(): readonly Variable[];
+  /** What a variable would work out to with this formula (null: not a valid value). Nothing changes. */
+  check(name: string, expr: string, kind: VarKind): number | null;
   /** Set a variable's formula; false when it isn't a valid value (nothing changes). */
   setVariable(name: string, expr: string): boolean;
 }
@@ -39,6 +41,12 @@ export class VariableTags {
   private hook = () => this.layout();
   /** One undo step per opening of the box (not one for everything ever typed in it). */
   private undoGroup = {};
+  /**
+   * What's typed (or dragged to), not applied yet: the model changes once it's
+   * done (↵, the drag let go, a tap elsewhere) - changing as it was typed, a
+   * big number threw the model and this box off the screen.
+   */
+  private pending: string | null = null;
 
   constructor(
     private view: Viewport,
@@ -56,9 +64,12 @@ export class VariableTags {
     this.box.hidden = true;
     this.box.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.input.addEventListener("input", () => this.typed());
+    // A drag let go: what it was dragged to applies (the box stays open).
+    this.input.addEventListener("change", () => this.apply());
     this.input.addEventListener("keydown", (e) => {
       e.stopPropagation();
-      if (e.key === "Enter" || e.key === "Escape") (e.preventDefault(), this.close());
+      if (e.key === "Enter") (e.preventDefault(), this.close());
+      else if (e.key === "Escape") (e.preventDefault(), this.close(false));
     });
     document.body.append(this.box);
     // A tap anywhere else puts the box away (the numpad's own keys don't count).
@@ -101,10 +112,10 @@ export class VariableTags {
       chip.classList.toggle("formula", t.from.length > 0);
       chip.innerHTML = "";
       chip.append(el("span", "vtag-mark", MARK[t.kind]), el("span", "vtag-name", t.name));
-      chip.title = `${KIND_NAME[t.kind]} variable ${t.name} = ${this.exprOf(t.name)} (tap to change)`;
+      chip.title = `${KIND_NAME[t.kind]} variable ${t.name} = ${bareExpr(this.exprOf(t.name))} (tap to change)`;
     }
     if (this.openName && !this.chips.has(this.openName)) this.close();
-    else if (this.openName) this.showValue();
+    else if (this.openName && this.pending === null) this.showValue();
     this.view.requestRender();
   }
 
@@ -119,9 +130,10 @@ export class VariableTags {
   private open(name: string): void {
     this.openName = name;
     this.undoGroup = {};
+    this.pending = null;
     this.boxName.textContent = `${MARK[this.kindOf(name)]} ${name} =`;
     this.input.dataset.kind = this.kindOf(name);
-    this.input.value = this.exprOf(name);
+    this.input.value = bareExpr(this.exprOf(name));
     this.input.classList.remove("invalid");
     this.input.size = Math.max(4, this.input.value.length + 1);
     this.box.hidden = false;
@@ -133,8 +145,11 @@ export class VariableTags {
     openNumpad(this.input);
   }
 
-  private close(): void {
+  /** Put away: what was typed applies (unless `keep` is false: Esc puts it back as it was). */
+  private close(keep = true): void {
     if (!this.openName) return;
+    if (keep) this.apply();
+    this.pending = null;
     this.openName = null;
     this.box.hidden = true;
     this.input.blur();
@@ -142,30 +157,38 @@ export class VariableTags {
     this.view.requestRender();
   }
 
-  /** The value as it works out, after a formula ("= 66 mm"). */
-  private showValue(): void {
+  /** What a formula works out to ("= 66"), from what's typed (or the value as it is). */
+  private showValue(text = this.exprOf(this.openName ?? "")): void {
     const name = this.openName;
     if (!name) return;
     const kind = this.kindOf(name);
-    const v = evaluate(this.exprOf(name), kind);
-    const formula = /[a-z_]/i.test(this.exprOf(name).replace(/(\d)\s*(mm|cm|m|in|ft)\b/gi, "$1"));
-    this.boxValue.textContent = v === null || !formula ? "" : `= ${kind === "length" ? fmtLen(v) : kind === "angle" ? `${trim(v, 2)}°` : trim(v, 3)}`;
+    const v = this.app.check(name, text, kind);
+    const formula = /[a-z_]/i.test(text.replace(/(\d)\s*(mm|cm|m|in|ft)\b/gi, "$1"));
+    // A length in the unit in use, without it (like the value itself).
+    this.boxValue.textContent = v === null || !formula ? "" : `= ${kind === "length" ? trim(toDisplay(v), 3) : kind === "angle" ? `${trim(v, 2)}°` : trim(v, 3)}`;
   }
 
+  /** Typed or dragged: checked, shown - not applied yet. */
   private typed(): void {
     const name = this.openName;
     if (!name) return;
-    let text = this.input.value.trim();
-    // Dragged or typed as a plain number: it keeps the unit it had ("220 mm" → "225 mm").
-    const unit = /^-?\d*\.?\d+\s*(mm|cm|m|in|ft)$/i.exec(this.exprOf(name))?.[1];
-    if (unit && /^-?\d*\.?\d+$/.test(text)) text = `${text} ${unit}`;
+    // A plain number keeps the unit the value had ("220 mm", shown as 220, typed 300: "300 mm").
+    const text = withUnitOf(this.input.value, this.exprOf(name));
     this.input.size = Math.max(4, this.input.value.length + 1);
-    if (!text) return void this.input.classList.add("invalid");
-    let ok = false;
-    // Key by key (or a drag), this opening: one undo step.
-    mergingCommits(this.undoGroup, () => (ok = this.app.setVariable(name, text)));
+    const ok = !!text && this.app.check(name, text, this.kindOf(name)) !== null;
+    this.pending = text;
     this.input.classList.toggle("invalid", !ok);
-    this.showValue();
+    this.showValue(ok ? text : undefined);
+  }
+
+  /** What's typed takes effect: the model follows (one undo step per opening). */
+  private apply(): void {
+    const name = this.openName;
+    const text = this.pending;
+    if (!name || text === null) return;
+    this.pending = null;
+    if (!text || this.app.check(name, text, this.kindOf(name)) === null) return;
+    mergingCommits(this.undoGroup, () => this.app.setVariable(name, text));
   }
 
   private layout(): void {
