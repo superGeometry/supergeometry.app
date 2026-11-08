@@ -7,7 +7,7 @@
 import { el } from "./ui";
 
 /** The app's main script of this page (its name changes with every build). */
-function loadedBuild(): string | null {
+export function loadedBuild(): string | null {
   const s = [...document.querySelectorAll<HTMLScriptElement>("script[src]")].map((x) => x.src).find((src) => /\/assets\/index-[\w-]+\.js/.test(src));
   return s ? (s.match(/index-[\w-]+\.js/)?.[0] ?? null) : null;
 }
@@ -22,7 +22,15 @@ async function liveBuild(): Promise<string | null> {
   }
 }
 
+/** Offline mode's part (src/ui/offline.ts): stores a new version as it comes out. */
+interface OfflineStore {
+  readonly on: boolean;
+  download(fresh: boolean): Promise<boolean>;
+}
+
 export class Updates {
+  offline: OfflineStore | null = null;
+
   /** `beforeReload` saves the project before the page is reloaded. */
   constructor(private beforeReload: () => Promise<void>) {
     // Only a built site has a build to compare (not the dev server).
@@ -44,6 +52,8 @@ export class Updates {
     const mine = loadedBuild();
     const live = await liveBuild();
     if (!mine || !live || live === mine) return false;
+    // Offline mode: the new version is downloaded now, so it's there next start even with no connection.
+    if (this.offline?.on) await this.offline.download(false);
     this.markPending();
     return true;
   }
@@ -54,6 +64,12 @@ export class Updates {
    */
   async reset(): Promise<void> {
     await this.beforeReload();
+    // Offline mode: the stored copy is downloaded again (the newest version), not removed.
+    if (this.offline?.on && navigator.onLine) {
+      await this.offline.download(true);
+      location.reload();
+      return;
+    }
     try {
       if ("caches" in window) for (const k of await caches.keys()) await caches.delete(k);
     } catch {

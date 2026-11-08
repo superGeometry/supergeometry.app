@@ -246,10 +246,12 @@ export class SelectTool implements Tool {
     this.app.ui.setBottom(this.app.bottomTools());
     this.app.ui.setHint(
       this.pending
-        ? `${this.pending.label}: select ${this.pending.accepts.join(" or ")}`
+        ? `${this.pending.label}: tap ${this.pending.accepts.map((k) => withArticle(label({ kind: k } as Sel, 1))).join(" or ")}`
         : sel.length === 0
-          ? null
-          : `${sel.length} ${label(sel[0], sel.length)} selected`,
+          ? this.app.store.features.length
+            ? "Pick a tool, or tap the model to select part of it."
+            : "Tap Sketch to start: draw a shape, then pull it into 3D."
+          : `${sel.length} ${label(sel[0], sel.length)} selected. Pick a tool for ${sel.length > 1 ? "them" : "it"}, or tap more to add.`,
     );
     const first = sel[0];
     if (!first) return;
@@ -999,9 +1001,12 @@ function perpTo(d: Vec3): Vec3 {
 }
 
 function label(s: Sel, n: number): string {
-  const base = { face: "face", edge: "edge", vertex: "vertex", body: "body", profile: "profile", curve: "curve", point: "point", image: "image", plane: "plane", axis: "axis", origin: "origin" }[s.kind];
-  if (base === "vertex") return n === 1 ? "vertex" : "vertices";
+  const base = { face: "face", edge: "edge", vertex: "corner", body: "body", profile: "shape", curve: "line", point: "point", image: "image", plane: "plane", axis: "axis", origin: "origin" }[s.kind];
   return n === 1 ? base : base === "body" ? "bodies" : base === "axis" ? "axes" : `${base}s`;
+}
+
+function withArticle(word: string): string {
+  return `${/^[aeio]/.test(word) ? "an" : "a"} ${word}`;
 }
 
 function cap(s: string): string {

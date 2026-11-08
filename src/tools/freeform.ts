@@ -159,7 +159,7 @@ export class FreeformTool implements Tool {
       // Nothing shown yet: the origin planes (and flat faces) to put it on.
       for (const o of [this.surface, this.faceEdges, this.lines, this.dots]) o.visible = false;
       view.setOriginPlanesVisible(true);
-      this.app.ui.setHint("Select a plane or a flat face to place the surface on.");
+      this.app.ui.setHint("Tap a plane or a flat face to put the shape on.");
       this.app.ui.showPanel({ title: "Freeform surface", items: [], onCancel: () => this.cancel() });
       return;
     }
@@ -237,15 +237,15 @@ export class FreeformTool implements Tool {
   }
 
   private hint(): void {
-    if (this.placing) return this.app.ui.setHint("Drag the gimbal (or type Move values) to put it in place first. Then tap points, edges or faces to shape it.");
+    if (this.placing) return this.app.ui.setHint("First drag the arrows to put it in place. Then tap its points, edges or faces to shape it.");
     // A phone has no Shift: there every tap adds, a second tap drops it.
-    if (this.live && this.live.kind !== "shape" && this.live.kind !== "sheet") return this.app.ui.setHint("Shape it with the sliders in the card. Tap the model (or take the next step) to keep it.");
+    if (this.live && this.live.kind !== "shape" && this.live.kind !== "sheet") return this.app.ui.setHint("Shape it with the sliders in the card. Tap the model to keep it.");
     if (this.live) return this.app.ui.setHint("Set the size and rows in the card, then tap faces to shape it.");
     const more = isCoarse ? "Tap more to add; tap a face again for the one behind it" : "Shift+tap adds; click a face again for the one behind it";
     this.app.ui.setHint(
       this.picks.length
-        ? `Drag the gimbal, or type exact Move / Turn / Scale values. ${more}. Tap empty space to deselect.`
-        : `Tap cage points, edges or faces to select them (${isCoarse ? "every tap adds" : "Shift adds"}). Done turns the shape into a body.`,
+        ? `Drag the arrows, or type exact values. ${more}. Tap empty space to let go.`
+        : `Tap the points, edges or faces of the frame around it to pick them, then drag. Done turns it into a body.`,
     );
   }
 

@@ -57,8 +57,8 @@ export class BooleanOp extends FeatureOp<BooleanFeature> {
 
   protected hint(): string {
     return this.feature.op === "subtract"
-      ? "Select a body to remove from, then a body to subtract from it."
-      : "Select a body, then the bodies to intersect it with (what they share is kept).";
+      ? "Tap the body to cut, then the bodies to cut away from it."
+      : "Tap a body, then the bodies it overlaps. Only the part they share is kept.";
   }
 
   protected items(): PanelItem[] {

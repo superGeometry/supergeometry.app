@@ -141,7 +141,7 @@ export class ThreePointPlaneOp extends PlaneFromPicks {
     return { origin: a, normal: norm(n), xDir: norm(sub(b, a)) };
   }
   protected hint(): string {
-    return this.pts.every(Boolean) && !this.make() ? "⚠ The three points are on one line - pick another" : "Tap three points (corners, edge points, sketch points): the plane goes through all of them.";
+    return this.pts.every(Boolean) && !this.make() ? "⚠ The three points are on one line - pick another" : "Tap three points (corners, points on edges or in sketches): the plane goes through all three.";
   }
 }
 
@@ -157,7 +157,7 @@ export class CurvePointPlaneOp extends PlaneFromPicks {
     return this.c && { origin: this.c.at, normal: this.c.tangent, xDir: xDirFor(this.c.tangent) };
   }
   protected hint(): string {
-    return this.edgesOnly ? "Tap an edge at the point where the plane should cross it (at right angles)." : "Tap a curve or edge where the plane should cross it: it stands across the curve there.";
+    return this.edgesOnly ? "Tap an edge where the plane should cross it, square to it." : "Tap a line or edge where the plane should cross it, square to it.";
   }
 }
 
@@ -191,7 +191,7 @@ export class EdgeAnglePlaneOp extends PlaneFromPicks {
     return [{ type: "number", label: "Angle", value: this.angle, kind: "angle", onInput: (v) => ((this.angle = v), this.sync(), this.update()) }];
   }
   protected hint(): string {
-    return "Tap a straight edge, then the face (or plane) the angle is measured from, and type the angle.";
+    return "Tap a straight edge, then the face to measure the angle from, then type the angle.";
   }
 }
 
@@ -208,6 +208,6 @@ export class FacePointPlaneOp extends PlaneFromPicks {
     return this.ref && this.at ? { ...this.ref, origin: this.at } : null;
   }
   protected hint(): string {
-    return "Tap a face or plane, then the point the new plane goes through.";
+    return "Tap a face or plane to copy its direction, then the point the new plane goes through.";
   }
 }

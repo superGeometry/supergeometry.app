@@ -88,34 +88,34 @@ type Kind =
 
 /** Asked once curves are picked and the turn still needs its centre. */
 const CENTRE_HINT = {
-  patternCircular: "Now tap the centre of the pattern - it snaps to the grid, line ends, midpoints, centres and joined points.",
-  rotate: "Now tap the point to turn around - it snaps to the grid, line ends, midpoints, centres and joined points.",
+  patternCircular: "Now tap the centre to repeat them around. It snaps to line ends, middles and centres.",
+  rotate: "Now tap the point to turn them around. It snaps to line ends, middles and centres.",
 };
 
 const HINTS: Record<Kind, string> = {
-  select: "Tap curves to select them and edit their size. Double-tap selects a whole shape.",
-  line: "Tap points to draw lines. Tap the first point to close; double-tap or Enter to stop.",
-  arc: isCoarse ? "Drag from one end of the arc to the other, then drag anywhere to bend it (or tap where it should pass)." : "Tap the arc's two endpoints, then a third point to bend it (or drag to bend).",
-  spline: "Tap points the curve passes through. Tap the first point to close; double-tap or Enter to finish.",
-  rect: "Tap (or drag) two opposite corners.",
-  circle: "Tap the center, then the radius.",
-  ellipse: "Tap the center, the end of the long axis, then the width.",
-  polygon: "Tap the center, then a corner.",
-  text: "Tap where the text should start.",
-  project: "Tap body edges or curves of other sketches to project them here (double-tap: the whole sketch) - or tap curves of this sketch, then a parallel plane or face to project them there.",
-  offset: "Tap a curve to offset it.",
-  fillet: "Tap the first line, then the second (the corner between them is rounded or cut).",
-  move: "Tap curves to select, then type the offset and Apply.",
-  scale: "Tap curves to select, then set the factor and Apply.",
-  patternLinear: "Tap curves to select, then set count and spacing.",
-  patternCircular: "Tap curves to select (double-tap for a whole shape), then tap the centre to turn them around.",
-  rotate: "Tap curves to select (double-tap: a whole shape), then tap the point to turn them around - an end, a midpoint or another shape's centre. The whole selection turns about that point, rigidly, by the angle: its own centre swings round it.",
-  mirror: "Tap a shape to select it (Shift+tap: single curves), then tap the line to mirror it across - any line, even one of its own edges.",
-  trim: "Tap the part of a curve to cut away (between crossings), or swipe across several. Join mode: tap a line to merge it with the line on the same axis it touches.",
-  align: "Tap the line to move, then the line it should line up with (the first one moves onto the second one's axis).",
-  extend: "Tap the half of a line or arc whose end should move, then the half of the curve it should meet. Tap the same half twice to extend to the next curve.",
-  delete: "Tap curves to delete them.",
-  split: "Tap a line or arc to cut it in two at its midpoint (or at a point you tap on it while holding Shift).",
+  select: "Tap a line or curve to change its size. Double-tap to pick a whole shape.",
+  line: "Tap to place points. Tap the first point again to close the shape, or double-tap to stop.",
+  arc: isCoarse ? "Drag from one end of the arc to the other, then drag to bend it." : "Click where the arc starts and ends, then a third point to bend it.",
+  spline: "Tap points for the curve to pass through. Tap the first point to close it, or double-tap to stop.",
+  rect: "Tap one corner, then the opposite corner.",
+  circle: "Tap the centre, then tap again to set the size.",
+  ellipse: "Tap the centre, then the end of the long side, then tap to set the width.",
+  polygon: "Tap the centre, then where a corner should be.",
+  text: "Tap where the text should start, then type it in the card.",
+  project: "Tap edges of a body, or lines of another sketch, to copy them into this sketch. Double-tap copies a whole sketch.",
+  offset: "Tap a line or shape to draw a copy of it a set distance away.",
+  fillet: "Tap two lines that meet to round the corner between them.",
+  move: "Tap what to move, then type how far and tap Apply.",
+  scale: "Tap what to resize, then type how many times bigger (2 = twice) and tap Apply.",
+  patternLinear: "Tap what to repeat, then set how many copies and how far apart.",
+  patternCircular: "Tap what to repeat (double-tap for a whole shape), then tap the centre to repeat it around.",
+  rotate: "Tap what to turn (double-tap for a whole shape), then tap the point to turn it around, and set the angle.",
+  mirror: "Tap a shape, then tap the line to flip it across. Any line works, even one of its own.",
+  trim: "Tap the piece of a line to cut away, or swipe across several pieces. (Join: tap a line to merge it with the one it continues.)",
+  align: "Tap the line to move, then the line it should line up with.",
+  extend: "Tap a line near the end to lengthen, then tap the line it should reach.",
+  delete: "Tap lines or shapes to delete them.",
+  split: "Tap a line or arc to cut it in two at its middle.",
 };
 
 /**
@@ -142,9 +142,9 @@ function runsAlongside(a: Vec2, b: Vec2, from: Vec2, to: Vec2, minOff: number): 
 /** The hint for a tool, as its chosen variant works. */
 function hintOf(kind: Kind): string {
   if (kind === "arc" && memory.arc === "center") return "Tap the centre, then where the arc starts, then where it ends.";
-  if (kind === "circle" && memory.circle === "2pt") return "Tap two points across the circle (its diameter).";
-  if (kind === "circle" && memory.circle === "3pt") return "Tap three points the circle passes through.";
-  if (kind === "fillet" && memory.corner === "chamfer") return "Tap a corner where two lines meet to cut it off straight (or tap the two lines).";
+  if (kind === "circle" && memory.circle === "2pt") return "Tap two points on opposite sides of the circle.";
+  if (kind === "circle" && memory.circle === "3pt") return "Tap three points on the circle's edge.";
+  if (kind === "fillet" && memory.corner === "chamfer") return "Tap a corner where two lines meet to cut it off straight.";
   if (kind === "spline" && memory.spline === "draw") return isTouchDevice ? "Draw with one finger, like a pencil (two move the view). End where you began to close it." : "Press and drag to draw, like a pencil. End where you began to close it.";
   return HINTS[kind];
 }
@@ -448,7 +448,7 @@ export class SketchTool implements Tool {
     }
     if (this.phase === "plane") {
       this.app.view.setOriginPlanesVisible(true);
-      this.app.ui.setHint("Select a plane or a flat face to sketch on.");
+      this.app.ui.setHint("Tap a plane or a flat face to draw on.");
       // The three origin planes as buttons too: in a 3D view they overlap near
       // the origin, and a tap meant for the floor can land on the front plane.
       const pick = (id: string) => () => {
@@ -1060,20 +1060,20 @@ export class SketchTool implements Tool {
     if (kind === "align" && this.selected.size === 1 && this.entities.find((e) => e.id === [...this.selected][0])?.kind === "line") {
       this.edit.alignFrom = [...this.selected][0];
       this.selected.clear();
-      alignHint = "Now tap the line to align it with (it moves onto that line's axis).";
-    } else if (kind === "align" && this.selected.size > 1) alignHint = "Tap the edge of the selected shape to line up, then the line to align it with (the whole shape moves).";
+      alignHint = "Now tap the line it should line up with.";
+    } else if (kind === "align" && this.selected.size > 1) alignHint = "Tap the side of the shape to line up, then the line it should line up with. The whole shape moves.";
     this.clearOverlays();
     this.hideLineDim();
     this.refreshDistanceDim();
     this.showSelection();
     this.updateMenu();
     this.updatePanel();
-    this.setHint(kind === "project" && this.projectOut.length ? "Now tap where to project to: a plane or a flat face parallel to this sketch (or tap more curves)" : this.wantsCentre ? CENTRE_HINT[kind as "rotate" | "patternCircular"] : alignHint);
+    this.setHint(kind === "project" && this.projectOut.length ? "Now tap a flat face or plane, parallel to this sketch, to copy them onto (or tap more lines)" : this.wantsCentre ? CENTRE_HINT[kind as "rotate" | "patternCircular"] : alignHint);
     if (kind === "align" && this.edit.alignFrom) this.app.setSelection([{ kind: "curve", sketch: this.sketchId ?? "", entity: this.edit.alignFrom }]);
   }
 
   private setHint(extra?: string): void {
-    const hint = this.phase === "plane" ? "Select a plane or a flat face to sketch on." : extra ?? hintOf(this.kind);
+    const hint = this.phase === "plane" ? "Tap a plane or a flat face to draw on." : extra ?? hintOf(this.kind);
     this.app.ui.setHint(hint);
   }
 
@@ -3629,7 +3629,7 @@ export class SketchTool implements Tool {
       if (!e || !endNear(e, uv)) return this.app.ui.toast("Pick a line, an arc or an open spline");
       this.edit.extendFrom = { id, at: uv };
       this.app.setSelection([{ kind: "curve", sketch: this.sketchId ?? "", entity: id }]);
-      this.setHint("Now tap the half of the curve it should meet (or the same half again to extend to the next curve).");
+      this.setHint("Now tap the line it should reach (or the same line again to reach the next one).");
       return;
     }
     this.edit.extendFrom = undefined;
@@ -3857,7 +3857,7 @@ export class SketchTool implements Tool {
     handle.set(fr.base, fr.normal);
     this.regionArrow = { sel, handle };
     this.app.setSelection(sel);
-    this.setHint("Drag the arrow to extrude (the sketch stays open until you do)");
+    this.setHint("Drag the arrow to pull the shape into 3D.");
   }
 
   private hideRegionArrow(): void {
@@ -4020,13 +4020,13 @@ export class SketchTool implements Tool {
           this.showSelection();
         }
         this.edit.picking = "refB";
-        this.setHint("Tap the second point - then type the distance it should be from the first");
+        this.setHint("Tap the second point, then type how far apart they should be.");
       } else {
         if (this.edit.refA && Math.hypot(s.uv[0] - this.edit.refA[0], s.uv[1] - this.edit.refA[1]) < 1e-9) return this.app.ui.toast("Tap a point away from the first one");
         this.edit.refB = s.uv;
         this.edit.factor = 1;
         this.edit.picking = undefined;
-        this.setHint("Type the distance the two points should be apart, then Enter");
+        this.setHint("Type how far apart the two points should be, then Enter.");
       }
       this.updatePanel();
       this.refreshPreview();
@@ -4380,7 +4380,7 @@ export class SketchTool implements Tool {
       else this.projectOut.push(hit.entity);
       this.selected = new Set(this.projectOut);
       this.showSelection();
-      return this.setHint(this.projectOut.length ? "Now tap where to project to: a plane or a flat face parallel to this sketch (or tap more curves)" : undefined);
+      return this.setHint(this.projectOut.length ? "Now tap a flat face or plane, parallel to this sketch, to copy them onto (or tap more lines)" : undefined);
     }
     if (this.projectOut.length) {
       if (hit?.kind === "plane") {

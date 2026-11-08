@@ -157,8 +157,9 @@ export class UI {
   }
 
   /**
-   * Touch screens show tools as icons only: press and hold one to see its name
-   * in the middle of the screen. Let go on it to use it; slide off it to not.
+   * Touch screens show buttons as icons only: press and hold one (a tool, a
+   * right-column button, the view cube's, undo...) to see its name in the
+   * middle of the screen. Let go on it to use it; slide off it to not.
    */
   private holdLabels(): void {
     const ghost = el("div", "tool-ghost");
@@ -177,15 +178,19 @@ export class UI {
       "pointerdown",
       (e) => {
         if (e.pointerType === "mouse") return;
-        const btn = (e.target as HTMLElement).closest<HTMLElement>("#toolbar .tool, #bottom-left .tool, #flyout .tool");
-        if (!btn) return;
+        const btn = (e.target as HTMLElement).closest<HTMLElement>(".tool, button, [role=button]");
+        // Icon buttons only (one with its name written on it says it already).
+        if (!btn || !btn.querySelector("svg") || btn.closest(".dialog, .menu")) return;
+        // Just the name: "Undo (Ctrl Z)" reads "Undo", "Zoom to fit (F)" "Zoom to fit".
+        const name = (btn.dataset.label || btn.title || btn.getAttribute("aria-label") || "").replace(/\s*\([^)]*\)$/, "");
+        if (!name) return;
         swallow = null;
         held = {
           btn,
           id: e.pointerId,
           off: false,
           timer: window.setTimeout(() => {
-            ghost.textContent = btn.dataset.label ?? btn.title;
+            ghost.textContent = name;
             ghost.hidden = false;
           }, 220),
         };
@@ -218,7 +223,7 @@ export class UI {
     document.addEventListener(
       "click",
       (e) => {
-        if (swallow && (e.target as HTMLElement).closest(".tool") === swallow) {
+        if (swallow && swallow.contains(e.target as Node)) {
           e.stopImmediatePropagation();
           e.preventDefault();
         }
@@ -227,7 +232,7 @@ export class UI {
       true,
     );
     // The long press shouldn't open the browser's own menu.
-    document.addEventListener("contextmenu", (e) => (e.target as HTMLElement).closest?.(".tool") && e.preventDefault());
+    document.addEventListener("contextmenu", (e) => (e.target as HTMLElement).closest?.(".tool, button") && e.preventDefault());
   }
 
   toggleHistory(open?: boolean): void {
@@ -403,7 +408,9 @@ export class UI {
         this.popover.style.top = `${Math.min(r.bottom + 6, window.innerHeight - this.popover.offsetHeight - 8)}px`;
       } else {
         this.popover.style.right = "";
-        this.popover.style.top = `${Math.max(8, Math.min(r.top, window.innerHeight - this.popover.offsetHeight - 8))}px`;
+        // Phones: below the top bar, like History.
+        const topMin = window.innerWidth <= 720 || window.innerHeight <= 500 ? 52 : 8;
+        this.popover.style.top = `${Math.max(topMin, Math.min(r.top, window.innerHeight - this.popover.offsetHeight - 8))}px`;
       }
       document.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));
       b.classList.add("pop-open");

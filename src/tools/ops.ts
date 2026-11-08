@@ -170,8 +170,8 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
   }
 
   protected hint(): string {
-    if (this.offsetsFace()) return "Drag the arrow or type how far the face moves: out adds, negative moves it in. The faces around it follow.";
-    return "Drag the arrow or type a distance. Negative values cut.";
+    if (this.offsetsFace()) return "Drag the arrow or type a distance to push or pull the face. The faces around it follow.";
+    return "Drag the arrow or type a distance to make it 3D. A negative distance cuts into the body.";
   }
 
   protected items(): PanelItem[] {
@@ -405,7 +405,7 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
   }
 
   protected hint(): string {
-    return `Drag the dot or type a ${this.feature.type === "fillet" ? "radius" : "distance"}. Tap more edges to add them.`;
+    return this.feature.type === "fillet" ? "Drag the dot or type a size to round the edge. Tap more edges to round them too." : "Drag the dot or type a size to cut the edge off at a slant. Tap more edges to add them.";
   }
 
   protected items(): PanelItem[] {
@@ -584,7 +584,7 @@ export class RevolveOp extends FeatureOp<RevolveFeature> {
   private typing = new DragTyping(this.app);
 
   protected hint(): string {
-    return "Set the angle (360° is a full turn). Drag the arrow on the axis to move along it while turning - with more than 360° that makes a thread or a spring.";
+    return "Set how far the shape spins around the axis (360° is a full turn). Drag the arrow along the axis to make a spring.";
   }
 
   protected items(): PanelItem[] {
@@ -694,7 +694,7 @@ export class SweepOp extends FeatureOp<SweepFeature> {
   }
 
   protected hint(): string {
-    return "Tap more curves to extend the path. Done when ready.";
+    return "The shape follows the path. Tap more lines to make the path longer.";
   }
 
   protected items(): PanelItem[] {
@@ -713,7 +713,7 @@ export class LoftOp extends FeatureOp<LoftFeature> {
   }
 
   protected hint(): string {
-    return "Tap profiles in the order the shape should pass through them.";
+    return "Tap the shapes in order: the body passes through each one.";
   }
 
   protected items(): PanelItem[] {
@@ -757,7 +757,7 @@ export class ShellOp extends FeatureOp<ShellFeature> {
   }
 
   protected hint(): string {
-    return "Tap faces to remove (open). Set the wall thickness.";
+    return "Tap the faces to leave open, and set how thick the walls are.";
   }
 
   protected items(): PanelItem[] {
@@ -924,13 +924,13 @@ export class TransformOp extends FeatureOp<TransformFeature> {
   protected hint(): string {
     switch (this.kind) {
       case "move":
-        return "Drag an arrow, square or arc of the gimbal - or type exact values. Tap empty space when done.";
+        return "Drag an arrow to slide it, an arc to turn it, or type exact values. Tap empty space when done.";
       case "mirror":
-        return "Mirror creates a copy unless you turn Copy off.";
+        return "The body is flipped across the plane. A copy is made unless you turn Copy off.";
       case "translate":
-        return "Tap a point on the body (a corner, edge or face), then the point it should move to.";
+        return "Tap a point on the body, then the point it should move to.";
       default:
-        return `${TITLES[this.kind]}: set the values, then Done.`;
+        return ({ rotate: "Set the angle to turn the body around the axis.", linear: "Set how many copies and how far apart, along the direction.", circular: "Set how many copies to place around the axis." } as Record<string, string>)[this.kind] ?? `${TITLES[this.kind]}: set the values, then tap empty space.`;
     }
   }
 
@@ -1203,7 +1203,7 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
   }
 
   protected hint(): string {
-    return "Drag an arrow to move it, an arc to tilt or turn it - or type a value while dragging.";
+    return "Drag an arrow to move the face, or an arc to tilt it. You can type a value while dragging.";
   }
 
   protected items(): PanelItem[] {
@@ -1385,8 +1385,8 @@ export class ScaleOp extends FeatureOp<TransformFeature> {
 
   protected hint(): string {
     return this.xyz
-      ? "Drag an axis handle to stretch the body along it only, or the centre for all three - type a factor while dragging."
-      : "Drag a handle (or the centre) to scale - type a factor while dragging (e.g. 2 doubles the size).";
+      ? "Drag one handle to stretch the body that way, or the centre to resize it evenly. Type a number while dragging (2 = twice)."
+      : "Drag a handle to resize. Type a number while dragging (2 = twice as big).";
   }
 
   protected items(): PanelItem[] {
@@ -1512,7 +1512,7 @@ export class ScaleRefOp extends FeatureOp<TransformFeature> {
   }
 
   protected hint(): string {
-    return "Type what the distance between the two points should be - the bodies scale to it.";
+    return "Type the new distance between the two points. The body resizes to match.";
   }
 
   protected items(): PanelItem[] {
@@ -1585,7 +1585,7 @@ export class ScaleFaceOp extends FeatureOp<ScaleFaceFeature> {
   }
 
   protected hint(): string {
-    return "Drag a handle to scale the face along it, or the centre for both - type a factor while dragging. The sides tilt to follow.";
+    return "Drag a handle to stretch the face one way, or the centre for both. The sides tilt to follow.";
   }
 
   protected items(): PanelItem[] {
@@ -1701,7 +1701,7 @@ export class ReplaceFaceOp extends FeatureOp<ReplaceFaceFeature> {
   }
 
   protected hint(): string {
-    return "Tap the face or plane it should move onto.";
+    return "Tap the face or plane this face should move onto.";
   }
 
   protected items(): PanelItem[] {
@@ -1756,7 +1756,7 @@ export class ImageOp extends FeatureOp<ImageFeature> {
   }
 
   protected hint(): string {
-    return "Drag the gimbal to move or rotate the image; set its width and opacity.";
+    return "Drag the arrows to place the image. Set its width and how see-through it is in the card.";
   }
 
   protected items(): PanelItem[] {
@@ -1881,7 +1881,7 @@ export class PlaneMoveOp extends FeatureOp<PlaneFeature> {
   }
 
   protected hint(): string {
-    return this.copy ? "Drag the gimbal to place a copy of the plane - tap empty space when done." : "Drag the gimbal to move or turn the plane - tap empty space when done.";
+    return this.copy ? "Drag the arrows to place a copy of the plane. Tap empty space when done." : "Drag the arrows to move or turn the plane. Tap empty space when done.";
   }
 
   protected items(): PanelItem[] {
@@ -2077,7 +2077,7 @@ export class SplitOp extends FeatureOp<SplitFeature> {
   }
 
   protected hint(): string {
-    return "The body is cut in two along the plane.";
+    return "The body is cut in two where the plane crosses it.";
   }
 
   protected items(): PanelItem[] {
@@ -2102,7 +2102,7 @@ export class FillToPlaneOp extends FeatureOp<FillToPlaneFeature> {
   }
 
   protected hint(): string {
-    return this.plane ? "The gap from the surface to the plane is filled: sides straight to it, the bottom its outline on the plane." : "Pick the plane to fill to (an origin plane, a construction plane or a flat face).";
+    return this.plane ? "The space between the face and the plane is filled in." : "Tap the plane or flat face to fill up to.";
   }
 
   protected items(): PanelItem[] {
@@ -2138,8 +2138,8 @@ export class ThreadOp extends FeatureOp<ThreadFeature> {
 
   protected hint(): string {
     return this.round.hole
-      ? `${this.label()}. Holes are threaded from the tap-drill size (nominal − pitch).`
-      : `${this.label()}. Change the pitch for a fine thread.`;
+      ? `${this.label()}. The thread is cut into the wall of the hole.`
+      : `${this.label()}. A smaller pitch makes a finer thread.`;
   }
 
   protected items(): PanelItem[] {
@@ -2179,7 +2179,7 @@ export class PlaneOp extends FeatureOp<PlaneFeature> {
   private typing = new DragTyping(this.app);
 
   protected hint(): string {
-    return this.base ? "Drag the arrow or type the offset (negative goes the other way)." : "Offset the new plane from a face or plane.";
+    return this.base ? "Drag the arrow or type how far away the new plane goes (negative: the other way)." : "Tap a face or plane to start the new plane from.";
   }
 
   protected items(): PanelItem[] {
@@ -2298,7 +2298,7 @@ export class MidplaneOp extends FeatureOp<PlaneFeature> {
   }
 
   protected hint(): string {
-    return "A plane halfway between two parallel planes or faces.";
+    return "Tap two facing faces or planes: the new plane goes halfway between them.";
   }
 
   protected items(): PanelItem[] {
@@ -2314,7 +2314,7 @@ export class AxisOp extends FeatureOp<AxisFeature> {
   }
 
   protected hint(): string {
-    return "Construction axis through the point shown - type where it should pass (X / Y / Z). Done to keep it.";
+    return "A helper line to turn or mirror around. Type X / Y / Z to move it, then tap empty space.";
   }
 
   /**

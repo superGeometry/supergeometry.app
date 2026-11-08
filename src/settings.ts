@@ -40,6 +40,8 @@ export interface Settings {
   numpad: boolean;
   /** The guide text (what to tap next) - switched in More. */
   showHints: boolean;
+  /** Offline mode: the app's files are kept on this device (More → Offline mode). */
+  offline: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -65,6 +67,7 @@ const DEFAULTS: Settings = {
   // On by default on touch screens (phones, tablets, headsets).
   numpad: isTouchDevice,
   showHints: true,
+  offline: false,
   version: 4,
 };
 

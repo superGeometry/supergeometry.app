@@ -53,7 +53,7 @@ export class SectionTool implements Tool {
   private askForPlane(): void {
     this.app.view.setOriginPlanesVisible(true);
     this.app.ui.showPanel(null);
-    this.app.ui.setHint("Select a plane or a flat face to cut the view with.");
+    this.app.ui.setHint("Tap a plane or a flat face to cut the view there, so you can see inside.");
   }
 
   hover(p: ToolPointer | null): void {
@@ -86,7 +86,7 @@ export class SectionTool implements Tool {
     const s = this.app.section!;
     this.handle ??= new Handle(this.app.view, "arrow");
     this.placeHandle();
-    this.app.ui.setHint("Drag the arrow to move the cut. Section View stays on until you delete it.");
+    this.app.ui.setHint("Drag the arrow to move the cut. It stays until you delete it in History.");
     this.app.ui.showPanel({
       title: "Section View",
       items: [

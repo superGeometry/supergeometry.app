@@ -2655,6 +2655,37 @@ form.dialog {
   }
 }
 
+/* Phones sideways with History open: the guide text under the top bar, right
+   of the tool column and clear of the view cube (not hidden: it's how a
+   beginner learns each tool). */
+@media (max-height: 500px) and (min-width: 721px) and (max-width: 1100px) {
+  html body.history-open #hint {
+    display: block;
+    top: calc(52px + var(--safe-t));
+    bottom: auto;
+    left: calc(66px + var(--safe-l));
+    right: auto;
+    transform: none;
+    width: auto;
+    max-width: calc(100vw - 540px - var(--safe-l) - var(--safe-r));
+  }
+}
+
+/* Phones sideways: like upright, the sketch tools show their names until one
+   is picked; tapping the picked tool again shows them (and hides them) again. */
+@media (max-height: 500px) and (min-width: 721px) {
+  html body.sketching #toolbar .tool-label {
+    display: flex;
+  }
+  html body.sketching.sketch-compact #toolbar .tool-label {
+    display: none;
+  }
+  /* The names cover where the guide text sits: it's back once a tool is picked. */
+  html body.sketching:not(.sketch-compact) #hint {
+    visibility: hidden;
+  }
+}
+
 /* Fullscreen on a tablet (touch, wide): Safari's close button sits at the top
    left, so the top bar starts a little to the right of it. */
 @media (pointer: coarse) and (min-width: 721px) {
@@ -2947,20 +2978,36 @@ body.history-open #viewcube-host {
     right: calc(182px + var(--safe-r));
   }
 }
-/* Phones sideways: the column's buttons slimmer, so all of them (nine while
-   sketching) fit its height without a scroll bar. */
+/* Phones: the right column's cards (Snap, Units...) no taller than History -
+   longer ones scroll inside. */
+@media (max-width: 720px) and (orientation: portrait) {
+  #popover {
+    max-height: 45vh;
+  }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  #popover {
+    max-height: calc(100vh - 60px - var(--safe-t) - var(--safe-b));
+  }
+}
+/* Phones sideways: the column's buttons a little shorter but wider (easy to
+   tap), so all of them (nine while sketching) fit its height without a scroll bar. */
 @media (orientation: landscape) and (max-height: 500px) {
   #right-col {
     gap: 1px;
     padding: 3px;
   }
   .right-btn {
-    min-height: 30px;
+    width: 48px;
+    min-height: 31px;
     gap: 0;
   }
+  #viewcube-host {
+    right: calc(70px + var(--safe-r));
+  }
   .right-btn svg {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
   }
   .right-label {
     font-size: 8.5px;

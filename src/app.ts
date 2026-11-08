@@ -40,6 +40,7 @@ import { PivotButton } from "./ui/pivot";
 import { HelpPanel } from "./ui/help";
 import { icons } from "./ui/icons";
 import { Updates } from "./ui/update";
+import { Offline } from "./ui/offline";
 import { Install } from "./ui/install";
 import { exportThreeMF } from "./io/threemf";
 import { sketchToDXF } from "./io/dxf";
@@ -631,7 +632,8 @@ export class App implements AppContext {
       wait(label, ["body", "face", "edge"], () => this.setTool(new TransformOp(this, kind, bodies())));
     const src = () => sourcesOf(this, this.selection)[0];
     return [
-      { id: "sketch", label: "Sketch", icon: "sketch", shortcut: "S", run: () => this.setTool(new SketchTool(this)) },
+      // An empty project: Sketch pulses - that's where to start.
+      { id: "sketch", label: "Sketch", icon: "sketch", shortcut: "S", pulse: this.store.features.length === 0, run: () => this.setTool(new SketchTool(this)) },
       {
         // Smooth shapes from a control cage.
         id: "freeform",
@@ -900,6 +902,11 @@ export class App implements AppContext {
       paintHints();
       this.ui.refreshHint();
     });
+    // Offline mode: the app kept on this device, so it works with no connection.
+    const offlineState = document.getElementById("m-offline-state")!;
+    const offline = new Offline((t, k) => this.ui.toast(t, k), (state) => (offlineState.textContent = state));
+    this.updates.offline = { get on() { return settings.value.offline; }, download: (fresh) => offline.download(fresh) };
+    moreItem("m-offline", () => void offline.toggle());
     moreItem("m-tutorial", () => {});
     // About: the README, in the app. Support links open in a new tab (no access back to this page).
     moreItem("m-about", () => showAbout());

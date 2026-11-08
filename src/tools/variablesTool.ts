@@ -24,7 +24,7 @@ export class VariablesTool implements Tool {
 
   private showCard(): void {
     const n = this.app.store.doc.variables.length;
-    this.app.ui.setHint(n ? "Tap a variable's tag to change it - type a value or a formula, or drag the value. The model follows." : "No variables yet: make one, then use it in any value box (ƒx).");
+    this.app.ui.setHint(n ? "Tap a variable to change its value. Everything that uses it updates." : "No variables yet. Make one, then use it in any value box (ƒx).");
     this.app.ui.showPanel({
       title: "Variables",
       items: [
