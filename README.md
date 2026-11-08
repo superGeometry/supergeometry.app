@@ -307,7 +307,7 @@ sketch. A sketch stays in view until every region of it is used.
   into that box. Enter confirms. **Press on any value box and drag left or
   right** to turn the value down or up like a wheel. Units come from **Units & grid** (mm, cm, m, in, ft);
   you can also type units (`2in`, `5cm`) and maths (`40/3 + 2`).
-- **Variables** (Insert → Variables → New Variable / Edit Variables) are named sizes like `wall = 3`.
+- **Variables** (the Variables button under Measure: change them there, or New Variable at the top) are named sizes like `wall = 3`.
   Type them into any field (`wall * 2`) or pick them from the **ƒx** menu
   next to a value. Change the variable later and everything using it updates.
 - The **on-screen numpad** (the keypad button in the right column - tap it

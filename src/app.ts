@@ -596,17 +596,6 @@ export class App implements AppContext {
         label: "Insert",
         icon: "insert",
         children: [
-          {
-            // One entry: make a new one, or see and change the ones there are.
-            id: "variables",
-            label: "Variables",
-            icon: "variable",
-            sub: `${this.store.doc.variables.length} defined`,
-            children: [
-              { id: "var", label: "New Variable", icon: "variableNew", run: () => void createVariable(this) },
-              { id: "vars", label: "Edit Variables", icon: "variableEdit", sub: `${this.store.doc.variables.length} defined`, run: () => void editVariables(this) },
-            ],
-          },
           { id: "image", label: "Image", icon: "image", run: () => void insertImage(this).then((f) => f && this.setTool(new ImageOp(this, f))) },
           { id: "file", label: "File", icon: "file", sub: "STEP, STL, OBJ, DXF, SVG", run: () => void insertFile(this) },
           { id: "project", label: "Project", icon: "file", sub: ".super", run: () => void insertFile(this) },
@@ -727,13 +716,6 @@ export class App implements AppContext {
           { id: "wrap", label: "Wrap & Emboss", icon: "wrap", disabled: true, why: SOON },
         ],
       },
-      // With variables set up: Edit Variables in a box of its own under the tools.
-      ...(this.store.doc.variables.length
-        ? [
-            { id: "===vars", label: "", icon: "variableEdit" as const },
-            { id: "editVars", label: "Edit Variables", icon: "variableEdit" as const, sub: `${this.store.doc.variables.length} defined`, run: () => void editVariables(this) },
-          ]
-        : []),
     ];
   }
 
@@ -741,6 +723,8 @@ export class App implements AppContext {
     return [
       { id: "section", label: "Section View", icon: "section", sub: this.section ? "On" : this.lastSection ? "Off · tap to show" : "Off", active: !!this.section, run: () => this.toggleSection() },
       { id: "measure", label: "Measure", icon: "measure", run: () => this.setTool(new MeasureTool(this)) },
+      // See and change the variables, or make a new one (at the window's top).
+      { id: "variables", label: "Variables", icon: "variable", sub: this.store.doc.variables.length ? `${this.store.doc.variables.length} defined` : "None yet", run: () => void editVariables(this) },
       this.isolated
         ? { id: "isolate", label: "Isolate", icon: "isolate", sub: "On - tap to show all", active: true, run: () => this.isolate(null) }
         : {

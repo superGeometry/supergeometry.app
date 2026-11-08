@@ -502,7 +502,11 @@ export class UI {
   }
 
   /** Small modal form; resolves with the values, or null if cancelled. */
-  dialog(title: string, fields: { key: string; label: string; value: string; placeholder?: string }[], note?: string): Promise<Record<string, string> | null> {
+  /**
+   * A window of fields; resolves with their values, or null (Cancel / Esc / X).
+   * `action`: a button at the top (e.g. New Variable); it resolves with the values too, and ACTION set.
+   */
+  dialog(title: string, fields: { key: string; label: string; value: string; placeholder?: string }[], note?: string, action?: { label: string; icon: IconName }): Promise<Record<string, string> | null> {
     return new Promise((resolve) => {
       const back = el("div", "dialog-back");
       const box = el("form", "dialog");
@@ -516,6 +520,15 @@ export class UI {
       x.addEventListener("click", () => close(null));
       head.append(x);
       box.append(head);
+      const values = () => Object.fromEntries(fields.map((f, i) => [f.key, inputs[i].value]));
+      if (action) {
+        const a = el("button", "text-btn dialog-action");
+        a.type = "button";
+        a.innerHTML = icons[action.icon];
+        a.append(action.label);
+        a.addEventListener("click", () => close({ ...values(), [DIALOG_ACTION]: "1" }));
+        box.append(a);
+      }
       if (note) box.append(el("div", "dialog-note", note));
       // The fields scroll inside the window; the title and the buttons stay in sight.
       const list = el("div", "dialog-list");
@@ -538,7 +551,7 @@ export class UI {
         resolve(v);
       };
       row.append(textButton("Cancel", "Esc", () => close(null)));
-      const ok = textButton("OK", "Enter", () => close(Object.fromEntries(fields.map((f, i) => [f.key, inputs[i].value]))), true);
+      const ok = textButton("OK", "Enter", () => close(values()), true);
       row.append(ok);
       box.append(row);
       box.addEventListener("submit", (e) => (e.preventDefault(), ok.click()));
@@ -1358,24 +1371,15 @@ function usable(items: ToolItem[]): ToolItem[] {
     } else out.push(item);
   }
   // No separators at the ends or twice in a row.
-  const mark = (x: ToolItem) => x.id.startsWith("---") || x.id.startsWith("===");
-  return out.filter((x, i, a) => !mark(x) || (i > 0 && i < a.length - 1 && !mark(a[i - 1])));
+  return out.filter((x, i, a) => !x.id.startsWith("---") || (i > 0 && i < a.length - 1 && !a[i - 1].id.startsWith("---")));
 }
 
 function renderTools(host: HTMLElement, all: ToolItem[], onFlyout: (item: ToolItem, btn: HTMLElement) => void, after?: () => void): void {
   host.innerHTML = "";
   const items = usable(all);
-  // "===" starts a box of its own (a gap between): the items go in groups.
-  const grouped = items.some((x) => x.id.startsWith("==="));
-  host.classList.toggle("grouped", grouped);
-  let into: HTMLElement = grouped ? host.appendChild(el("div", "tool-group")) : host;
   for (const item of items) {
-    if (item.id.startsWith("===")) {
-      into = host.appendChild(el("div", "tool-group"));
-      continue;
-    }
     if (item.id.startsWith("---")) {
-      into.append(el("div", "tool-sep"));
+      host.append(el("div", "tool-sep"));
       continue;
     }
     const b = toolButton(item, true);
@@ -1388,9 +1392,8 @@ function renderTools(host: HTMLElement, all: ToolItem[], onFlyout: (item: ToolIt
         after?.();
       }
     });
-    into.append(b);
+    host.append(b);
   }
-  for (const g of host.querySelectorAll(".tool-group:empty")) g.remove();
 }
 
 function toolButton(item: ToolItem, withLabel: boolean): HTMLButtonElement {
@@ -1480,6 +1483,9 @@ function iconButton(icon: IconName, title: string, run: () => void): HTMLButtonE
   });
   return b;
 }
+
+/** Set in a dialog's result when its top button was tapped (a key no field can have). */
+export const DIALOG_ACTION = " action";
 
 export function textButton(label: string, kbd: string, run: () => void, primary = false): HTMLButtonElement {
   const b = document.createElement("button");

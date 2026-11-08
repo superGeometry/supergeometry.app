@@ -44,7 +44,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "union", name: "Union / Subtract / Intersect", text: "Combine bodies, cut one from another, or keep only where they overlap. Union needs the bodies to touch. Subtract / Intersect: tap the body to change (marked +), then the bodies to cut with (marked −); Keep modified body / Keep subtracted bodies leave copies. Two overlapping bodies picked: all three are in the list." },
       { icon: "tools", name: "Tools", text: "Split Body (by a plane or face), Fill to Plane (an open freeform surface filled down to a plane becomes a solid), Thread (tap a round face or a hole's rim: ISO pitch, outside or inside, left-hand as an option), Repair Body (fixes an imported or broken body without changing its shape), Offset Face, Offset Edge (tap a straight edge, then a flat face: a line on that face parallel to the edge at the distance you type, running right across the face from edge to edge - it splits the face into shapes to extrude or cut; with a face selected it's Offset from Edge: tap the edge next)." },
       { icon: "construct", name: "Construct", text: "Helper planes - offset, midplane, through 3 points, on a curve, perpendicular to an edge, through an edge at an angle, parallel to a face - each with its own mark at a corner; and axes (from a face or edge, or along X / Y / Z through a point you type)." },
-      { icon: "insert", name: "Insert", text: "Variables (New Variable, or Edit Variables to see and change them), images to trace over (on the floor, front or side, at the X / Y you type), STEP/STL/SVG/DXF files." },
+      { icon: "insert", name: "Insert", text: "Images to trace over (on the floor, front or side, at the X / Y you type), STEP/STL/SVG/DXF files." },
     ],
   },
   {
@@ -99,6 +99,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "undo", name: "Undo / Redo", text: "Step back and forward (Ctrl Z / Ctrl Y)." },
       { icon: "section", name: "Section View", text: "Cut the view open to see inside - the cut shows as a solid face with a thick outline; tap again to hide it (it's remembered). Place Plane in its card puts a construction plane where the cut is." },
       { icon: "measure", name: "Measure", text: "Distances, angles and sizes between anything you tap; pin them to keep them on screen." },
+      { icon: "variable", name: "Variables", text: "Named sizes like wall = 3, to use in any field (wall * 2). Change one and everything using it updates; New Variable at the top makes another." },
       { icon: "isolate", name: "Isolate", text: "Show only the selected bodies (and sketches drawn on their faces - tap a shape on one to extrude, offset... it); tap again to show everything." },
     ],
   },

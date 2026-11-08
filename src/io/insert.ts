@@ -6,6 +6,7 @@ import { GROUND } from "../geom";
 import { uid } from "../sketch/edit";
 import type { AppContext } from "../tools/tool";
 import { evaluate, fmtLen, setVariables } from "../units";
+import { DIALOG_ACTION } from "../ui/ui";
 import { parseSVG } from "./svg";
 
 export function pickFile(accept: string): Promise<File | null> {
@@ -116,24 +117,36 @@ export async function createVariable(app: AppContext, value = ""): Promise<strin
   return name;
 }
 
-/** Edit every variable at once; changing one rebuilds everything that uses it. */
+/**
+ * The Variables window: every variable at once (changing one rebuilds everything
+ * that uses it), and New Variable at its top. Making one keeps what was typed,
+ * then comes back here with the new one in the list.
+ */
 export async function editVariables(app: AppContext): Promise<void> {
-  const list = app.store.doc.variables;
-  if (!list.length) return void createVariable(app);
-  const v = await app.ui.dialog(
-    "Variables",
-    list.map((x) => ({ key: x.name, label: x.name, value: x.expr })),
-    "Change a value to update every feature that uses it. Clear a value to delete the variable.",
-  );
-  if (!v) return;
-  const next = list.filter((x) => v[x.name]?.trim()).map((x) => ({ name: x.name, expr: v[x.name].trim() }));
-  setVariables(next);
-  const bad = next.find((x) => evaluate(x.expr) === null);
-  if (bad) {
-    setVariables(list);
-    return app.ui.toast(`"${bad.expr}" isn't a valid value for ${bad.name}`, "error");
+  for (;;) {
+    const list = app.store.doc.variables;
+    const v = await app.ui.dialog(
+      "Variables",
+      list.map((x) => ({ key: x.name, label: x.name, value: x.expr })),
+      list.length
+        ? "Change a value to update every feature that uses it. Clear a value to delete the variable."
+        : "No variables yet. Make one, then use it in any field, e.g. width*2 or wall + 1mm.",
+      { label: "New Variable", icon: "variableNew" },
+    );
+    if (!v) return;
+    if (list.length) {
+      const next = list.filter((x) => v[x.name]?.trim()).map((x) => ({ name: x.name, expr: v[x.name].trim() }));
+      setVariables(next);
+      const bad = next.find((x) => evaluate(x.expr) === null);
+      if (bad) {
+        setVariables(list);
+        return app.ui.toast(`"${bad.expr}" isn't a valid value for ${bad.name}`, "error");
+      }
+      if (next.some((x, i) => x.name !== list[i]?.name || x.expr !== list[i]?.expr) || next.length !== list.length) app.store.commit((d) => (d.variables = next));
+    }
+    if (!v[DIALOG_ACTION]) return;
+    await createVariable(app);
   }
-  app.store.commit((d) => (d.variables = next));
 }
 
 export async function editImage(app: AppContext, f: ImageFeature): Promise<void> {
