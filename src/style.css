@@ -2207,6 +2207,99 @@ form.dialog {
     gap: 8px;
   }
 }
+/* A phone on its side: too short for the window's parts one under another.
+   Two columns under the title bar - the words and the support buttons on
+   the left, the projects on the right - so it all fits without scrolling. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .dialog.library {
+    display: grid;
+    grid-template-columns: minmax(240px, 34%) minmax(0, 1fr);
+    grid-template-areas:
+      "head head"
+      "welcome section"
+      "welcome grid"
+      "support grid"
+      "support note";
+    grid-template-rows: auto auto auto 1fr auto;
+    align-content: start;
+    gap: 6px 14px;
+    padding: 10px 12px;
+    width: min(900px, calc(100vw - 24px - var(--safe-l, 0px) - var(--safe-r, 0px)));
+    overflow: hidden;
+  }
+  .dialog.library > .library-head {
+    grid-area: head;
+  }
+  .dialog.library > .library-welcome {
+    grid-area: welcome;
+    align-self: start;
+    font-size: 12.5px;
+    line-height: 1.4;
+    padding: 8px 10px;
+  }
+  .dialog.library > .library-section {
+    grid-area: section;
+    margin: 0;
+  }
+  .dialog.library > .library-grid {
+    grid-area: grid;
+    align-self: start;
+    grid-auto-columns: 168px;
+    gap: 8px;
+    padding-bottom: 8px;
+  }
+  .dialog.library > .library-support {
+    grid-area: support;
+    padding: 8px;
+    gap: 6px;
+  }
+  .dialog.library > .library-note {
+    grid-area: note;
+    align-self: end;
+    font-size: 11px;
+  }
+  /* The buttons say it: the sentence above them goes. */
+  .library-support-text {
+    display: none;
+  }
+  .library-support-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+  .library-support-btn {
+    min-height: 0;
+    padding: 2px 8px 2px 2px;
+  }
+  .library-support-logo {
+    width: 26px;
+    height: 26px;
+  }
+  .library-support-name {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .library-support-name b {
+    flex: none;
+  }
+  .library-support-name span {
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Its Boost tag says what it's for: the name gets the room. */
+  .library-support-btn:has(.library-support-tag) .library-support-name span {
+    display: none;
+  }
+  .library-date {
+    white-space: nowrap;
+  }
+  .library-info {
+    padding: 4px 2px 4px 8px;
+  }
+}
 
 /* ---------------------------------------------------------- small screens */
 
