@@ -15,7 +15,7 @@ import {
   type Face,
   type Wire,
 } from "replicad";
-import type { PlaneDef, SketchEntity, Vec2 } from "../doc/types";
+import type { PlaneDef, SketchEntity, Vec2, Vec3 } from "../doc/types";
 import { toWorld } from "../geom";
 import { entityPrims, evalPrim, isClosedPrim, SPLINE_PER_SPAN, splineSpanAt, splineSpans, type Prim } from "../sketch/curves";
 import { arrangement, resolveRegion, type Arrangement, type Loop, type LoopRef, type Piece, type RegionRef } from "../sketch/regions";
@@ -53,7 +53,36 @@ export function entitiesWire(entities: SketchEntity[], ids: string[], plane: Pla
       else edges.push(exactSpline(p, 0, 1, plane) ?? bspline(Array.from({ length: 65 }, (_, i) => evalPrim(p, i / 64)), plane));
     }
   }
-  return assembleWire(edges);
+  return assembleWire(endToEnd(edges));
+}
+
+/**
+ * Path curves in the order they run, whatever order they were picked or drawn
+ * in: a fillet's arc is added after the two lines it joins, and the wire was
+ * built in list order - it stopped at the first gap, so a string swept over a
+ * rounded saddle ended there (10 mm of a 650 mm path), with no error.
+ */
+function endToEnd(edges: Edge[]): Edge[] {
+  if (edges.length < 3) return edges;
+  const ends = edges.map((e) => [e.startPoint.toTuple(), e.endPoint.toTuple()] as Vec3[]);
+  const size = Math.max(1, ...ends.flat().map((q) => Math.hypot(q[0], q[1], q[2])));
+  const tol = size * 1e-7;
+  const same = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < tol;
+  const touching = (q: Vec3, skip: number) => ends.some((pair, j) => j !== skip && pair.some((x) => same(x, q)));
+  // Start at a loose end (an open path), else anywhere (a closed one).
+  let first = ends.findIndex((pair, i) => pair.some((q) => !touching(q, i)));
+  if (first < 0) first = 0;
+  const order = [first];
+  const used = new Set(order);
+  let tip = touching(ends[first][1], first) ? ends[first][1] : ends[first][0];
+  while (order.length < edges.length) {
+    const next = ends.findIndex((pair, j) => !used.has(j) && pair.some((q) => same(q, tip)));
+    if (next < 0) return edges; // not one chain: as it was
+    order.push(next);
+    used.add(next);
+    tip = same(ends[next][0], tip) ? ends[next][1] : ends[next][0];
+  }
+  return order.map((i) => edges[i]);
 }
 
 function loopWire(arr: Arrangement, loop: Loop, plane: PlaneDef): Wire {
@@ -248,6 +277,19 @@ function exactSpline(p: Prim, t0: number, t1: number, plane: PlaneDef, a?: Vec2,
     const curve = new oc.Geom_BSplineCurve(arr, knots, mults, 3, false);
     const tol = 1e-6 * Math.max(1, ...poles.map((q) => Math.hypot(q[0], q[1])));
     for (let i = 2; i <= m; i++) curve.RemoveKnot(i, 2, tol);
+    // A whole closed spline: one periodic curve, smooth where it starts too.
+    // Left as an open curve whose ends meet, its start was a seam - a fillet
+    // round the bottom of a guitar body pulled up from it failed there.
+    if (ctrl.closed && Math.abs(f1 - f0 - spans) < 1e-9 && Math.hypot(poles[0][0] - poles[poles.length - 1][0], poles[0][1] - poles[poles.length - 1][1]) < tol) {
+      try {
+        curve.SetPeriodic();
+        curve.RemoveKnot(curve.FirstUKnotIndex(), 2, tol);
+        const k0 = curve.FirstUKnotIndex();
+        curve.SetOrigin((curve.Knot(k0) + curve.Knot(k0 + 1)) / 2, 1e-9);
+      } catch {
+        // (stays as it was)
+      }
+    }
     const mk = new oc.BRepBuilderAPI_MakeEdge(curve);
     const edge = cast(mk.Edge()) as Edge;
     mk.delete();

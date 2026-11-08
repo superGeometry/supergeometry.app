@@ -143,6 +143,25 @@ function filletEnding(body: Shape3D, F: Face, g: Face, cy: Cyl): [PlaneDef, Plan
   return pls;
 }
 
+/**
+ * The plane a curved face g touches all along its one straight edge with F
+ * (its normal the same the whole way: a curve pulled straight), else null.
+ */
+function tangentPlaneAlong(F: Face, g: Face): PlaneDef | null {
+  const shared = g.edges.filter((e) => F.edges.some((fe) => fe.isSame(e)));
+  if (shared.length !== 1 || shared[0].geomType !== "LINE") return null;
+  const e = shared[0];
+  try {
+    const ns = [0, 0.5, 1].map((t) => norm(tup(g.normalAt(e.pointAt(t)))));
+    if (ns.some((n) => dot(n, ns[0]) < 1 - 1e-9)) return null;
+    const dir = norm(tup(e.tangentAt(0.5)));
+    if (Math.abs(dot(dir, ns[0])) > 1e-6) return null;
+    return { origin: tup(e.pointAt(0.5)), normal: ns[1], xDir: dir };
+  } catch {
+    return null;
+  }
+}
+
 /** Faces sharing an edge with F. */
 function neighbours(body: Shape3D, F: Face): Face[] {
   const edges = F.edges;
@@ -190,6 +209,15 @@ function regionAround(body: Shape3D, F: Face, nb: Face[], q: Vec3, L: number): S
       const radial = len(sub(rel, scale(cy.a, dot(rel, cy.a))));
       (radial < cy.r ? keep : remove).push(infiniteCylinder(cy, cy.r, L));
     } else {
+      // A curve pulled straight (a spline side extruded) meeting F along a
+      // straight edge: it carries on along its tangent there. Bounded only by
+      // the flat faces round it, a heel's foot moved down ran off along the heel.
+      const tangent = tangentPlaneAlong(F, g);
+      if (tangent) {
+        const side = dot(sub(q, tangent.origin), tangent.normal) < 0 ? scale(tangent.normal, -1) : tangent.normal;
+        keep.push(halfSpace({ origin: tangent.origin, normal: side, xDir: xDirFor(side) }, L));
+        continue;
+      }
       // Any other surface (a twisted corner patch where a chamfer meets a
       // fillet, a lofted side) has no one way to carry on: the flat faces
       // round it do, and bound the region there. Left open, it would run off

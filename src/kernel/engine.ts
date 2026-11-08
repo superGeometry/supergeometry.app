@@ -57,7 +57,7 @@ import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
-import { cylinderOf, deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
+import { cylinderOf, deleteFace, deleteFaces as deleteBodyFaces, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
@@ -628,7 +628,18 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     case "deleteGeom": {
       const start = need(bodies, f.body);
       let body = start;
-      for (const r of f.faces) body = deleteFace(body, resolveFace(body, r));
+      // Picked together, taken out together: a slot's two walls and floor close
+      // up as one gap (one wall alone has nothing to close it).
+      let together: Shape3D | null = null;
+      if (f.faces.length > 1) {
+        try {
+          together = deleteBodyFaces(body, f.faces.map((r) => resolveFace(body, r)));
+        } catch {
+          together = null;
+        }
+      }
+      if (together) body = together;
+      else for (const r of f.faces) body = deleteFace(body, resolveFace(body, r));
       for (const r of f.edges) body = deleteEdge(body, r);
       for (const v of f.vertices) body = deleteVertex(body, v);
       bodies.set(f.body, staysClosed(start, body));
