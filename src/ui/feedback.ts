@@ -142,8 +142,8 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
   // opens it in the app (in 3D, with its timeline) and its file as code.
   const file = project?.();
   const fileCode = file ? codeBlock(file) : "";
-  /** The link, once packed (null: not ready, or this browser can't). */
-  let link: string | null = null;
+  /** The link that opens it (null: it couldn't be packed). */
+  const link = file ? projectLink(file.json) : null;
   const room = MAX_POST - MAX_TEXT - 500;
   const linkLine = () => (link ? `[Open it in 3D in supergeometry.app](${link})` : "");
   const codeFits = () => fileCode.length + linkLine().length <= room;
@@ -221,12 +221,6 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
   text.addEventListener("input", paint);
   infoBox.addEventListener("change", paint);
   fileBox.addEventListener("change", () => ((wanted = fileBox.checked), paint()));
-  // Packing takes a moment: the window follows once it's done.
-  if (file)
-    void projectLink(file.json).then((l) => {
-      link = l;
-      paint();
-    });
 
   const pick = (id: Kind) => {
     kind = id;
