@@ -3,7 +3,7 @@ import { simplifyStroke } from "../sketch/freehand";
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
 import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, patternSpacing, planeY, roundSig, scale as scale3, sub as sub3, toPlane } from "../geom";
-import { addForUser, addStrict, constraintError, constraintName, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
+import { addForUser, addStrict, constraintError, constraintName, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { nearestSnap } from "../sketch/snapPick";
 import { arrangement } from "../sketch/regions";
@@ -647,6 +647,13 @@ export class SketchTool implements Tool {
     const curves = this.pickedCurves();
     const chips: Extract<PanelItem, { type: "chips" }>["chips"] = [];
     for (const b of CONSTRAINT_BUTTONS) {
+      // Curves whose ends touch but aren't joined (their constraints deleted):
+      // Coincident joins them all again, in one tap.
+      const gaps = b.type === "coincident" && !this.selPts.length ? this.endGaps() : [];
+      if (gaps.length) {
+        chips.push({ label: gaps.length > 1 ? `Coincident (${gaps.length})` : "Coincident", glyph: b.glyph, title: `Join the ends that touch (Shift+${b.key})`, onClick: () => this.addConstraint(b.type) });
+        continue;
+      }
       const have = existingConstraints(b.type, this.constraints, this.selPts, curves);
       const built = have.length ? [] : buildConstraints(b.type, this.selPts, curves);
       if (!have.length && !built.length) continue;
@@ -663,6 +670,11 @@ export class SketchTool implements Tool {
       });
     }
     return chips.length ? [{ type: "chips", label: "Constraints", chips }] : [];
+  }
+
+  /** Ends of the selected curves sitting on another end without being joined. */
+  private endGaps(): [PointRef, PointRef][] {
+    return this.selected.size ? touchingEnds(this.entities, this.constraints, this.selected) : [];
   }
 
   /** "Delete constraints (n)" for the selection's card, when it has any. */
@@ -768,6 +780,14 @@ export class SketchTool implements Tool {
   }
 
   private addConstraint(type: (typeof CONSTRAINT_BUTTONS)[number]["type"]): void {
+    // Coincident on curves: join every end that touches another (they're already
+    // on the same spot, so nothing moves).
+    const gaps = type === "coincident" && !this.selPts.length ? this.endGaps() : [];
+    if (gaps.length) {
+      this.commit(this.entities, [...this.constraints, ...gaps.map(([a, b]): SketchConstraint => ({ id: uid(), type: "coincident", pts: [a, b] }))]);
+      this.app.ui.toast(gaps.length === 1 ? "Joined (coincident)" : `Joined ${gaps.length} ends (coincident)`);
+      return this.selectionChanged();
+    }
     const curves = this.pickedCurves();
     let cs = buildConstraints(type, this.selPts, curves);
     // Lock holds points where they are now.

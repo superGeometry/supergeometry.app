@@ -3,7 +3,7 @@
 // at the corners; only that corner (and, for a rectangle, its square-ness) moves.
 import assert from "node:assert/strict";
 import type { SketchEntity } from "../src/doc/types";
-import { constraintError, pointOf, solve } from "../src/sketch/constraints";
+import { constraintError, pointOf, solve, touchingEnds } from "../src/sketch/constraints";
 import { explodeJoined } from "../src/sketch/edit";
 
 let n = 0;
@@ -54,6 +54,19 @@ const checks: [string, () => void][] = [
     const c1 = out.constraints.find((c) => c.id === "c1")!;
     assert.deepEqual(c1.pts![0], { e: out.lines[1].id, p: "a" });
     assert.ok(!out.constraints.some((c) => c.id === "c2"));
+  }],
+  ["constraints deleted: the touching ends are found again to join", () => {
+    const r: SketchEntity = { id: "r", kind: "rect", center: [0, 0], w: 100, h: 60, rotation: 0 };
+    const out = explodeJoined(r, [], id)!;
+    const ids = new Set(out.lines.map((l) => l.id));
+    // Joined: nothing to add.
+    assert.equal(touchingEnds(out.lines, out.constraints, ids).length, 0);
+    // All deleted: the 4 corners.
+    assert.equal(touchingEnds(out.lines, [], ids).length, 4);
+    // Only one line picked: its 2 ends.
+    assert.equal(touchingEnds(out.lines, [], new Set([out.lines[0].id])).length, 2);
+    // A line elsewhere: nothing.
+    assert.equal(touchingEnds([...out.lines, { id: "far", kind: "line", a: [500, 0], b: [600, 0] }], [], new Set(["far"])).length, 0);
   }],
 ];
 let failed = 0;

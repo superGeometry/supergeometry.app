@@ -1047,3 +1047,39 @@ export function followDrag(
   }
   return { entities: best, to: bestTo, ok: lo > 0 };
 }
+
+/**
+ * Ends of the given curves that sit on another curve's end but aren't joined
+ * (no Coincident links them, directly or through others) - e.g. after the
+ * constraints of a shape were deleted. Pairs where at least one side is one of
+ * `ids`; centres don't count.
+ */
+export function touchingEnds(entities: SketchEntity[], constraints: SketchConstraint[], ids: Set<string>): [PointRef, PointRef][] {
+  const ends = entities.flatMap((e) => (e.construction && !ids.has(e.id) ? [] : pointsOf(e).filter((q) => q.p !== "c").map((q) => ({ ref: { e: e.id, p: q.p }, at: q.at }))));
+  let size = 1;
+  for (const q of ends) size = Math.max(size, Math.abs(q.at[0]), Math.abs(q.at[1]));
+  const tol = size * 1e-7;
+  // Already joined: groups of points linked by Coincident.
+  const parent = new Map<string, string>();
+  const key = (r: PointRef) => `${r.e}:${r.p}`;
+  const find = (k: string): string => {
+    let r = k;
+    while (parent.has(r) && parent.get(r) !== r) r = parent.get(r)!;
+    return r;
+  };
+  for (const c of constraints) if (c.type === "coincident" && c.pts?.length === 2 && !c.curves?.length) parent.set(find(key(c.pts[0])), find(key(c.pts[1])));
+  const out: [PointRef, PointRef][] = [];
+  for (let i = 0; i < ends.length; i++)
+    for (let j = i + 1; j < ends.length; j++) {
+      const A = ends[i];
+      const B = ends[j];
+      if (A.ref.e === B.ref.e || (!ids.has(A.ref.e) && !ids.has(B.ref.e))) continue;
+      if (Math.hypot(A.at[0] - B.at[0], A.at[1] - B.at[1]) > tol) continue;
+      const ka = find(key(A.ref));
+      const kb = find(key(B.ref));
+      if (ka === kb) continue;
+      parent.set(ka, kb);
+      out.push([A.ref, B.ref]);
+    }
+  return out;
+}
