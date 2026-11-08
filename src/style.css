@@ -3462,7 +3462,7 @@ body #panel.as-list {
    text, across the screen (placed from script). Short, scrolling if long. */
 html[data-screen="phone"] body #panel.as-list {
   width: max-content;
-  max-width: min(520px, calc(100vw - 16px));
+  max-width: min(300px, calc(100vw - 16px));
   min-width: 0;
   max-height: 38vh;
 }
@@ -3933,6 +3933,63 @@ html[data-screen="phone"] body #panel.as-list .panel-buttons {
 }
 html[data-screen="phone"] body #panel.as-list .panel-buttons > :first-child {
   margin-left: auto;
+}
+
+/* Phones: the card small - short boxes, small names and icons - so it
+   covers little of the drawing (tablets and desktops keep their size). */
+html[data-screen="phone"] body #panel.as-list {
+  gap: 4px;
+  padding: 4px 5px;
+  font-size: 12px;
+}
+html[data-screen="phone"] #panel.as-list .field input {
+  width: 48px;
+  height: 28px;
+  padding: 0 4px;
+  font-size: 13px;
+}
+@supports (field-sizing: content) {
+  html[data-screen="phone"] #panel.as-list .field input {
+    min-width: 48px;
+    max-width: 76px;
+  }
+}
+html[data-screen="phone"] #panel.as-list .field-label {
+  font-size: 11px;
+}
+html[data-screen="phone"] #panel.as-list .panel-buttons .tool,
+html[data-screen="phone"] #panel.as-list .panel-buttons .text-btn,
+html[data-screen="phone"] #panel.as-list .panel-fields > .text-btn,
+html[data-screen="phone"] #panel.as-list .toggle,
+html[data-screen="phone"] #panel.as-list .slot,
+html[data-screen="phone"] #panel.as-list .chip {
+  min-height: 28px;
+  font-size: 12px;
+}
+html[data-screen="phone"] #panel.as-list .text-btn,
+html[data-screen="phone"] #panel.as-list .toggle {
+  padding: 0 8px;
+  gap: 4px;
+}
+html[data-screen="phone"] #panel.as-list .text-btn svg,
+html[data-screen="phone"] #panel.as-list .tool svg {
+  width: 14px;
+  height: 14px;
+}
+html[data-screen="phone"] #panel.as-list .chip {
+  padding: 0 8px;
+  gap: 4px;
+  border-radius: 14px;
+}
+html[data-screen="phone"] #panel.as-list .chip-list {
+  gap: 4px;
+}
+html[data-screen="phone"] #panel.as-list .choice button {
+  padding: 4px 7px;
+  font-size: 12px;
+}
+html[data-screen="phone"] #panel.as-list kbd {
+  display: none;
 }
 
 /* Card sliders (Freeform's Bend, Taper, Arch…): a full row, easy to drag with a thumb. */

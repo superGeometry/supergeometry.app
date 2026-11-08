@@ -103,6 +103,8 @@ export interface HistoryHandlers {
 }
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
+/** A tool card on a phone is at most this wide (px): a narrow strip, not one across the screen. */
+const PHONE_CARD_MAX = 300;
 
 /** All DOM chrome around the viewport. Deliberately framework-free and small. */
 export class UI {
@@ -891,7 +893,8 @@ export class UI {
       const h = p.offsetHeight;
       const g = gaps(y1 - h, y1).sort((a, b) => b[1] - b[0] - (a[1] - a[0]))[0];
       if (!g || g[1] - g[0] < need) continue;
-      p.style.maxWidth = `${Math.floor(g[1] - g[0])}px`;
+      // (No wider than a phone card is: fields wrap onto a second row instead.)
+      p.style.maxWidth = `${Math.floor(Math.min(g[1] - g[0], PHONE_CARD_MAX))}px`;
       this.hugContents(p);
       const h2 = p.offsetHeight;
       p.style.left = `${Math.round(g[0])}px`;
@@ -1037,7 +1040,7 @@ export class UI {
     const spot = this.panelSpot();
     if (spot) {
       if (screenClass() === "phone") {
-        p.style.maxWidth = `${window.innerWidth - 16}px`;
+        p.style.maxWidth = `${Math.min(window.innerWidth - 16, PHONE_CARD_MAX)}px`;
         this.hugContents(p);
       }
       this.putPanel(spot.x, spot.y);

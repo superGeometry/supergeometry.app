@@ -1328,6 +1328,20 @@ export class SketchTool implements Tool {
     // there - typing Width 100, Height 150 and pressing Enter did nothing; it
     // still waited for a second tap, which on a phone lands wherever the finger is.
     const typed = this.pts.length > 0 && ["rect", "circle", "polygon", "ellipse", "line", "arc"].includes(k);
+    // Phones: no card over the drawing while a shape is drawn - its values
+    // (X / Y of the first point, Length, Angle, Radius…) wait behind a small
+    // Values chip, and the finished curve's card shows when it's tapped in
+    // Select. A spline keeps its Done beside the chip.
+    if (!this.pts.length) this.valuesOpen = false;
+    else if (!this.valuesOpen && (typed || k === "spline") && items.length && screenClass() === "phone") {
+      this.liveKeys = [];
+      ui.showPanel({
+        title: titleOf(k),
+        items: [{ type: "button", label: "Values", icon: "numpad", onClick: () => ((this.valuesOpen = true), this.updatePanel(), this.refreshPreview()) }],
+        onDone: k === "spline" && this.pts.length >= 2 ? () => this.finishSpline(false) : undefined,
+      });
+      return;
+    }
     // The size fields follow the pointer (refreshPreview) until one is typed.
     this.liveKeys = items.filter((it) => it.type === "number").map((it) => lockOf.get(it) ?? null);
     ui.showPanel(items.length ? { title: k === "fillet" && memory.corner === "chamfer" ? "Chamfer" : titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined, onDone: k === "spline" && this.pts.length >= 2 ? () => this.finishSpline(false) : typed ? () => this.finishTyped() : undefined } : null);
@@ -3283,6 +3297,8 @@ export class SketchTool implements Tool {
 
   /** Size fields of the card (by number-field index): which lock each one shows, or null. */
   private liveKeys: (string | null)[] = [];
+  /** Phones: the drawing tool's values card opened from its small Values chip (closed again when the shape is done). */
+  private valuesOpen = false;
 
   /** The size a lock key stands for, with the next point at `c` (what the card shows before it's typed). */
   private liveValue(key: string, c: Vec2 | null): number | undefined {
