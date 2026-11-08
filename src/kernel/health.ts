@@ -95,3 +95,16 @@ function countHairThin(s: Shape3D): number {
   const total = areas.reduce((a, b) => a + b, 0);
   return areas.filter((a) => a < total * 1e-7).length;
 }
+
+/** A solid's volume counted from a mesh of it (coarse, so the view's own finer mesh still gets made). */
+export function meshVolume(s: Shape3D, size: number): number {
+  const m = s.mesh({ tolerance: size * 1e-3, angularTolerance: 0.3 });
+  const p = m.vertices;
+  const t = m.triangles;
+  let v = 0;
+  for (let k = 0; k < t.length; k += 3) {
+    const [i, j, l] = [3 * t[k], 3 * t[k + 1], 3 * t[k + 2]];
+    v += p[i] * (p[j + 1] * p[l + 2] - p[j + 2] * p[l + 1]) - p[i + 1] * (p[j] * p[l + 2] - p[j + 2] * p[l]) + p[i + 2] * (p[j] * p[l + 1] - p[j + 1] * p[l]);
+  }
+  return v / 6;
+}

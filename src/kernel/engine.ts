@@ -52,7 +52,7 @@ import type {
 import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "../geom";
 import { projectPolyline } from "../sketch/edit";
 import { cageToShape } from "./freeform";
-import { deepCopy, hairThin, openEdges, shapeValid, subShapes } from "./health";
+import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from "./health";
 import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
@@ -431,11 +431,15 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const v0 = Math.abs(measureVolume(body));
       const hollowed = (s: Shape3D | null) => !!s && Math.abs(Math.abs(measureVolume(s)) - v0) > 1e-6 * v0;
       let out: Shape3D | null = null;
-      try {
-        out = body.shell(Math.abs(f.thickness), (finder) => finder.inList(faces));
-      } catch {
-        out = null;
-      }
+      // No face picked: a closed hollow (a sealed void inside a wall). The one-step
+      // shell gives only the inner core back then (a battery case came out solid).
+      if (!faces.length) out = shellByOffset(body, [], Math.abs(f.thickness));
+      else
+        try {
+          out = body.shell(Math.abs(f.thickness), (finder) => finder.inList(faces));
+        } catch {
+          out = null;
+        }
       // Many-faced shapes trip the one-step shell: hollow with an offset copy
       // of the body instead, then cut the openings through.
       if (!hollowed(out)) out = shellByOffset(body, faces, Math.abs(f.thickness));
@@ -462,6 +466,12 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           if (solidsIn(plain) && booleanVolumeOk("cut", target, all, plain)) out = plain;
           else if (isEmpty(out) && isEmpty(plain)) throw new Error("The result is empty");
           else throw new Error("Subtracting these didn't work out - the geometry engine lost the shape. Try the tools one or two at a time");
+        }
+        // The tolerant cut can leave faces that don't meet up where the plain one
+        // is clean (a direction switch's slot through the housing's shelled top).
+        else if (!shapeValid(out) && shapeValid(target)) {
+          const plain = target.cut(all);
+          if (solidsIn(plain) && shapeValid(plain) && booleanVolumeOk("cut", target, all, plain)) out = plain;
         }
         if (!f.keepTools) for (const t of f.tools) bodies.delete(t);
         // Kept as it was: the result is a body of its own.
@@ -1274,8 +1284,10 @@ function shellByOffset(body: Shape3D, faces: Face[], t: number): Shape3D | null 
         off.PerformByJoin(src.wrapped, -t, 1e-6, oc.BRepOffset_Mode.BRepOffset_Skin, true, false, join, false, new oc.Message_ProgressRange());
         if (off.IsDone()) {
           let got = cast(off.Shape());
-          // It can come back as a closed shell: make that a solid.
-          if (got.constructor.name === "Shell") got = makeSolid([got as never]);
+          // It can come back as a closed shell: make that a solid. (Asked of the
+          // shape itself - class names are renamed in the app's build, so a
+          // constructor.name test never matched there and the cut came out null.)
+          if (got.wrapped.ShapeType() === oc.TopAbs_ShapeEnum.TopAbs_SHELL) got = makeSolid([got as never]);
           inner = got as Shape3D;
         }
         if (inner && Math.abs(measureVolume(inner)) > 0) break;
@@ -1532,13 +1544,25 @@ function booleanVolumeOk(op: "fuse" | "cut", a: Shape3D, b: Shape3D, r: Shape3D)
     // its faces (a jet engine's casing: 2 to 75 mm³ in 1.9 litres) - more than
     // the name raised on its pylon (158 mm³) could stand under a closer check.
     // A boolean gone wrong is off by about the smaller shape, or more.
-    const tol = (va + vb) * 1e-5 + Math.min(va, vb) * 0.6 + 1e-9;
-    if (!Number.isFinite(v) || v < -tol) return false;
-    return op === "fuse" ? v >= Math.max(va, vb) - tol && v <= va + vb + tol : v <= va + tol && v >= va - vb - tol;
+    const fits = (va: number, vb: number, v: number) => {
+      const tol = (va + vb) * 1e-5 + Math.min(va, vb) * 0.6 + 1e-9;
+      if (!Number.isFinite(v) || v < -tol) return false;
+      return op === "fuse" ? v >= Math.max(va, vb) - tol && v <= va + vb + tol : v <= va + tol && v >= va - vb - tol;
+    };
+    if (fits(va, vb, v)) return true;
+    // The measured volume can be off by far more than a small tool on some
+    // curved faces (a shelled loft: 455 mm³ either way on a drill's housing),
+    // and differently once a cut splits a face near them - two terminal slots
+    // (120 mm³) "took" 920. Counted from meshes, it's the true change - asked
+    // only of a sound cut (a thread's failed joins, meshed, took 10 s each).
+    if (op !== "cut" || isEmpty(r) || !shapeValid(r)) return false;
+    const size = Math.max(sizeOf(a), sizeOf(b));
+    return fits(Math.abs(meshVolume(a, size)), Math.abs(meshVolume(b, size)), meshVolume(r, size));
   } catch {
     return true; // can't tell: leave it to the usual checks
   }
 }
+
 
 /**
  * Flat pieces of one plane that meet, joined into one face each (pieces apart

@@ -8,7 +8,7 @@
 
 import { assembleWire, cast, getOC, makeCompound, makeFace, measureArea, measureVolume, type Shape3D } from "replicad";
 import { unify } from "./faceEdit";
-import { deepCopy, hairThin, openEdges, shapeValid, subShapes } from "./health";
+import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from "./health";
 
 export interface Health {
   valid: boolean;
@@ -251,8 +251,28 @@ export function repairShape(input: Shape3D, o: RepairOptions = {}): { shape: Sha
   if (isHealthy(h, o)) return { shape: cur, fixes: [] };
   const size = sizeOf(input);
   const v0 = o.volume ?? (h.volume > 0 && h.valid ? h.volume : undefined);
+  // Not valid: its measured volume can't be trusted, but one counted from a
+  // mesh can (when it's closed). Without it, "fixed faces" was free to change
+  // the shape: a slot cut into a drill's housing came back 764 mm³ bigger,
+  // and the housing split in half later left pieces inside out.
+  let m0: number | undefined;
+  if (v0 === undefined && h.solids && !h.openEdges) {
+    try {
+      const m = meshVolume(input, size);
+      if (m > 0) m0 = m;
+    } catch {
+      m0 = undefined;
+    }
+  }
   const sameShape = (s: Shape3D, hs: Health) => {
     if (Math.abs(sizeOf(s) - size) > size * 1e-3) return false;
+    if (m0 !== undefined) {
+      try {
+        return Math.abs(meshVolume(s, size) - m0) <= m0 * 5e-3;
+      } catch {
+        return false;
+      }
+    }
     if (v0 === undefined || !(hs.volume > 0)) return true;
     return Math.abs(hs.volume - v0) <= v0 * 5e-3;
   };
