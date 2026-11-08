@@ -904,8 +904,8 @@ export class App implements AppContext {
     moreItem("m-tutorial", () => {});
     // About: the README, in the app. Support links open in a new tab (no access back to this page).
     moreItem("m-about", () => showAbout());
-    // Feedback: a bug report, suggestion or discussion, posted on r/supergeometry (Reddit's page, in a new tab).
-    moreItem("m-feedback", () => showFeedback());
+    // Feedback: a bug report (with the project's file if wanted), suggestion or discussion, posted on r/supergeometry (Reddit's page, in a new tab).
+    moreItem("m-feedback", () => showFeedback(() => ({ name: this.store.doc.name, json: JSON.stringify(this.store.doc) }), (t) => this.ui.toast(t)));
     // Support: a short list of ways (each opens in a new tab). One without a link yet says so.
     const donateList = document.getElementById("m-donate-list")!;
     on("m-donate", () => {

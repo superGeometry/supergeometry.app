@@ -1882,6 +1882,9 @@ form.dialog {
 .feedback-out {
   opacity: 0.85;
 }
+.feedback-how {
+  color: var(--text);
+}
 /* A phone on its side: a shorter description box, so the buttons stay in sight. */
 @media (orientation: landscape) and (max-height: 500px) {
   .dialog.feedback {
