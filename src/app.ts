@@ -8,7 +8,11 @@ import { showLibrary } from "./ui/library";
 import { showAbout } from "./ui/about";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
-import { createVariable, editVariables, insertFile, insertImage } from "./io/insert";
+import { createVariable, insertFile, insertImage } from "./io/insert";
+import { numpadVariables } from "./ui/numpad";
+import { variableTags } from "./doc/varAnchors";
+import { VariableTags } from "./tools/variableTags";
+import { VariablesTool } from "./tools/variablesTool";
 import { freeformBodies } from "./doc/freeformCopies";
 import { KernelClient } from "./kernel/client";
 import type { ExportFormat, RegenResult } from "./kernel/protocol";
@@ -29,7 +33,7 @@ import { bodiesOf, edgeRefOf, faceRefOf, sameSel, sourcesOf, type AppContext, ty
 import { setupRightColumn } from "./ui/panels";
 import type { ToolItem } from "./ui/ui";
 import { UI } from "./ui/ui";
-import { setUnits, setVariables } from "./units";
+import { evaluate, setUnits, setVariables } from "./units";
 import { InputRouter } from "./view/input";
 import { ViewCube } from "./view/viewcube";
 import { PivotButton } from "./ui/pivot";
@@ -57,6 +61,9 @@ export class App implements AppContext {
   selection: Sel[] = [];
   section: SectionState | null = null;
   isolated: string[] | null = null;
+  /** Variables switched on: their tags in the view. */
+  varsOn = false;
+  private varTags!: VariableTags;
   private hover: Sel | null = null;
   private selectTool: SelectTool;
   private tool: Tool;
@@ -98,9 +105,23 @@ export class App implements AppContext {
       });
     setupRightColumn(this.ui, this.view, this.store, (u) => this.setUnits(u), isolatedNames);
     this.pinLayer = new PinLayer(this.view);
+    this.varTags = new VariableTags(this.view, {
+      variables: () => this.store.doc.variables,
+      setVariable: (name, expr) => {
+        const list = this.store.doc.variables;
+        const next = list.map((v) => (v.name === name ? { name, expr } : v));
+        setVariables(next);
+        const bad = next.some((v) => evaluate(v.expr) === null);
+        setVariables(list);
+        if (bad) return false;
+        if (list.find((v) => v.name === name)?.expr !== expr) this.store.commit((d) => (d.variables = next));
+        return true;
+      },
+    });
     // ƒx buttons on number fields create named variables.
     this.ui.variableFactory = (current) => createVariable(this, current);
     this.ui.variableNames = () => this.store.doc.variables.map((v) => v.name);
+    numpadVariables({ names: () => this.store.doc.variables.map((v) => v.name), create: (value) => createVariable(this, value) });
     settings.onChange(() => this.showPins());
     this.items = new ItemsPanel(this.store, {
       // A phone: like taps in the view, each body tapped in Items joins the
@@ -347,6 +368,27 @@ export class App implements AppContext {
     void this.regenerate();
   }
 
+  /** The tags where the variables act on the model as it is now (Variables on). */
+  private showVariableTags(): void {
+    if (this.varsOn && this.result) this.varTags.set(variableTags(this.store.doc.variables, this.store.doc.features, this.result));
+  }
+
+  /** The Variables button: on (tags and their card), or off. */
+  private toggleVariables(): void {
+    if (this.varsOn) return this.variablesOff();
+    this.varsOn = true;
+    this.showVariableTags();
+    this.varTags.setVisible(true);
+    this.setTool(new VariablesTool(this));
+  }
+
+  variablesOff(): void {
+    this.varsOn = false;
+    this.varTags.setVisible(false);
+    if (this.tool instanceof VariablesTool) this.setTool(null);
+    this.refreshTools();
+  }
+
   private setUnits(u: Units): void {
     this.store.commit((d) => (d.units = u));
   }
@@ -389,6 +431,7 @@ export class App implements AppContext {
     if (this.tool === this.selectTool) this.selectTool.refresh();
     this.renderHistory();
     this.items.render(r);
+    this.showVariableTags();
     const open = this.openBodies(r);
     this.ui.setWarning(
       open.length
@@ -723,8 +766,8 @@ export class App implements AppContext {
     return [
       { id: "section", label: "Section View", icon: "section", sub: this.section ? "On" : this.lastSection ? "Off · tap to show" : "Off", active: !!this.section, run: () => this.toggleSection() },
       { id: "measure", label: "Measure", icon: "measure", run: () => this.setTool(new MeasureTool(this)) },
-      // See and change the variables, or make a new one (at the window's top).
-      { id: "variables", label: "Variables", icon: "variable", sub: this.store.doc.variables.length ? `${this.store.doc.variables.length} defined` : "None yet", run: () => void editVariables(this) },
+      // On: a tag per variable in the view (tap one to change it), and their card. Off again.
+      { id: "variables", label: "Variables", icon: "variable", sub: this.varsOn ? "On" : this.store.doc.variables.length ? `Off · ${this.store.doc.variables.length}` : "Off", active: this.varsOn, run: () => this.toggleVariables() },
       this.isolated
         ? { id: "isolate", label: "Isolate", icon: "isolate", sub: "On - tap to show all", active: true, run: () => this.isolate(null) }
         : {

@@ -307,7 +307,12 @@ sketch. A sketch stays in view until every region of it is used.
   into that box. Enter confirms. **Press on any value box and drag left or
   right** to turn the value down or up like a wheel. Units come from **Units & grid** (mm, cm, m, in, ft);
   you can also type units (`2in`, `5cm`) and maths (`40/3 + 2`).
-- **Variables** (the Variables button under Measure: change them there, or New Variable at the top) are named sizes like `wall = 3`.
+- **Variables** are named sizes like `wall = 3`. The Variables button (under
+  Measure) switches them on: a tag shows where each one acts on the model -
+  ↔ a length, ∠ an angle, # a number - and follows it as the model moves.
+  Tap a tag to type its value or a formula, or drag the value: the model
+  follows as you go, and lines show what it's made from and what uses it.
+  The card has New Variable and the whole list; tap Variables again to switch off.
   Type them into any field (`wall * 2`) or pick them from the **ƒx** menu
   next to a value. Change the variable later and everything using it updates.
 - The **on-screen numpad** (the keypad button in the right column - tap it
@@ -316,6 +321,8 @@ sketch. A sketch stays in view until every region of it is used.
   replaces it; nothing is applied until you press ↵. After the second tap of
   a line, its length box opens right away. Drag the numpad by its grip where
   you want it; double-tap the grip to put it back by the box.
+  Its **ƒx** key adds + × / and a key per variable (tap one to type its
+  name), and **+ New** makes a variable from the value in the box.
 
 ---
 

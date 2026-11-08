@@ -87,7 +87,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
     items: [
       { icon: "magnet", name: "Snapping", text: "What the pointer snaps to: grid, end and middle points, guide lines." },
       { icon: "ruler", name: "Units & grid", text: "mm, cm, m, inch, foot; grid size; degree format." },
-      { icon: "numpad", name: "Numpad", text: "Tap to switch the on-screen numpad on or off: value boxes then open it instead of the keyboard. Typing replaces the value; ↵ applies it." },
+      { icon: "numpad", name: "Numpad", text: "Tap to switch the on-screen numpad on or off: value boxes then open it instead of the keyboard. Typing replaces the value; ↵ applies it. ƒx adds + × / and your variables (tap one to type its name), and + New makes a variable from the value." },
       { icon: "display", name: "Display", text: "Shaded, wireframe or X-ray; edges and hidden edges." },
       { icon: "camera", name: "Screenshot", text: "Save a picture of the view, marked faintly at the bottom right with the project's name, the isolated bodies (when isolating) and supergeometry.app." },
       { icon: "history", name: "History", text: "Every step in order. Tap one to change it, hover to see what it works on, the eye switches it off, the bin deletes it (two taps, as in Items and the projects: the first turns it red). Select several (Ctrl/Shift+click) to group them: fold, rename, switch all off or on, ungroup." },
@@ -99,7 +99,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "undo", name: "Undo / Redo", text: "Step back and forward (Ctrl Z / Ctrl Y)." },
       { icon: "section", name: "Section View", text: "Cut the view open to see inside - the cut shows as a solid face with a thick outline; tap again to hide it (it's remembered). Place Plane in its card puts a construction plane where the cut is." },
       { icon: "measure", name: "Measure", text: "Distances, angles and sizes between anything you tap; pin them to keep them on screen." },
-      { icon: "variable", name: "Variables", text: "Named sizes like wall = 3, to use in any field (wall * 2). Change one and everything using it updates; New Variable at the top makes another." },
+      { icon: "variable", name: "Variables", text: "Named sizes like wall = 3, to use in any field (wall * 2). Tap to switch on: a tag shows where each acts on the model (↔ length, ∠ angle, # number). Tap a tag to type its value or a formula, or drag the value - the model follows; lines show what it's made from and what uses it. Tap again to switch off." },
       { icon: "isolate", name: "Isolate", text: "Show only the selected bodies (and sketches drawn on their faces - tap a shape on one to extrude, offset... it); tap again to show everything." },
     ],
   },

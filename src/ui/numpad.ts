@@ -32,6 +32,14 @@ function saveSpot(spot: Spot | null): void {
 }
 
 const KEYS = ["7", "8", "9", "⌫", "4", "5", "6", "−", "1", "2", "3", "↵", "ƒx", "0", "."];
+/** ƒx on: a row of operators under the keys (− types a minus then, not the sign flip). */
+const FX_KEYS = ["+", "×", "/", "abc"];
+
+/** The project's variables, for ƒx (set by the app). */
+let varHooks: { names: () => string[]; create: (value: string) => Promise<string | null> } | null = null;
+export function numpadVariables(hooks: typeof varHooks): void {
+  varHooks = hooks;
+}
 
 class Numpad {
   private el = document.createElement("div");
@@ -46,6 +54,10 @@ class Numpad {
   private selEnd = 0;
   /** Just opened on a box: the first key typed replaces what's in it. */
   private fresh = false;
+  /** ƒx on: operators and the variables' names to type formulas with. */
+  private fx = false;
+  private fxRow = document.createElement("div");
+  private chips = document.createElement("div");
 
   constructor() {
     this.el.className = "numpad";
@@ -84,12 +96,12 @@ class Numpad {
     grip.addEventListener("pointerup", end);
     grip.addEventListener("pointercancel", end);
     this.el.append(grip);
-    for (const k of KEYS) {
+    const key = (k: string, host: HTMLElement, cls = "") => {
       const b = document.createElement("button");
       b.type = "button";
       b.tabIndex = -1;
       b.textContent = k;
-      b.className = k === "↵" ? "np-enter" : "";
+      b.className = cls || (k === "↵" ? "np-enter" : k === "ƒx" ? "np-fx" : "");
       let downId: number | null = null;
       // Keep the focus where it is (and stop iOS from zooming, selecting or
       // sending the tap anywhere else).
@@ -112,8 +124,15 @@ class Numpad {
       b.addEventListener("pointerleave", () => ((downId = null), b.classList.remove("down")));
       // Taps arrive as pointer events; a click after them must not do it twice.
       b.addEventListener("click", (e) => (e.preventDefault(), e.stopPropagation()));
-      this.el.append(b);
-    }
+      host.append(b);
+      return b;
+    };
+    for (const k of KEYS) key(k, this.el);
+    this.fxRow.className = "np-fx-row";
+    for (const k of FX_KEYS) key(k, this.fxRow, k === "abc" ? "np-abc" : "np-op");
+    this.chips.className = "np-chips";
+    this.el.append(this.fxRow, this.chips);
+    this.keyFor = (k) => key(k, this.chips, k === "+ New" ? "np-chip np-new" : "np-chip");
     this.el.addEventListener("pointerdown", (e) => (e.preventDefault(), e.stopPropagation()));
     this.el.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
     document.body.append(this.el);
@@ -150,9 +169,25 @@ class Numpad {
     });
   }
 
+  private keyFor: (k: string) => HTMLButtonElement = () => document.createElement("button");
+
+  /** ƒx on or off: the operators and a chip per variable (and + New: one from this value). */
+  private setFx(on: boolean): void {
+    this.fx = on;
+    this.el.classList.toggle("fx", on);
+    this.chips.innerHTML = "";
+    if (on) {
+      for (const n of varHooks?.names() ?? []) this.keyFor(n).dataset.name = n;
+      if (varHooks) this.keyFor("+ New");
+    }
+    if (!this.el.hidden) this.place();
+  }
+
   open(input: HTMLInputElement): void {
     this.target = input;
     this.fresh = true;
+    // A formula in the box already: ƒx is on.
+    this.setFx(/[a-z_]/i.test(input.value.replace(/(\d)\s*(mm|cm|m|in|ft)\b/gi, "$1")));
     // All of it selected, so typing overrides it - but a minus stays: the
     // number after it is what's selected (⌫ first clears it all, sign too).
     this.selStart = input.value.startsWith("-") ? 1 : 0;
@@ -215,6 +250,8 @@ class Numpad {
     // First key after opening: a digit or point types over the number (a
     // minus in front stays); ⌫ clears it all, sign too - then type it positive.
     if (this.fresh && (k === "." || /^\d$/.test(k))) [s, e] = [v.startsWith("-") ? 1 : 0, v.length];
+    // A variable tapped first: the box becomes it.
+    if (this.fresh && varHooks?.names().includes(k)) [s, e] = [0, v.length];
     if (this.fresh && k === "⌫") [s, e] = [0, v.length];
     if (k !== "↵") this.fresh = false;
     const put = (text: string) => {
@@ -227,6 +264,8 @@ class Numpad {
         v = v.slice(0, s - 1) + v.slice(s);
         s = e = s - 1;
       }
+    } else if (k === "−" && this.fx) {
+      put("-");
     } else if (k === "−") {
       // Flip the sign of the whole value.
       v = v.startsWith("-") ? v.slice(1) : `-${v}`;
@@ -238,12 +277,29 @@ class Numpad {
       t.dispatchEvent(new Event("change", { bubbles: true }));
       return this.close();
     } else if (k === "ƒx") {
-      // Variables are typed by name: bring the system keyboard for that.
+      // Operators and the variables' names on the numpad.
+      this.setFx(!this.fx);
+      return;
+    } else if (k === "abc") {
+      // Anything else (a name not made yet): the system keyboard.
       this.close();
       t.inputMode = "text";
       t.focus();
       return;
-    } else put(k);
+    } else if (k === "+ New") {
+      // A variable from this value: it's made, and the box uses it.
+      const value = t.value;
+      this.close();
+      void varHooks?.create(value).then((name) => {
+        if (!name || !t.isConnected) return;
+        t.value = name;
+        t.dispatchEvent(new Event("input", { bubbles: true }));
+        t.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      return;
+    } else if (k === "×") put("*");
+    else if (k === "+" || k === "/") put(k);
+    else put(k);
     t.value = v;
     this.selStart = s;
     this.selEnd = e;

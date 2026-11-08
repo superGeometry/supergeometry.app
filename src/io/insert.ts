@@ -6,7 +6,7 @@ import { GROUND } from "../geom";
 import { uid } from "../sketch/edit";
 import type { AppContext } from "../tools/tool";
 import { evaluate, fmtLen, setVariables } from "../units";
-import { DIALOG_ACTION } from "../ui/ui";
+import { DIALOG_ACTION } from "../ui/dialogAction";
 import { parseSVG } from "./svg";
 
 export function pickFile(accept: string): Promise<File | null> {

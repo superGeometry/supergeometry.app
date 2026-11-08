@@ -4,6 +4,7 @@ import { screenClass, watchScreenClass } from "../device";
 import type { FeatureError } from "../kernel/protocol";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
 import { icons, type IconName } from "./icons";
+import { DIALOG_ACTION } from "./dialogAction";
 import { numpadInput } from "./numpad";
 import { settings } from "../settings";
 
@@ -1483,9 +1484,6 @@ function iconButton(icon: IconName, title: string, run: () => void): HTMLButtonE
   });
   return b;
 }
-
-/** Set in a dialog's result when its top button was tapped (a key no field can have). */
-export const DIALOG_ACTION = " action";
 
 export function textButton(label: string, kbd: string, run: () => void, primary = false): HTMLButtonElement {
   const b = document.createElement("button");
