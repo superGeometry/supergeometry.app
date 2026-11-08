@@ -59,6 +59,13 @@ export function originOnPlane(p: PlaneDef): PlaneDef {
   return { ...p, origin: [n[0] * k, n[1] * k, n[2] * k] };
 }
 
+/** A default size: `v` rounded to two significant figures (217.4 -> 220, 0.0347 -> 0.035). */
+export function roundSig(v: number, sig = 2): number {
+  if (!Number.isFinite(v) || v === 0) return v;
+  const p = Math.pow(10, Math.floor(Math.log10(Math.abs(v))) - sig + 1);
+  return Math.round(v / p) * p;
+}
+
 export function niceStep(raw: number): number {
   const p = Math.pow(10, Math.floor(Math.log10(raw)));
   const m = raw / p;

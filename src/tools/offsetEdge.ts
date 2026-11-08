@@ -7,6 +7,7 @@
 
 import type { PlaneDef, SketchFeature, Vec3 } from "../doc/types";
 import type { BodyMesh } from "../kernel/protocol";
+import { len, roundSig, sub } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { FeatureOp, type Slot } from "./featureOp";
 import { offsetLineOnFace } from "./offsetEdgeGeom";
@@ -32,6 +33,7 @@ export class OffsetEdgeOp extends FeatureOp<SketchFeature> {
   private edge: EdgePick | null = null;
   private face: FacePick | null = null;
   private distance = 5;
+  private typed = false;
   /** Why there's no line (the edge across the face, the line off it). */
   private problem: string | null = null;
 
@@ -48,6 +50,8 @@ export class OffsetEdgeOp extends FeatureOp<SketchFeature> {
     const info = this.app.view.body(body)?.edges[edge];
     if (!info || info.type !== "LINE") return false;
     this.edge = { start: info.start, end: info.end, sel: { kind: "edge", body, edge } };
+    // A tenth of the edge to start with (5 mm was lost on a big part), until one is typed.
+    if (!this.typed) this.distance = roundSig(len(sub(info.end, info.start)) * 0.1) || this.distance;
     this.sync();
     return true;
   }
@@ -113,6 +117,7 @@ export class OffsetEdgeOp extends FeatureOp<SketchFeature> {
         value: this.distance,
         kind: "length",
         onInput: (v) => {
+          this.typed = true;
           this.distance = v;
           this.sync();
           this.update();

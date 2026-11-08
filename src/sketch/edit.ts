@@ -2,7 +2,7 @@
 // transforms, projection of 3D edges, and text outlines.
 
 import type { PlaneDef, SketchConstraint, SketchEntity, Vec2, Vec3 } from "../doc/types";
-import { toPlane } from "../geom";
+import { roundSig, toPlane } from "../geom";
 import { constraintError, pointOf, pointsOf, refsOf } from "./constraints";
 import { arcFrom3, closestOnPrim, entityCorners, entityPrims, evalPrim, isClosedPrim, primSegments, samplePrim, type Prim } from "./curves";
 
@@ -816,10 +816,152 @@ export function offsetChain(entities: SketchEntity[], id: string, d: number): Sk
     if (!flipped.length) break;
     alive = alive.filter((i) => !flipped.includes(i));
   }
+  // Straight pieces: what still runs closer to the outline than the distance
+  // (across a narrow spike or neck it swung past the far side) is cut away -
+  // the offset never crosses the original.
+  if (out.every((e) => e.kind === "line") && pieces.every((e) => e.kind === "line")) {
+    const clean = cleanLineOffset(pieces as Extract<SketchEntity, { kind: "line" }>[], out as Extract<SketchEntity, { kind: "line" }>[], d, chain.closed);
+    if (!clean) return null;
+    return [...entities, ...clean.map((e) => ({ ...e, id: uid() }))];
+  }
   return [...entities, ...out.map((e) => ({ ...e, id: uid() }))];
 }
 
+/**
+ * The offset of straight pieces, cut where it crosses itself, keeping only the
+ * parts at least the distance from the original (and, for a closed outline, on
+ * the side it was offset to) - joined up again into one or more outlines.
+ * `grow` > 0: a closed outline grows (the offset is outside it).
+ */
+function cleanLineOffset(orig: LineE[], off: LineE[], grow: number, closed: boolean): LineE[] | null {
+  const d = Math.abs(grow);
+  let size = 1;
+  for (const e of [...orig, ...off]) for (const q of [e.a, e.b]) size = Math.max(size, Math.abs(q[0]), Math.abs(q[1]));
+  const eps = size * 1e-9;
+  const distSeg = (q: Vec2, a: Vec2, b: Vec2) => {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const t = Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+    return Math.hypot(a[0] + dx * t - q[0], a[1] + dy * t - q[1]);
+  };
+  const distOrig = (q: Vec2) => Math.min(...orig.map((o) => distSeg(q, o.a, o.b)));
+  const poly = orig.map((o) => o.a);
+  const inside = (q: Vec2) => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i];
+      const [xj, yj] = poly[j];
+      if (yi > q[1] !== yj > q[1] && q[0] < ((xj - xi) * (q[1] - yi)) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  // Where each offset piece crosses the others (and the original, which it must not run past).
+  const cuts: number[][] = off.map(() => [0, 1]);
+  const cross = (a: Vec2, b: Vec2, c: Vec2, e: Vec2): [number, number] | null => {
+    const r: Vec2 = [b[0] - a[0], b[1] - a[1]];
+    const s: Vec2 = [e[0] - c[0], e[1] - c[1]];
+    const den = r[0] * s[1] - r[1] * s[0];
+    if (Math.abs(den) < 1e-15 * (Math.hypot(...r) * Math.hypot(...s) || 1)) return null;
+    const t = ((c[0] - a[0]) * s[1] - (c[1] - a[1]) * s[0]) / den;
+    const u = ((c[0] - a[0]) * r[1] - (c[1] - a[1]) * r[0]) / den;
+    return t > 1e-12 && t < 1 - 1e-12 && u >= -1e-12 && u <= 1 + 1e-12 ? [t, u] : null;
+  };
+  for (let i = 0; i < off.length; i++) {
+    for (let j = 0; j < off.length; j++) {
+      if (i === j) continue;
+      const x = cross(off[i].a, off[i].b, off[j].a, off[j].b);
+      if (x) cuts[i].push(x[0]);
+    }
+    for (const o of orig) {
+      const x = cross(off[i].a, off[i].b, o.a, o.b);
+      if (x) cuts[i].push(x[0]);
+    }
+  }
+  const at = (e: LineE, t: number): Vec2 => [e.a[0] + (e.b[0] - e.a[0]) * t, e.a[1] + (e.b[1] - e.a[1]) * t];
+  // The parts that are far enough (and on the right side), each with its piece's index.
+  const kept: { a: Vec2; b: Vec2; src: number }[] = [];
+  off.forEach((e, i) => {
+    const ts = [...new Set(cuts[i])].sort((x, y) => x - y);
+    for (let k = 0; k + 1 < ts.length; k++) {
+      const p = at(e, ts[k]);
+      const q = at(e, ts[k + 1]);
+      if (Math.hypot(q[0] - p[0], q[1] - p[1]) < eps * 10) continue;
+      const mid = at(e, (ts[k] + ts[k + 1]) / 2);
+      if (distOrig(mid) < d * (1 - 1e-6)) continue;
+      if (closed && inside(mid) !== grow < 0) continue;
+      kept.push({ a: p, b: q, src: i });
+    }
+  });
+  if (!kept.length) return null;
+  // Nothing was cut away: as it was.
+  if (kept.length === off.length && kept.every((k, i) => k.src === i)) return off;
+  // Join the parts end to end again (in the offset's own direction), and merge
+  // the parts of one piece that follow each other straight on.
+  const tol = Math.max(eps * 1e3, d * 1e-7);
+  const same = (p: Vec2, q: Vec2) => Math.hypot(p[0] - q[0], p[1] - q[1]) < tol;
+  const used = new Set<number>();
+  const out: LineE[] = [];
+  for (let s = 0; s < kept.length; s++) {
+    if (used.has(s)) continue;
+    const path: (typeof kept)[number][] = [];
+    let cur = s;
+    while (cur >= 0 && !used.has(cur)) {
+      used.add(cur);
+      const k = kept[cur];
+      const last = path[path.length - 1];
+      if (last && last.src === k.src && same(last.b, k.a)) last.b = k.b;
+      else path.push({ ...k });
+      cur = kept.findIndex((x, j) => !used.has(j) && same(x.a, k.b));
+    }
+    // A loop's first and last parts of the same piece: one line.
+    if (path.length > 1 && path[0].src === path[path.length - 1].src && same(path[path.length - 1].b, path[0].a)) {
+      path[0].a = path[path.length - 1].a;
+      path.pop();
+    }
+    // Scraps that don't join into an outline (a closed offset is loops only).
+    if (closed && !(path.length >= 2 && same(path[path.length - 1].b, path[0].a))) continue;
+    for (const k of path) out.push({ ...off[k.src], a: k.a, b: k.b });
+  }
+  return out.length ? out : null;
+}
+
 // --------------------------------------------------------------- offset
+
+/**
+ * The offset distance to start with for a curve: a tenth of its size (a line's
+ * length, an arc's, a circle's diameter, a box's smaller side), rounded - so it
+ * shows on a sketch of any size (a fixed 2 mm was invisible on a 10 m one).
+ */
+export function defaultOffset(e: SketchEntity): number {
+  let size = 0;
+  switch (e.kind) {
+    case "line":
+      size = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]);
+      break;
+    case "arc": {
+      const c = arcFrom3(e.a, e.m, e.b);
+      size = c ? c.r * Math.abs(c.sweep) : Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]);
+      break;
+    }
+    case "circle":
+    case "polygon":
+      size = 2 * e.radius;
+      break;
+    case "ellipse":
+      size = 2 * Math.min(e.rx, e.ry);
+      break;
+    case "rect":
+      size = Math.min(e.w, e.h);
+      break;
+    case "spline":
+    case "polyline": {
+      const pts = e.kind === "spline" ? samplePrim(entityPrims(e)[0], 0, 1) : e.points;
+      for (let i = 1; i < pts.length; i++) size += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      break;
+    }
+  }
+  return size > 0 ? roundSig(size * 0.1) : 1;
+}
 
 /** Offset copy of an entity (outward for closed shapes, to the left for open ones). */
 export function offsetEntity(e: SketchEntity, d: number): SketchEntity | null {

@@ -2,7 +2,7 @@ import { isTouchDevice } from "../device";
 import { simplifyStroke } from "../sketch/freehand";
 import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
-import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, planeY, scale as scale3, sub as sub3, toPlane } from "../geom";
+import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, planeY, roundSig, scale as scale3, sub as sub3, toPlane } from "../geom";
 import { addForUser, addStrict, constraintError, constraintName, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { nearestSnap } from "../sketch/snapPick";
@@ -10,9 +10,10 @@ import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, buttonEnabled, CONSTRAINT_BUTTONS, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
 import { settings } from "../settings";
 import { isCoarse, screenClass } from "../device";
-import { arcFrom3, closestOnPrim, entityCorners, entityPolylines, entityPrims } from "../sketch/curves";
+import { arcFrom3, closestOnPrim, entityPolylines, entityPrims } from "../sketch/curves";
 import {
   offsetChain,
+  defaultOffset,
   connectedChain,
   angleLines,
   explode,
@@ -94,7 +95,7 @@ const HINTS: Record<Kind, string> = {
   text: "Tap where the text should start.",
   project: "Tap body edges or curves of other sketches to project them here (double-tap: the whole sketch) - or tap curves of this sketch, then a parallel plane or face to project them there.",
   offset: "Tap a curve to offset it.",
-  fillet: "Tap a corner where two lines meet.",
+  fillet: "Tap the first line, then the second (the corner between them is rounded or cut).",
   move: "Tap curves to select, then type the offset and Apply.",
   scale: "Tap curves to select, then set the factor and Apply.",
   patternLinear: "Tap curves to select, then set count and spacing.",
@@ -625,6 +626,30 @@ export class SketchTool implements Tool {
     if (performance.now() - this.refusedAt < 2000) return;
     this.refusedAt = performance.now();
     this.app.ui.toast("That contradicts constraints already on the sketch - remove one first (Constraints → tap it → Delete)", "error");
+  }
+
+  /** Constraints on the selected curves (any that names one of them): sizes, angles, joins, locks. */
+  private selectionConstraints(): SketchConstraint[] {
+    const ids = this.selected;
+    return this.constraints.filter((c) => refsOf(c).some((r) => ids.has(r)));
+  }
+
+  /** "Delete constraints (n)" for the selection's card, when it has any. */
+  private deleteConstraintsItem(): PanelItem[] {
+    const n = this.selectionConstraints().length;
+    if (!n) return [];
+    return [
+      {
+        type: "button",
+        label: `Delete constraints (${n})`,
+        icon: "constraints",
+        onClick: () => {
+          const list = this.selectionConstraints();
+          this.removeConstraints(list);
+          this.app.ui.toast(`${list.length} constraint${list.length === 1 ? "" : "s"} removed - the shape stays as it is, free to change`);
+        },
+      },
+    ];
   }
 
   private removeConstraints(list: SketchConstraint[]): void {
@@ -1171,6 +1196,7 @@ export class SketchTool implements Tool {
             items: [
               ...angle,
               { type: "button", label: "Construction", icon: "construction", onClick: () => this.toggleConstruction() },
+              ...this.deleteConstraintsItem(),
               { type: "button", label: "Delete", icon: "trash", onClick: () => this.deleteSelected() },
             ],
           });
@@ -1984,7 +2010,14 @@ export class SketchTool implements Tool {
       case "split":
         return this.tapCurve(p, (id, uv) => this.tapSplit(id, uv, p.shift));
       case "offset":
-        return this.tapCurve(p, (id) => ((this.edit.offsetOf = id), this.updatePanel(), this.refreshPreview()));
+        return this.tapCurve(p, (id) => {
+          // A tenth of the curve tapped (keeping the side it went last time).
+          const e = this.entities.find((x) => x.id === id);
+          if (e) memory.offset = (memory.offset < 0 ? -1 : 1) * defaultOffset(e);
+          this.edit.offsetOf = id;
+          this.updatePanel();
+          this.refreshPreview();
+        });
       case "fillet":
         return this.tapFillet(p);
       case "project":
@@ -3806,38 +3839,35 @@ export class SketchTool implements Tool {
   }
 
   /**
-   * Fillet like Extend: tap the halves of two lines (they needn't touch) - or
-   * tap right on a corner. The rounded corner appears; type its radius, Enter.
+   * Fillet / Chamfer: tap the two lines (they needn't touch; the halves tapped
+   * are kept) or two sides of a rectangle / polygon. The rounded corner
+   * appears at a tenth of the first line's length; type its size, Enter.
    */
   private tapFillet(p: ToolPointer): void {
     // A tap while the last one's radius is showing keeps it - and, on another
     // corner, rounds that one too (four corners took eight taps).
     const kept = !!this.filletEdit;
     if (kept) this.finishFillet();
-    const w = this.app.view.rayToPlane(p.x, p.y, this.plane!);
-    if (!w) return;
-    const uv = toPlane(this.plane!, w);
-    const tol = this.app.view.cam.worldPerPixel(this.app.view.height) * p.tol * 1.5;
     const base = this.entities;
+    // Two lines are asked for (not the point they share): a finger on a corner
+    // can't tell which corner, a line it can. The first one's length sets the
+    // starting size: a tenth of it.
+    const firstLen = (id: string, at: Vec2) => {
+      const e = base.find((x) => x.id === id);
+      const side = e && sideNear(e, at);
+      return side ? Math.hypot(side.b[0] - side.a[0], side.b[1] - side.a[1]) : 0;
+    };
     if (!this.edit.filletFrom) {
-      // Right on a corner (two curve ends meet there): round it directly.
-      const ends = base.flatMap(guidePoints).filter((g) => g.kind === "end");
-      // Corners: where two curve ends meet, and every corner of a rectangle,
-      // polygon or outline (one shape, so no ends meeting there).
-      const shapeCorners = base.flatMap((e) => (e.kind === "rect" || e.kind === "polygon" || e.kind === "polyline" ? entityCorners(e) : []));
-      const cands = [...ends.filter((g) => ends.filter((h) => Math.hypot(h.p[0] - g.p[0], h.p[1] - g.p[1]) < 1e-6).length >= 2).map((g) => g.p), ...shapeCorners];
-      const corner = cands.reduce<{ p: Vec2; d: number } | null>((best, q) => {
-        const d = Math.hypot(q[0] - uv[0], q[1] - uv[1]);
-        return d < tol && (!best || d < best.d) ? { p: q, d } : best;
-      }, null);
-      if (corner) return this.startFillet((r) => (memory.corner === "chamfer" ? chamferCorner(base, corner.p, r, tol * 0.01 + 1e-6) : filletCorner(base, corner.p, r, tol * 0.01 + 1e-6)));
-      if (kept) return;
       const c = this.curveAt(p);
-      if (!c) return this.tapEmpty();
-      if (base.find((x) => x.id === c.id)?.kind !== "line") return this.app.ui.toast("Pick a line (or tap a corner)");
+      // (Empty space after a fillet: it's kept, that's all.)
+      if (!c) return kept ? undefined : this.tapEmpty();
+      if (!sideNear(base.find((x) => x.id === c.id), c.uv)) return this.app.ui.toast("Pick a line (or a side of a rectangle / polygon)");
       this.edit.filletFrom = { id: c.id, at: c.uv };
+      const L = firstLen(c.id, c.uv);
+      if (L > 0) memory.fillet = roundSig(L * 0.1);
+      this.updatePanel();
       this.app.setSelection([{ kind: "curve", sketch: this.sketchId ?? "", entity: c.id }]);
-      return this.setHint("Now tap the half of the other line.");
+      return this.setHint("Now tap the other line.");
     }
     const first = this.edit.filletFrom;
     const c = this.curveAt(p);
@@ -3845,7 +3875,37 @@ export class SketchTool implements Tool {
     this.edit.filletFrom = undefined;
     this.clearPreviewJoin();
     this.app.setSelection([]);
-    this.startFillet((r) => (memory.corner === "chamfer" ? chamferEnds(base, first, { id: c.id, at: c.uv }, r) : filletEnds(base, first, { id: c.id, at: c.uv }, r)));
+    // Two sides of one rectangle / polygon: the corner between them.
+    if (c.id === first.id) {
+      const e = base.find((x) => x.id === c.id);
+      const s1 = e && sideNear(e, first.at);
+      const s2 = e && sideNear(e, c.uv);
+      const corner = s1 && s2 && [s1.a, s1.b].find((q) => samePt(q, s2.a) || samePt(q, s2.b));
+      if (!corner || (s1 && s2 && samePt(s1.a, s2.a) && samePt(s1.b, s2.b))) return this.app.ui.toast("Tap two sides that meet at a corner");
+      const tol = this.app.view.cam.worldPerPixel(this.app.view.height) * 0.5 + 1e-6;
+      return this.startFillet((r) => (memory.corner === "chamfer" ? chamferCorner(base, corner, r, tol) : filletCorner(base, corner, r, tol)));
+    }
+    // Two lines: the ends that meet are the ones nearest where they cross
+    // (not the halves tapped - any spot on a line picks it).
+    const l1 = base.find((x) => x.id === first.id);
+    const l2 = base.find((x) => x.id === c.id);
+    let at1 = first.at;
+    let at2 = c.uv;
+    if (l1?.kind === "line" && l2?.kind === "line") {
+      const x = lineMeet(l1, l2);
+      if (x) {
+        const near = (l: typeof l1): Vec2 => (Math.hypot(l.a[0] - x[0], l.a[1] - x[1]) <= Math.hypot(l.b[0] - x[0], l.b[1] - x[1]) ? l.a : l.b);
+        // Just inside the line from that end, so it reads as "that end".
+        const inside = (l: typeof l1): Vec2 => {
+          const e = near(l);
+          const o = e === l.a ? l.b : l.a;
+          return [e[0] + (o[0] - e[0]) * 0.01, e[1] + (o[1] - e[1]) * 0.01];
+        };
+        at1 = inside(l1);
+        at2 = inside(l2);
+      }
+    }
+    this.startFillet((r) => (memory.corner === "chamfer" ? chamferEnds(base, { id: first.id, at: at1 }, { id: c.id, at: at2 }, r) : filletEnds(base, { id: first.id, at: at1 }, { id: c.id, at: at2 }, r)));
   }
 
   private filletEdit: { make: (r: number) => SketchEntity[] | null; widget: DimWidget; base: SketchEntity[]; baseIds: Set<string> } | null = null;
@@ -4103,6 +4163,7 @@ export class SketchTool implements Tool {
     items.push(
       { type: "toggle", label: "Construction", value: !!e.construction, onChange: () => this.toggleConstruction() },
       ...(e.kind === "rect" || e.kind === "polygon" ? [{ type: "button", label: "Explode", icon: "line", onClick: () => this.commit(this.entities.flatMap((x) => (x.id === id ? explode(x) : [x]))) } as PanelItem] : []),
+      ...this.deleteConstraintsItem(),
       { type: "button", label: "Delete", icon: "trash", onClick: () => this.deleteSelected() },
     );
     this.app.ui.showPanel({ title: titleOf(e.kind as Kind), items, onDone: () => this.clearSelection() });
@@ -4183,6 +4244,16 @@ function titleOf(k: string): string {
 
 function sizeOfEntity(e: SketchEntity, prop: string): number {
   return sizeOfFn(e, prop) ?? 0;
+}
+
+/** The straight piece of a curve nearest a point: a line itself, or the side of a rectangle / polygon / outline. */
+function sideNear(e: SketchEntity | undefined, at: Vec2): Extract<SketchEntity, { kind: "line" }> | null {
+  if (!e) return null;
+  if (e.kind === "line") return e;
+  if (e.kind !== "rect" && e.kind !== "polygon" && e.kind !== "polyline") return null;
+  const sides = explode(e).filter((x): x is Extract<SketchEntity, { kind: "line" }> => x.kind === "line");
+  if (!sides.length) return null;
+  return sides.reduce((m, x) => (closestOnPrim(entityPrims(x)[0], at).d < closestOnPrim(entityPrims(m)[0], at).d ? x : m));
 }
 
 function samePt(a: Vec2, b: Vec2): boolean {
