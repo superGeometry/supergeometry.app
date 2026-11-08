@@ -56,7 +56,9 @@ export type PanelItem =
    * arches… The value shows beside it (`show` formats it).
    */
   | { type: "slider"; label: string; value: number; min: number; max: number; step?: number; show?(v: number): string; onInput(v: number): void }
-  | { type: "button"; label: string; icon?: IconName; onClick(): void; /** Blue: the step to take next (Apply). */ primary?: boolean };
+  | { type: "button"; label: string; icon?: IconName; onClick(): void; /** Blue: the step to take next (Apply). */ primary?: boolean }
+  /** A row of one-tap chips (e.g. the constraints that fit a selection); `on` ones are lit. */
+  | { type: "chips"; label?: string; chips: { label: string; glyph?: string; on?: boolean; title?: string; onClick(): void }[]; empty?: string };
 
 /** Kept for older call sites: a numeric field. */
 export interface ValueField {
@@ -692,6 +694,21 @@ export class UI {
         // The card's grip and the view must not take the drag.
         r.addEventListener("pointerdown", (e) => e.stopPropagation());
         g.append(r, out);
+        row.append(g);
+      } else if (it.type === "chips") {
+        const g = el("div", "chips");
+        if (it.label) g.append(el("span", "field-label", it.label));
+        const list = el("div", "chip-list");
+        for (const c of it.chips) {
+          const b = el("button", `chip${c.on ? " on" : ""}`);
+          if (c.glyph) b.append(el("span", "chip-glyph", c.glyph));
+          b.append(c.label);
+          if (c.title) b.title = c.title;
+          b.addEventListener("click", c.onClick);
+          list.append(b);
+        }
+        if (!it.chips.length && it.empty) list.append(el("span", "chip-empty", it.empty));
+        g.append(list);
         row.append(g);
       } else if (it.type === "toggle") {
         const b = el("button", `toggle${it.value ? " on" : ""}`, it.label);

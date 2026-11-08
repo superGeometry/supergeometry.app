@@ -111,6 +111,59 @@ export function explode(e: SketchEntity): SketchEntity[] {
   return entityPrims(e).map((p) => ({ id: uid(), kind: "line", a: (p as { a: Vec2 }).a, b: (p as { b: Vec2 }).b, construction: e.construction }));
 }
 
+/**
+ * A rectangle or polygon taken apart into lines that stay joined at the
+ * corners (Coincident), so dragging one corner moves just that corner and the
+ * two sides meeting there. A rectangle's sides also stay square to each other
+ * (Horizontal / Vertical when it isn't turned, else Perpendicular / Parallel),
+ * so it stretches as a rectangle; a polygon's corners move freely. The shape's
+ * own constraints follow: its corners become the lines' ends, its width and
+ * height the lengths of two sides; ones about its centre go.
+ */
+export function explodeJoined(
+  e: SketchEntity,
+  constraints: SketchConstraint[],
+  newId: () => string,
+): { lines: SketchEntity[]; constraints: SketchConstraint[]; ref: (r: { e: string; p: string }) => { e: string; p: string } | null } | null {
+  if (e.kind !== "rect" && e.kind !== "polygon") return null;
+  const k = entityCorners(e);
+  const n = k.length;
+  const lines: SketchEntity[] = k.map((a, i) => ({ id: newId(), kind: "line", a, b: k[(i + 1) % n], ...(e.construction ? { construction: true } : {}) }));
+  const sid = (i: number) => lines[((i % n) + n) % n].id;
+  const ref = (r: { e: string; p: string }) => {
+    if (r.e !== e.id) return r;
+    const m = /^k(\d+)$/.exec(r.p);
+    return m ? { e: sid(Number(m[1])), p: "a" } : null;
+  };
+  const cs: SketchConstraint[] = [];
+  for (const c of constraints) {
+    const onShape = c.curves?.includes(e.id);
+    if (onShape) {
+      if (c.type === "dim" && e.kind === "rect" && (c.prop === "w" || c.prop === "h")) cs.push({ ...c, curves: [sid(c.prop === "w" ? 0 : 1)], prop: "length" });
+      // Other sizes and relations of the whole shape no longer have a curve to hold.
+      continue;
+    }
+    if (c.pts?.some((r) => r.e === e.id)) {
+      const pts = c.pts.map(ref);
+      if (pts.some((r) => !r)) continue;
+      cs.push({ ...c, pts: pts as { e: string; p: string }[] });
+    } else cs.push(c);
+  }
+  for (let i = 0; i < n; i++) cs.push({ id: newId(), type: "coincident", pts: [{ e: sid(i), p: "b" }, { e: sid(i + 1), p: "a" }] });
+  if (e.kind === "rect") {
+    const turn = ((e.rotation % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2);
+    if (Math.min(turn, Math.PI / 2 - turn) < 1e-9) {
+      const flat = Math.abs(Math.cos(e.rotation)) > 0.5;
+      cs.push({ id: newId(), type: flat ? "horizontal" : "vertical", curves: [sid(0)] }, { id: newId(), type: flat ? "horizontal" : "vertical", curves: [sid(2)] });
+      cs.push({ id: newId(), type: flat ? "vertical" : "horizontal", curves: [sid(1)] }, { id: newId(), type: flat ? "vertical" : "horizontal", curves: [sid(3)] });
+    } else {
+      cs.push({ id: newId(), type: "perpendicular", curves: [sid(0), sid(1)] });
+      cs.push({ id: newId(), type: "parallel", curves: [sid(0), sid(2)] }, { id: newId(), type: "parallel", curves: [sid(1), sid(3)] });
+    }
+  }
+  return { lines, constraints: cs, ref };
+}
+
 /** Parameters where other entities cross primitive `p`. */
 function crossings(p: Prim, others: Prim[]): number[] {
   const ts: number[] = [];
@@ -760,6 +813,7 @@ export function offsetChain(entities: SketchEntity[], id: string, d: number): Sk
   // neighbours meet straight away - like a CAD offset, not an inside-out loop.
   let alive = pieces.map((_, i) => i);
   let out: Piece[] = [];
+  const allLines = pieces.every((e) => e.kind === "line");
   for (let round = 0; round <= pieces.length; round++) {
     if (alive.length < (chain.closed ? 2 : 1)) return null;
     const moved = alive.map((i) => offsetEntity(pieces[i], leftOf(pieces[i]) * side * d) as Piece | null);
@@ -798,6 +852,11 @@ export function offsetChain(entities: SketchEntity[], id: string, d: number): Sk
       out[i] = moveEnd(out[i], "b", meet) as (typeof out)[number];
       out[j] = moveEnd(out[j], "a", meet) as (typeof out)[number];
     }
+    // All straight: no piece is dropped here - the offset is cut where it crosses
+    // itself instead, and what turned round or runs too near the outline goes
+    // (cleanLineOffset). Dropping pieces one by one lost whole lobes of a shape
+    // past a narrow notch.
+    if (allLines) break;
     // Turned round or squeezed to nothing: that piece goes, and again.
     const flipped = alive.filter((src, k) => {
       const o = out[k];
@@ -889,6 +948,9 @@ function cleanLineOffset(orig: LineE[], off: LineE[], grow: number, closed: bool
       const mid = at(e, (ts[k] + ts[k + 1]) / 2);
       if (distOrig(mid) < d * (1 - 1e-6)) continue;
       if (closed && inside(mid) !== grow < 0) continue;
+      // A piece turned round (squeezed past nothing between its neighbours).
+      const o = orig[i];
+      if (o && (e.b[0] - e.a[0]) * (o.b[0] - o.a[0]) + (e.b[1] - e.a[1]) * (o.b[1] - o.a[1]) <= 0) continue;
       kept.push({ a: p, b: q, src: i });
     }
   });
@@ -911,6 +973,9 @@ function cleanLineOffset(orig: LineE[], off: LineE[], grow: number, closed: bool
       const last = path[path.length - 1];
       if (last && last.src === k.src && same(last.b, k.a)) last.b = k.b;
       else path.push({ ...k });
+      // Back at the start: the loop is closed (where offsets crossed, two
+      // parts start at the same point - going on there lost the loop).
+      if (path.length > 1 && same(kept[s].a, k.b)) break;
       cur = kept.findIndex((x, j) => !used.has(j) && same(x.a, k.b));
     }
     // A loop's first and last parts of the same piece: one line.

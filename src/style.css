@@ -151,6 +151,52 @@ kbd {
   background: #2b2e34;
 }
 
+.cbar-note {
+  padding: 8px 10px 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.7;
+  max-width: 220px;
+  white-space: normal;
+}
+/* One-tap chips in a card (the constraints that fit a selection). */
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 17px;
+  background: var(--chrome);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.chip-glyph {
+  min-width: 16px;
+  text-align: center;
+  opacity: 0.85;
+}
+.chip-empty {
+  opacity: 0.6;
+  font-size: 0.9em;
+}
 .text-btn {
   min-height: 36px;
   padding: 0 12px;

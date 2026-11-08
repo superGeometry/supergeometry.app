@@ -54,6 +54,14 @@ const checks: [string, () => void][] = [
     // Sketch 11's first side (2470 long): 250, not 2.
     assert.equal(defaultOffset(L("s", P[0], P[1])), 250);
   }],
+  ["inward past the notch: the lower lobe keeps its own outline (joined where the offsets meet)", () => {
+    const orig = loop(P);
+    const out = offsetChain(orig, orig[0].id, -800)!;
+    const made = out.slice(orig.length) as Extract<SketchEntity, { kind: "line" }>[];
+    // Some offset runs through the lobe (around x 2200..3000, y -7500..-9100).
+    assert.ok(made.some((m) => [m.a, m.b].some((q) => q[0] < 3000 && q[1] < -7400 && q[1] > -9200)), "lobe offset missing");
+    checkOffset(orig, -800, "lobe");
+  }],
   ["pattern spacing starts just clear of the shape", () => {
     assert.equal(patternSpacing(100), 120);
     assert.equal(patternSpacing(2350), 2800);

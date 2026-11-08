@@ -6,8 +6,9 @@ import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, patter
 import { addForUser, addStrict, constraintError, constraintName, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { nearestSnap } from "../sketch/snapPick";
+import { arrangement } from "../sketch/regions";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
-import { buildConstraints, buttonEnabled, CONSTRAINT_BUTTONS, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
+import { buildConstraints, CONSTRAINT_BUTTONS, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
 import { settings } from "../settings";
 import { isCoarse, screenClass } from "../device";
 import { arcFrom3, closestOnPrim, entityPolylines, entityPrims } from "../sketch/curves";
@@ -17,6 +18,7 @@ import {
   connectedChain,
   angleLines,
   explode,
+  explodeJoined,
   alignOne,
   alignShape,
   endNear,
@@ -83,6 +85,12 @@ type Kind =
   | "extend"
   | "align"
   | "delete";
+
+/** Asked once curves are picked and the turn still needs its centre. */
+const CENTRE_HINT = {
+  patternCircular: "Now tap the centre of the pattern - it snaps to the grid, line ends, midpoints, centres and joined points.",
+  rotate: "Now tap the point to turn around - it snaps to the grid, line ends, midpoints, centres and joined points.",
+};
 
 const HINTS: Record<Kind, string> = {
   select: "Tap curves to select them and edit their size. Double-tap selects a whole shape.",
@@ -563,7 +571,6 @@ export class SketchTool implements Tool {
       document.body.append(this.bar);
       window.addEventListener("resize", this.placeBar);
     }
-    const curves = this.pickedCurves();
     this.bar.innerHTML = "";
     const auto = document.createElement("button");
     auto.className = `cbar-toggle${settings.value.autoConstrain ? " on" : ""}`;
@@ -575,19 +582,13 @@ export class SketchTool implements Tool {
     glyphs.innerHTML = `<span class="cl">Show constraints</span><span class="switch"></span>`;
     glyphs.title = "Show or hide the constraint badges and dimensions on the sketch";
     glyphs.addEventListener("click", () => settings.set("showConstraintGlyphs", !settings.value.showConstraintGlyphs));
-    this.bar.append(auto, glyphs, document.createElement("hr"));
-    for (const b of CONSTRAINT_BUTTONS) {
-      const btn = document.createElement("button");
-      // Already on the selection: shown as on; tapping removes it (Lock becomes Unlock).
-      const have = this.selected.size || this.selPts.length ? existingConstraints(b.type, this.constraints, this.selPts, curves) : [];
-      const label = have.length && b.type === "fix" ? "Unlock" : b.label;
-      btn.innerHTML = `<span class="cl">${label} <kbd>⇧${b.key}</kbd></span><span class="cg">${have.length && b.type === "fix" ? "🔓" : b.glyph}</span>`;
-      btn.classList.toggle("on", have.length > 0);
-      btn.disabled = !have.length && !buttonEnabled(b.type, this.selPts, curves);
-      btn.title = have.length ? `Remove ${b.label.toLowerCase()} (${have.length})` : btn.disabled ? `${b.label}: select the right points/curves first` : b.label;
-      btn.addEventListener("click", () => (have.length ? this.removeConstraints(have) : this.addConstraint(b.type)));
-      this.bar.append(btn);
-    }
+    // The constraints themselves are in the card of what's selected - just the
+    // ones that fit it, one tap each (a column of mostly greyed-out buttons sat
+    // on top of that card).
+    const note = document.createElement("div");
+    note.className = "cbar-note";
+    note.textContent = "Tap lines or points: the constraints that fit show in their card. Tap a badge on the sketch to change or delete it.";
+    this.bar.append(auto, glyphs, note);
     this.placeBar();
   }
 
@@ -633,6 +634,35 @@ export class SketchTool implements Tool {
   private selectionConstraints(): SketchConstraint[] {
     const ids = this.selected;
     return this.constraints.filter((c) => refsOf(c).some((r) => ids.has(r)));
+  }
+
+  /**
+   * The constraints that fit what's selected, as one-tap chips in its card:
+   * only those that apply (no greyed-out list). One already on it is lit -
+   * tap it again to take it off. The selection stays, so several can be
+   * added in a row.
+   */
+  private constraintChips(): PanelItem[] {
+    if (this.kind !== "select" || (!this.selected.size && !this.selPts.length)) return [];
+    const curves = this.pickedCurves();
+    const chips: Extract<PanelItem, { type: "chips" }>["chips"] = [];
+    for (const b of CONSTRAINT_BUTTONS) {
+      const have = existingConstraints(b.type, this.constraints, this.selPts, curves);
+      const built = have.length ? [] : buildConstraints(b.type, this.selPts, curves);
+      if (!have.length && !built.length) continue;
+      // H/V says which one it is (the line's nearer to one or the other).
+      const t = b.type === "hv" ? (have[0] ?? built[0]).type : b.type;
+      const label = b.type === "hv" ? (t === "horizontal" ? "Horizontal" : "Vertical") : have.length && b.type === "fix" ? "Unlock" : b.label;
+      const glyph = b.type === "hv" ? (t === "horizontal" ? "H" : "V") : have.length && b.type === "fix" ? "🔓" : b.glyph;
+      chips.push({
+        label,
+        glyph,
+        on: have.length > 0,
+        title: have.length ? `Remove ${label.toLowerCase()} (Shift+${b.key})` : `${label} (Shift+${b.key})`,
+        onClick: () => (have.length ? this.removeConstraints(have) : this.addConstraint(b.type)),
+      });
+    }
+    return chips.length ? [{ type: "chips", label: "Constraints", chips }] : [];
   }
 
   /** "Delete constraints (n)" for the selection's card, when it has any. */
@@ -754,7 +784,9 @@ export class SketchTool implements Tool {
     this.commit(res.result.entities, res.constraints);
     if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
     else if (res.removed.length) this.app.ui.toast(`Replaced ${[...new Set(res.removed.map(constraintName))].join(", ")}`);
-    this.clearSelection();
+    // The selection stays: its card shows the new one lit (tap again to take it
+    // off), and another can be added straight away.
+    this.selectionChanged();
   }
 
   private selectConstraint(id: string): void {
@@ -937,10 +969,17 @@ export class SketchTool implements Tool {
   setKind(kind: Kind): void {
     // Phones: once a tool is picked the column shows just icons (names are back on the next sketch).
     document.body.classList.add("sketch-compact");
+    // A shape tapped (its extrude arrow up) and then Project: its outline is what gets projected.
+    if (kind === "project" && this.regionArrow && this.sketchId) {
+      const arr = arrangement(this.app.sketchCurves(this.sketchId));
+      for (const s of this.regionArrow.sel) if (s.kind === "profile") for (const id of arr.regions[s.region]?.curves ?? []) if (!id.startsWith("bnd-")) this.selected.add(id);
+    }
     this.hideRegionArrow();
     // Another tool picked: still sketching, Exit Sketch calms down.
     if (kind !== "select") this.exitPulse = false;
-    this.projectOut = [];
+    // Project with curves of this sketch already picked: those are what gets
+    // projected - next it only asks where to.
+    this.projectOut = kind === "project" ? this.entities.filter((e) => this.selected.has(e.id)).map((e) => e.id) : [];
     this.kind = kind;
     this.pts = [];
     this.locks = {};
@@ -965,7 +1004,7 @@ export class SketchTool implements Tool {
     this.clearPreviewJoin();
     this.edit.mirrorLine = undefined;
     // Editing tools keep the selection; drawing tools start clean.
-    if (!["move", "scale", "patternLinear", "patternCircular", "rotate", "mirror", "select", "delete", "align"].includes(kind)) this.selected.clear();
+    if (!["move", "scale", "patternLinear", "patternCircular", "rotate", "mirror", "select", "delete", "align", "project"].includes(kind)) this.selected.clear();
     // Align with a line already selected: that's the one that moves - next, what to align it with.
     // (A whole shape selected: tap its edge to align, then the line.)
     let alignHint: string | undefined;
@@ -980,7 +1019,7 @@ export class SketchTool implements Tool {
     this.showSelection();
     this.updateMenu();
     this.updatePanel();
-    this.setHint(alignHint);
+    this.setHint(kind === "project" && this.projectOut.length ? "Now tap where to project to: a plane or a flat face parallel to this sketch (or tap more curves)" : this.wantsCentre ? CENTRE_HINT[kind as "rotate" | "patternCircular"] : alignHint);
     if (kind === "align" && this.edit.alignFrom) this.app.setSelection([{ kind: "curve", sketch: this.sketchId ?? "", entity: this.edit.alignFrom }]);
   }
 
@@ -1176,7 +1215,7 @@ export class SketchTool implements Tool {
       case "patternCircular":
       case "rotate":
         items.push(
-          { type: "slot", label: k === "rotate" ? "Turn around" : "Center", value: this.edit.pivot ? `${trimNum(this.edit.pivot[0])}, ${trimNum(this.edit.pivot[1])}` : k === "patternCircular" ? "Tap the centre" : "Tap a point", active: this.edit.picking === "pivot", filled: !!this.edit.pivot, onClick: () => ((this.edit.picking = "pivot"), this.updatePanel()) },
+          { type: "slot", label: k === "rotate" ? "Turn around" : "Center", value: this.edit.pivot ? `${trimNum(this.edit.pivot[0])}, ${trimNum(this.edit.pivot[1])}` : k === "patternCircular" ? "Tap the centre" : "Tap a point", active: this.edit.picking === "pivot" || this.wantsCentre, filled: !!this.edit.pivot, onClick: () => ((this.edit.picking = "pivot"), this.updatePanel()) },
           ...(k === "patternCircular" ? [{ type: "number", label: "Count", value: this.edit.count, kind: "int", min: 2, onInput: (v: number) => ((this.edit.count = v), this.refreshPreview()) } as PanelItem] : []),
           k === "patternCircular"
             ? { type: "number", label: "Angle", value: this.edit.patAngle, kind: "angle", onInput: (v) => ((this.edit.patAngle = v), this.refreshPreview()) }
@@ -1194,6 +1233,13 @@ export class SketchTool implements Tool {
         break;
       case "select":
         if (selCount === 1) return this.showSizePanel();
+        // Points only: what can be done with them - join, lock, a distance...
+        if (selCount === 0 && this.selPts.length)
+          return ui.showPanel({
+            title: this.selPts.length === 1 ? "Point" : `${this.selPts.length} points`,
+            items: [...this.constraintChips(), ...this.deleteConstraintsItem()],
+            onDone: () => this.clearSelection(),
+          });
         if (selCount > 1) {
           // Two lines: the angle of the second picked against the first.
           const [l1, l2] = this.pickedCurves();
@@ -1206,6 +1252,7 @@ export class SketchTool implements Tool {
             title: `${selCount} curves`,
             items: [
               ...angle,
+              ...this.constraintChips(),
               { type: "button", label: "Construction", icon: "construction", onClick: () => this.toggleConstruction() },
               ...this.deleteConstraintsItem(),
               { type: "button", label: "Delete", icon: "trash", onClick: () => this.deleteSelected() },
@@ -1304,7 +1351,9 @@ export class SketchTool implements Tool {
       this.app.setHover(onCurve ? { kind: "curve", sketch: hit.sketch, entity: hit.entity } : null);
       // Second pick of Extend/Fillet: show the result as dashed lines before tapping.
       this.previewJoin(onCurve ? this.curveAt(p) : null);
-      if (!this.edit.picking) return;
+      if (!this.edit.picking && !this.wantsCentre) return;
+      // Waiting for the centre: where the tap would land (snapped), not a curve to pick.
+      if (this.wantsCentre) this.app.setHover(null);
     }
     if (this.kind === "project") {
       const hit = this.app.view.pick(p.x, p.y, { profiles: false, planes: false, axes: false, edgeTolPx: p.tol });
@@ -1643,7 +1692,7 @@ export class SketchTool implements Tool {
       this.gimbal.setHot(part);
       return true;
     }
-    const refs = this.dragRefs(this.selected, this.selPts);
+    const refs = this.joinCorners(this.dragRefs(this.selected, this.selPts));
     if (!refs.length) return false;
     const c = toPlane(this.plane!, this.gimbal.origin);
     this.sdrag = { kind: "gimbal", part, from: p, refs, center: c, last: { d: [0, 0], ang: 0 } };
@@ -1671,10 +1720,48 @@ export class SketchTool implements Tool {
     if (!from || !hit || (hit.kind !== "point" && hit.kind !== "curve") || hit.sketch !== this.sketchId) return false;
     // Dragging something unselected drags just that; a selected thing drags the whole selection.
     const isSel = hit.kind === "curve" ? this.selected.has(hit.entity) : this.selPts.some((r) => r.e === hit.entity && r.p === hit.p);
-    const refs = isSel ? this.dragRefs(this.selected, this.selPts) : hit.kind === "curve" ? this.dragRefs([hit.entity], []) : this.dragRefs([], [{ e: hit.entity, p: hit.p }]);
+    const refs = this.joinCorners(isSel ? this.dragRefs(this.selected, this.selPts) : hit.kind === "curve" ? this.dragRefs([hit.entity], []) : this.dragRefs([], [{ e: hit.entity, p: hit.p }]));
     if (!refs.length) return false;
     this.sdrag = { kind: "points", from, refs };
     return true;
+  }
+
+  /**
+   * A corner of a rectangle or polygon about to be dragged: the shape becomes
+   * lines joined at its corners first (same undo step as the drag), so only
+   * that corner and its two sides move - a rectangle stretches, staying square.
+   */
+  private joinCorners(refs: DragRef[]): DragRef[] {
+    const ids = new Set(refs.filter((d) => /^k\d+$/.test(d.ref.p)).map((d) => d.ref.e));
+    let es = this.entities;
+    let cs = this.constraints;
+    const maps: ((r: PointRef) => PointRef | null)[] = [];
+    for (const id of ids) {
+      const e = es.find((x) => x.id === id);
+      const out = e && explodeJoined(e, cs, uid);
+      if (!out) continue;
+      es = es.flatMap((x) => (x.id === id ? out.lines : [x]));
+      cs = out.constraints;
+      maps.push(out.ref);
+      if (this.selected.delete(id)) for (const l of out.lines) this.selected.add(l.id);
+    }
+    if (!maps.length || !this.sketchId) return refs;
+    const map = (r: PointRef): PointRef | null => maps.reduce<PointRef | null>((q, f) => (q ? f(q) : null), r);
+    this.selPts = this.selPts.map(map).filter((r): r is PointRef => !!r);
+    const sid = this.sketchId;
+    this.app.store.transient((doc) => {
+      const f = doc.features.find((x) => x.id === sid);
+      if (f?.type === "sketch") {
+        f.entities = es;
+        f.constraints = cs.length ? cs : undefined;
+      }
+    });
+    const out = new Map<string, DragRef>();
+    for (const d of refs) {
+      const r = map(d.ref);
+      if (r) out.set(refKey(r), { ref: r, at: d.at });
+    }
+    return [...out.values()];
   }
 
   /** The one selected line (no points selected), if that's the selection. */
@@ -3735,6 +3822,11 @@ export class SketchTool implements Tool {
     this.patAuto = s;
   }
 
+  /** Rotate About / Circular Pattern with curves picked and no centre yet: the next tap is the centre. */
+  private get wantsCentre(): boolean {
+    return (this.kind === "rotate" || this.kind === "patternCircular") && this.selected.size > 0 && !this.edit.pivot;
+  }
+
   private selectionChanged(): void {
     // A pattern's spacing that wasn't set by hand follows what's selected.
     if (this.kind === "patternLinear" && this.patAuto !== null && Math.abs(Math.hypot(this.edit.dx, this.edit.dy) - this.patAuto) < 1e-9) this.autoPatternSpacing();
@@ -3745,6 +3837,7 @@ export class SketchTool implements Tool {
     this.updatePanel();
     this.refreshPreview();
     this.refreshConstraintUI();
+    if (this.wantsCentre) this.setHint(CENTRE_HINT[this.kind as "rotate" | "patternCircular"]);
   }
 
   private clearSelection(): void {
@@ -4233,6 +4326,7 @@ export class SketchTool implements Tool {
         break;
     }
     items.push(
+      ...this.constraintChips(),
       { type: "toggle", label: "Construction", value: !!e.construction, onChange: () => this.toggleConstruction() },
       ...(e.kind === "rect" || e.kind === "polygon" ? [{ type: "button", label: "Explode", icon: "line", onClick: () => this.commit(this.entities.flatMap((x) => (x.id === id ? explode(x) : [x]))) } as PanelItem] : []),
       ...this.deleteConstraintsItem(),
