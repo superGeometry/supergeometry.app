@@ -603,8 +603,8 @@ export class App implements AppContext {
             icon: "variable",
             sub: `${this.store.doc.variables.length} defined`,
             children: [
-              { id: "var", label: "New Variable", icon: "variable", run: () => void createVariable(this) },
-              { id: "vars", label: "Edit Variables", icon: "variable", sub: `${this.store.doc.variables.length} defined`, run: () => void editVariables(this) },
+              { id: "var", label: "New Variable", icon: "variableNew", run: () => void createVariable(this) },
+              { id: "vars", label: "Edit Variables", icon: "variableEdit", sub: `${this.store.doc.variables.length} defined`, run: () => void editVariables(this) },
             ],
           },
           { id: "image", label: "Image", icon: "image", run: () => void insertImage(this).then((f) => f && this.setTool(new ImageOp(this, f))) },
@@ -727,6 +727,13 @@ export class App implements AppContext {
           { id: "wrap", label: "Wrap & Emboss", icon: "wrap", disabled: true, why: SOON },
         ],
       },
+      // With variables set up: Edit Variables in a box of its own under the tools.
+      ...(this.store.doc.variables.length
+        ? [
+            { id: "===vars", label: "", icon: "variableEdit" as const },
+            { id: "editVars", label: "Edit Variables", icon: "variableEdit" as const, sub: `${this.store.doc.variables.length} defined`, run: () => void editVariables(this) },
+          ]
+        : []),
     ];
   }
 

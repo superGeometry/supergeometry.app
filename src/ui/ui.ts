@@ -1358,15 +1358,24 @@ function usable(items: ToolItem[]): ToolItem[] {
     } else out.push(item);
   }
   // No separators at the ends or twice in a row.
-  return out.filter((x, i, a) => !x.id.startsWith("---") || (i > 0 && i < a.length - 1 && !a[i - 1].id.startsWith("---")));
+  const mark = (x: ToolItem) => x.id.startsWith("---") || x.id.startsWith("===");
+  return out.filter((x, i, a) => !mark(x) || (i > 0 && i < a.length - 1 && !mark(a[i - 1])));
 }
 
 function renderTools(host: HTMLElement, all: ToolItem[], onFlyout: (item: ToolItem, btn: HTMLElement) => void, after?: () => void): void {
   host.innerHTML = "";
   const items = usable(all);
+  // "===" starts a box of its own (a gap between): the items go in groups.
+  const grouped = items.some((x) => x.id.startsWith("==="));
+  host.classList.toggle("grouped", grouped);
+  let into: HTMLElement = grouped ? host.appendChild(el("div", "tool-group")) : host;
   for (const item of items) {
+    if (item.id.startsWith("===")) {
+      into = host.appendChild(el("div", "tool-group"));
+      continue;
+    }
     if (item.id.startsWith("---")) {
-      host.append(el("div", "tool-sep"));
+      into.append(el("div", "tool-sep"));
       continue;
     }
     const b = toolButton(item, true);
@@ -1379,8 +1388,9 @@ function renderTools(host: HTMLElement, all: ToolItem[], onFlyout: (item: ToolIt
         after?.();
       }
     });
-    host.append(b);
+    into.append(b);
   }
+  for (const g of host.querySelectorAll(".tool-group:empty")) g.remove();
 }
 
 function toolButton(item: ToolItem, withLabel: boolean): HTMLButtonElement {

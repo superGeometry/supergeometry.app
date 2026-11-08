@@ -81,6 +81,9 @@ export const icons = {
   fit: svg('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
   file: svg('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>'),
   insert: svg('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/>'),
+  // New Variable: the x with a plus; Edit Variables: the x with a pencil.
+  variableNew: svg('<path d="M3 8c3.5 0 3.5 12 7 12M10 8c-3.5 0-3.5 12-7 12"/><path d="M17.5 3.5v7M14 7h7"/>'),
+  variableEdit: svg('<path d="M3 8c3.5 0 3.5 12 7 12M10 8c-3.5 0-3.5 12-7 12"/><path d="M13 20.5l.8-3.3 6-6 2.5 2.5-6 6z"/><path d="M18.3 12.7l2.5 2.5"/>'),
   variable: svg('<path d="M5 6c3 0 3 12 6 12M11 6c-3 0-3 12-6 12"/><path d="M14 9h6M17 6v6M14 16h6"/>'),
   image: svg('<rect x="3" y="5" width="18" height="14" rx="1"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/>'),
   construct: svg('<path d="M3 15l6-6h12l-6 6z"/><path d="M12 3v18" stroke-dasharray="2 2"/>'),

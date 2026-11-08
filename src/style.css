@@ -409,6 +409,37 @@ body.items-open #undo-dock {
   max-height: calc(100vh - 200px - var(--safe-t) - var(--safe-b));
   overflow-y: auto;
 }
+/* Boxes of their own (Edit Variables under the tools), with a gap between. */
+#toolbar.grouped {
+  background: none;
+  padding: 0;
+  gap: 8px;
+  /* The space around the boxes is the view's (taps go through). */
+  pointer-events: none;
+}
+#toolbar.grouped .tool-group {
+  pointer-events: auto;
+}
+/* Phones held sideways: no room under the column, so the box goes beside it, at the top. */
+@media (max-height: 500px) and (min-width: 721px) {
+  #toolbar.grouped {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  #toolbar.grouped .tool-group {
+    max-height: 100%;
+    overflow-y: auto;
+  }
+}
+.tool-group {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 1px;
+  background: var(--chrome);
+  border-radius: var(--radius);
+  padding: 4px;
+}
 #toolbar:empty,
 #bottom-left:empty {
   display: none;
@@ -2000,6 +2031,13 @@ form.dialog {
   #toolbar .tool-label,
   #bottom-left .tool-label {
     display: none;
+  }
+  /* The strip: the tools fill it, Edit Variables at its end in a box of its own. */
+  #toolbar .tool-group {
+    flex-direction: row;
+  }
+  #toolbar .tool-group:first-child {
+    flex: 1 0 auto;
   }
   #bottom-left {
     bottom: calc(64px + var(--safe-b));
