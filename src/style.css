@@ -834,13 +834,30 @@ body.sketching .right-btn.sketch-only {
   fill: #ffd34d;
   stroke: none;
 }
-/* To the variables it's made from (solid) and made from it (dotted). */
-.vtag-lines line {
-  stroke-width: 1.2;
-  stroke: rgba(159, 209, 255, 0.7);
+/* A tap on one: the tags related to it stay lit, the rest fade back. */
+.vtag.faded {
+  opacity: 0.35;
 }
-.vtag-lines line.to {
-  stroke-dasharray: 2 3;
+.vtag.rel {
+  border-color: rgba(159, 209, 255, 0.85);
+}
+/* Under the open box: what's made from it ("→ p2 = p1 + arm1"). */
+.vtag-rel {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 47;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(31, 33, 37, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font: 11.5px ui-monospace, monospace;
+  color: #bcd2ee;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.vtag-rel[hidden] {
+  display: none;
 }
 .vtag {
   position: absolute;

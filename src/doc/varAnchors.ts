@@ -20,6 +20,14 @@ export interface VarUse {
   /** What in it: a value's path, or a sketch dimension's id. */
   where: string;
   kind: VarKind;
+  /** The formula there ("arm1", "p1 + arm1 - 70 mm"). */
+  expr: string;
+}
+
+/** The use is the variable itself ("arm1", or "2*baseR" on a diameter), not a formula it's part of. */
+export function isDirect(u: VarUse, name: string): boolean {
+  const esc = name.replace(/[^a-z0-9_]/gi, "");
+  return new RegExp(`^\\s*(${esc}|2\\s*\\*\\s*${esc}|${esc}\\s*\\*\\s*2)\\s*$`).test(u.expr);
 }
 
 /** The kernel's answer, as far as tags need it. */
@@ -53,9 +61,9 @@ export function usesOf(features: readonly Feature[]): Map<string, VarUse[]> {
   };
   for (const f of features) {
     if (f.suppressed) continue;
-    for (const [path, expr] of Object.entries(f.exprs ?? {})) for (const n of namesIn(expr)) add1(n, { feature: f.id, where: path, kind: kindOfPath(path) });
+    for (const [path, expr] of Object.entries(f.exprs ?? {})) for (const n of namesIn(expr)) add1(n, { feature: f.id, where: path, kind: kindOfPath(path), expr });
     if (f.type === "sketch")
-      for (const c of f.constraints ?? []) if (c.expr) for (const n of namesIn(c.expr)) add1(n, { feature: f.id, where: c.id, kind: c.prop === "angle" ? "angle" : "length" });
+      for (const c of f.constraints ?? []) if (c.expr) for (const n of namesIn(c.expr)) add1(n, { feature: f.id, where: c.id, kind: c.prop === "angle" ? "angle" : "length", expr: c.expr! });
   }
   return out;
 }
@@ -302,8 +310,10 @@ export function useSpot(u: VarUse, features: readonly Feature[], world: AnchorWo
 
 export interface VarTag {
   name: string;
-  /** What it changes, drawn on the model (see useMarks). */
+  /** What it changes, drawn on the model (see useMarks): the one use its tag is on. */
   marks: Vec3[][];
+  /** The variables made from it. */
+  to: string[];
   kind: VarKind;
   /** Where its tag goes (its first use that has a spot), null: not on the model. */
   at: Vec3 | null;
@@ -318,17 +328,25 @@ export function variableTags(variables: readonly Variable[], features: readonly 
   const uses = usesOf(features);
   return variables.map((v) => {
     // Its tag at the use that says most where it acts: a turn's pivot, then a
-    // step's value, then a dimension of the shape, then a construction line.
+    // step's value, then a dimension of the shape, then a construction line -
+    // where it's the value itself before where it's part of a formula.
     const rank = (u: VarUse) => {
       const f = features.find((g) => g.id === u.feature);
-      if (f?.type === "transform") return 0;
-      if (f?.type !== "sketch") return 1;
+      const part = isDirect(u, v.name) ? 0 : 10;
+      if (f?.type === "transform") return part;
+      if (f?.type !== "sketch") return part + 1;
       const c = f.constraints?.find((x) => x.id === u.where);
-      return f.entities.find((e) => e.id === c?.curves?.[0])?.construction ? 3 : 2;
+      return part + (f.entities.find((e) => e.id === c?.curves?.[0])?.construction ? 3 : 2);
     };
     const ordered = [...(uses.get(v.name) ?? [])].sort((a, b) => rank(a) - rank(b));
     const spots = ordered.map((u) => useSpot(u, features, world)).filter((p): p is Vec3 => !!p && p.every(Number.isFinite));
-    const marks = ordered.flatMap((u) => useMarks(u, v.name, features, world)).filter((m) => m.length > 1 && m.every((p) => p.every(Number.isFinite)));
-    return { name: v.name, marks, kind: kindOfVariable(v.name, variables, uses), at: spots[0] ?? null, others: spots.slice(1), from: madeFrom(v.name, variables) };
+    // One thing shown (both sides of an arm the same length: one of them).
+    let marks: Vec3[][] = [];
+    for (const u of ordered) {
+      marks = useMarks(u, v.name, features, world).filter((m) => m.length > 1 && m.every((p) => p.every(Number.isFinite)));
+      if (marks.length) break;
+    }
+    const to = variables.filter((w) => madeFrom(w.name, variables).includes(v.name)).map((w) => w.name);
+    return { name: v.name, marks, to, kind: kindOfVariable(v.name, variables, uses), at: spots[0] ?? null, others: spots.slice(1), from: madeFrom(v.name, variables) };
   });
 }

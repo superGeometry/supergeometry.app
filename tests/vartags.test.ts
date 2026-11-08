@@ -51,8 +51,10 @@ check("p2 and p3: at the elbow and the head's joint, on the upper arm", inside(t
 const segLen = (m: Vec3[]) => Math.hypot(m[1][0] - m[0][0], m[1][1] - m[0][1], m[1][2] - m[0][2]);
 const v = (n: string) => Number(/[\d.]+/.exec(doc.variables.find((x) => x.name === n)!.expr)![0]);
 check("baseR's mark: the base's radius (2*baseR on its diameter), from its centre", tag("baseR").marks.length === 1 && Math.abs(segLen(tag("baseR").marks[0]) - v("baseR")) < 1e-6 && Math.hypot(...tag("baseR").marks[0][0]) < 1e-6, JSON.stringify(tag("baseR").marks.map(segLen)));
-check("arm1: a line as long as arm1, along the turned arm (and the others that use it)", tag("arm1").marks.some((m) => Math.abs(segLen(m) - v("arm1")) < 1e-6 && m.every((p) => inside(p, arm1))), JSON.stringify(tag("arm1").marks.map(segLen)));
-check("p1's marks include the lower joint's height (from 0 up to the pivot)", tag("p1").marks.some((m) => m.length === 2 && Math.abs(segLen(m) - 66) < 1e-6), JSON.stringify(tag("p1").marks.map(segLen)));
+check("arm1: one line, as long as arm1, along the turned arm (not both sides, not the formulas it's in)", tag("arm1").marks.length === 1 && Math.abs(segLen(tag("arm1").marks[0]) - v("arm1")) < 1e-6 && tag("arm1").marks[0].every((p) => inside(p, arm1)), JSON.stringify(tag("arm1").marks.map(segLen)));
+check("one thing marked per variable (an angle: its arc and two arms)", tags.every((t) => t.marks.length === (t.kind === "angle" ? 3 : 1)), tags.map((t) => `${t.name}:${t.marks.length}`).join(" "));
+check("made from arm1: p2 (and p3 through it, not listed)", JSON.stringify(tag("arm1").to) === '["p2"]' && JSON.stringify(tag("p1").to) === '["p2"]', JSON.stringify(tag("arm1").to));
+check("p1's mark: the lower joint's height (from 0 up to the pivot)", tag("p1").marks.some((m) => m.length === 2 && Math.abs(segLen(m) - 66) < 1e-6), JSON.stringify(tag("p1").marks.map(segLen)));
 check("a1's mark: an arc round the joint with its two arms", tag("a1").marks.length === 3 && tag("a1").marks[1].length > 3);
 check("baseH's mark: the base's height", tag("baseH").marks.some((m) => Math.abs(segLen(m) - 16) < 1e-6));
 check("every variable of the lamp has a spot", tags.every((t) => t.at), tags.filter((t) => !t.at).map((t) => t.name).join(", "));

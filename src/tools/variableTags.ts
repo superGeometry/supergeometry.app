@@ -2,9 +2,11 @@
 // it acts on the model - its kind's mark (↔ a length, ∠ an angle, # a number)
 // and its name, like the sketch's constraint marks. Tap one: its value box
 // opens by it, to type a value or a formula, or press and drag sideways to
-// turn it up or down - the model follows. While it's open, lines show what it
-// does: dashed to its other uses, solid to the variables it's made from and
-// to the ones made from it.
+// turn it up or down - the model follows. While it's open, what it changes is
+// drawn on the model in yellow dashes (one thing: the radius, the arm's
+// length, the turn's arc), the tags of the variables it's made from or that
+// are made from it stay lit (the rest fade), and a line under the box says
+// what's made from it ("p2 = p1 + arm1").
 
 import { mergingCommits } from "../doc/store";
 import type { Variable, Vec3 } from "../doc/types";
@@ -38,6 +40,8 @@ export class VariableTags {
   private input = document.createElement("input");
   private boxName = el("span", "vtag-box-name");
   private boxValue = el("span", "vtag-box-value");
+  /** Under the box: the variables made from it, with their formulas. */
+  private rel = el("div", "vtag-rel");
   private hook = () => this.layout();
   /** One undo step per opening of the box (not one for everything ever typed in it). */
   private undoGroup = {};
@@ -62,6 +66,7 @@ export class VariableTags {
     numpadInput(this.input);
     this.box.append(this.boxName, this.input, this.boxValue);
     this.box.hidden = true;
+    this.rel.hidden = true;
     this.box.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.input.addEventListener("input", () => this.typed());
     // A drag let go: what it was dragged to applies (the box stays open).
@@ -71,18 +76,39 @@ export class VariableTags {
       if (e.key === "Enter") (e.preventDefault(), this.close());
       else if (e.key === "Escape") (e.preventDefault(), this.close(false));
     });
-    document.body.append(this.box);
-    // A tap anywhere else puts the box away (the numpad's own keys don't count).
+    document.body.append(this.box, this.rel);
+    // A tap anywhere else puts the box away (the numpad's own keys don't count);
+    // a drag turns or moves the view and the box stays open, its marks with it.
+    let press: { id: number; x: number; y: number; moved: boolean } | null = null;
     document.addEventListener(
       "pointerdown",
       (e) => {
         const t = e.target as HTMLElement;
+        // A second finger (pinch): not a tap.
+        if (press && e.pointerId !== press.id) return void (press.moved = true);
+        press = null;
         if (!this.openName || this.box.contains(t) || t.closest?.(".numpad, .vtag")) return;
-        this.close();
+        press = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
       },
       true,
     );
-    view.frameHooks.add(this.hook);
+    document.addEventListener(
+      "pointermove",
+      (e) => {
+        if (press && e.pointerId === press.id && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) press.moved = true;
+      },
+      true,
+    );
+    document.addEventListener(
+      "pointerup",
+      (e) => {
+        if (!press || e.pointerId !== press.id) return;
+        const tap = !press.moved;
+        press = null;
+        if (tap) this.close();
+      },
+      true,
+    );    view.frameHooks.add(this.hook);
   }
 
   /** Show or hide them all (the Variables switch). */
@@ -116,6 +142,7 @@ export class VariableTags {
     }
     if (this.openName && !this.chips.has(this.openName)) this.close();
     else if (this.openName && this.pending === null) this.showValue();
+    this.showRelated();
     this.view.requestRender();
   }
 
@@ -137,7 +164,7 @@ export class VariableTags {
     this.input.classList.remove("invalid");
     this.input.size = Math.max(4, this.input.value.length + 1);
     this.box.hidden = false;
-    for (const [n, c] of this.chips) c.classList.toggle("sel", n === name);
+    this.showRelated();
     this.showValue();
     this.layout();
     this.input.focus();
@@ -153,8 +180,29 @@ export class VariableTags {
     this.openName = null;
     this.box.hidden = true;
     this.input.blur();
-    for (const c of this.chips.values()) c.classList.remove("sel");
+    this.showRelated();
     this.view.requestRender();
+  }
+
+  /**
+   * The open one's relations, without lines across the view: the tags it's
+   * made from and made from it stay lit, the rest fade; under the box, what's
+   * made from it.
+   */
+  private showRelated(): void {
+    const name = this.openName;
+    const tag = name ? this.tags.find((t) => t.name === name) : undefined;
+    const near = new Set([...(tag?.from ?? []), ...(tag?.to ?? [])]);
+    for (const [n, c] of this.chips) {
+      c.classList.toggle("sel", n === name);
+      c.classList.toggle("rel", !!tag && near.has(n));
+      c.classList.toggle("faded", !!tag && n !== name && !near.has(n));
+    }
+    const lines = (tag?.to ?? []).map((n) => `${n} = ${bareExpr(this.exprOf(n))}`);
+    this.rel.textContent = "";
+    for (const l of lines.slice(0, 3)) this.rel.append(el("div", "", `\u2192 ${l}`));
+    if (lines.length > 3) this.rel.append(el("div", "", `+${lines.length - 3} more`));
+    this.rel.hidden = !tag || !lines.length;
   }
 
   /** What a formula works out to ("= 66"), from what's typed (or the value as it is). */
@@ -211,7 +259,7 @@ export class VariableTags {
     this.drawLines(at);
     const open = this.openName && at.get(this.openName);
     if (!open) {
-      if (this.openName) this.box.style.transform = "translate(-9999px, 0)";
+      if (this.openName) this.box.style.transform = this.rel.style.transform = "translate(-9999px, 0)";
       return;
     }
     // The box beside its tag, kept on screen.
@@ -220,57 +268,58 @@ export class VariableTags {
     const x = Math.max(6, Math.min(window.innerWidth - w - 6, open[0] + 18));
     const y = Math.max(56, Math.min(window.innerHeight - h - 6, open[1] - h / 2));
     this.box.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    // What's made from it, under the box (above it at the bottom of the screen).
+    if (!this.rel.hidden) {
+      const rh = this.rel.offsetHeight;
+      const below = y + h + 4 + rh < window.innerHeight - 6;
+      const rx = Math.max(6, Math.min(window.innerWidth - this.rel.offsetWidth - 6, x));
+      this.rel.style.transform = `translate(${Math.round(rx)}px, ${Math.round(below ? y + h + 4 : y - rh - 4)}px)`;
+    }
   }
 
   /**
-   * The open tag: what it changes, drawn on the model in yellow dashes (the
-   * base's radius, the arm's length, a turn's arc - every place it's used),
-   * and thin lines to the variables it's made from and the ones made from it.
+   * The open tag: what it changes, drawn on the model in yellow dashes - a
+   * length like a dimension (a tick across each end), an angle as its arc.
    */
   private drawLines(at: Map<string, [number, number]>): void {
     this.lines.innerHTML = "";
     const name = this.openName;
-    const from = name ? at.get(name) : undefined;
-    if (!name || !from) return;
+    if (!name || !at.get(name)) return;
     const tag = this.tags.find((t) => t.name === name)!;
-    const dot = (p: [number, number]) => {
-      const d = document.createElementNS(SVG_NS, "circle");
-      d.setAttribute("cx", String(p[0]));
-      d.setAttribute("cy", String(p[1]));
-      d.setAttribute("r", "3");
-      d.setAttribute("class", "mark");
-      this.lines.append(d);
+    const add = (tagName: string, attrs: Record<string, string>) => {
+      const n = document.createElementNS(SVG_NS, tagName);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+      n.setAttribute("class", "mark");
+      this.lines.append(n);
     };
+    const f = (x: number) => x.toFixed(1);
     for (const m of tag.marks) {
       const pts = m.map((p) => this.view.toScreen(p as Vec3));
       if (pts.some((p) => !p)) continue;
-      const pl = document.createElementNS(SVG_NS, "polyline");
-      pl.setAttribute("points", pts.map((p) => `${p![0].toFixed(1)},${p![1].toFixed(1)}`).join(" "));
-      pl.setAttribute("class", "mark");
-      this.lines.append(pl);
-      // Its two ends (what's measured is between them).
-      dot(pts[0]!);
-      dot(pts[pts.length - 1]!);
+      add("polyline", { points: pts.map((p) => `${f(p![0])},${f(p![1])}`).join(" ") });
     }
-    const line = (to: [number, number], cls: string) => {
-      const l = document.createElementNS(SVG_NS, "line");
-      l.setAttribute("x1", String(from[0]));
-      l.setAttribute("y1", String(from[1]));
-      l.setAttribute("x2", String(to[0]));
-      l.setAttribute("y2", String(to[1]));
-      l.setAttribute("class", cls);
-      this.lines.append(l);
-    };
-    for (const n of tag.from) {
-      const s = at.get(n);
-      if (s) line(s, "from");
+    const first = tag.marks[0]?.map((p) => this.view.toScreen(p as Vec3));
+    if (!first || first.some((p) => !p)) return;
+    if (tag.kind === "angle") {
+      // The pivot.
+      add("circle", { cx: f(first[0]![0]), cy: f(first[0]![1]), r: "3" });
+      return;
     }
-    for (const t of this.tags) if (t.from.includes(name) && at.get(t.name)) line(at.get(t.name)!, "to");
+    // Where it's measured from and to: a tick across each end.
+    for (const m of tag.marks) {
+      if (m.length !== 2) continue;
+      const [p, q] = m.map((x) => this.view.toScreen(x as Vec3));
+      if (!p || !q) continue;
+      const len = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+      const [nx, ny] = [(-(q[1] - p[1]) / len) * 7, ((q[0] - p[0]) / len) * 7];
+      for (const e of [p, q]) add("line", { x1: f(e[0] - nx), y1: f(e[1] - ny), x2: f(e[0] + nx), y2: f(e[1] + ny), "stroke-dasharray": "none" });
+    }
   }
 
   dispose(): void {
     this.view.frameHooks.delete(this.hook);
     this.host.remove();
     this.box.remove();
+    this.rel.remove();
   }
 }
