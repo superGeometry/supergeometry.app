@@ -90,7 +90,7 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
       { icon: "numpad", name: "Numpad", text: "Tap to switch the on-screen numpad on or off: value boxes then open it instead of the keyboard. Typing replaces the value; ↵ applies it. ƒx adds + × / and your variables (tap one to type its name), and + New makes a variable from the value." },
       { icon: "display", name: "Display", text: "Shaded, wireframe or X-ray; edges and hidden edges." },
       { icon: "camera", name: "Screenshot", text: "Save a picture of the view, marked faintly at the bottom right with the project's name, the isolated bodies (when isolating) and supergeometry.app." },
-      { icon: "history", name: "History", text: "Every step in order. Tap one to change it, hover to see what it works on, the eye switches it off, the bin deletes it (two taps, as in Items and the projects: the first turns it red). Select several (Ctrl/Shift+click) to group them: fold, rename, switch all off or on, ungroup." },
+      { icon: "history", name: "History", text: "Every step in order. Tap one to change it, hover to see what it works on, the eye switches it off, the bin deletes it (two taps, as in Items and the projects: the first turns it red). Select several (Ctrl/Shift+click) to group them: fold, rename, switch all off or on, ungroup. Ticked steps in a group: Ungroup (beside Group) takes just them out, in their own place in the timeline (a group they were in the middle of splits around them); a group's tick box ticks all its steps." },
     ],
   },
   {

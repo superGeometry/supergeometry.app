@@ -332,7 +332,9 @@ The **History** panel lists every step. Tap a step to edit it (its tool opens
 with the old values). The eye switches a step off; the bin deletes it. Hover
 a step to see what it works on, outlined in dashed orange. A sketch's own
 steps fold out from the ▸ next to it. Select several steps (Ctrl/Shift+click)
-to **group** them: fold, rename, switch all off or on, ungroup. If a step
+to **group** them: fold, rename, switch all off or on, ungroup. Tick steps in
+a group and **Ungroup** (beside Group) takes just them out, in their own place
+in the timeline - a group they were in the middle of splits around them. If a step
 can't be rebuilt after a change, it's marked and the reason is shown.
 
 ---

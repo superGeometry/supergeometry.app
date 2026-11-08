@@ -1,4 +1,5 @@
 import { mergingCommits } from "../doc/store";
+import { ungroupedSteps } from "../doc/historyGroups";
 import type { Feature, HistoryGroup } from "../doc/types";
 import { screenClass, watchScreenClass } from "../device";
 import type { FeatureError } from "../kernel/protocol";
@@ -1197,6 +1198,21 @@ export class UI {
     if (hi - lo + 1 > idx.length) this.toast("Groups hold steps next to each other: the ones in between went in too");
   }
 
+  /**
+   * The ticked steps out of their groups. They stay where they are in the
+   * timeline (steps aren't moved): a group they were in the middle of splits
+   * in two around them, so they show in their own place between the halves.
+   */
+  private ungroupSteps(features: readonly Feature[], h: HistoryHandlers): void {
+    const out = ungroupedSteps(features.map((f) => f.id), h.groups, this.historyChecked);
+    const n = [...this.historyChecked].filter((id) => h.groups.some((g) => g.steps.includes(id))).length;
+    this.historyChecked.clear();
+    this.historyPicking = false;
+    document.getElementById("history-pick")?.classList.remove("on");
+    h.setGroups(out);
+    this.toast(`${n} step${n === 1 ? "" : "s"} out of the group, in ${n === 1 ? "its" : "their"} place in the timeline`);
+  }
+
   renderHistory(features: readonly Feature[], errors: FeatureError[], activeId: string | null, h: HistoryHandlers, warnings: Map<string, string> = new Map()): void {
     this.lastHistory = [features, errors, activeId, h, warnings];
     this.historyList.innerHTML = "";
@@ -1308,8 +1324,18 @@ export class UI {
       const make = el("button", "text-btn primary", `Group (${this.historyChecked.size})`);
       make.addEventListener("click", () => void this.groupSteps(features, h));
       li.append(make);
+      // Ticked steps that are in a group: out of it, back in their place in the timeline.
+      const inGroups = [...this.historyChecked].filter((id) => groupOf.has(id)).length;
+      if (inGroups) {
+        const un = el("button", "text-btn history-ungroup");
+        un.innerHTML = icons.ungroup;
+        un.append(` Ungroup (${inGroups})`);
+        un.title = "Take the ticked steps out of their group (they stay in their place in the timeline)";
+        un.addEventListener("click", () => this.ungroupSteps(features, h));
+        li.append(un);
+      }
       this.historyList.append(li);
-    } else if (this.historyPicking) this.historyList.append(el("li", "history-empty", "Tick steps, then group them."));
+    } else if (this.historyPicking) this.historyList.append(el("li", "history-empty", "Tick steps to group them, or ungroup them."));
   }
 
   /** A group's row: fold it open/shut, its name, switch all its steps off/on, rename, ungroup. */
@@ -1318,6 +1344,20 @@ export class UI {
     const bad = members.some((m) => errors.some((e) => e.featureId === m.id));
     const allOff = members.every((m) => m.suppressed);
     const li = el("li", `history-item history-group${bad ? " error" : ""}${allOff ? " suppressed" : ""}`);
+    // Ticking: the whole group's steps at once (to ungroup it, or group it with more).
+    if (this.historyPicking) {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.className = "items-check";
+      const ticked = members.filter((m) => this.historyChecked.has(m.id)).length;
+      box.checked = ticked === members.length;
+      box.indeterminate = ticked > 0 && ticked < members.length;
+      box.addEventListener("change", () => {
+        for (const m of members) box.checked ? this.historyChecked.add(m.id) : this.historyChecked.delete(m.id);
+        this.rerenderHistory();
+      });
+      li.append(box);
+    }
     const caret = el("button", "history-caret", closed ? "▸" : "▾");
     caret.title = closed ? `Show the ${members.length} steps` : "Fold the group";
     const fold = (e: Event) => {
@@ -1336,7 +1376,7 @@ export class UI {
     const ren = iconButton("rename", "Rename group", () =>
       void h.askName("Rename group", g.name).then((n) => n && h.setGroups(h.groups.map((x) => (x.id === g.id ? { ...x, name: n } : x)))),
     );
-    const un = iconButton("close", "Ungroup (keeps the steps)", () => h.setGroups(h.groups.filter((x) => x.id !== g.id)));
+    const un = iconButton("ungroup", "Ungroup (the steps stay, in their place in the timeline)", () => h.setGroups(h.groups.filter((x) => x.id !== g.id)));
     li.append(caret, name, eye, ren, un);
     return li;
   }

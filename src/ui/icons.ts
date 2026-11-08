@@ -111,6 +111,8 @@ export const icons = {
   freeform: svg('<path d="M4 15c2-7 6-9 9-6s5 1 7-3"/><path d="M4 15c3 3 8 4 12 1s4-6 4-10" stroke-dasharray="2 2"/><circle cx="4" cy="15" r="1.4" fill="currentColor"/><circle cx="13" cy="9" r="1.4" fill="currentColor"/><circle cx="20" cy="6" r="1.4" fill="currentColor"/>'),
   copy: svg('<rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>'),
   color: svg('<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>'),
+  /** A folder with an arrow out of it (steps out of their group). */
+  ungroup: svg('<path d="M3 7a1 1 0 0 1 1-1h5l2 2h3"/><path d="M3 7v11a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4"/><path d="M13 13l8-8M16 5h5v5"/>'),
   folder: svg('<path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>'),
   constraints: svg('<path d="M5 5v14M9 5v14"/><path d="M13 19L19 5"/><circle cx="16" cy="12" r="1.2" fill="currentColor"/>'),
   isolate: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
