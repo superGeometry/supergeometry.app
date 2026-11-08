@@ -2947,6 +2947,26 @@ body.history-open #viewcube-host {
     right: calc(182px + var(--safe-r));
   }
 }
+/* Phones sideways: the column's buttons slimmer, so all of them (nine while
+   sketching) fit its height without a scroll bar. */
+@media (orientation: landscape) and (max-height: 500px) {
+  #right-col {
+    gap: 1px;
+    padding: 3px;
+  }
+  .right-btn {
+    min-height: 30px;
+    gap: 0;
+  }
+  .right-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+  .right-label {
+    font-size: 8.5px;
+    line-height: 1;
+  }
+}
 
 /* ---------------------------------------------------------------- help */
 .help-panel {
