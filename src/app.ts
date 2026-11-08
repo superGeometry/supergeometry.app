@@ -939,7 +939,6 @@ export class App implements AppContext {
     item("m-new", () => void this.newProject());
     item("m-open", () => void this.showProjects());
     item("m-save", () => this.save());
-    item("m-link", () => this.shareLink());
     item("m-stl", () => void this.export("stl"));
     item("m-step", () => void this.export("step"));
     item("m-3mf", () => void this.export3mf());
@@ -1182,7 +1181,7 @@ export class App implements AppContext {
       return true;
     } catch (err) {
       console.warn("Opening a project link:", err);
-      this.ui.toast("That link's project couldn't be read", "error");
+      this.ui.toast("That link is incomplete (chat apps can cut long links short): ask for the .super file instead", "error");
       return false;
     }
   }
@@ -1201,44 +1200,6 @@ export class App implements AppContext {
     const text = await projectText(id);
     const e = (await libraryEntries()).find((x) => x.id === id);
     if (text && e) download(new Blob([text], { type: "application/json" }), `${e.name}.super`);
-  }
-
-  /**
-   * File → Share by link: a link with the whole project packed in it
-   * (supergeometry.app/#p=…), copied. Copying must start inside the tap
-   * (Safari): the link is handed to the clipboard as it's being made.
-   * Where copying isn't allowed, it's shown to copy by hand.
-   */
-  private shareLink(): void {
-    if (!this.store.features.length) return this.ui.toast("Nothing to share yet: the project is empty");
-    const json = JSON.stringify(this.store.doc);
-    const made = import("./io/projectLink").then(({ projectLink }) => {
-      const link = projectLink(json);
-      if (!link) throw new Error("not packed");
-      return link;
-    });
-    const copied = (link: string) =>
-      this.ui.toast(
-        link.length > 8000
-          ? `Link copied (${Math.round(link.length / 1000)}k characters: some apps cut a link that long - File → Save shares the file instead)`
-          : "Link copied: paste it anywhere. It opens this project in supergeometry.app",
-      );
-    const byHand = () =>
-      void made.then(
-        (link) => void this.ui.dialog("Share by link", [{ key: "link", label: "Link", value: link }], "Copying isn't allowed here: select the link and copy it."),
-        () => this.ui.toast("This project couldn't be made into a link", "error"),
-      );
-    const clip = navigator.clipboard;
-    try {
-      if (clip?.write && typeof ClipboardItem !== "undefined") {
-        const item = new ClipboardItem({ "text/plain": made.then((l) => new Blob([l], { type: "text/plain" })) });
-        clip.write([item]).then(() => void made.then(copied), byHand);
-        return;
-      }
-    } catch {
-      // (A browser whose ClipboardItem takes no promise: the plain way below.)
-    }
-    made.then((l) => clip.writeText(l).then(() => copied(l))).catch(byHand);
   }
 
   private save(how: Delivery = "download"): void {
