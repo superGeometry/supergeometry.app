@@ -1154,13 +1154,10 @@ body.sketching .right-btn.sketch-only {
   display: none;
 }
 @media (max-width: 720px) {
-  /* Up under the view cube, beside the right column: the card of what's
-     selected and the tool's options are along the bottom. */
+  /* Placed by the sketch tool, like on bigger screens: beside the right
+     column, its bottom level with the Constraints button. */
   #constraint-bar {
-    top: calc(140px + var(--safe-t)) !important;
     transform: none;
-    bottom: auto;
-    right: calc(60px + var(--safe-r)) !important;
     max-height: 40vh;
     overflow-y: auto;
   }
@@ -2728,10 +2725,7 @@ form.dialog {
   }
   /* The constraint column: under the view cube, beside the right column, scrolling. */
   #constraint-bar {
-    top: calc(170px + var(--safe-t)) !important;
-    bottom: calc(10px + var(--safe-b));
-    right: calc(64px + var(--safe-r)) !important;
-    max-height: none;
+    max-height: calc(100vh - 20px);
     overflow-y: auto;
   }
   #constraint-bar .cbar-note {
