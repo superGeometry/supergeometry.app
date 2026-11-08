@@ -1,5 +1,5 @@
 import type { Feature } from "../doc/types";
-import type { Envelope, ExportFormat, RegenResult, Request, Response } from "./protocol";
+import type { BodyMesh, Envelope, ExportFormat, RegenResult, Request, Response } from "./protocol";
 
 /** Promise-based wrapper around the kernel worker. */
 export class KernelClient {
@@ -13,12 +13,16 @@ export class KernelClient {
   // Coalesce regenerations: while one runs, only the most recent request waits.
   private regenRunning = false;
   private regenQueued: { features: Feature[]; resolve: (r: RegenResult | null) => void } | null = null;
+  /** The last answer's meshes by key: the worker sends a mesh once, then just its key. */
+  private meshes = new Map<number, BodyMesh>();
 
   constructor() {
     this.start();
   }
 
   private start(): void {
+    // A fresh worker sends every mesh again.
+    this.meshes = new Map();
     this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.worker.onmessage = (e: MessageEvent<Envelope<Response>>) => {
       const cb = this.pending.get(e.data.id);
@@ -86,12 +90,24 @@ export class KernelClient {
     // Stopped meanwhile: the fresh worker has its own queue.
     if (worker !== this.worker) return resolve(null);
     this.running = null;
-    resolve(r.type === "regenerated" ? r.result : null);
+    resolve(r.type === "regenerated" ? this.withMeshes(r.result) : null);
     if (r.type === "error") console.error(r.message);
     this.regenRunning = false;
     const q = this.regenQueued;
     this.regenQueued = null;
     if (q) this.runRegen(q.features, q.resolve);
+  }
+
+  /** Meshes sent as their key only (unchanged bodies): the ones the page has. */
+  private withMeshes(result: RegenResult): RegenResult {
+    const bodies = result.bodies.map((b) => {
+      if (!(b as { same?: boolean }).same) return b;
+      const had = this.meshes.get(b.key)!;
+      // (The same object when nothing about it changed: the view keeps what it drew.)
+      return had.id === b.id && had.name === b.name ? had : { ...had, id: b.id, name: b.name };
+    });
+    this.meshes = new Map(bodies.map((b) => [b.key, b]));
+    return { ...result, bodies };
   }
 
   async export(features: Feature[], format: ExportFormat, bodies?: string[]): Promise<Blob> {

@@ -28,6 +28,7 @@ import {
   measureDistanceBetween,
   measureVolume,
   revolution,
+  Solid,
   Vector,
   assembleWire,
   type AnyShape,
@@ -90,6 +91,8 @@ interface CacheEntry {
 }
 
 const meshCache = new WeakMap<Shape3D, BodyMesh>();
+/** The next mesh's key (see BodyMesh.key). */
+let meshKey = 1;
 const importCache = new Map<string, Shape3D>();
 let cache: CacheEntry[] = [];
 
@@ -1490,14 +1493,30 @@ function combine(id: string, mode: string, target: string | undefined, solid: Sh
 }
 
 /**
+ * A shape's (signed) volume, worked out once per shape: a cut asks for its
+ * body's, its tool's and its result's in several checks, and again for the
+ * same body on every move of a drag - slow on a freeform's curved faces.
+ * (A shape turned right way out in place is measured again, not looked up.)
+ */
+const volumes = new WeakMap<Shape3D, number>();
+function volumeOf(s: Shape3D): number {
+  let v = volumes.get(s);
+  if (v === undefined) {
+    v = measureVolume(s);
+    volumes.set(s, v);
+  }
+  return v;
+}
+
+/**
  * Can this be the volume of a ∪ b (or a − b)? A union is at least the bigger
  * of the two and at most both together; a cut is at most a and at least a − b.
  */
 function booleanVolumeOk(op: "fuse" | "cut", a: Shape3D, b: Shape3D, r: Shape3D): boolean {
   try {
-    const va = Math.abs(measureVolume(a));
-    const vb = Math.abs(measureVolume(b));
-    const v = isEmpty(r) ? 0 : measureVolume(r);
+    const va = Math.abs(volumeOf(a));
+    const vb = Math.abs(volumeOf(b));
+    const v = isEmpty(r) ? 0 : volumeOf(r);
     // A big many-faced body measures a little differently once a join splits
     // its faces (a jet engine's casing: 2 to 75 mm³ in 1.9 litres) - more than
     // the name raised on its pylon (158 mm³) could stand under a closer check.
@@ -1565,7 +1584,7 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
 /** Bodies (other than `skip`) that `solid` really overlaps (not just touches). */
 function overlapping(solid: Shape3D, ctx: Ctx, skip?: string): string[] {
   const sb = solid.boundingBox;
-  const vs = Math.abs(measureVolume(solid));
+  const vs = Math.abs(volumeOf(solid));
   const out: string[] = [];
   for (const [id, body] of ctx.bodies) {
     if (id === skip) continue;
@@ -1576,7 +1595,7 @@ function overlapping(solid: Shape3D, ctx: Ctx, skip?: string): string[] {
       // Tolerant: a wall drawn from the body's own edge (projected, offset…) sits a hair
       // off the body's surface, and an exact boolean then finds no overlap at all.
       const common = fuzzyBoolean("common", body, solid);
-      if (!isEmpty(common) && Math.abs(measureVolume(common)) > Math.max(1e-9, Math.min(vs, Math.abs(measureVolume(body))) * 1e-6)) out.push(id);
+      if (!isEmpty(common) && Math.abs(measureVolume(common)) > Math.max(1e-9, Math.min(vs, Math.abs(volumeOf(body))) * 1e-6)) out.push(id);
     } catch {
       // can't tell: leave it alone
     }
@@ -1790,6 +1809,7 @@ function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
   const mesh: BodyMesh = {
     id,
     name,
+    key: meshKey++,
     positions: new Float32Array(m.vertices),
     normals: new Float32Array(m.normals),
     indices: new Uint32Array(m.triangles),
@@ -1860,7 +1880,7 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
   const was = before ? subShapes(before, "SOLID").length : Math.max(1, subShapes(after, "SOLID").length);
   // Not a solid before (an imported mesh, a sheet): nothing to hold it to.
   if (!was) return after;
-  const v0 = before ? Math.abs(measureVolume(before)) : 0;
+  const v0 = before ? Math.abs(volumeOf(before)) : 0;
   let solids = subShapes(after, "SOLID");
   if (!solids.length) {
     // A hollow (outer skin + inner skin) left as loose skins: one solid with a void.
@@ -1875,7 +1895,8 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
     after = cast(solid) as Shape3D;
   }
   // A lump inside out among the others: the cut went wrong.
-  const signed = solids.map((x) => measureVolume(cast(x) as Shape3D));
+  // (One solid: the body itself - its volume, worked out once.)
+  const signed = solids.length === 1 && after instanceof Solid ? [volumeOf(after)] : solids.map((x) => measureVolume(cast(x) as Shape3D));
   if (solids.length > 1 && signed.some((v) => v < 0) && signed.some((v) => v > 0)) throw new Error("That edit would damage the body - try a different value");
   // Crumbs: lumps far smaller than the rest (left between coincident faces).
   const vols = signed.map((v) => Math.abs(v));
@@ -1892,7 +1913,7 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
   if (!mayPart && solids.length > was) throw new Error("That would break the body into pieces - try a smaller value");
   // Inside out (negative volume): turn it right - on a copy (its faces may be
   // shared with earlier steps' results, which must never change).
-  if (measureVolume(after) < 0) {
+  if (volumeOf(after) < 0) {
     after = deepCopy(after);
     solids = subShapes(after, "SOLID");
     for (const x of solids) oc.BRepLib.OrientClosedSolid(x);

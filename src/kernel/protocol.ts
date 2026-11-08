@@ -28,6 +28,12 @@ export interface EdgeInfo {
 export interface BodyMesh {
   id: string;
   name: string;
+  /**
+   * Which mesh this is: the same key, the same geometry (a body the step
+   * didn't change). The worker sends only the key for a mesh the page already
+   * has, and the view keeps what it drew for it.
+   */
+  key: number;
   positions: Float32Array;
   normals: Float32Array;
   indices: Uint32Array;

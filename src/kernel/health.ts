@@ -25,7 +25,19 @@ function checkValid(shape: Shape3D): boolean {
 }
 
 
+/**
+ * Edges with a face on one side only (gaps), by index. Worked out once per
+ * shape, like the checks below: every edit asks it of the body as it was
+ * before, which is the same body on each move of a drag.
+ */
+const openCache = new WeakMap<Shape3D, number[]>();
 export function openEdges(shape: Shape3D): number[] {
+  let known = openCache.get(shape);
+  if (!known) openCache.set(shape, (known = findOpenEdges(shape)));
+  return known;
+}
+
+function findOpenEdges(shape: Shape3D): number[] {
   const edges = shape.edges;
   const buckets = new Map<number, { e: Edge; i: number; n: number }[]>();
   edges.forEach((e, i) => {
@@ -70,7 +82,15 @@ export function subShapes(s: Shape3D, kind: "SOLID" | "SHELL"): any[] {
   return out;
 }
 
+/** How many faces are next to nothing in area (once per shape: every face's area is slow on curved faces). */
+const thinCache = new WeakMap<Shape3D, number>();
 export function hairThin(s: Shape3D): number {
+  let known = thinCache.get(s);
+  if (known === undefined) thinCache.set(s, (known = countHairThin(s)));
+  return known;
+}
+
+function countHairThin(s: Shape3D): number {
   const areas = s.faces.map((f) => measureArea(f));
   const total = areas.reduce((a, b) => a + b, 0);
   return areas.filter((a) => a < total * 1e-7).length;

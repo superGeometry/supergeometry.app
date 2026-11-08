@@ -357,17 +357,37 @@ export class Viewport {
   }
 
   setBodies(meshes: BodyMesh[]): void {
-    for (const b of this.bodies.values()) {
+    // A body the step didn't change (same mesh key): what was drawn for it stays
+    // (its triangles went to the graphics card once, not again on every rebuild).
+    const was = new Map(this.bodies);
+    const keep = new Set(meshes.filter((m) => was.get(m.id)?.data.key === m.key).map((m) => m.id));
+    for (const [id, b] of was) {
+      b.outline?.geometry.dispose();
+      b.outline = null;
+      if (keep.has(id)) continue;
       b.mesh.geometry.dispose();
       b.edges.geometry.dispose();
     }
     this.openMats.forEach((m) => this.releaseLineMaterial(m));
     this.openMats = [];
-    for (const b of this.bodies.values()) b.outline?.geometry.dispose();
     this.bodies.clear();
     this.bodiesGroup.clear();
     this.capGroup.clear();
     for (const data of meshes) {
+      const old = keep.has(data.id) ? was.get(data.id) : undefined;
+      if (old) {
+        const i = this.bodies.size;
+        old.data = data;
+        old.mesh.material = this.matsFor(data.id).body;
+        old.cap.material = this.matsFor(data.id).cap;
+        old.capStencil.forEach((sm) => (sm.renderOrder = 10 + 3 * i));
+        old.cap.renderOrder = 11 + 3 * i;
+        this.bodiesGroup.add(old.mesh, old.edges, old.hidden);
+        this.capGroup.add(old.cap, ...old.capStencil);
+        this.bodies.set(data.id, old);
+        this.addOpenEdges(data);
+        continue;
+      }
       const g = new BufferGeometry();
       g.setAttribute("position", new BufferAttribute(data.positions, 3));
       g.setAttribute("normal", new BufferAttribute(data.normals, 3));
@@ -396,25 +416,27 @@ export class Viewport {
       this.capGroup.add(cap, ...capStencil);
       const vertices = uniqueEnds(data.edges);
       this.bodies.set(data.id, { data, mesh, cap, capStencil, outline: null, edges, hidden, vertices });
-      // Open (non-watertight) edges stand out in orange.
-      if (data.openEdges?.length) {
-        const seg: number[] = [];
-        for (const i of data.openEdges) {
-          const g = data.edgeGroups.find((x) => x.edge === i);
-          if (g) seg.push(...Array.from(data.edgePositions.slice(g.start * 3, (g.start + g.count) * 3)));
-        }
-        if (seg.length) {
-          const mat = this.lineMaterial(0xff9a3d, 3, true);
-          this.openMats.push(mat);
-          const l = new LineSegments2(new LineSegmentsGeometry().setPositions(seg), mat);
-          l.renderOrder = 3;
-          this.bodiesGroup.add(l);
-        }
-      }
+      this.addOpenEdges(data);
     }
     this.applyClip();
     this.applySettings();
     this.applyHidden();
+  }
+
+  /** Open (non-watertight) edges stand out in orange. */
+  private addOpenEdges(data: BodyMesh): void {
+    if (!data.openEdges?.length) return;
+    const seg: number[] = [];
+    for (const i of data.openEdges) {
+      const g = data.edgeGroups.find((x) => x.edge === i);
+      if (g) seg.push(...Array.from(data.edgePositions.slice(g.start * 3, (g.start + g.count) * 3)));
+    }
+    if (!seg.length) return;
+    const mat = this.lineMaterial(0xff9a3d, 3, true);
+    this.openMats.push(mat);
+    const l = new LineSegments2(new LineSegmentsGeometry().setPositions(seg), mat);
+    l.renderOrder = 3;
+    this.bodiesGroup.add(l);
   }
 
   // ------------------------------------------------------- hidden/isolate
