@@ -3743,7 +3743,17 @@ html[data-screen="phone"] body.is-fullscreen {
   cursor: grabbing;
 }
 /* Folded (double-tap on the grip): just the grip and the window's name. */
-#panel.folded > :not(.panel-grip):not(.panel-title) {
+#panel.folded > :not(.panel-grip):not(.panel-title):not(.panel-unfold) {
+  display: none !important;
+}
+/* The Values chip that unfolds a folded card: phones only (elsewhere the title shows). */
+#panel .panel-unfold {
+  display: none;
+}
+html[data-screen="phone"] #panel.folded .panel-unfold {
+  display: flex;
+}
+html[data-screen="phone"] #panel.folded .panel-grip {
   display: none !important;
 }
 

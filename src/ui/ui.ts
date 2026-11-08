@@ -633,7 +633,6 @@ export class UI {
     // name. It hangs under the tool's value box on the model (or by the pointer).
     this.panel.classList.add("as-list");
     this.followPanel();
-    this.panel.append(this.panelGrip(), el("div", "panel-title", spec.title));
     const row = el("div", "panel-fields");
     const items: PanelItem[] = [
       ...(spec.fields ?? []).map(
@@ -641,6 +640,21 @@ export class UI {
       ),
       ...(spec.items ?? []),
     ];
+    // Phones: a card that is just one button (the Values chip while drawing)
+    // has nothing to fold or move - no grip. Folded, a card shows a Values
+    // chip that unfolds it (its title isn't shown on a phone: it was an empty bar).
+    const phone = document.documentElement.dataset.screen === "phone";
+    const chipOnly = items.length === 1 && items[0].type === "button" && !spec.fields?.length && !spec.actions?.length;
+    if (!(phone && chipOnly)) this.panel.append(this.panelGrip());
+    this.panel.append(el("div", "panel-title", spec.title));
+    const unfold = el("button", "text-btn panel-unfold");
+    unfold.innerHTML = icons.numpad;
+    unfold.append("Values");
+    unfold.addEventListener("click", () => {
+      this.panel.classList.remove("folded");
+      this.putPanel(this.panel.offsetLeft, this.panel.offsetTop);
+    });
+    this.panel.append(unfold);
     let numberIndex = 0;
     for (const it of items) {
       if (it.type === "number") {
