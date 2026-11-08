@@ -6,6 +6,7 @@ import { SUPPORT, openSupport } from "./ui/support";
 import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, renameProject, setCurrentProject } from "./doc/library";
 import { showLibrary } from "./ui/library";
 import { showAbout } from "./ui/about";
+import { showFeedback } from "./ui/feedback";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
 import { createVariable, insertFile, insertImage } from "./io/insert";
@@ -903,6 +904,8 @@ export class App implements AppContext {
     moreItem("m-tutorial", () => {});
     // About: the README, in the app. Support links open in a new tab (no access back to this page).
     moreItem("m-about", () => showAbout());
+    // Feedback: a bug report, suggestion or discussion, posted on r/supergeometry (Reddit's page, in a new tab).
+    moreItem("m-feedback", () => showFeedback());
     // Support: a short list of ways (each opens in a new tab). One without a link yet says so.
     const donateList = document.getElementById("m-donate-list")!;
     on("m-donate", () => {

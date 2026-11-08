@@ -1836,6 +1836,63 @@ form.dialog {
 .dialog.library > * {
   flex-shrink: 0;
 }
+/* More → Feedback: a kind, a title and a description, posted on Reddit. */
+.dialog.feedback {
+  width: min(460px, calc(100vw - 24px - var(--safe-l, 0px) - var(--safe-r, 0px)));
+}
+.dialog-field textarea {
+  min-height: 110px;
+  resize: vertical;
+  font: 14px/1.4 system-ui, sans-serif;
+  color: var(--text);
+  background: #2b2e34;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.dialog.feedback .dialog-field input {
+  font: 14px system-ui, sans-serif;
+}
+.feedback-kinds .chip {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+.feedback-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.feedback-info input {
+  margin: 2px 0 0;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--accent);
+}
+.feedback-info code {
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.feedback-out {
+  opacity: 0.85;
+}
+/* A phone on its side: a shorter description box, so the buttons stay in sight. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .dialog.feedback {
+    width: min(620px, calc(100vw - 24px - var(--safe-l, 0px) - var(--safe-r, 0px)));
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  .dialog-field textarea {
+    min-height: 64px;
+  }
+}
 /* More → About: the README, read in the app. */
 .dialog.about {
   width: min(720px, calc(100vw - 24px));
