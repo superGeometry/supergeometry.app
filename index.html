@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#1f2125" />
+    <meta name="color-scheme" content="dark" />
+    <!-- The first paint, before the app's stylesheet is in (a reload, More → Update):
+         the app's grey, and the search engines' text hidden - not black text on white. -->
+    <style>
+      html, body { margin: 0; height: 100%; background: #2b2d31; color: #e8e9ec; }
+      .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+    </style>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="Free 3D CAD app in your browser, for phone, tablet, computer and VR headset. Sketch, extrude, fillet and design parts for 3D printing. Export STL, STEP and 3MF. No account, no download." />
