@@ -3,15 +3,13 @@
 // itself: it opens Reddit's own "new post" page in a new tab with the title
 // and the text filled in, and the person posts it there (signed in to Reddit).
 // What goes along: what's typed here, a short line with the app version and
-// the browser if left on and, on a bug report, the project if left on: a link
-// that opens it in the app (supergeometry.app/#p=…, see io/projectLink) and
-// its file (a .super file is JSON) as a code block. What's too long for
-// Reddit's address is copied instead, for pasting into the post.
+// the browser if left on and, on a bug report, the project's file (a .super
+// file is JSON) as a code block if left on. A file too long for Reddit's
+// address is copied instead, for pasting into the post.
 
 import { icons } from "./icons";
 import { el, textButton } from "./ui";
 import { openSupport } from "./support";
-import { projectLink } from "../io/projectLink";
 
 export const SUBREDDIT = "supergeometry";
 
@@ -29,7 +27,7 @@ const MAX_URL = 7000;
 /** The longest text a Reddit post takes. */
 const MAX_POST = 40000;
 /** Where a copied file goes in the post. */
-const PASTE_HERE = "(paste what was copied here)";
+const PASTE_HERE = "(paste the copied file here)";
 
 /** The open project, as its .super file. */
 export interface FeedbackProject {
@@ -138,25 +136,21 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
   infoText.append("Add the app version and browser: ", el("code", "", infoLine()));
   info.append(infoBox, infoText);
 
-  // Bug report: the project, so the bug can be opened and seen. A link that
-  // opens it in the app (in 3D, with its timeline) and its file as code.
+  // Bug report: the project's file as a code block, so the bug can be opened and seen.
   const file = project?.();
   const fileCode = file ? codeBlock(file) : "";
-  /** The link that opens it (null: it couldn't be packed). */
-  const link = file ? projectLink(file.json) : null;
-  const room = MAX_POST - MAX_TEXT - 500;
-  const linkLine = () => (link ? `[Open it in 3D in supergeometry.app](${link})` : "");
-  const codeFits = () => fileCode.length + linkLine().length <= room;
-  const tooBig = () => !codeFits() && !(link && link.length <= room);
+  const tooBig = fileCode.length > MAX_POST - MAX_TEXT - 500;
   const fileRow = el("label", "feedback-info");
   const fileBox = document.createElement("input");
   fileBox.type = "checkbox";
-  /** Ticked by the person (the box itself is off while the project can't go). */
-  let wanted = false;
   const fileText = el("span", "");
   const fileHow = el("span", "feedback-how");
   if (file) {
-    fileText.append("Add this project: a link that opens it in 3D, and its file ", el("code", "", `${file.name}.super`), ` as code (${sizeText(file.json.length)}). Anyone who reads the post can open it.`);
+    fileText.append("Add this project's file as code: ", el("code", "", `${file.name}.super`), ` (${sizeText(file.json.length)}). Anyone who reads the post can open it.`);
+    if (tooBig) {
+      fileBox.disabled = true;
+      fileHow.textContent = " Too big for a Reddit post (it takes 40,000 characters at most).";
+    }
     fileText.append(fileHow);
   }
   fileRow.append(fileBox, fileText);
@@ -176,51 +170,30 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
   for (const b of row.querySelectorAll("button")) b.type = "button";
 
   const tag = () => KINDS.find((k) => k.id === kind)!.tag;
-  /** The post's text, without the project. */
+  /** The post's text, without the file. */
   const bodyText = () => {
     let body = text.value.trim().slice(0, MAX_TEXT);
     if (infoBox.checked) body += `${body ? "\n\n" : ""}---\n${infoLine()}`;
     return body;
   };
-  const withFile = () => !!file && kind === "bug" && fileBox.checked && !tooBig();
-  /**
-   * The post: filled in whole if it fits in Reddit's address; else the link
-   * filled in and the code copied for pasting; else both copied.
-   */
-  const plan = (): { body: string; copy?: string } => {
+  const fileHead = (body: string) => `${body ? "\n\n" : ""}Project file (\`${file!.name}.super\`):\n\n`;
+  const withFile = () => !!file && kind === "bug" && fileBox.checked;
+  /** The file fits in the address (filled in); longer, it's copied for pasting. */
+  const fileFits = () => {
     const body = bodyText();
-    if (!withFile()) return { body };
-    const head = `${body ? "\n\n" : ""}Project \`${file!.name}.super\``;
-    const code = codeFits() ? fileCode : "";
-    const fits = (b: string) => submitUrl(`[${tag()}] ${title.value.trim()}`, b).length <= MAX_URL;
-    const parts = [linkLine(), code].filter(Boolean);
-    const whole = `${body}${head}:\n\n${parts.join("\n\n")}`;
-    if (fits(whole)) return { body: whole };
-    if (link && code) {
-      const withLink = `${body}${head}:\n\n${linkLine()}\n\nIts file:\n\n${PASTE_HERE}`;
-      if (fits(withLink)) return { body: withLink, copy: code };
-    }
-    return { body: `${body}${head}:\n\n${PASTE_HERE}`, copy: parts.join("\n\n") };
+    return submitUrl(`[${tag()}] ${title.value.trim()}`, body + fileHead(body) + fileCode).length <= MAX_URL;
   };
 
   const paint = () => {
     post.disabled = !title.value.trim();
-    const big = !!file && tooBig();
-    fileBox.disabled = big;
-    // Unticked while too big; ticked again (if it was wanted) once the link makes it fit.
-    fileBox.checked = wanted && !big;
-    const copy = !!plan().copy;
+    const copy = withFile() && !fileFits();
     postLabel.textContent = copy ? "Copy file and open Reddit" : "Open Reddit";
-    fileHow.textContent = big
-      ? " Too big for a Reddit post: File → Save, then share the file with a link."
-      : copy
-        ? " Too long to fill in: it's copied, paste it into the post where it says so."
-        : "";
+    if (file && !tooBig) fileHow.textContent = !withFile() ? "" : copy ? " Too long to fill in: it's copied, paste it into the post where it says so." : "";
   };
   title.addEventListener("input", paint);
   text.addEventListener("input", paint);
   infoBox.addEventListener("change", paint);
-  fileBox.addEventListener("change", () => ((wanted = fileBox.checked), paint()));
+  fileBox.addEventListener("change", paint);
 
   const pick = (id: Kind) => {
     kind = id;
@@ -234,17 +207,23 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
     text.placeholder = k.text;
     // Version and browser help most with a bug: on for it, off for the others (it can still be ticked).
     infoBox.checked = id === "bug";
-    // The project: only on a bug report, on by default there.
+    // The file: only on a bug report, on by default there.
     fileRow.hidden = !file || id !== "bug";
-    wanted = !!file && id === "bug";
+    fileBox.checked = !!file && !tooBig && id === "bug";
     paint();
   };
 
   const send = () => {
     const t = title.value.trim();
     if (!t) return void title.focus();
-    const { body, copy } = plan();
-    if (copy && !copyText(copy)) return void toast("Couldn't copy the file: File → Save, then share the file with a link");
+    let body = bodyText();
+    if (withFile()) {
+      if (fileFits()) body += fileHead(body) + fileCode;
+      else {
+        if (!copyText(fileCode)) return void toast("Couldn't copy the file: try again, or post without it");
+        body += fileHead(body) + PASTE_HERE;
+      }
+    }
     openSupport(submitUrl(`[${tag()}] ${t}`, body));
     close();
   };

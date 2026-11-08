@@ -6,7 +6,6 @@ import { SUPPORT, openSupport } from "./ui/support";
 import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, renameProject, setCurrentProject } from "./doc/library";
 import { showLibrary } from "./ui/library";
 import { showAbout } from "./ui/about";
-import { clearLinkedProject, linkedProject } from "./io/linkHash";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
 import { createVariable, insertFile, insertImage } from "./io/insert";
@@ -176,12 +175,7 @@ export class App implements AppContext {
     const loaded = this.store.load().then(() => this.attachLibrary());
     // Every visit starts at the projects, with a welcome: shown as soon as the
     // projects are read, while the geometry kernel is still loading behind it.
-    // A link with a project in it (a bug report's "open it in 3D") opens that instead.
-    void loaded.then(async () => {
-      if (!(await this.openLinked())) await this.showProjects(true, true);
-    });
-    // Such a link pasted into this tab while the app is open.
-    window.addEventListener("hashchange", () => void this.openLinked());
+    void loaded.then(() => this.showProjects(true, true));
     Promise.all([this.kernel.ready, loaded])
       .then(async () => {
         this.ui.setStatus(null);
@@ -910,7 +904,7 @@ export class App implements AppContext {
     // About: the README, in the app. Support links open in a new tab (no access back to this page).
     moreItem("m-about", () => showAbout());
     // Feedback: a bug report (with the project's file if wanted), suggestion or discussion, posted on r/supergeometry (Reddit's page, in a new tab).
-    // (Loaded on the first tap: it brings the link packing along.)
+    // (Loaded on the first tap: most visits never open it.)
     moreItem("m-feedback", () => void import("./ui/feedback").then(({ showFeedback }) => showFeedback(() => ({ name: this.store.doc.name, json: JSON.stringify(this.store.doc) }), (t) => this.ui.toast(t, "error"))));
     // Support: a short list of ways (each opens in a new tab). One without a link yet says so.
     const donateList = document.getElementById("m-donate-list")!;
@@ -1162,28 +1156,6 @@ export class App implements AppContext {
         return name;
       },
     }, { welcome, fullscreen: this.fullscreen });
-  }
-
-  /**
-   * The project packed in the address (supergeometry.app/#p=…), opened as a
-   * new project of its own: the one open now is kept as it was. False if the
-   * address has none or it can't be read.
-   */
-  private async openLinked(): Promise<boolean> {
-    const packed = linkedProject();
-    if (!packed) return false;
-    clearLinkedProject();
-    try {
-      const { unpackProject } = await import("./io/projectLink");
-      const doc = parseProject(unpackProject(packed));
-      await this.switchProject(doc, newProjectId());
-      this.ui.toast(`Opened “${doc.name}” from a link. It's kept in File → Open`);
-      return true;
-    } catch (err) {
-      console.warn("Opening a project link:", err);
-      this.ui.toast("That link is incomplete (chat apps can cut long links short): ask for the .super file instead", "error");
-      return false;
-    }
   }
 
   private async openKept(id: string): Promise<void> {
