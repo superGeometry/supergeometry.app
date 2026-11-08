@@ -747,6 +747,13 @@ export class UI {
     }
     if (spec.onDone) buttons.append(textButton("Done", "Enter", spec.onDone, true));
     this.panel.append(buttons);
+    // Phones: a window with nothing to set (only Done, Cancel being the ✕ by
+    // undo) isn't shown - a tap on empty space finishes, as Done would; Enter
+    // and Esc still work.
+    if (document.documentElement.dataset.screen === "phone" && !items.length && !spec.actions?.length) {
+      this.panel.hidden = true;
+      document.body.classList.remove("panel-open");
+    }
   }
 
   private numberField(f: Extract<PanelItem, { type: "number" }>, index: number, spec: ValuePanel): HTMLElement {
