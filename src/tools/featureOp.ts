@@ -306,9 +306,10 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     else {
       // A new solid from sketches: the sketches step out of the way (the eye in Items brings them back).
       const f = this.feature as Feature;
-      // …once all their regions are used: one drawn with several parts (a
-      // side, a plinth and a door) stays in view until the last is made.
-      const used = sketchesUsed(f).filter((id) => allRegionsUsed(this.app, id, [...this.app.store.doc.features, f]));
+      // An extrude: its sketch is hidden straight away (tap the eye to bring it
+      // back for the next shape). Other steps: once all its regions are used -
+      // one drawn with several parts stays in view until the last is made.
+      const used = sketchesUsed(f).filter((id) => f.type === "extrude" || allRegionsUsed(this.app, id, [...this.app.store.doc.features, f]));
       this.app.store.commit((d) => {
         d.features.push(f);
         if (used.length) d.hidden = [...new Set([...d.hidden, ...used])];
