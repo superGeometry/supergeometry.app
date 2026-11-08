@@ -6,8 +6,9 @@
 // then follows the moves and turns made later to the body it's on, so a tag
 // sits on the arm where the arm is now, not where it was sketched.
 
-import { add, scale, toWorld } from "../geom";
-import { applyAffine, stepAffine } from "./freeformCopies";
+import { add, cross, norm, scale, toWorld } from "../geom";
+import { arcFrom3 } from "../sketch/curves";
+import { applyAffine, stepAffine, type Affine } from "./freeformCopies";
 import { kindOfPath } from "./params";
 import type { Feature, PlaneDef, SketchConstraint, SketchEntity, Variable, Vec2, Vec3 } from "./types";
 
@@ -139,19 +140,122 @@ function bodyMiddle(world: AnchorWorld, id: string): Vec3 | null {
  * moves, turns and mirrors (not copies); joined into another body, it goes
  * with that one from then on.
  */
-function carried(p: Vec3, body: string | null, features: readonly Feature[], from: number): Vec3 {
-  if (!body) return p;
+function carrier(body: string | null, features: readonly Feature[], from: number): (p: Vec3) => Vec3 {
+  if (!body) return (p) => p;
   const on = new Set([body]);
-  let q = p;
+  const steps: Affine[] = [];
   for (let i = from + 1; i < features.length; i++) {
     const g = features[i];
     if (g.suppressed) continue;
     if (g.type === "transform" && !g.copy && g.bodies.some((b) => on.has(b))) {
       const m = stepAffine(g.op);
-      if (m) q = applyAffine(m, q);
+      if (m) steps.push(m);
     } else if (g.type === "boolean" && g.tools.some((t) => on.has(t))) on.add(g.target);
   }
-  return q;
+  return (p) => steps.reduce<Vec3>((q, m) => applyAffine(m, q), p);
+}
+
+function carried(p: Vec3, body: string | null, features: readonly Feature[], from: number): Vec3 {
+  return carrier(body, features, from)(p);
+}
+
+/** A sketch's points as they are now: on the body made from it (construction lines stay where drawn). */
+function sketchCarrier(f: Extract<Feature, { type: "sketch" }>, curve: string | undefined, features: readonly Feature[], world: AnchorWorld): (uv: Vec2) => Vec3 {
+  const plane = world.sketchPlanes[f.id] ?? f.plane;
+  const j = features.findIndex((g) => "source" in g && (g.source as { sketch?: string }).sketch === f.id);
+  const keep = f.entities.find((e) => e.id === curve)?.construction || j < 0;
+  const move = keep ? (p: Vec3) => p : carrier(bodyOf(features[j]) ?? features[j].id, features, j);
+  return (uv) => move(toWorld(plane, uv));
+}
+
+/** Points along a circle round `axis` at `o`, starting toward `from` (a polyline). */
+function arcPoints(o: Vec3, axis: Vec3, from: Vec3, deg: number, r: number): Vec3[] {
+  const k = norm(axis);
+  const u = norm(from);
+  const w = cross(k, u);
+  const n = Math.max(6, Math.ceil(Math.abs(deg) / 6));
+  return Array.from({ length: n + 1 }, (_, i) => {
+    const t = ((deg * Math.PI) / 180) * (i / n);
+    return add(o, add(scale(u, r * Math.cos(t)), scale(w, r * Math.sin(t))));
+  });
+}
+
+/**
+ * What a use changes, drawn on the model as it is now (polylines): the radius
+ * of the circle it sizes, the line it makes long, the height of an extrusion,
+ * the arc of a turn, a pivot's height.
+ */
+export function useMarks(u: VarUse, name: string, features: readonly Feature[], world: AnchorWorld): Vec3[][] {
+  const i = features.findIndex((f) => f.id === u.feature);
+  const f = features[i];
+  if (!f) return [];
+  if (f.type === "sketch") {
+    const c = f.constraints?.find((x) => x.id === u.where);
+    const e = c && f.entities.find((x) => x.id === c.curves?.[0]);
+    if (!c || !e) return [];
+    const at = sketchCarrier(f, e.id, features, world);
+    const line = (a: Vec2, b: Vec2) => [at(a), at(b)];
+    const turn = (center: Vec2, rot: number, off: Vec2): Vec2 => [center[0] + off[0] * Math.cos(rot) - off[1] * Math.sin(rot), center[1] + off[0] * Math.sin(rot) + off[1] * Math.cos(rot)];
+    // "2*baseR" on a diameter: baseR is the radius - that's what's shown.
+    const esc = name.replace(/[^a-z0-9_]/gi, "");
+    const half = new RegExp(`^\\s*(2\\s*\\*\\s*${esc}|${esc}\\s*\\*\\s*2)\\s*$`).test(c.expr ?? "");
+    const round = (center: Vec2, r: number): Vec3[][] => {
+      const d: Vec2 = [Math.SQRT1_2, Math.SQRT1_2];
+      const rim: Vec2 = [center[0] + r * d[0], center[1] + r * d[1]];
+      if (c.prop === "radius" || half) return [line(center, rim)];
+      return [line([center[0] - r * d[0], center[1] - r * d[1]], rim)];
+    };
+    switch (e.kind) {
+      case "line":
+        return [line(e.a, e.b)];
+      case "circle":
+      case "polygon":
+        return round(e.center, e.radius);
+      case "arc": {
+        const ac = arcFrom3(e.a, e.m, e.b);
+        return ac ? round(ac.c, ac.r) : [];
+      }
+      case "rect": {
+        const [hw, hh] = [e.w / 2, e.h / 2];
+        const p = (x: number, y: number) => turn(e.center, e.rotation, [x, y]);
+        return c.prop === "h" ? [line(p(hw, -hh), p(hw, hh))] : [line(p(-hw, -hh), p(hw, -hh))];
+      }
+      case "ellipse":
+        return [line(e.center, turn(e.center, e.rotation, c.prop === "ry" ? [0, e.ry] : [e.rx, 0]))];
+      default:
+        return [];
+    }
+  }
+  if (f.type === "extrude") {
+    // From the sketch up to the far end: the height it makes.
+    const top = useSpot(u, features, world);
+    const src = f.source;
+    let base: Vec3 | null = null;
+    if (src.kind === "profile") {
+      const pl = world.sketchPlanes[src.sketch] ?? (features.find((g) => g.id === src.sketch) as { plane?: PlaneDef } | undefined)?.plane;
+      const r = src.regions[0];
+      if (pl && r) base = carried(toWorld(pl, r.c), f.target ?? f.id, features, i);
+    } else base = carried(src.face.center, f.target ?? f.id, features, i);
+    return base && top ? [[base, top]] : [];
+  }
+  if (f.type === "transform" && f.op.kind === "move" && f.op.rotate) {
+    const r = f.op.rotate;
+    const move = carrier(f.bodies[0] ?? null, features, i);
+    // The pivot's height (or X, Y): from where that is 0 to the pivot.
+    const k = /origin\.(\d)$/.exec(u.where);
+    if (k) {
+      const foot = [...r.origin] as Vec3;
+      foot[Number(k[1])] = 0;
+      return [[move(foot), move(r.origin)]];
+    }
+    // The angle: an arc round the axis at the pivot, with its two arms.
+    const ax = norm(r.axis);
+    const ref = Math.abs(ax[2]) < 0.9 ? cross(ax, [0, 0, 1]) : cross(ax, [1, 0, 0]);
+    const pts = arcPoints(r.origin, ax, ref, r.angle, 30).map(move);
+    const o = move(r.origin);
+    return [[o, pts[0]], pts, [o, pts[pts.length - 1]]];
+  }
+  return [];
 }
 
 /** Where one use is in the view now (null: nowhere to show it). */
@@ -198,6 +302,8 @@ export function useSpot(u: VarUse, features: readonly Feature[], world: AnchorWo
 
 export interface VarTag {
   name: string;
+  /** What it changes, drawn on the model (see useMarks). */
+  marks: Vec3[][];
   kind: VarKind;
   /** Where its tag goes (its first use that has a spot), null: not on the model. */
   at: Vec3 | null;
@@ -222,6 +328,7 @@ export function variableTags(variables: readonly Variable[], features: readonly 
     };
     const ordered = [...(uses.get(v.name) ?? [])].sort((a, b) => rank(a) - rank(b));
     const spots = ordered.map((u) => useSpot(u, features, world)).filter((p): p is Vec3 => !!p && p.every(Number.isFinite));
-    return { name: v.name, kind: kindOfVariable(v.name, variables, uses), at: spots[0] ?? null, others: spots.slice(1), from: madeFrom(v.name, variables) };
+    const marks = ordered.flatMap((u) => useMarks(u, v.name, features, world)).filter((m) => m.length > 1 && m.every((p) => p.every(Number.isFinite)));
+    return { name: v.name, marks, kind: kindOfVariable(v.name, variables, uses), at: spots[0] ?? null, others: spots.slice(1), from: madeFrom(v.name, variables) };
   });
 }

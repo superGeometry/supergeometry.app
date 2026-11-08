@@ -222,13 +222,36 @@ export class VariableTags {
     this.box.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   }
 
-  /** The open tag's relations: dashed to its other uses, solid to its neighbours in formulas. */
+  /**
+   * The open tag: what it changes, drawn on the model in yellow dashes (the
+   * base's radius, the arm's length, a turn's arc - every place it's used),
+   * and thin lines to the variables it's made from and the ones made from it.
+   */
   private drawLines(at: Map<string, [number, number]>): void {
     this.lines.innerHTML = "";
     const name = this.openName;
     const from = name ? at.get(name) : undefined;
     if (!name || !from) return;
     const tag = this.tags.find((t) => t.name === name)!;
+    const dot = (p: [number, number]) => {
+      const d = document.createElementNS(SVG_NS, "circle");
+      d.setAttribute("cx", String(p[0]));
+      d.setAttribute("cy", String(p[1]));
+      d.setAttribute("r", "3");
+      d.setAttribute("class", "mark");
+      this.lines.append(d);
+    };
+    for (const m of tag.marks) {
+      const pts = m.map((p) => this.view.toScreen(p as Vec3));
+      if (pts.some((p) => !p)) continue;
+      const pl = document.createElementNS(SVG_NS, "polyline");
+      pl.setAttribute("points", pts.map((p) => `${p![0].toFixed(1)},${p![1].toFixed(1)}`).join(" "));
+      pl.setAttribute("class", "mark");
+      this.lines.append(pl);
+      // Its two ends (what's measured is between them).
+      dot(pts[0]!);
+      dot(pts[pts.length - 1]!);
+    }
     const line = (to: [number, number], cls: string) => {
       const l = document.createElementNS(SVG_NS, "line");
       l.setAttribute("x1", String(from[0]));
@@ -238,18 +261,6 @@ export class VariableTags {
       l.setAttribute("class", cls);
       this.lines.append(l);
     };
-    for (const p of tag.others) {
-      const s = this.view.toScreen(p as Vec3);
-      if (s) {
-        line(s, "use");
-        const dot = document.createElementNS(SVG_NS, "circle");
-        dot.setAttribute("cx", String(s[0]));
-        dot.setAttribute("cy", String(s[1]));
-        dot.setAttribute("r", "3.5");
-        dot.setAttribute("class", "use");
-        this.lines.append(dot);
-      }
-    }
     for (const n of tag.from) {
       const s = at.get(n);
       if (s) line(s, "from");
