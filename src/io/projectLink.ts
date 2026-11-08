@@ -1,5 +1,7 @@
 // A project packed into a link: supergeometry.app/#p=… opens it in the app.
 // It sits after the # so it never reaches a server - the page reads it.
+// Loaded only when a link is made or opened (it brings the compressor along);
+// reading the address is in linkHash.
 //
 // Kept short, so it fits in a post or a message:
 //  - the long made-up ids ("extrude-mw6obrns-xqpb") become short ones ("~3"),
@@ -14,9 +16,8 @@
 // so a new dictionary or step gets a new letter and the old ones stay readable.
 
 import { deflateSync, inflateSync } from "fflate";
+import { KEY, SITE } from "./linkHash";
 
-export const SITE = "https://supergeometry.app/";
-const KEY = "p";
 const VERSION = "A";
 
 /** Version A's dictionary: the pieces every project file is made of, the most common last. Never change it. */
@@ -138,14 +139,4 @@ export function projectLink(json: string): string | null {
   } catch {
     return null;
   }
-}
-
-/** The packed project in this address's # part, if there is one. */
-export function linkedProject(hash = location.hash): string | null {
-  return new URLSearchParams(hash.replace(/^#/, "")).get(KEY);
-}
-
-/** The address without the packed project (a reload doesn't open it again). */
-export function clearLinkedProject(): void {
-  history.replaceState(null, "", location.pathname + location.search);
 }

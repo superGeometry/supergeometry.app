@@ -6,8 +6,7 @@ import { SUPPORT, openSupport } from "./ui/support";
 import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, renameProject, setCurrentProject } from "./doc/library";
 import { showLibrary } from "./ui/library";
 import { showAbout } from "./ui/about";
-import { showFeedback } from "./ui/feedback";
-import { clearLinkedProject, linkedProject, unpackProject } from "./io/projectLink";
+import { clearLinkedProject, linkedProject } from "./io/linkHash";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
 import { createVariable, insertFile, insertImage } from "./io/insert";
@@ -911,7 +910,8 @@ export class App implements AppContext {
     // About: the README, in the app. Support links open in a new tab (no access back to this page).
     moreItem("m-about", () => showAbout());
     // Feedback: a bug report (with the project's file if wanted), suggestion or discussion, posted on r/supergeometry (Reddit's page, in a new tab).
-    moreItem("m-feedback", () => showFeedback(() => ({ name: this.store.doc.name, json: JSON.stringify(this.store.doc) }), (t) => this.ui.toast(t, "error")));
+    // (Loaded on the first tap: it brings the link packing along.)
+    moreItem("m-feedback", () => void import("./ui/feedback").then(({ showFeedback }) => showFeedback(() => ({ name: this.store.doc.name, json: JSON.stringify(this.store.doc) }), (t) => this.ui.toast(t, "error"))));
     // Support: a short list of ways (each opens in a new tab). One without a link yet says so.
     const donateList = document.getElementById("m-donate-list")!;
     on("m-donate", () => {
@@ -939,6 +939,7 @@ export class App implements AppContext {
     item("m-new", () => void this.newProject());
     item("m-open", () => void this.showProjects());
     item("m-save", () => this.save());
+    item("m-link", () => this.shareLink());
     item("m-stl", () => void this.export("stl"));
     item("m-step", () => void this.export("step"));
     item("m-3mf", () => void this.export3mf());
@@ -1174,7 +1175,8 @@ export class App implements AppContext {
     if (!packed) return false;
     clearLinkedProject();
     try {
-      const doc = parseProject(await unpackProject(packed));
+      const { unpackProject } = await import("./io/projectLink");
+      const doc = parseProject(unpackProject(packed));
       await this.switchProject(doc, newProjectId());
       this.ui.toast(`Opened “${doc.name}” from a link. It's kept in File → Open`);
       return true;
@@ -1199,6 +1201,44 @@ export class App implements AppContext {
     const text = await projectText(id);
     const e = (await libraryEntries()).find((x) => x.id === id);
     if (text && e) download(new Blob([text], { type: "application/json" }), `${e.name}.super`);
+  }
+
+  /**
+   * File → Share by link: a link with the whole project packed in it
+   * (supergeometry.app/#p=…), copied. Copying must start inside the tap
+   * (Safari): the link is handed to the clipboard as it's being made.
+   * Where copying isn't allowed, it's shown to copy by hand.
+   */
+  private shareLink(): void {
+    if (!this.store.features.length) return this.ui.toast("Nothing to share yet: the project is empty");
+    const json = JSON.stringify(this.store.doc);
+    const made = import("./io/projectLink").then(({ projectLink }) => {
+      const link = projectLink(json);
+      if (!link) throw new Error("not packed");
+      return link;
+    });
+    const copied = (link: string) =>
+      this.ui.toast(
+        link.length > 8000
+          ? `Link copied (${Math.round(link.length / 1000)}k characters: some apps cut a link that long - File → Save shares the file instead)`
+          : "Link copied: paste it anywhere. It opens this project in supergeometry.app",
+      );
+    const byHand = () =>
+      void made.then(
+        (link) => void this.ui.dialog("Share by link", [{ key: "link", label: "Link", value: link }], "Copying isn't allowed here: select the link and copy it."),
+        () => this.ui.toast("This project couldn't be made into a link", "error"),
+      );
+    const clip = navigator.clipboard;
+    try {
+      if (clip?.write && typeof ClipboardItem !== "undefined") {
+        const item = new ClipboardItem({ "text/plain": made.then((l) => new Blob([l], { type: "text/plain" })) });
+        clip.write([item]).then(() => void made.then(copied), byHand);
+        return;
+      }
+    } catch {
+      // (A browser whose ClipboardItem takes no promise: the plain way below.)
+    }
+    made.then((l) => clip.writeText(l).then(() => copied(l))).catch(byHand);
   }
 
   private save(how: Delivery = "download"): void {
