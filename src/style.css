@@ -451,6 +451,40 @@ body.items-open #undo-dock {
   background: var(--accent-soft);
   color: #b9d4ff;
 }
+/* The tool whose window is open (and Exit Sketch once a shape is closed):
+   a ring grows and fades round its icon. */
+body.panel-open .tool.active::before,
+.tool.pulse::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  opacity: 0;
+  animation: tool-pulse 1.4s ease-out infinite;
+}
+/* A wide button with its name grows too much at the update ring's scale. */
+@keyframes tool-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.1, 1.22);
+    opacity: 0;
+  }
+}
+.tool.pulse {
+  color: #fff;
+}
+@media (prefers-reduced-motion: reduce) {
+  body.panel-open .tool.active::before,
+  .tool.pulse::before {
+    animation: none;
+    opacity: 1;
+  }
+}
 .tool.disabled {
   opacity: 0.38;
   cursor: default;

@@ -47,13 +47,14 @@ import type { TextAlign } from "../sketch/textLayout";
 import { DragTyping } from "./dragTyping";
 import { DimWidget } from "./annotate";
 import { PatternBox } from "./patternBox";
-import { axisDrag } from "./handles";
+import { axisDrag, Handle } from "./handles";
+import { ExtrudeOp } from "./ops";
 import { CopyToggle, copyMode } from "./copyToggle";
 import type { PanelItem, ToolItem } from "../ui/ui";
 import { fmtLen, trim as trimNum } from "../units";
 import type { ToolPointer } from "../view/input";
 import { dotMaterial, sketchToWorld } from "../view/viewport";
-import { hitToSel, type AppContext, type Tool } from "./tool";
+import { hitToSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
 
 export type SketchKind = Kind;
 type Kind =
@@ -460,6 +461,8 @@ export class SketchTool implements Tool {
   }
 
   exit(): void {
+    this.regionArrow?.handle.dispose();
+    this.regionArrow = null;
     // A fillet being sized is kept (before the constraint UI goes away).
     this.finishFillet();
     this.clearOverlays();
@@ -803,7 +806,7 @@ export class SketchTool implements Tool {
 
   private updateMenu(): void {
     const app = this.app;
-    const exit: ToolItem = { id: "exit", label: "Exit Sketch", icon: "exit", shortcut: "Esc", run: () => app.setTool(null) };
+    const exit: ToolItem = { id: "exit", label: "Exit Sketch", icon: "exit", shortcut: "Esc", pulse: this.exitPulse, run: () => app.setTool(null) };
     if (this.phase === "plane") {
       app.ui.setTools([exit]);
       app.ui.setBottom([]);
@@ -908,6 +911,9 @@ export class SketchTool implements Tool {
   setKind(kind: Kind): void {
     // Phones: once a tool is picked the column shows just icons (names are back on the next sketch).
     document.body.classList.add("sketch-compact");
+    this.hideRegionArrow();
+    // Another tool picked: still sketching, Exit Sketch calms down.
+    if (kind !== "select") this.exitPulse = false;
     this.kind = kind;
     this.pts = [];
     this.locks = {};
@@ -967,16 +973,23 @@ export class SketchTool implements Tool {
     this.angleDim = null;
     const items: PanelItem[] = [];
     const k = this.kind;
-    const lock = (key: string, label: string, kind: "length" | "angle" | "int" = "length", value?: number): PanelItem => ({
+    this.liveKeys = [];
+    const lockOf = new Map<PanelItem, string>();
+    const lock = (key: string, label: string, kind: "length" | "angle" | "int" = "length", value?: number): PanelItem => {
+      const it: PanelItem = {
       type: "number",
       label,
-      value: this.locks[key] ?? value ?? 0,
+      // What it is with the pointer where it is now (it follows the pointer until typed).
+      value: this.locks[key] ?? value ?? this.liveValue(key, this.lockedCursor()) ?? 0,
       kind,
-      onInput: (v) => {
-        this.locks[key] = v;
-        this.refreshPreview();
-      },
-    });
+        onInput: (v) => {
+          this.locks[key] = v;
+          this.refreshPreview();
+        },
+      };
+      lockOf.set(it, key);
+      return it;
+    };
     const selCount = this.selected.size;
     const apply = (label: string, fn: () => void): PanelItem => ({ type: "button", label, icon: "check", onClick: fn, primary: true });
     // A finger lands a few pixels off and the grid there can be 5 px a step:
@@ -1015,16 +1028,21 @@ export class SketchTool implements Tool {
         // By its centre, on a phone: where the centre is, the radius and where
         // it starts, then where it ends (degrees, 0° right, round anticlockwise)
         // - a nacelle's lip round a centre at 257 snapped to 260.
-        if (isTouchDevice && memory.arc === "center") {
+        // (Every device: values can be typed while it's drawn, not only once it's made.)
+        if (memory.arc === "center") {
           if (this.pts.length === 1) items.push(...firstAt(), lock("r", "Radius"), lock("a0", "Start angle", "angle"));
           else if (this.pts.length === 2) items.push(lock("a1", "End angle", "angle"));
-        }
+        } else if (this.pts.length === 1) items.push(...firstAt(), lock("len", "Length"), lock("ang", "Angle", "angle"));
+        else if (this.pts.length === 2) items.push(lock("r", "Radius"));
         break;
       case "rect":
         if (this.pts.length === 1 && memory.rect !== "3pt") items.push(...firstAt(), lock("w", "Width"), lock("h", "Height"));
+        else if (this.pts.length === 1) items.push(...firstAt(), lock("len", "Width"), lock("ang", "Angle", "angle"));
+        else if (this.pts.length === 2 && memory.rect === "3pt") items.push(lock("h", "Height"));
         break;
       case "circle":
         if (this.pts.length === 1 && memory.circle !== "3pt") items.push(...firstAt(), lock("r", "Diameter"));
+        else if (this.pts.length === 1) items.push(...firstAt(), lock("len", "Length"), lock("ang", "Angle", "angle"));
         break;
       case "polygon":
         items.push({ type: "number", label: "Sides", value: memory.sides, kind: "int", min: 3, onInput: (v) => ((memory.sides = Math.max(3, Math.min(64, v))), this.refreshPreview(), this.updateMenu()) });
@@ -1161,7 +1179,9 @@ export class SketchTool implements Tool {
     // A shape being drawn with a size typed in the card: Enter (or Done) puts it
     // there - typing Width 100, Height 150 and pressing Enter did nothing; it
     // still waited for a second tap, which on a phone lands wherever the finger is.
-    const typed = this.pts.length > 0 && (["rect", "circle", "polygon", "ellipse", "line"].includes(k) || (k === "arc" && memory.arc === "center"));
+    const typed = this.pts.length > 0 && ["rect", "circle", "polygon", "ellipse", "line", "arc"].includes(k);
+    // The size fields follow the pointer (refreshPreview) until one is typed.
+    this.liveKeys = items.filter((it) => it.type === "number").map((it) => lockOf.get(it) ?? null);
     ui.showPanel(items.length ? { title: k === "fillet" && memory.corner === "chamfer" ? "Chamfer" : titleOf(k), items, onCancel: this.pts.length ? () => this.resetDrawing() : undefined, onDone: k === "spline" && this.pts.length >= 2 ? () => this.finishSpline(false) : typed ? () => this.finishTyped() : undefined } : null);
   }
 
@@ -1227,6 +1247,10 @@ export class SketchTool implements Tool {
       if (g) return this.app.setHover(null);
     }
     if (this.kind === "select") {
+      const onArrow = !!this.regionArrow?.handle.hit(p);
+      this.regionArrow?.handle.setHot(onArrow);
+      this.app.view.canvas.style.cursor = onArrow ? "grab" : "";
+      if (onArrow) return this.app.setHover(null);
       const g = this.gimbal?.hit(p) ?? null;
       this.gimbal?.setHot(g);
       if (g) return this.app.setHover(null);
@@ -1257,6 +1281,9 @@ export class SketchTool implements Tool {
 
   down(p: ToolPointer): boolean {
     if (this.phase !== "draw") return false;
+    // The extrude arrow of a tapped shape, grabbed: only now does Extrude start
+    // (the sketch closes), and this same drag sizes it.
+    if (this.regionArrow?.handle.hit(p)) return this.extrudeFromArrow(p);
     if (this.kind === "patternLinear" && this.startPatternDrag(p)) return true;
     // Drags (the gimbal's too) start once the pointer moves (dragStart): a
     // gimbal grabbed on the press took every tap near it - with a point picked
@@ -1285,6 +1312,7 @@ export class SketchTool implements Tool {
     if (!["line", "rect", "circle", "polygon", "ellipse", "arc"].includes(this.kind) || this.pts.length) return false;
     const s = this.snap(p);
     if (!s) return false;
+    this.stopExitPulse();
     this.pts = [s.uv];
     this.downAt = { x: p.x, y: p.y };
     this.firstSnap = s;
@@ -1356,14 +1384,20 @@ export class SketchTool implements Tool {
       case "line":
         return ["len"];
       case "rect":
-        return memory.rect === "3pt" ? [] : ["w", "h"];
+        // By three points: the first side (length, angle), then the height.
+        return memory.rect === "3pt" ? (this.pts.length === 1 ? ["len", "ang"] : ["h"]) : ["w", "h"];
       case "circle":
-        return memory.circle === "3pt" ? [] : ["r"];
+        return memory.circle === "3pt" ? (this.pts.length === 1 ? ["len", "ang"] : []) : ["r"];
+      case "arc":
+        // By its centre: radius and start angle, then the end angle; by three
+        // points: the chord (length, angle), then the radius.
+        if (memory.arc === "center") return this.pts.length === 1 ? ["r", "a0"] : ["a1"];
+        return this.pts.length === 1 ? ["len", "ang"] : ["r"];
       case "polygon":
         // Tab: radius → number of sides.
         return ["r", "sides"];
       case "ellipse":
-        return ["rx"];
+        return this.pts.length === 1 ? ["rx"] : ["ry"];
       default:
         return [];
     }
@@ -2008,14 +2042,14 @@ export class SketchTool implements Tool {
         const key = keys[this.lockIndex];
         this.typedThisShape = true;
         const used = this.typing.key(e, {
-          kind: key === "ang" ? "angle" : key === "sides" ? "number" : "length",
-          show: this.kind === "line" ? (text, bad) => this.lineDim?.setText(text, bad) : undefined,
+          kind: key === "ang" || key === "a0" || key === "a1" ? "angle" : key === "sides" ? "number" : "length",
+          show: key === "len" && this.lineDim ? (text, bad) => this.lineDim?.setText(text, bad) : undefined,
           apply: (v) => this.applyLock(key, v),
           commit: () => {
             // Enter moves on to the next size - except the polygon's side count (Tab only).
             if (this.lockIndex < keys.length - 1 && keys[this.lockIndex + 1] !== "sides") {
               this.lockIndex++;
-              this.setHint(`Now type the ${{ ang: "angle", h: "height", sides: "number of sides" }[keys[this.lockIndex]] ?? "next value"} (or Enter to keep it), then Enter.`);
+              this.setHint(`Now type the ${{ ang: "angle", h: "height", sides: "number of sides", a0: "start angle", a1: "end angle", r: "radius" }[keys[this.lockIndex]] ?? "next value"} (or Enter to keep it), then Enter.`);
               return;
             }
             this.lockIndex = 0;
@@ -2316,6 +2350,29 @@ export class SketchTool implements Tool {
     const L = this.locks;
     if (!a) return c;
     const last = this.pts[this.pts.length - 1];
+    // The first side of a 3-point rectangle / circle / arc: a length and angle, like a line.
+    const firstSide = this.pts.length === 1 && ((this.kind === "arc" && memory.arc !== "center") || (this.kind === "rect" && memory.rect === "3pt") || (this.kind === "circle" && memory.circle === "3pt"));
+    if (firstSide) {
+      if (L.len === undefined && L.ang === undefined) return c;
+      const ang = L.ang !== undefined ? (L.ang * Math.PI) / 180 : Math.atan2(c[1] - a[1], c[0] - a[0]);
+      const len = L.len ?? Math.hypot(c[0] - a[0], c[1] - a[1]);
+      return [a[0] + Math.cos(ang) * len, a[1] + Math.sin(ang) * len];
+    }
+    if (this.pts.length === 2 && ((this.kind === "arc" && memory.arc !== "center" && L.r !== undefined) || (this.kind === "rect" && memory.rect === "3pt" && L.h !== undefined))) {
+      const [p0, p1] = this.pts;
+      const d = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
+      const n: Vec2 = [-(p1[1] - p0[1]) / d, (p1[0] - p0[0]) / d];
+      const side = Math.sign((c[0] - p0[0]) * n[0] + (c[1] - p0[1]) * n[1]) || 1;
+      if (this.kind === "rect") return [p1[0] + n[0] * side * L.h, p1[1] + n[1] * side * L.h];
+      // Arc through both ends with that radius, bulging the pointer's way (the
+      // short way round, unless the pointer is further out than the radius).
+      const h = d / 2;
+      const r = Math.max(L.r, h);
+      const mid: Vec2 = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+      const far = Math.abs((c[0] - mid[0]) * n[0] + (c[1] - mid[1]) * n[1]) > r;
+      const s = far ? r + Math.sqrt(r * r - h * h) : r - Math.sqrt(r * r - h * h);
+      return [mid[0] + n[0] * side * s, mid[1] + n[1] * side * s];
+    }
     switch (this.kind) {
       case "line": {
         // Typed across / up: exactly there (what isn't typed stays put).
@@ -2345,8 +2402,9 @@ export class SketchTool implements Tool {
       case "arc": {
         if (memory.arc !== "center") return c;
         const deg = (x: number) => (x * Math.PI) / 180;
-        if (this.pts.length === 1 && (L.r !== undefined || L.a0 !== undefined)) {
-          const r = L.r ?? Math.hypot(c[0] - a[0], c[1] - a[1]);
+        // (A length typed in the box on the radius line is the radius.)
+        if (this.pts.length === 1 && (L.r !== undefined || L.a0 !== undefined || L.len !== undefined)) {
+          const r = L.r ?? L.len ?? Math.hypot(c[0] - a[0], c[1] - a[1]);
           const ang = L.a0 !== undefined ? deg(L.a0) : Math.atan2(c[1] - a[1], c[0] - a[0]);
           return [a[0] + Math.cos(ang) * r, a[1] + Math.sin(ang) * r];
         }
@@ -2453,6 +2511,7 @@ export class SketchTool implements Tool {
   }
 
   private addPoint(uv: Vec2, count: number): void {
+    this.stopExitPulse();
     // Drawing started: (phones) the tool column shrinks to its icons.
     document.body.classList.add("sketch-compact");
     // The next tap finishes the length being typed for the line before.
@@ -2548,9 +2607,11 @@ export class SketchTool implements Tool {
           if (e.kind === "rect") {
             // The typed Width and Height are the whole rectangle's, in every mode
             // (a centre rectangle typed 100 × 150 used to come out 200 × 300).
-            dim("w", L.w);
+            dim("w", memory.rect === "3pt" ? L.len : L.w);
             dim("h", L.h);
           }
+          // An arc's typed radius (a centre arc's in the box on its radius line too) is kept as a dimension.
+          if (e.kind === "arc") dim("radius", memory.arc === "center" ? (L.r ?? L.len) : L.r);
           if (e.kind === "circle") dim("diameter", L.r);
           if (e.kind === "polygon") dim("radius", L.r);
           if (e.kind === "ellipse") (dim("dx", L.rx), dim("dy", L.ry));
@@ -2609,6 +2670,17 @@ export class SketchTool implements Tool {
   private shapeClosed(): void {
     this.resetDrawing();
     this.setKind("select");
+    // Done drawing, most likely: Exit Sketch pulses (until the next thing is drawn).
+    this.exitPulse = true;
+    this.updateMenu();
+  }
+
+  /** Exit Sketch pulsing: a shape was just closed, nothing drawn since. */
+  private exitPulse = false;
+
+  private stopExitPulse(): void {
+    if (!this.exitPulse) return;
+    this.exitPulse = false;
     this.updateMenu();
   }
 
@@ -2893,9 +2965,15 @@ export class SketchTool implements Tool {
     const ghosts: SketchEntity[] = [];
     let label: string | null = null;
     const c = this.lockedCursor();
+    this.updateLiveValues(c);
+    // A length box on the first side of a 3-point shape (or an arc's radius) stays up.
+    let keepLineDim = false;
     if (["line", "arc", "rect", "circle", "polygon", "ellipse", "spline"].includes(this.kind) && this.pts.length && c) {
       const pts = this.kind === "line" ? [this.pts[this.pts.length - 1], c] : [...this.pts, c];
       const e = this.buildShape(pts);
+      const yellow = 0xffc23d;
+      // Arc by its centre: the centre shows from the first tap on.
+      if (this.kind === "arc" && memory.arc === "center") this.drawCentreMark(this.pts[0]);
       // Arc, both ends placed and nothing to aim with (touch, or being bent): the bend so far.
       if (this.kind === "arc" && this.pts.length === 2 && this.arcM && (isCoarse || this.arcBend)) {
         const [a, b] = this.pts;
@@ -2906,9 +2984,26 @@ export class SketchTool implements Tool {
         const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
         if (L > 1e-9) {
           const m: Vec2 = [(a[0] + b[0]) / 2 - ((b[1] - a[1]) / L) * L * 0.3, (a[1] + b[1]) / 2 + ((b[0] - a[0]) / L) * L * 0.3];
-          this.drawGhosts([{ id: "arc-preview", kind: "arc", a, m, b }], 0xffc23d, true);
+          this.drawGhosts([{ id: "arc-preview", kind: "arc", a, m, b }], yellow, true);
         }
-        label = dimLabel(e, pts);
+        // Its chord's length can be typed in the box (or in the card), like a line's.
+        this.showLineDim(a, b);
+        keepLineDim = true;
+      } else if (this.kind === "arc" && memory.arc === "center" && this.pts.length === 1 && e?.kind === "line") {
+        // Centre placed: the circle the arc will lie on, dashed, and its radius (typed in the box).
+        const r = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]);
+        if (r > 1e-9) this.drawGhosts([{ id: "arc-circle", kind: "circle", center: e.a, radius: r }], yellow, true);
+        this.showLineDim(e.a, e.b);
+        keepLineDim = true;
+      } else if (e?.kind === "line" && this.pts.length === 1 && ((this.kind === "rect" && memory.rect === "3pt") || (this.kind === "circle" && memory.circle === "3pt"))) {
+        // 3-point rectangle / circle, first point placed: a dashed guide to the
+        // second (the side, or the chord - with the circle on it as a diameter).
+        const ghosts: SketchEntity[] = [{ ...e, id: "first-side" }];
+        const r = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) / 2;
+        if (this.kind === "circle" && r > 1e-9) ghosts.push({ id: "chord-circle", kind: "circle", center: [(e.a[0] + e.b[0]) / 2, (e.a[1] + e.b[1]) / 2], radius: r });
+        this.drawGhosts(ghosts, yellow, true);
+        this.showLineDim(e.a, e.b);
+        keepLineDim = true;
       } else if (e?.kind === "line" && this.kind === "line" && phoneScreen() && !this.dragging && this.pts.length >= 1) {
         // Touch, a line just placed and its length being typed: no next segment
         // trailing to where the finger was (it only gets in the way) - the next tap places it.
@@ -2919,7 +3014,7 @@ export class SketchTool implements Tool {
         label = dimLabel(e, pts);
       }
     }
-    if (!(this.kind === "line" && this.pts.length && c)) this.hideLineDim();
+    if (!keepLineDim && !(this.kind === "line" && this.pts.length && c)) this.hideLineDim();
     if (this.kind === "text" && this.pts.length) {
       void textEntities(this.text || " ", this.pts[0], memory.textSize, 0, memory.textFont, memory.textAlign).then((es) => {
         if (this.kind !== "text" || !this.pts.length) return;
@@ -2970,6 +3065,52 @@ export class SketchTool implements Tool {
       this.app.ui.setLabel(p.x, p.y, text ? (label ? `${text}  · type a value` : text) : null);
     }
     this.app.view.requestRender();
+  }
+
+  /** Size fields of the card (by number-field index): which lock each one shows, or null. */
+  private liveKeys: (string | null)[] = [];
+
+  /** The size a lock key stands for, with the next point at `c` (what the card shows before it's typed). */
+  private liveValue(key: string, c: Vec2 | null): number | undefined {
+    const a = this.pts[0];
+    if (!a || !c) return undefined;
+    const last = this.pts[this.pts.length - 1];
+    const deg = (x: number) => Math.round(((x * 180) / Math.PI) * 1e4) / 1e4;
+    const e = this.buildShape([...this.pts, c]);
+    switch (key) {
+      case "len":
+        return Math.hypot(c[0] - last[0], c[1] - last[1]);
+      case "ang":
+        return deg(Math.atan2(c[1] - last[1], c[0] - last[0]));
+      case "dx":
+        return c[0] - last[0];
+      case "dy":
+        return c[1] - last[1];
+      case "w":
+        return e?.kind === "rect" ? e.w : undefined;
+      case "h":
+        return e?.kind === "rect" ? e.h : undefined;
+      case "r":
+        if (this.kind === "circle") return memory.circle === "2pt" ? Math.hypot(c[0] - a[0], c[1] - a[1]) : 2 * Math.hypot(c[0] - a[0], c[1] - a[1]);
+        if (this.kind === "arc" && memory.arc !== "center") return e?.kind === "arc" ? arcFrom3(e.a, e.m, e.b)?.r : undefined;
+        return Math.hypot(c[0] - a[0], c[1] - a[1]);
+      case "a0":
+      case "a1": {
+        const t = deg(Math.atan2(c[1] - a[1], c[0] - a[0]));
+        return t < 0 ? t + 360 : t;
+      }
+      case "rx":
+        return 2 * Math.hypot(c[0] - a[0], c[1] - a[1]);
+      case "ry":
+        return e?.kind === "ellipse" ? 2 * e.ry : undefined;
+    }
+    return undefined;
+  }
+
+  /** The card's size fields, as the pointer moves: what each would be (a typed one stays). */
+  private updateLiveValues(c: Vec2 | null): void {
+    if (!this.liveKeys.some((k) => k)) return;
+    this.app.ui.updatePanelValues(this.liveKeys.map((k) => (k ? (this.locks[k] ?? this.liveValue(k, c)) : undefined)) as number[]);
   }
 
   /** A typed size; "sides" (polygon) is a count, not a lock. */
@@ -3063,6 +3204,13 @@ export class SketchTool implements Tool {
     this.app.view.requestRender();
   }
 
+  /** A point marker (an arc's centre while it's drawn). */
+  private drawCentreMark(q: Vec2): void {
+    const m = new Points(new BufferGeometry().setFromPoints([sketchToWorld(this.plane!, q, 0.02)]), dotMaterial({ color: 0xffc23d, size: 9 }));
+    m.renderOrder = 10;
+    this.addOverlay(m);
+  }
+
   private addOverlay(o: Line | Points): void {
     this.overlays.push(o);
     this.app.view.overlay.add(o);
@@ -3109,6 +3257,8 @@ export class SketchTool implements Tool {
   }
 
   private commit(entities: SketchEntity[], constraints: SketchConstraint[] = this.constraints): void {
+    // The shapes change: a picked region's arrow would point at the old one.
+    this.hideRegionArrow();
     const store = this.app.store;
     const ids = new Set(entities.map((e) => e.id));
     const cs = constraints.filter((c) => refsOf(c).every((id) => ids.has(id)));
@@ -3416,7 +3566,11 @@ export class SketchTool implements Tool {
       return this.selectionChanged();
     }
     if (!c) {
+      // Inside a closed shape (Select tool): the shape is picked and its extrude
+      // arrow shows - the sketch stays open; only dragging the arrow extrudes.
+      if (this.kind === "select" && count < 2 && this.tapRegion(p)) return;
       // Empty space: deselect; with nothing selected, an editing tool goes back to Select.
+      if (this.regionArrow) this.hideRegionArrow();
       if (this.selected.size || this.selPts.length) this.clearSelection();
       else if (this.kind !== "select") this.setKind("select");
       return;
@@ -3426,7 +3580,59 @@ export class SketchTool implements Tool {
     this.selectionChanged();
   }
 
+  /** A tapped closed shape of this sketch: its profile, and the arrow that extrudes it. */
+  private regionArrow: { sel: Sel[]; handle: Handle } | null = null;
+
+  /** Tap inside a closed shape: pick it (again: let it go) and show its extrude arrow. */
+  private tapRegion(p: ToolPointer): boolean {
+    if (!this.sketchId) return false;
+    const hit = this.app.view.pick(p.x, p.y, { curves: false, profiles: true, bodies: false, planes: false, axes: false, images: false, edges: false, vertices: false, edgeTolPx: 0 });
+    if (hit?.kind !== "profile" || hit.sketch !== this.sketchId) return false;
+    const s = hitToSel(hit);
+    if (!s || s.kind !== "profile") return false;
+    const same = this.regionArrow?.sel.some((x) => x.kind === "profile" && x.region === s.region);
+    if (this.selected.size || this.selPts.length) this.clearSelection();
+    if (same) {
+      this.hideRegionArrow();
+      return true;
+    }
+    this.showRegionArrow([s]);
+    return true;
+  }
+
+  private showRegionArrow(sel: Sel[]): void {
+    const src = sourcesOf(this.app, sel)[0];
+    if (!src) return this.hideRegionArrow();
+    const fr = sourceFrame(this.app, src);
+    const handle = this.regionArrow?.handle ?? new Handle(this.app.view, "arrow");
+    handle.set(fr.base, fr.normal);
+    this.regionArrow = { sel, handle };
+    this.app.setSelection(sel);
+    this.setHint("Drag the arrow to extrude (the sketch stays open until you do)");
+  }
+
+  private hideRegionArrow(): void {
+    if (!this.regionArrow) return;
+    this.regionArrow.handle.dispose();
+    this.regionArrow = null;
+    this.app.setSelection([]);
+    this.setHint();
+  }
+
+  /** The arrow dragged: Extrude takes over (at 0, following this drag). */
+  private extrudeFromArrow(p: ToolPointer): boolean {
+    const sel = this.regionArrow!.sel;
+    const src = sourcesOf(this.app, sel)[0];
+    this.hideRegionArrow();
+    if (!src) return false;
+    const op = new ExtrudeOp(this.app, src, undefined, "auto", { distance: 0 });
+    this.app.setTool(op);
+    this.app.setSelection(sel);
+    return op.down(p);
+  }
+
   private selectionChanged(): void {
+    if (this.regionArrow && (this.selected.size || this.selPts.length)) this.hideRegionArrow();
     this.updateMenu();
     this.refreshDistanceDim();
     this.showSelection();

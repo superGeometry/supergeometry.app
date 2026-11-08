@@ -17,6 +17,8 @@ export interface ToolItem {
   sub?: string;
   shortcut?: string;
   active?: boolean;
+  /** Draw the eye to it: a ring pulses round it (Exit Sketch once a shape is closed). */
+  pulse?: boolean;
   disabled?: boolean;
   /** Reason shown when disabled. */
   why?: string;
@@ -617,6 +619,8 @@ export class UI {
     this.panelVersion++;
     this.panel.innerHTML = "";
     this.panel.hidden = !spec;
+    // A tool's window open: the tool's icon pulses, so it's clear what the window belongs to.
+    document.body.classList.toggle("panel-open", !!spec);
     // Closed: next time it's placed afresh (and whole). Folded stays folded
     // (a sketch closes and reopens its card for each thing tapped) until
     // another tool starts: unfoldPanel.
@@ -1443,6 +1447,7 @@ function toolButton(item: ToolItem, withLabel: boolean): HTMLButtonElement {
   b.dataset.tool = item.id;
   b.dataset.label = item.label;
   b.classList.toggle("active", !!item.active);
+  b.classList.toggle("pulse", !!item.pulse);
   b.classList.toggle("has-children", !!item.children?.length);
   b.classList.toggle("disabled", !!item.disabled);
   b.title = item.disabled && item.why ? item.why : item.shortcut ? `${item.label} (${item.shortcut})` : item.label;
