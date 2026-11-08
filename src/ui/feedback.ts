@@ -4,8 +4,8 @@
 // and the text filled in, and the person posts it there (signed in to Reddit).
 // What goes along: what's typed here, a short line with the app version and
 // the browser if left on and, on a bug report, the project's file (a .super
-// file is JSON) as a code block if left on. A file too long for Reddit's
-// address is copied instead, for pasting into the post.
+// file is JSON) if left on: copied as it is, and the post marks where it goes
+// - in a Code Block of Reddit's own editor, pasted in there.
 
 import { icons } from "./icons";
 import { el, textButton } from "./ui";
@@ -22,12 +22,10 @@ const KINDS: { id: Kind; label: string; tag: string; title: string; text: string
 
 /** A browser address has a length limit: the text stops well short of it. */
 const MAX_TEXT = 4000;
-/** The longest address sent to Reddit (its servers turn away much longer ones). */
-const MAX_URL = 7000;
 /** The longest text a Reddit post takes. */
 const MAX_POST = 40000;
-/** Where a copied file goes in the post. */
-const PASTE_HERE = "(paste the copied file here)";
+/** Where the copied file goes in the post. */
+const PASTE_HERE = "(put a Code Block here and paste the copied file into it)";
 
 /** The open project, as its .super file. */
 export interface FeedbackProject {
@@ -56,11 +54,6 @@ export function submitUrl(title: string, text: string): string {
   // %20 for spaces, not "+": every reader of the address takes it as a space.
   const q = Object.entries({ title, text, selftext: "true", type: "TEXT" }).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
   return `https://www.reddit.com/r/${SUBREDDIT}/submit?${q.join("&")}`;
-}
-
-/** The file as a code block in the post (Reddit's Markdown). */
-function codeBlock(p: FeedbackProject): string {
-  return "```json\n" + p.json + "\n```";
 }
 
 /** Copies text; it must run inside the tap (a browser only allows it there). */
@@ -138,9 +131,10 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
 
   // Bug report: the project's file as a code block, so the bug can be opened and seen.
   const file = project?.();
-  const fileCode = file ? codeBlock(file) : "";
+  /** What the file takes in the post once it's in a code block (the block's marks too). */
+  const codeLength = file ? file.json.length + 12 : 0;
   /** Not even with an empty description (the head and the version line counted). */
-  const neverFits = fileCode.length > MAX_POST - 200;
+  const neverFits = codeLength > MAX_POST - 200;
   const fileRow = el("label", "feedback-info");
   const fileBox = document.createElement("input");
   fileBox.type = "checkbox";
@@ -177,32 +171,24 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
     if (infoBox.checked) body += `${body ? "\n\n" : ""}---\n${infoLine()}`;
     return body;
   };
-  const fileHead = (body: string) => `${body ? "\n\n" : ""}Project file (\`${file!.name}.super\`):\n\n`;
+  const fileHead = (body: string) => `${body ? "\n\n" : ""}Project file (${file!.name}.super):\n\n`;
   const withFile = () => !!file && kind === "bug" && fileBox.checked;
-  /** The whole post with the file in it fits Reddit's 40,000 characters (the description counts too). */
-  const postFits = () => {
+  /** How far the post with the file in it is over Reddit's 40,000 characters (the description counts too). */
+  const overBy = () => {
     const body = bodyText();
-    return (body + fileHead(body) + fileCode).length <= MAX_POST;
-  };
-  /** The file fits in the address (filled in); longer, it's copied for pasting. */
-  const fileFits = () => {
-    const body = bodyText();
-    return submitUrl(`[${tag()}] ${title.value.trim()}`, body + fileHead(body) + fileCode).length <= MAX_URL;
+    return body.length + fileHead(body).length + codeLength - MAX_POST;
   };
 
   const paint = () => {
-    const over = withFile() && !postFits();
+    const over = withFile() && overBy() > 0;
     post.disabled = !title.value.trim() || over;
-    const copy = withFile() && !over && !fileFits();
-    postLabel.textContent = copy ? "Copy file and open Reddit" : "Open Reddit";
+    postLabel.textContent = withFile() ? "Copy file and open Reddit" : "Open Reddit";
     if (file && !neverFits)
       fileHow.textContent = !withFile()
         ? ""
         : over
-          ? ` With this description the post is over Reddit's 40,000 characters: shorten it by ${(bodyText().length + fileHead(bodyText()).length + fileCode.length - MAX_POST).toLocaleString("en")} characters, or untick the file.`
-          : copy
-            ? " Too long to fill in: it's copied, paste it into the post where it says so."
-            : "";
+          ? ` With this description the post is over Reddit's 40,000 characters: shorten it by ${overBy().toLocaleString("en")} characters, or untick the file.`
+          : " It's copied: in the post, put a Code Block where it says so (Reddit's code button) and paste it in.";
   };
   title.addEventListener("input", paint);
   text.addEventListener("input", paint);
@@ -230,14 +216,12 @@ export function showFeedback(project?: () => FeedbackProject, toast: (t: string)
   const send = () => {
     const t = title.value.trim();
     if (!t) return void title.focus();
-    if (withFile() && !postFits()) return;
+    if (withFile() && overBy() > 0) return;
     let body = bodyText();
     if (withFile()) {
-      if (fileFits()) body += fileHead(body) + fileCode;
-      else {
-        if (!copyText(fileCode)) return void toast("Couldn't copy the file: try again, or post without it");
-        body += fileHead(body) + PASTE_HERE;
-      }
+      // The plain file: pasted into Reddit's own code block (Markdown marks would end up inside it).
+      if (!copyText(file!.json)) return void toast("Couldn't copy the file: try again, or post without it");
+      body += fileHead(body) + PASTE_HERE;
     }
     openSupport(submitUrl(`[${tag()}] ${t}`, body));
     close();
