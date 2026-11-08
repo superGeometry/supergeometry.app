@@ -351,26 +351,60 @@ function scrubStep(v: number, kind: string): number {
   return a < 1 ? 0.01 : a < 10 ? 0.1 : a < 100 ? 0.5 : a < 1000 ? 5 : 50;
 }
 
+/** A plain number ("220", "12.5 mm"), not "width*2" or a variable: what a drag can turn up or down. */
+function plainNumber(input: HTMLInputElement): number | null {
+  const text = input.value.trim().replace(/\s*(mm|cm|m|in|ft|°|")$/i, "");
+  return /^-?\d*\.?\d+$/.test(text) ? Number(text) : null;
+}
+
+let measure: CanvasRenderingContext2D | null = null;
+
+/** Where in the box's text a click at `clientX` falls (the caret's index). */
+function caretAt(input: HTMLInputElement, clientX: number): number {
+  measure ??= document.createElement("canvas").getContext("2d");
+  const text = input.value;
+  if (!measure) return text.length;
+  const cs = getComputedStyle(input);
+  measure.font = cs.font;
+  const r = input.getBoundingClientRect();
+  const left = parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth);
+  const inner = r.width - left - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
+  const width = (s: string) => measure!.measureText(s).width;
+  let x = clientX - r.left - left + input.scrollLeft;
+  const free = Math.max(0, inner - width(text));
+  if (cs.textAlign === "center") x -= free / 2;
+  else if (cs.textAlign === "right" || cs.textAlign === "end") x -= free;
+  let best = 0;
+  for (let i = 1; i <= text.length; i++) if (Math.abs(width(text.slice(0, i)) - x) < Math.abs(width(text.slice(0, best)) - x)) best = i;
+  return best;
+}
+
 /**
  * A value box is also a horizontal scroll wheel: press and drag left or right
- * to turn the value down or up (a click still opens the numpad / types).
+ * to turn the value down or up - selected or not (the mouse shows ↔ over it).
+ * A click selects the value (and opens the numpad); a click in the box when
+ * it's already in use puts the caret there.
  */
 function scrubbable(input: HTMLInputElement): void {
   if (input.dataset.scrub) return;
   input.dataset.scrub = "1";
-  let start: { x: number; v: number; id: number; kind: string; step: number } | null = null;
+  let start: { x: number; v: number; id: number; kind: string; step: number; mouse: boolean; focused: boolean } | null = null;
   let moved = false;
+  // ↔ over a value that can be dragged; a formula is text to edit (the text cursor).
+  const cursor = () => input.classList.toggle("scrub-off", plainNumber(input) === null);
+  input.addEventListener("pointerenter", cursor);
+  input.addEventListener("input", cursor);
   input.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     const kind = kindOf(input);
-    // Only plain numbers (not "width*2" or a variable).
-    const text = input.value.trim().replace(/\s*(mm|cm|m|in|ft|°|")$/i, "");
-    if (!/^-?\d*\.?\d+$/.test(text)) return;
-    const v = Number(text);
-    start = { x: e.clientX, v, id: e.pointerId, kind, step: scrubStep(v, kind) };
+    const v = plainNumber(input);
+    cursor();
+    if (v === null) return;
+    const mouse = e.pointerType === "mouse";
+    start = { x: e.clientX, v, id: e.pointerId, kind, step: scrubStep(v, kind), mouse, focused: document.activeElement === input };
     moved = false;
-    // A mouse doesn't focus the box until it's known to be a click.
-    if (e.pointerType === "mouse" && document.activeElement !== input) e.preventDefault();
+    // A mouse: no text selecting by dragging - it's a click (handled on let go) or a drag.
+    if (mouse) e.preventDefault();
     // (Held only once it's a drag: held from the press, a tap couldn't put
     // the caret where it was tapped - it went to the start.)
   });
@@ -402,6 +436,7 @@ function scrubbable(input: HTMLInputElement): void {
   });
   const end = (e: PointerEvent) => {
     if (!start || e.pointerId !== start.id) return;
+    const s = start;
     start = null;
     if (moved) {
       input.classList.remove("scrubbing");
@@ -409,8 +444,16 @@ function scrubbable(input: HTMLInputElement): void {
       input.blur();
       // (the click that follows mustn't open the numpad)
       setTimeout(() => delete input.dataset.scrubbed, 0);
-    } else if (e.type === "pointerup" && e.pointerType === "mouse" && document.activeElement !== input) {
-      input.focus();
+    } else if (e.type === "pointerup" && s.mouse) {
+      // A first click: the whole value, ready to be typed over. In use
+      // already: the caret where it was clicked (to add to it).
+      if (!s.focused || document.activeElement !== input) {
+        input.focus();
+        input.select();
+      } else {
+        const i = caretAt(input, e.clientX);
+        input.setSelectionRange(i, i);
+      }
     }
   };
   input.addEventListener("pointerup", end);

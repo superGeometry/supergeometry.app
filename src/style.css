@@ -3782,12 +3782,12 @@ html[data-screen="phone"] body #panel.as-list .panel-buttons > :first-child {
   background: var(--hover, rgba(255, 255, 255, 0.06));
   color: var(--text);
 }
-/* Value boxes scrub left / right with a press and drag. */
+/* Value boxes scrub left / right with a press and drag, selected or not; a formula is text. */
 @media (pointer: fine) {
   input[data-scrub] {
     cursor: ew-resize;
   }
-  input[data-scrub]:focus {
+  input[data-scrub].scrub-off {
     cursor: text;
   }
 }
