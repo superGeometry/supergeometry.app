@@ -88,6 +88,11 @@ export interface LibraryOptions {
   fullscreen?: { isFull(): boolean; toggle(): void } | null;
 }
 
+/** The page already fills the screen (the browser's own full screen, or an app window that has it all). */
+function wholeScreen(): boolean {
+  return matchMedia("(display-mode: fullscreen)").matches || (Math.abs(innerWidth - screen.width) < 2 && Math.abs(innerHeight - screen.height) < 2);
+}
+
 export function showLibrary(entries: LibraryEntry[], currentId: string | null, act: LibraryActions, opts: LibraryOptions = {}): void {
   const back = el("div", "dialog-back");
   const box = el("div", "dialog library");
@@ -115,13 +120,14 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
     // (Phones show the icon alone.)
     fsBtn.append(el("span", "library-full-text", on ? "Exit full screen" : "Full screen"));
     fsBtn.title = on ? "Exit full screen" : "Full screen";
+    // The welcome points it out (it pulses) until the app has the whole
+    // screen - from this button, or the browser's own full screen (F11).
+    fsBtn.classList.toggle("pulse", !!opts.welcome && !on && !wholeScreen());
   };
   if (fs) {
     fsBtn = el("button", "text-btn library-full");
     fsBtn.type = "button";
     fsBtn.addEventListener("click", () => fs.toggle());
-    // The welcome points it out (it pulses while the window is open): the app works best with the whole screen.
-    if (opts.welcome && !fs.isFull()) fsBtn.classList.add("pulse");
     paintFull();
     head.append(fsBtn);
   }
@@ -144,9 +150,11 @@ export function showLibrary(entries: LibraryEntry[], currentId: string | null, a
     window.removeEventListener("keydown", onKey, true);
     document.removeEventListener("fullscreenchange", paintFull);
     document.removeEventListener("webkitfullscreenchange", paintFull);
+    window.removeEventListener("resize", paintFull);
   };
   document.addEventListener("fullscreenchange", paintFull);
   document.addEventListener("webkitfullscreenchange", paintFull);
+  window.addEventListener("resize", paintFull);
   const onKey = (e: KeyboardEvent) => {
     // A question asked over it (Delete?) has the keys.
     if (back.nextElementSibling?.classList.contains("dialog-back")) return;

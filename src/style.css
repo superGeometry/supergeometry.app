@@ -1826,6 +1826,15 @@ form.dialog {
   width: min(780px, calc(100vw - 24px));
   max-height: min(86vh, calc(100vh - 24px - var(--safe-t) - var(--safe-b)));
   padding: 14px;
+  /* A short screen (a phone on its side): the window scrolls up and down,
+     its parts keep their size (the projects were squeezed out of sight). */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 210, 230, 0.5) transparent;
+}
+.dialog.library > * {
+  flex-shrink: 0;
 }
 /* More → About: the README, read in the app. */
 .dialog.about {

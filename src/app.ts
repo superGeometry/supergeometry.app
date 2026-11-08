@@ -773,10 +773,11 @@ export class App implements AppContext {
 
   bottomTools(): ToolItem[] {
     return [
-      { id: "section", label: "Section View", icon: "section", sub: this.section ? "On" : this.lastSection ? "Off · tap to show" : "Off", active: !!this.section, run: () => this.toggleSection() },
-      { id: "measure", label: "Measure", icon: "measure", run: () => this.setTool(new MeasureTool(this)) },
+      // The one whose card is open pulses (as a tool does while its window is open).
+      { id: "section", label: "Section View", icon: "section", sub: this.section ? "On" : this.lastSection ? "Off · tap to show" : "Off", active: !!this.section, pulse: this.tool instanceof SectionTool, run: () => this.toggleSection() },
+      { id: "measure", label: "Measure", icon: "measure", active: this.tool instanceof MeasureTool, pulse: this.tool instanceof MeasureTool, run: () => this.setTool(this.tool instanceof MeasureTool ? null : new MeasureTool(this)) },
       // On: a tag per variable in the view (tap one to change it), and their card. Off again.
-      { id: "variables", label: "Variables", icon: "variable", sub: this.varsOn ? "On" : this.store.doc.variables.length ? `Off · ${this.store.doc.variables.length}` : "Off", active: this.varsOn, run: () => this.toggleVariables() },
+      { id: "variables", label: "Variables", icon: "variable", sub: this.varsOn ? "On" : this.store.doc.variables.length ? `Off · ${this.store.doc.variables.length}` : "Off", active: this.varsOn, pulse: this.tool instanceof VariablesTool, run: () => this.toggleVariables() },
       this.isolated
         ? { id: "isolate", label: "Isolate", icon: "isolate", sub: "On - tap to show all", active: true, run: () => this.isolate(null) }
         : {

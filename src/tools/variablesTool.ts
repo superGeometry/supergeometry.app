@@ -17,7 +17,8 @@ export class VariablesTool implements Tool {
 
   enter(): void {
     this.app.ui.setTools([{ id: "exit", label: "Done", icon: "exit", shortcut: "Esc", run: () => this.app.setTool(null) }]);
-    this.app.ui.setBottom([]);
+    // The view tools stay, this one lit and pulsing (tap it again to close it).
+    this.app.ui.setBottom(this.app.bottomTools());
     this.showCard();
   }
 

@@ -37,6 +37,8 @@ export interface Tool extends PointerHandler {
 }
 
 export interface AppContext {
+  /** The row of view tools at the bottom (Section View, Measure, Variables, Isolate). */
+  bottomTools(): ToolItem[];
   readonly store: DocStore;
   readonly kernel: KernelClient;
   readonly view: Viewport;

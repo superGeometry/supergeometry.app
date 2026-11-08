@@ -34,7 +34,8 @@ export class MeasureTool implements Tool {
 
   enter(): void {
     this.app.ui.setTools([{ id: "exit", label: "Exit Measure", icon: "exit", shortcut: "Esc", run: () => this.app.setTool(null) }]);
-    this.app.ui.setBottom([]);
+    // The view tools stay, this one lit and pulsing (tap it again to close it).
+    this.app.ui.setBottom(this.app.bottomTools());
     this.app.ui.setHint("Select objects to see their measurements. Double-tap for a whole body.");
     this.card = el("div", "measure-card");
     document.body.append(this.card);
