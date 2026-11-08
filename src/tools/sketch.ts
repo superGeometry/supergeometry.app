@@ -267,7 +267,10 @@ export class SketchTool implements Tool {
   private edit: {
     pivot?: Vec2;
     mirrorLine?: [Vec2, Vec2];
-    picking?: "pivot" | "mirror";
+    picking?: "pivot" | "mirror" | "refA" | "refB";
+    /** Scale by reference: the point that stays put and the second point (their distance becomes what's typed). */
+    refA?: Vec2;
+    refB?: Vec2;
     offsetOf?: string;
     /** Extend: the first curve half picked (its nearer end will meet the second pick). */
     extendFrom?: { id: string; at: Vec2 };
@@ -500,6 +503,8 @@ export class SketchTool implements Tool {
     this.clearPreviewJoin();
     this.distDim?.dispose();
     this.distDim = null;
+    this.refDim?.dispose();
+    this.refDim = null;
     settings.offChange(this.onSettings);
     this.listening = false;
     document.body.classList.remove("sketching", "sketch-compact");
@@ -1044,6 +1049,9 @@ export class SketchTool implements Tool {
     this.finishFillet();
     this.clearPreviewJoin();
     this.edit.mirrorLine = undefined;
+    this.edit.refA = this.edit.refB = undefined;
+    if (this.edit.picking === "refA" || this.edit.picking === "refB") this.edit.picking = undefined;
+    this.refreshRefDim();
     // Editing tools keep the selection; drawing tools start clean.
     if (!["move", "scale", "patternLinear", "patternCircular", "rotate", "mirror", "select", "delete", "align", "project"].includes(kind)) this.selected.clear();
     // Align with a line already selected: that's the one that moves - next, what to align it with.
@@ -1230,9 +1238,23 @@ export class SketchTool implements Tool {
           apply(`Apply (${selCount})`, () => this.applyTransform()),
         );
         break;
-      case "scale":
-        items.push({ type: "number", label: "Factor", value: this.edit.factor, kind: "number", min: 0.0001, onInput: (v) => ((this.edit.factor = v), this.refreshPreview()) }, { type: "toggle", label: "Copy", value: this.edit.copy, onChange: (v) => ((this.edit.copy = v), this.updatePanel()) }, apply(`Apply (${selCount})`, () => this.applyTransform()));
+      case "scale": {
+        // By reference: two points, then the distance they should be apart.
+        const { refA: ra, refB: rb } = this.edit;
+        const d0 = this.refDistance();
+        const at = items.length;
+        this.refIndex = { factor: at, distance: d0 ? at + 3 : -1 };
+        items.push(
+          { type: "number", label: "Factor", value: this.edit.factor, kind: "number", min: 0.0001, onInput: (v) => ((this.edit.factor = v), this.refreshPreview(), this.refreshRefDim()) },
+          { type: "slot", label: "Reference: stays put", value: ra ? `${trimNum(ra[0])}, ${trimNum(ra[1])}` : "Tap a point", active: this.edit.picking === "refA", filled: !!ra, onClick: () => ((this.edit.picking = "refA"), this.updatePanel()) },
+          { type: "slot", label: "Second point", value: rb ? `${trimNum(rb[0])}, ${trimNum(rb[1])}` : "Tap a point", active: this.edit.picking === "refB", filled: !!rb, onClick: () => ((this.edit.picking = ra ? "refB" : "refA"), this.updatePanel()) },
+          ...(d0 ? [{ type: "number", label: "Distance", value: d0 * this.edit.factor, kind: "length", min: 0.0001, onInput: (v: number) => this.setRefDistance(v) } as PanelItem] : []),
+          { type: "toggle", label: "Copy", value: this.edit.copy, onChange: (v) => ((this.edit.copy = v), this.updatePanel()) },
+          apply(`Apply (${selCount})`, () => this.applyTransform()),
+        );
+        this.refreshRefDim();
         break;
+      }
       case "patternLinear": {
         // Count, spacing and the direction it runs (the arrows show it; drag one to set both).
         const spacing = Math.hypot(this.edit.dx, this.edit.dy);
@@ -2085,7 +2107,7 @@ export class SketchTool implements Tool {
     if (!p || !this.curveAt(p)) {
       // Each right-click goes one step back: what's picked or half done, then
       // the drawing tool (back to Select), then out of the sketch.
-      const pending = !!this.filletEdit || !!(this.edit.offsetOf || this.edit.extendFrom || this.edit.alignFrom || this.edit.filletFrom || this.edit.pivot || this.edit.picking) || !!this.selConstraint || this.selected.size > 0 || this.selPts.length > 0;
+      const pending = !!this.filletEdit || !!(this.edit.offsetOf || this.edit.extendFrom || this.edit.alignFrom || this.edit.filletFrom || this.edit.pivot || this.edit.picking || this.edit.refA) || !!this.selConstraint || this.selected.size > 0 || this.selPts.length > 0;
       if (!pending) {
         if (this.kind !== "select") return this.setKind("select");
         return this.app.setTool(null);
@@ -2094,6 +2116,8 @@ export class SketchTool implements Tool {
       this.edit.offsetOf = this.edit.extendFrom = this.edit.alignFrom = this.edit.filletFrom = undefined;
       this.edit.pivot = undefined;
       this.edit.picking = undefined;
+      // Scale by reference: its points go too (and a factor only they had set).
+      if (this.edit.refA) ((this.edit.refA = this.edit.refB = undefined), (this.edit.factor = 1), this.refreshRefDim(), this.refreshPreview());
       if (this.selConstraint) this.deselectConstraint();
       this.clearSelection();
       this.setHint();
@@ -3923,7 +3947,75 @@ export class SketchTool implements Tool {
     return [toPlane(plane, o), toPlane(plane, [o[0] + d[0], o[1] + d[1], o[2] + d[2]])];
   }
 
+  /** Scale by reference: the distance between the two points as they are now (0: not both picked). */
+  private refDistance(): number {
+    const { refA: a, refB: b } = this.edit;
+    return a && b ? Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
+  }
+
+  /** Scale by reference: the distance typed - the factor that makes it so. */
+  private setRefDistance(v: number): void {
+    const d0 = this.refDistance();
+    if (!d0 || !(v > 0)) return;
+    this.edit.factor = v / d0;
+    this.refreshPreview();
+    this.refreshRefDim();
+    if (this.refIndex) {
+      const vals: number[] = [];
+      vals[this.refIndex.factor] = this.edit.factor;
+      if (this.refIndex.distance >= 0) vals[this.refIndex.distance] = v;
+      this.app.ui.updatePanelValues(vals);
+    }
+  }
+
+  private refIndex: { factor: number; distance: number } | null = null;
+  private refDim: DimWidget | null = null;
+
+  /** Scale by reference: the dimension between the two points (where the second ends up), its value box ready to type into. */
+  private refreshRefDim(): void {
+    const { refA: a, refB: b } = this.edit;
+    const d0 = this.refDistance();
+    if (this.kind !== "scale" || this.phase !== "draw" || !a || !b || d0 < 1e-12) {
+      this.refDim?.dispose();
+      this.refDim = null;
+      return;
+    }
+    const k = this.edit.factor;
+    this.refDim ??= new DimWidget(this.app.view, {
+      value: d0 * k,
+      focus: true,
+      onInput: (v) => this.setRefDistance(v),
+      onCommit: () => this.applyTransform(),
+    });
+    const w = (q: Vec2) => sketchToWorld(this.plane!, q, 0.02).toArray() as Vec3;
+    this.refDim.set(w(a), w([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]));
+  }
+
   private pickForEdit(p: ToolPointer): void {
+    if (this.edit.picking === "refA" || this.edit.picking === "refB") {
+      const s = this.snap(p);
+      if (!s) return;
+      if (this.edit.picking === "refA") {
+        this.edit.refA = s.uv;
+        this.edit.refB = undefined;
+        // Nothing selected: the whole sketch scales.
+        if (!this.selected.size) {
+          this.selected = new Set(this.entities.map((e) => e.id));
+          this.showSelection();
+        }
+        this.edit.picking = "refB";
+        this.setHint("Tap the second point - then type the distance it should be from the first");
+      } else {
+        if (this.edit.refA && Math.hypot(s.uv[0] - this.edit.refA[0], s.uv[1] - this.edit.refA[1]) < 1e-9) return this.app.ui.toast("Tap a point away from the first one");
+        this.edit.refB = s.uv;
+        this.edit.factor = 1;
+        this.edit.picking = undefined;
+        this.setHint("Type the distance the two points should be apart, then Enter");
+      }
+      this.updatePanel();
+      this.refreshPreview();
+      return;
+    }
     if (this.edit.picking === "pivot") {
       const s = this.snap(p);
       if (s) this.edit.pivot = s.uv;
@@ -3956,7 +4048,8 @@ export class SketchTool implements Tool {
         break;
       }
       case "scale": {
-        const c = centroidOf(sel);
+        // By reference: about the point that stays put.
+        const c = this.edit.refA && this.edit.refB ? this.edit.refA : centroidOf(sel);
         for (const e of sel) out.push(transformEntity(e, scaleXf(c, this.edit.factor), !preview && this.edit.copy));
         break;
       }
@@ -4007,7 +4100,33 @@ export class SketchTool implements Tool {
         return !(inMoved && ids.some((i) => !moved.has(i)));
       });
     }
+    // Scaled: the sizes held by dimensions scale with it (angles stay) - or
+    // the dimensions would pull the curves back to their old size.
+    if (this.kind === "scale") {
+      const k = this.edit.factor;
+      const out = new Set(results.map((e) => e.id));
+      const sel = this.entities.filter((e) => this.selected.has(e.id));
+      const xf = scaleXf(this.edit.refA && this.edit.refB ? this.edit.refA : centroidOf(sel), k);
+      const ids = (x: SketchConstraint) => [...(x.curves ?? []), ...(x.pts ?? []).map((q) => q.e)];
+      // (Copies have new ids: the constraints stay with the originals.)
+      if (!keepOriginals)
+        cons = cons.map((x) => {
+          const on = ids(x);
+          if (!on.length || !on.every((i) => out.has(i))) return x;
+          if ((x.type === "dim" && x.prop !== "angle") || x.type === "distance") return { ...x, value: (x.value ?? 0) * k, expr: undefined };
+          if (x.type === "fix" && x.at) return { ...x, at: xf(x.at) };
+          return x;
+        });
+      // By reference: done with the points, and the factor they gave isn't kept for the next scale.
+      if (this.edit.refA) this.edit.factor = 1;
+      this.edit.refA = this.edit.refB = undefined;
+      if (this.edit.picking === "refA" || this.edit.picking === "refB") this.edit.picking = undefined;
+    }
     this.commit([...base, ...results], cons);
+    if (this.kind === "scale") {
+      this.refreshRefDim();
+      this.updatePanel();
+    }
     if (!keepOriginals) {
       this.selected = new Set(results.map((e) => e.id));
       this.showSelection();

@@ -18,7 +18,7 @@ import { isClosed } from "../freeform/cage";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 import { connectEdges } from "../doc/freeformConnect";
 import { OffsetEdgeOp } from "./offsetEdge";
-import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MoveFaceOp, PlaneMoveOp, PlaneOp, planeAxes, ReplaceFaceOp, ScaleFaceOp, ScaleOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
+import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MoveFaceOp, PlaneMoveOp, PlaneOp, planeAxes, ReplaceFaceOp, ScaleFaceOp, ScaleOp, ScaleRefOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { BooleanOp } from "./booleanOp";
 import { pickColor } from "../ui/colorPicker";
@@ -594,11 +594,13 @@ export class SelectTool implements Tool {
         label: "Scale",
         icon: "scale",
         // Starts the kind used last.
-        sub: lastScale.xyz ? "X / Y / Z" : "Uniform",
-        run: () => app.setTool(new ScaleOp(app, lastScale.xyz, bodies)),
+        sub: { uniform: "Uniform", xyz: "X / Y / Z", ref: "By reference" }[lastScale.kind],
+        run: () => app.setTool(lastScale.kind === "ref" ? new ScaleRefOp(app, bodies) : new ScaleOp(app, lastScale.kind === "xyz", bodies)),
         children: [
-          { id: "scaleUniform", label: "Uniform", icon: "scale", active: !lastScale.xyz, run: () => ((lastScale.xyz = false), app.setTool(new ScaleOp(app, false, bodies))) },
-          { id: "scaleXYZ", label: "X / Y / Z", icon: "scale", sub: "freeform bodies", active: lastScale.xyz, run: () => ((lastScale.xyz = true), app.setTool(new ScaleOp(app, true, bodies))) },
+          { id: "scaleUniform", label: "Uniform", icon: "scale", active: lastScale.kind === "uniform", run: () => ((lastScale.kind = "uniform"), app.setTool(new ScaleOp(app, false, bodies))) },
+          { id: "scaleXYZ", label: "X / Y / Z", icon: "scale", sub: "one direction", active: lastScale.kind === "xyz", run: () => ((lastScale.kind = "xyz"), app.setTool(new ScaleOp(app, true, bodies))) },
+          // Two points on it, then what their distance should be: the whole body scales to it.
+          { id: "scaleRef", label: "By reference", icon: "scale", sub: "two points, a distance", active: lastScale.kind === "ref", run: () => ((lastScale.kind = "ref"), app.setTool(new ScaleRefOp(app, bodies))) },
         ],
       },
       { id: "translate", label: "Translate", icon: "translate", shortcut: "N", run: () => app.setTool(new TransformOp(app, "translate", bodies)) },
@@ -1007,7 +1009,7 @@ function cap(s: string): string {
 }
 
 /** Which Scale was used last (the button starts that one). */
-const lastScale = { xyz: false };
+const lastScale: { kind: "uniform" | "xyz" | "ref" } = { kind: "uniform" };
 
 /** Which group a list entry belongs to (a dim line goes between groups). */
 const GROUP: Record<string, string> = {

@@ -1385,7 +1385,7 @@ export class ScaleOp extends FeatureOp<TransformFeature> {
 
   protected hint(): string {
     return this.xyz
-      ? "Drag an axis handle to stretch along it, or the centre for all three - type a factor while dragging. Works on freeform bodies."
+      ? "Drag an axis handle to stretch the body along it only, or the centre for all three - type a factor while dragging."
       : "Drag a handle (or the centre) to scale - type a factor while dragging (e.g. 2 doubles the size).";
   }
 
@@ -1475,6 +1475,91 @@ export class ScaleOp extends FeatureOp<TransformFeature> {
   dragKey(e: KeyboardEvent): boolean {
     const t = this.dragTarget();
     return !!t && this.typing.key(e, t);
+  }
+}
+
+/**
+ * Scale by reference: tap two points on the bodies (corners, edges, faces),
+ * type what the distance between them should be - the bodies scale about the
+ * first point so it is (everything on them with it).
+ */
+export class ScaleRefOp extends FeatureOp<TransformFeature> {
+  readonly id = "scale";
+  private a: Vec3 | null = null;
+  private b: Vec3 | null = null;
+  private dim: DimWidget | null = null;
+
+  constructor(app: AppContext, bodies: string[], existing?: TransformFeature) {
+    super(app, { ...app.store.newIdentity("transform", "Scale"), type: "transform", bodies, copy: false, op: { kind: "scale", center: [0, 0, 0], factor: 1 } }, existing);
+    const o = this.feature.op;
+    if (o.kind === "scale" && o.ref) [this.a, this.b] = o.ref;
+    this.slots = [
+      pointSlot(app, "First point (stays put)", () => this.a, (p) => ((this.a = p), this.placed())),
+      pointSlot(app, "Second point", () => this.b, (p) => ((this.b = p), this.placed())),
+    ];
+  }
+
+  /** Distance between the two points before scaling. */
+  private get d0(): number {
+    return this.a && this.b ? len(sub(this.b, this.a)) : 0;
+  }
+
+  private placed(): void {
+    const o = this.feature.op;
+    if (o.kind !== "scale" || !this.a) return;
+    o.center = this.a;
+    if (this.b) o.ref = [this.a, this.b];
+  }
+
+  protected hint(): string {
+    return "Type what the distance between the two points should be - the bodies scale to it.";
+  }
+
+  protected items(): PanelItem[] {
+    const o = this.feature.op;
+    if (o.kind !== "scale" || this.d0 < 1e-9) return [];
+    return [
+      { type: "number", label: "Distance", value: this.d0 * o.factor, kind: "length", onInput: (v) => this.setLength(v) },
+      this.num("Factor", "op.factor", "number", { min: 0.0001, onInput: () => (this.dim?.setValue(this.d0 * (this.feature.op as { factor: number }).factor), this.update()) }),
+    ];
+  }
+
+  private setLength(v: number): void {
+    const o = this.feature.op;
+    if (o.kind !== "scale" || !(v > 0) || this.d0 < 1e-9) return;
+    o.factor = v / this.d0;
+    this.app.ui.updatePanelValues([v, o.factor]);
+    this.update();
+  }
+
+  protected ready(): boolean {
+    const o = this.feature.op;
+    return super.ready() && this.d0 > 1e-9 && o.kind === "scale" && Math.abs(o.factor - 1) > 1e-9;
+  }
+
+  /** Both points: the dimension between them, its value box ready to type into. */
+  protected onDraftChanged(): void {
+    const o = this.feature.op;
+    if (!this.a || !this.b || this.d0 < 1e-9 || o.kind !== "scale") {
+      this.dim?.dispose();
+      this.dim = null;
+      return;
+    }
+    const fresh = !this.dim;
+    this.dim ??= new DimWidget(this.app.view, {
+      value: this.d0 * o.factor,
+      focus: true,
+      onInput: (v) => (this.setLength(v), this.app.ui.updatePanelValues([v, (this.feature.op as { factor: number }).factor])),
+      onCommit: () => this.done(),
+    });
+    // Where the second point ends up: the line between them grows with the body.
+    this.dim.set(this.a, add(this.a, scale(sub(this.b, this.a), o.factor)));
+    if (fresh) this.render();
+  }
+
+  exit(): void {
+    this.dim?.dispose();
+    super.exit();
   }
 }
 

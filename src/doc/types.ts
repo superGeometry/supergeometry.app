@@ -231,8 +231,9 @@ export interface TransformFeature extends FeatureBase {
   link?: boolean;
   op:
     | { kind: "move"; translate: Vec3; rotate?: { origin: Vec3; axis: Vec3; angle: number } }
-    | { kind: "scale"; center: Vec3; factor: number }
-    /** Different factors along X, Y and Z (freeform bodies: rebuilt from their cage). */
+    /** `ref`: scaled by reference - the two points picked (center is the first), the distance typed between them. */
+    | { kind: "scale"; center: Vec3; factor: number; ref?: [Vec3, Vec3] }
+    /** Different factors along X, Y and Z (freeforms rebuilt from their cage, other bodies face by face). */
     | { kind: "scaleXYZ"; center: Vec3; factors: Vec3 }
     | { kind: "mirror"; plane: PlaneDef }
     | { kind: "linear"; dir: Vec3; spacing: number; count: number }

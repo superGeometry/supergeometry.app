@@ -177,12 +177,19 @@ for (const [name, features, describe] of tests) {
   console.log(ok ? "ok  " : "FAIL", "shell a freeform:", `${b0.faces.length} → ${r.bodies[0].faces.length} faces`, r.errors.map((e) => e.message).join());
 }
 
-// XYZ scale of an ordinary body: a clear message, the body stays.
+// XYZ scale of an ordinary body: stretched along X only (twice as long, same height).
 {
+  const b0 = (await regenerate(base)).bodies.find((b) => b.id === "e1")!;
   const r = await regenerate([...base, { id: "sx2", name: "Scale XYZ", type: "transform", bodies: ["e1"], copy: false, op: { kind: "scaleXYZ", center: [0, 0, 0], factors: [2, 1, 1] } }]);
-  const ok = r.errors.length === 1 && /freeform/.test(r.errors[0].message) && r.bodies.length === 1;
+  const b1 = r.bodies.find((b) => b.id === "e1");
+  const ext = (b: any, i: number) => {
+    let lo = Infinity, hi = -Infinity;
+    for (let j = i; j < b.positions.length; j += 3) (lo = Math.min(lo, b.positions[j])), (hi = Math.max(hi, b.positions[j]));
+    return hi - lo;
+  };
+  const ok = !r.errors.length && !!b1 && Math.abs(ext(b1, 0) - 2 * ext(b0, 0)) < 1e-4 && Math.abs(ext(b1, 2) - ext(b0, 2)) < 1e-4;
   if (!ok) failed++;
-  console.log(ok ? "ok  " : "FAIL", "XYZ scale on a regular body explains why not:", r.errors.map((e) => e.message).join());
+  console.log(ok ? "ok  " : "FAIL", "XYZ scale on a regular body stretches it along X:", r.errors.map((e) => e.message).join());
 }
 
 // Union of bodies that don't touch: refused with a clear message.

@@ -59,6 +59,7 @@ import { useSafeBooleans } from "./safeBooleans";
 import { cylinderOf, deleteFace, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
+import { stretchShape } from "./stretch";
 import type { BodyMesh, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
 type Bodies = Map<string, Shape3D>;
@@ -1639,8 +1640,12 @@ function transform(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {
       case "scaleXYZ": {
         if (op.factors.some((k) => k <= 0)) throw new Error("Scale factors must be positive");
         const ff = ctx.freeforms.get(id);
-        if (!ff) throw new Error("Stretching along X/Y/Z works on freeform bodies only - the geometry engine can't stretch other bodies (use uniform Scale)");
-        results.push(freeformShape(ff.feature, affineThen(ff.m, scaleAbout(op.center, op.factors))));
+        const [kx, ky, kz] = op.factors;
+        // A freeform is rebuilt from its stretched cage (smooth as ever); any
+        // other body is rebuilt face by face, stretched (all three the same: a plain scale).
+        if (ff) results.push(freeformShape(ff.feature, affineThen(ff.m, scaleAbout(op.center, op.factors))));
+        else if (Math.abs(kx - ky) < 1e-12 && Math.abs(ky - kz) < 1e-12) results.push(body.clone().scale(kx, op.center));
+        else results.push(stretchShape(body, op.center, op.factors));
         break;
       }
       case "mirror":
