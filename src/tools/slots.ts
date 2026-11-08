@@ -85,11 +85,12 @@ export function planeSlot(app: AppContext, label: string, get: () => PlaneDef | 
   let name = "";
   return {
     label,
-    describe: () => (get() ? name || "Plane" : "Tap a plane or flat face"),
+    describe: () => (get() ? name || "Plane" : "Tap a plane, flat face or sketched shape"),
     originPlanes: true,
-    rejectHint: "Tap a flat face or a plane (or pick XY / XZ / YZ)",
+    rejectHint: "Tap a flat face, a plane or a closed sketched shape (or pick XY / XZ / YZ)",
     filled: () => !!get(),
-    pick: { profiles: false, edges: false, planes: true },
+    // A closed shape of any sketch counts too: its sketch's plane, there (a plane offset from a profile).
+    pick: { profiles: true, edges: false, planes: true },
     // The project's own planes by name too (Replace Face onto a plane 320 up:
     // a thin sheet among the bodies, easy to miss with a finger).
     presets: [
@@ -112,6 +113,16 @@ export function planeSlot(app: AppContext, label: string, get: () => PlaneDef | 
         set(info.plane, faceRefOf(app, hit) ?? undefined);
         name = "Face";
         shown = { kind: "face", body: hit.body, face: hit.face };
+        return true;
+      }
+      if (hit.kind === "profile") {
+        const pl = app.sketchPlane(hit.sketch);
+        if (!pl) return false;
+        // Where the shape was tapped (on the sketch's plane), so the new plane shows over it.
+        const q = hit.point ?? pl.origin;
+        set({ ...pl, origin: sub(q, scale(pl.normal, dot(sub(q, pl.origin), pl.normal))) });
+        name = "Sketch shape";
+        shown = { kind: "profile", sketch: hit.sketch, region: hit.region };
         return true;
       }
       return false;
