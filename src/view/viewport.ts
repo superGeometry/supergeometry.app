@@ -694,7 +694,8 @@ export class Viewport {
       // Clean 2px lines; the sketch being edited is brighter and on top.
       const solid: number[] = [];
       const dashed: number[] = [];
-      for (const e of s.entities) {
+      // Offsets of the face's edge (linked to it): drawn and tapped like the sketch's own curves.
+      for (const e of [...s.entities, ...(s.boundary ?? []).filter((b) => b.id.startsWith("lnk-"))]) {
         for (const poly of entityPolylines(e)) {
           const pts = poly.map((p) => new Vector3(p[0], p[1], 0).applyMatrix4(m));
           const into = e.construction ? dashed : solid;

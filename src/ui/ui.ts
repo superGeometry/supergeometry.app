@@ -481,12 +481,36 @@ export class UI {
     this.toastEl.textContent = text;
     this.toastEl.className = `show ${kind}`;
     // Never over what's being typed into (a value box, the numpad, the tool panel): then it shows up top.
-    const t = this.toastEl.getBoundingClientRect();
-    const hit = [...document.querySelectorAll<HTMLElement>(".numpad:not([hidden]), .dim-widget, #panel:not([hidden])")].some((el) => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.left < t.right && r.right > t.left && r.top < t.bottom && r.bottom > t.top;
-    });
-    if (hit) this.toastEl.classList.add("top");
+    // Nor over History or Items when they're open ("2 regions selected" landed on History's steps).
+    const over = (t: DOMRect) =>
+      [...document.querySelectorAll<HTMLElement>(".numpad:not([hidden]), .dim-widget, #panel:not([hidden]), #history, #items")]
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.width > 0 && r.height > 0 && r.left < t.right && r.right > t.left && r.top < t.bottom && r.bottom > t.top);
+    // Placed without its slide-in (measured mid-slide, it was where it had been).
+    this.toastEl.style.transition = "none";
+    requestAnimationFrame(() => (this.toastEl.style.transition = ""));
+    this.toastEl.style.left = this.toastEl.style.maxWidth = "";
+    const hits = over(this.toastEl.getBoundingClientRect());
+
+    if (hits.length) {
+      // Side panels (History, Items) in the way: in the middle of the space between them.
+      const t = this.toastEl.getBoundingClientRect();
+      const mid = (t.left + t.right) / 2;
+      const lo = Math.max(0, ...hits.filter((r) => (r.left + r.right) / 2 < mid).map((r) => r.right));
+      const hi = Math.min(innerWidth, ...hits.filter((r) => (r.left + r.right) / 2 >= mid).map((r) => r.left));
+      // (Narrower there, the text wraps: a tablet with both open has 240 px between them.)
+      if (hi - lo >= 160) {
+        this.toastEl.style.left = `${(lo + hi) / 2}px`;
+        this.toastEl.style.maxWidth = `${hi - lo - 16}px`;
+      }
+      // Still over something (a value box, the tool card): up top.
+      if (over(this.toastEl.getBoundingClientRect()).length) {
+        this.toastEl.style.left = this.toastEl.style.maxWidth = "";
+
+        this.toastEl.classList.add("top");
+      }
+    }
+
     clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => (this.toastEl.className = ""), 3600);
   }

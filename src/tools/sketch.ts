@@ -14,6 +14,7 @@ import { isCoarse, screenClass } from "../device";
 import { arcFrom3, closestOnPrim, entityPolylines, entityPrims } from "../sketch/curves";
 import {
   offsetChain,
+  outlineOffsetCurves,
   defaultOffset,
   connectedChain,
   angleLines,
@@ -278,6 +279,8 @@ export class SketchTool implements Tool {
     refA?: Vec2;
     refB?: Vec2;
     offsetOf?: string;
+    /** Where the face's outline was tapped (an offset of it is linked to it). */
+    offsetAt?: Vec2;
     /** Extend: the first curve half picked (its nearer end will meet the second pick). */
     extendFrom?: { id: string; at: Vec2 };
     /** Align: the line that will move. */
@@ -352,12 +355,16 @@ export class SketchTool implements Tool {
   private get entities(): SketchEntity[] {
     return this.sketch?.entities ?? [];
   }
-  /** Outline of the face this sketch sits on (snaps, trims against; not editable). */
+  /** Outline of the face this sketch sits on, and its linked offsets (snaps, trims against; not editable as curves). */
   private get boundary(): SketchEntity[] {
-    return this.sketchId ? this.app.sketchCurves(this.sketchId).filter((e) => e.id.startsWith("bnd-")) : [];
+    return this.sketchId ? this.app.sketchCurves(this.sketchId).filter((e) => e.id.startsWith("bnd-") || e.id.startsWith("lnk-")) : [];
+  }
+  /** Just the face's own outline. */
+  private get outline(): SketchEntity[] {
+    return this.boundary.filter((e) => e.id.startsWith("bnd-"));
   }
   private withoutBoundary(es: SketchEntity[]): SketchEntity[] {
-    return es.filter((e) => !e.id.startsWith("bnd-"));
+    return es.filter((e) => !e.id.startsWith("bnd-") && !e.id.startsWith("lnk-"));
   }
 
   /** Swipe trim: cut the piece under this spot (live; committed when the swipe ends). */
@@ -442,14 +449,18 @@ export class SketchTool implements Tool {
         const info = best && view.body(best.body)?.faces[best.face];
         if (best && info?.plane) {
           this.plane = originOnPlane({ origin: info.plane.origin, normal: info.plane.normal, xDir });
-          this.attachedTo = { body: best.body, center: info.center, normal: info.normal, area: info.area };
+          this.attachedTo = { body: best.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}) };
           this.app.ui.toast("Sketching on the face in front of you");
         } else if (view.construction.planes.some((c) => Math.abs(dot(c.plane.normal, normal)) > 0.9999)) {
           // Planes of the project's own face this way (a blade's tip plane,
           // seen from the top): pick one in the card, not the origin plane.
           this.phase = "plane";
           this.plane = null;
-        } else this.app.ui.toast("Sketching on the origin plane (tap Exit and pick a face to sketch on one)");
+        } else {
+          // Which one, in the names the plane buttons use: "the origin plane" left people guessing.
+          const name = ["YZ (side)", "XZ (front)", "XY (floor)"][k];
+          this.app.ui.toast(this.app.store.features.some((f) => f.type === "extrude" || f.type === "revolve" || f.type === "import") ? `Sketching on ${name}, through the origin. For a face of the model: Exit, then tap the face first.` : `Sketching on ${name}`);
+        }
       }
     }
     if (this.phase === "plane") {
@@ -620,13 +631,13 @@ export class SketchTool implements Tool {
    * Turn the second picked line to `deg` against the first, about its end
    * nearest the first line, and keep it there with an angle dimension.
    */
-  private setLinesAngle(id1: string, id2: string, deg: number): void {
+  private setLinesAngle(id1: string, id2: string, deg: number, expr?: string): void {
     const r = angleLines(this.entities, id1, id2, deg);
     if (!r) return;
     const swap = (p: string) => (p === "a" ? "b" : p === "b" ? "a" : p);
     const remap = (c: SketchConstraint): SketchConstraint => (c.pts ? { ...c, pts: c.pts.map((q) => (r.swapped.includes(q.e) ? { ...q, p: swap(q.p) } : q)) } : c);
     const same = (c: SketchConstraint) => c.type === "dim" && c.prop === "angle" && c.curves?.length === 2 && c.curves.includes(id1) && c.curves.includes(id2);
-    const res = addStrict(r.entities, this.constraints.filter((c) => !same(c)).map(remap), [{ id: uid(), type: "dim" as const, curves: [id1, id2], prop: "angle", value: deg }], { fixed: new Set([id1]) });
+    const res = addStrict(r.entities, this.constraints.filter((c) => !same(c)).map(remap), [{ id: uid(), type: "dim" as const, curves: [id1, id2], prop: "angle", value: deg, ...(expr ? { expr } : {}) }], { fixed: new Set([id1]) });
     if (!res.ok) return this.refused();
     this.commit(res.result.entities, res.constraints);
   }
@@ -1341,9 +1352,11 @@ export class SketchTool implements Tool {
         if (selCount > 1) {
           // Two lines: the angle of the second picked against the first.
           const [l1, l2] = this.pickedCurves();
+          let typed: string | null = null;
+          const had = l1 && l2 ? this.constraints.find((c) => c.type === "dim" && c.prop === "angle" && c.curves?.length === 2 && c.curves.includes(l1.id) && c.curves.includes(l2.id))?.expr : undefined;
           const angle: PanelItem[] =
             selCount === 2 && l1?.kind === "line" && l2?.kind === "line"
-              ? [{ type: "number", label: "Angle", value: this.angleBetween(l1.id, l2.id), kind: "angle", onInput: (v) => this.setLinesAngle(l1.id, l2.id, v) }]
+              ? [{ type: "number", label: "Angle", value: this.angleBetween(l1.id, l2.id), kind: "angle", expr: had, onExpr: (x) => (typed = x), onInput: (v) => this.setLinesAngle(l1.id, l2.id, v, typed && isExpression(typed) ? typed : undefined) }]
               : [];
           if (selCount === 2 && l1?.kind === "line" && l2?.kind === "line") this.showAngleBox(l1, l2);
           return ui.showPanel({
@@ -2222,10 +2235,31 @@ export class SketchTool implements Tool {
       case "split":
         return this.tapCurve(p, (id, uv) => this.tapSplit(id, uv, p.shift));
       case "offset":
-        return this.tapCurve(p, (id) => {
-          // A tenth of the curve tapped (keeping the side it went last time).
-          const e = this.entities.find((x) => x.id === id);
-          if (e) memory.offset = (memory.offset < 0 ? -1 : 1) * defaultOffset(e);
+        // The face's own edge too (it isn't a curve of the sketch the view picks).
+        if (!this.curveAt(p)) {
+          const o = this.outlineAt(p);
+          if (o) {
+            memory.offset = -Math.abs(defaultOffset(o.e));
+            this.edit.offsetAt = o.uv;
+            this.edit.offsetOf = o.e.id;
+            this.updatePanel();
+            this.refreshPreview();
+            return;
+          }
+        }
+        return this.tapCurve(p, (id, uv) => {
+          if (id.startsWith("lnk-")) return this.app.ui.toast("That's an offset of the face's edge already - tap it in Select to change its distance");
+          // The face's own edge: its whole outline, offset inward to start, and
+          // linked - it's made again from the face when the face changes.
+          if (id.startsWith("bnd-")) {
+            const e = this.outline.find((x) => x.id === id);
+            if (e) memory.offset = -Math.abs(defaultOffset(e));
+            this.edit.offsetAt = uv;
+          } else {
+            // A tenth of the curve tapped (keeping the side it went last time).
+            const e = this.entities.find((x) => x.id === id);
+            if (e) memory.offset = (memory.offset < 0 ? -1 : 1) * defaultOffset(e);
+          }
           this.edit.offsetOf = id;
           this.updatePanel();
           this.refreshPreview();
@@ -2344,7 +2378,8 @@ export class SketchTool implements Tool {
       const info = this.app.view.body(hit.body)?.faces[hit.face];
       if (!info?.plane) return this.app.ui.toast("Pick a flat face");
       this.plane = originOnPlane(info.plane);
-      this.attachedTo = { body: hit.body, center: info.center, normal: info.normal, area: info.area };
+      this.attachedTo = { body: hit.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}) };
+
     } else if (hit.kind === "profile") {
       // Tapping an existing sketch continues it.
       this.sketchId = hit.sketch;
@@ -3586,7 +3621,21 @@ export class SketchTool implements Tool {
     return ["move", "scale", "patternLinear", "patternCircular", "rotate", "mirror"].includes(this.kind);
   }
 
+  /** The edge of the face this sketch is on, under the pointer (it's drawn by the body, not the sketch). */
+  private outlineAt(p: ToolPointer): { e: SketchEntity; uv: Vec2 } | null {
+    const uv = this.uvAt(p);
+    if (!uv) return null;
+    const tol = this.app.view.cam.worldPerPixel(this.app.view.height) * Math.max(8, p.tol);
+    let best: { e: SketchEntity; d: number } | null = null;
+    for (const e of this.outline) {
+      const d = Math.min(...entityPrims(e).map((pr) => closestOnPrim(pr, uv).d));
+      if (d < tol && (!best || d < best.d)) best = { e, d };
+    }
+    return best ? { e: best.e, uv } : null;
+  }
+
   private curveAt(p: ToolPointer): { id: string; uv: Vec2 } | null {
+
     const hit = this.app.view.pick(p.x, p.y, { curves: this.sketchId ?? true, profiles: false, bodies: false, planes: false, axes: false, edgeTolPx: p.tol });
     // A point (end, centre…) stands for its curve here - small shapes are mostly points when zoomed out.
     if ((hit?.kind !== "curve" && hit?.kind !== "point") || hit.sketch !== this.sketchId) return null;
@@ -4195,6 +4244,7 @@ export class SketchTool implements Tool {
   /** New curves the offset would add (one curve, or the whole chain in Chain mode). */
   private offsetResult(): SketchEntity[] {
     const id = this.edit.offsetOf;
+    if (id?.startsWith("bnd-") && this.edit.offsetAt) return outlineOffsetCurves(this.outline, [{ id: "new", distance: memory.offset, at: this.edit.offsetAt }]);
     const src = this.entities.find((e) => e.id === id);
     if (!id || !src) return [];
     if (memory.offsetMode === "chain" && (src.kind === "line" || src.kind === "arc" || (src.kind === "spline" && !src.closed))) {
@@ -4208,6 +4258,19 @@ export class SketchTool implements Tool {
   private applyOffset(): void {
     const made = this.offsetResult();
     if (!made.length) return this.app.ui.toast("That offset would collapse the curve");
+    // Of the face's outline: kept as a link to it, not as curves of their own.
+    if (this.edit.offsetOf?.startsWith("bnd-") && this.edit.offsetAt && this.sketchId) {
+      const link = { id: uid(), distance: memory.offset, at: this.edit.offsetAt };
+      const sid = this.sketchId;
+      this.app.store.commit((d) => {
+        const f = d.features.find((x) => x.id === sid);
+        if (f?.type === "sketch") f.outlineOffsets = [...(f.outlineOffsets ?? []), link];
+      });
+      this.app.ui.toast("Offset of the face's edge: it follows the face when the face changes size");
+      this.edit.offsetOf = this.edit.offsetAt = undefined;
+      return this.resetDrawing();
+    }
+
     // Chain pieces stay joined to each other.
     const cs: SketchConstraint[] = [];
     for (let i = 0; i < made.length; i++) {
@@ -4466,8 +4529,44 @@ export class SketchTool implements Tool {
 
   // ------------------------------------------------- single-entity sizes
 
+  /** An offset of the face's edge (linked to it): its distance, which side, or delete it. */
+  private showLinkPanel(curve: string): void {
+    const linkId = curve.slice(4, curve.lastIndexOf("-"));
+    const sid = this.sketchId;
+    const link = this.sketch?.outlineOffsets?.find((o) => o.id === linkId);
+    if (!sid || !link) return;
+    const change = (fn: (list: NonNullable<SketchFeature["outlineOffsets"]>) => NonNullable<SketchFeature["outlineOffsets"]>) =>
+      this.app.store.commit((d) => {
+        const f = d.features.find((x) => x.id === sid);
+        if (f?.type !== "sketch") return;
+        const next = fn(f.outlineOffsets ?? []);
+        f.outlineOffsets = next.length ? next : undefined;
+      });
+    const setDistance = (v: number) => change((list) => list.map((o) => (o.id === linkId ? { ...o, distance: v } : o)));
+    this.app.ui.showPanel({
+      title: "Offset of the face's edge",
+      items: [
+        { type: "number", label: "Distance", value: link.distance, kind: "length", onInput: (v) => v !== 0 && setDistance(v) },
+        { type: "button", label: "Flip", icon: "flip", onClick: () => (setDistance(-link.distance), this.clearSelection()) },
+        {
+          type: "button",
+          label: "Delete",
+          icon: "trash",
+          onClick: () => {
+            change((list) => list.filter((o) => o.id !== linkId));
+            this.clearSelection();
+          },
+        },
+      ],
+      onDone: () => this.clearSelection(),
+    });
+    this.setHint("It follows the face's edge when the face changes size. Negative: inside the edge.");
+  }
+
   private showSizePanel(): void {
     const id = [...this.selected][0];
+    if (id?.startsWith("lnk-")) return this.showLinkPanel(id);
+
     let e = this.entities.find((x) => x.id === id);
     if (!e) return;
     const set = (patch: Partial<SketchEntity>) => {
@@ -4606,7 +4705,8 @@ export class SketchTool implements Tool {
       value: deg,
       angle: true,
       noLine: true,
-      onInput: (v) => this.setLinesAngle(l1.id, l2.id, v),
+      // A variable or a sum typed ("tilt", "90-a") stays: the angle follows it.
+      onInput: (v, text) => this.setLinesAngle(l1.id, l2.id, v, text && isExpression(text) ? text : undefined),
       onCommit: () => this.clearSelection(),
       onPin: () => this.app.addPin({ text: `${trimNum(this.angleBetween(l1.id, l2.id), 2)}°`, at: w }),
     });

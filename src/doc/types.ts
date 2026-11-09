@@ -58,6 +58,8 @@ export interface FaceRef {
   center: Vec3;
   normal: Vec3;
   area: number;
+  /** The step that made the face (only faces made by it are matched; none left: it's gone). */
+  step?: string;
 }
 
 export interface EdgeRef {
@@ -65,7 +67,10 @@ export interface EdgeRef {
   mid: Vec3;
   dir: Vec3;
   length: number;
+  /** The steps that made the faces either side of it (sorted). */
+  steps?: string[];
 }
+
 
 export type ExtrudeSource =
   | { kind: "profile"; sketch: string; regions: RegionRef[] }
@@ -128,6 +133,13 @@ export interface SketchFeature extends FeatureBase {
   attachedTo?: FaceRef;
   entities: SketchEntity[];
   constraints?: SketchConstraint[];
+  /**
+   * Offsets of the outline of the face it's drawn on (a lid's lip 2 mm in
+   * from the rim): made again from the face as it is on every rebuild, so
+   * they follow it when it changes size. Their curves are "lnk-<id>-<n>".
+   */
+  outlineOffsets?: OutlineOffset[];
+
   /** What was done in the sketch, in order (shown under it in History); repeats are counted. */
   log?: { op: string; n: number }[];
 }
@@ -518,4 +530,13 @@ export interface ItemFolder {
 
 export function emptyDoc(): ProjectDoc {
   return { format: "super", version: 2, name: "Untitled", features: [], variables: [], views: [], units: "mm", hidden: [], pins: [], names: {} };
+}
+
+/** An offset of a face outline in a sketch on that face (see SketchFeature.outlineOffsets). */
+export interface OutlineOffset {
+  id: string;
+  /** Positive grows a closed outline outward, negative goes inside it. */
+  distance: number;
+  /** Where the outline was tapped (sketch coordinates): the loop nearest it is offset. */
+  at: Vec2;
 }

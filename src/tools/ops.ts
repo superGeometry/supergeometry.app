@@ -11,7 +11,7 @@ import type { ToolPointer } from "../view/input";
 import { FeatureOp } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
 import { axisSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
-import { faceIndexOf, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
+import { faceIndexOf, goneRefs, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
 import { SketchTool } from "./sketch";
 import { screenClass } from "../device";
 import { faceBeforeShell } from "./shellFace";
@@ -417,7 +417,15 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
 
   enter(): void {
     super.enter();
+    // Edges it was built on that are gone (it said "pick the edges again"):
+    // dropped, so the edges tapped now are what it rounds.
+    const gone = this.existing ? goneRefs(this.app, this.feature.edges, this.feature.id) : [];
+    if (gone.length) {
+      this.feature.edges = this.feature.edges.filter((e) => !gone.includes(e));
+      this.app.ui.toast(`${gone.length} of its edges ${gone.length > 1 ? "are" : "is"} gone - tap the edges to ${this.feature.type === "fillet" ? "round" : "cut"} now`);
+    }
     this.app.setSelection(this.edgeSels());
+
     this.dim = new DimWidget(this.app.view, {
       boxAt: "beyond",
       boxGap: 40,
@@ -457,7 +465,8 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
     if (!info) return;
     const i = this.feature.edges.findIndex((e) => e.body === hit.body && Math.hypot(...sub(e.mid, info.mid)) < 1e-6);
     if (i >= 0) this.feature.edges.splice(i, 1);
-    else this.feature.edges.push({ body: hit.body, mid: info.mid, dir: info.dir, length: info.length });
+    else this.feature.edges.push({ body: hit.body, mid: info.mid, dir: info.dir, length: info.length, ...(info.steps ? { steps: info.steps } : {}) });
+
     this.app.setSelection(this.edgeSels());
     this.update();
   }
@@ -734,7 +743,8 @@ export class ShellOp extends FeatureOp<ShellFeature> {
 
   constructor(app: AppContext, body: string, faces: FaceRef[], existing?: ShellFeature) {
     super(app, { ...app.store.newIdentity("shell"), type: "shell", body, faces, thickness: 1 }, existing);
-    this.original = (app.view.body(body)?.faces ?? []).map((f) => ({ body, center: f.center, normal: f.normal, area: f.area }));
+    this.original = (app.view.body(body)?.faces ?? []).map((f) => ({ body, center: f.center, normal: f.normal, area: f.area, ...(f.step ? { step: f.step } : {}) }));
+
     this.slots = [facesSlot(app, "Open faces", () => this.feature.faces, (f) => (this.feature.faces = f.map((r) => this.onOriginal(r))), true)];
     this.active = 0;
   }
@@ -752,9 +762,16 @@ export class ShellOp extends FeatureOp<ShellFeature> {
 
   enter(): void {
     super.enter();
+    // Faces to open that are gone (it said "pick the face again"): dropped, so the faces tapped now are used.
+    const gone = this.existing ? goneRefs(this.app, this.feature.faces, this.feature.id) : [];
+    if (gone.length) {
+      this.feature.faces = this.feature.faces.filter((f) => !gone.includes(f));
+      this.app.ui.toast(`${gone.length} of the faces it opened ${gone.length > 1 ? "are" : "is"} gone - tap the faces to leave open now`);
+    }
     this.active = 0;
     this.render();
   }
+
 
   protected hint(): string {
     return "Tap the faces to leave open, and set how thick the walls are.";
@@ -2117,14 +2134,26 @@ export class FillToPlaneOp extends FeatureOp<FillToPlaneFeature> {
  * thread, a hole drawn at the tap-drill size an inside one. The pitch starts
  * at the ISO coarse pitch for the size; the panel shows which size that makes.
  */
+/**
+ * The pitch (and hand) used last, for its size: the next hole or shank of
+ * that size starts with it. Four boss holes at a fine 0.35 were four times
+ * typing 0.35 over the standard 0.5.
+ */
+let lastThread: { r: number; hole: boolean; pitch: number; left?: boolean } | null = null;
+
 export class ThreadOp extends FeatureOp<ThreadFeature> {
   readonly id = "thread";
 
   private round: { r: number; hole: boolean };
 
   constructor(app: AppContext, face: FaceRef, round: { r: number; hole: boolean }, existing?: ThreadFeature) {
-    super(app, { ...app.store.newIdentity("thread"), type: "thread", face, pitch: defaultPitch(round.r * 2, round.hole), round }, existing);
+    const same = lastThread && Math.abs(lastThread.r - round.r) < 1e-6 && lastThread.hole === round.hole ? lastThread : null;
+    super(app, { ...app.store.newIdentity("thread"), type: "thread", face, pitch: same?.pitch ?? defaultPitch(round.r * 2, round.hole), round, ...(same?.left ? { left: true } : {}) }, existing);
     this.round = existing?.round ?? round;
+  }
+
+  private remember(): void {
+    lastThread = { r: this.round.r, hole: this.round.hole, pitch: this.feature.pitch, left: this.feature.left };
   }
 
   enter(): void {
@@ -2145,7 +2174,7 @@ export class ThreadOp extends FeatureOp<ThreadFeature> {
   protected items(): PanelItem[] {
     return [
       this.num("Pitch", "pitch", "length", { min: 0.05, onInput: (v) => this.setPitch(v) }),
-      { type: "toggle", label: "Left-hand", value: !!this.feature.left, onChange: (v) => ((this.feature.left = v || undefined), this.render(), this.update()) },
+      { type: "toggle", label: "Left-hand", value: !!this.feature.left, onChange: (v) => ((this.feature.left = v || undefined), this.remember(), this.render(), this.update()) },
     ];
   }
 
@@ -2156,6 +2185,7 @@ export class ThreadOp extends FeatureOp<ThreadFeature> {
   private setPitch(v: number): void {
     if (!(v > 0)) return;
     this.feature.pitch = v;
+    this.remember();
     this.app.ui.updatePanelValues([v]);
     this.update();
   }

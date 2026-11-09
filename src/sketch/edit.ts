@@ -1,7 +1,7 @@
 // Pure sketch-editing operations (no UI): trim, extend, offset, fillet,
 // transforms, projection of 3D edges, and text outlines.
 
-import type { PlaneDef, SketchConstraint, SketchEntity, Vec2, Vec3 } from "../doc/types";
+import type { OutlineOffset, PlaneDef, SketchConstraint, SketchEntity, Vec2, Vec3 } from "../doc/types";
 import { roundSig, toPlane } from "../geom";
 import { constraintError, pointOf, pointsOf, refsOf, solve } from "./constraints";
 import { arcFrom3, closestOnPrim, entityCorners, entityPrims, evalPrim, isClosedPrim, primSegments, samplePrim, type Prim } from "./curves";
@@ -1572,4 +1572,32 @@ export function chamferConstraints(entities: SketchEntity[], constraints: Sketch
 /** Where the (infinite) lines of two line curves meet. */
 export function lineMeet(p: LineE, q: LineE): Vec2 | null {
   return meetLines(p.a, [p.b[0] - p.a[0], p.b[1] - p.a[1]], q.a, q.b);
+}
+
+/**
+ * The curves of a sketch's linked offsets of its face outline (see
+ * SketchFeature.outlineOffsets), made from the outline as it is now. Each
+ * offsets the loop of the outline nearest where it was tapped.
+ */
+export function outlineOffsetCurves(boundary: SketchEntity[], links: OutlineOffset[] | undefined): SketchEntity[] {
+  const out: SketchEntity[] = [];
+  for (const o of links ?? []) {
+    let seed: SketchEntity | null = null;
+    let best = Infinity;
+    for (const e of boundary) {
+      for (const p of entityPrims(e)) {
+        const d = closestOnPrim(p, o.at).d;
+        if (d < best) [best, seed] = [d, e];
+      }
+    }
+    if (!seed) continue;
+    let made: SketchEntity[] = [];
+    if (seed.kind === "line" || seed.kind === "arc" || (seed.kind === "spline" && !seed.closed)) made = offsetChain(boundary, seed.id, o.distance)?.slice(boundary.length) ?? [];
+    else {
+      const one = offsetEntity(seed, o.distance);
+      if (one) made = [one];
+    }
+    made.forEach((e, k) => out.push({ ...e, id: `lnk-${o.id}-${k}` }));
+  }
+  return out;
 }

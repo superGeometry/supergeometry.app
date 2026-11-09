@@ -183,6 +183,22 @@ export class App implements AppContext {
         this.ui.setStatus(null);
         await this.regenerate();
         this.view.fitAll(false);
+        // A project never pictured (kept before it was ever drawn) showed a
+        // blank shape on its card: now that it's drawn, it gets its picture -
+        // in the welcome window too, if that's still open.
+        const entry = (await libraryEntries()).find((e) => e.id === this.projectId);
+        if (entry && !entry.thumb && this.store.features.length) {
+          await this.keepInLibrary(JSON.stringify(this.store.doc), true);
+          const thumb = (await libraryEntries()).find((e) => e.id === this.projectId)?.thumb;
+          const pic = document.querySelector<HTMLElement>(".library-card.current .library-pic");
+          if (thumb && pic && !pic.querySelector("img")) {
+            const img = document.createElement("img");
+            img.src = thumb;
+            img.alt = "";
+            img.draggable = false;
+            pic.querySelector("svg")?.replaceWith(img);
+          }
+        }
       })
       .catch((err) => this.ui.setStatus(`Could not start the geometry kernel: ${err.message ?? err}`));
   }

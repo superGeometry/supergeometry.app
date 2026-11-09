@@ -50,14 +50,17 @@ import type {
   Vec3,
 } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "../geom";
-import { projectPolyline } from "../sketch/edit";
+import { outlineOffsetCurves, projectPolyline } from "../sketch/edit";
+
 import { cageToShape } from "./freeform";
 import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from "./health";
 import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
-import { cylinderOf, deleteFace, deleteFaces as deleteBodyFaces, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
+import { edgeSteps, faceSteps, inheritTags, sameSteps, tagBody } from "./provenance";
+import { cylinderOf, deleteFace,
+ deleteFaces as deleteBodyFaces, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
@@ -197,6 +200,7 @@ async function run(features: Feature[], saved = false) {
               const b = out.bodies.get(id);
               if (!b || out.freeforms.has(id)) continue;
               const c = deepCopy(b);
+              inheritTags(b, c);
               copies.set(id, c);
               out.bodies.set(id, c);
             }
@@ -218,6 +222,12 @@ async function run(features: Feature[], saved = false) {
               if (kept) out.bodies.set(id, kept);
               else out.bodies.delete(id);
             }
+          }
+          // Which step made each face: kept from what it was made from, this step's own otherwise.
+          const from = [...touchedBodies(f, ctx).map((id) => ctx.bodies.get(id)!), ...copies.values()];
+          for (const [id, body] of out.bodies) {
+            const was = ctx.bodies.get(id);
+            if (body !== was) tagBody(body, f.id, was ? [was, ...from] : from);
           }
           if (editNotes.length) entry.note = [...new Set(editNotes)].join(" ");
           // Anything but a move/scale changing a freeform body makes it an ordinary body.
@@ -249,7 +259,9 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     case "sketch": {
       const plane = f.attachedTo ? followFace(f, bodies) : f.plane;
       // On a face, the face outline takes part in regions: a line across the face splits it.
-      const boundary = f.attachedTo ? faceBoundary(f.attachedTo, plane, bodies) : [];
+      const outline = f.attachedTo ? faceBoundary(f.attachedTo, plane, bodies) : [];
+      // Offsets of the outline, made from it as it is now (they follow the face).
+      const boundary = [...outline, ...outlineOffsetCurves(outline, f.outlineOffsets)];
       ctx.sketches.set(f.id, { ...f, plane, boundary });
       return;
     }
@@ -2005,7 +2017,16 @@ function followFace(f: SketchFeature, bodies: Bodies): PlaneDef {
   const ref = f.attachedTo!;
   const body = bodies.get(ref.body);
   if (!body) return f.plane;
-  const face = resolveFace(body, ref);
+  let face: Face;
+  try {
+    face = resolveFace(body, ref);
+  } catch {
+    // Its face is gone (the step that made it switched off or changed): the
+    // sketch stays where it was, and says so - rather than stopping every step after it.
+    editNotes.push("The face this sketch was drawn on is gone: it stays where it was. Tap it and pick a face to move it onto one.");
+    return f.plane;
+  }
+
   const n = norm(face.normalAt().toTuple() as Vec3);
   const c = face.center.toTuple() as Vec3;
   const offset = dot(n, sub(c, f.plane.origin));
@@ -2043,7 +2064,12 @@ function edgeInfo(edge: Edge): EdgeInfo {
 function resolveFace(body: Shape3D, ref: FaceRef, only?: (f: Face) => boolean): Face {
   const size = Math.sqrt(ref.area) || 1;
   let best: { face: Face; score: number } | null = null;
-  for (const face of body.faces) {
+  // Only faces made by the step that made the one picked (see provenance.ts).
+  const steps = ref.step ? faceSteps(body) : undefined;
+  const faces = body.faces;
+  if (steps && !faces.some((_, i) => steps[i] === ref.step)) throw new Error(FACE_GONE);
+  for (const [i, face] of faces.entries()) {
+    if (steps && steps[i] !== ref.step) continue;
     if (only && !only(face)) continue;
     const fi = faceInfo(face);
     const align = dot(fi.normal, ref.normal);
@@ -2051,20 +2077,33 @@ function resolveFace(body: Shape3D, ref: FaceRef, only?: (f: Face) => boolean): 
     const score = dist(fi.center, ref.center) / size + (1 - align) * 4 + Math.abs(Math.log((fi.area + 1e-9) / (ref.area + 1e-9)));
     if (!best || score < best.score) best = { face, score };
   }
-  if (!best) throw new Error("The face it was built on no longer exists");
+  if (!best) throw new Error(FACE_GONE);
   return best.face;
 }
+
+/** What a step says when what it was built on is gone (an earlier step was changed or switched off). */
+const FACE_GONE = "The face it was built on is gone (something before it changed). Tap this step and pick the face again.";
+const EDGE_GONE = "An edge it was built on is gone (something before it changed). Tap this step and pick the edges again.";
 
 function resolveEdge(body: Shape3D, ref: EdgeRef): Edge {
   const size = ref.length || 1;
   let best: { edge: Edge; score: number } | null = null;
-  for (const edge of body.edges) {
+  // Only edges between faces made by the same steps as the one picked.
+  const steps = ref.steps ? edgeSteps(body) : undefined;
+  const all = body.edges;
+  if (steps && !all.some((_, i) => sameSteps(steps[i], ref.steps!))) throw new Error(EDGE_GONE);
+  for (const [i, edge] of all.entries()) {
+    if (steps && !sameSteps(steps[i], ref.steps!)) continue;
     const ei = edgeInfo(edge);
     const align = Math.abs(dot(ei.dir, ref.dir));
     const score = dist(ei.mid, ref.mid) / size + (1 - align) * 2 + Math.abs(Math.log((ei.length + 1e-9) / (ref.length + 1e-9)));
     if (!best || score < best.score) best = { edge, score };
   }
-  if (!best || best.score > 3) throw new Error("An edge it was built on no longer exists");
+  // Picked with its steps, the candidates are edges of the same kind: the
+  // nearest is it, however far a resize moved it (a 3 mm lid's corner edges,
+  // 20 mm out when the lid was made 40 wider, were "gone"). Without, only one close by.
+  if (!best || (!steps && best.score > 3)) throw new Error(EDGE_GONE);
+
   return best.edge;
 }
 
@@ -2090,8 +2129,9 @@ function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
     faceGroups: m.faceGroups.map((g, i) => ({ start: g.start, count: g.count, face: i })),
     edgePositions: new Float32Array(e.lines),
     edgeGroups: e.edgeGroups.map((g, i) => ({ start: g.start, count: g.count, edge: i })),
-    faces: shape.faces.map(faceInfo),
-    edges: shape.edges.map(edgeInfo),
+    faces: shape.faces.map((f, i) => ({ ...faceInfo(f), step: faceSteps(shape)?.[i] })),
+    edges: shape.edges.map((e, i) => ({ ...edgeInfo(e), steps: edgeSteps(shape)?.[i] })),
+
     openEdges: openEdges(shape),
   };
   meshCache.set(shape, mesh);

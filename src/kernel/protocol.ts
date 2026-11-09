@@ -13,6 +13,8 @@ export interface FaceInfo {
   plane?: PlaneDef;
   /** Set for round (cylindrical) faces: the radius, and whether it's a hole (material outside it). */
   round?: { r: number; hole: boolean };
+  /** The step that made it (see provenance.ts). */
+  step?: string;
 }
 
 export interface EdgeInfo {
@@ -23,6 +25,8 @@ export interface EdgeInfo {
   end: Vec3;
   /** LINE, CIRCLE, ELLIPSE, BSPLINE_CURVE… */
   type: string;
+  /** The steps that made the faces either side (sorted). */
+  steps?: string[];
 }
 
 export interface BodyMesh {

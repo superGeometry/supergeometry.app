@@ -16,7 +16,7 @@ export class VariablesTool implements Tool {
   constructor(private app: VariablesHost) {}
 
   enter(): void {
-    this.app.ui.setTools([{ id: "exit", label: "Done", icon: "exit", shortcut: "Esc", run: () => this.app.setTool(null) }]);
+    this.app.ui.setTools([{ id: "exit", label: "Done", icon: "exit", shortcut: "Esc", run: () => this.leave() }]);
     // The view tools stay, this one lit and pulsing (tap it again to close it).
     this.app.ui.setBottom(this.app.bottomTools());
     this.showCard();
@@ -32,7 +32,7 @@ export class VariablesTool implements Tool {
         ...(n ? [{ type: "button" as const, label: `All Variables (${n})`, icon: "variable" as const, onClick: () => void editVariables(this.app).then(() => this.showCard()) }] : []),
       ],
       actions: [{ id: "off", label: "Turn Off", icon: "close", run: () => this.app.variablesOff() }],
-      onDone: () => this.app.setTool(null),
+      onDone: () => this.leave(),
     });
   }
 
@@ -41,13 +41,23 @@ export class VariablesTool implements Tool {
     this.app.ui.setHint(null);
   }
 
+  /**
+   * The card closes; the tags stay on (tap Variables again to hide them).
+   * With no variables there are no tags: left on, the button stayed lit
+   * over nothing - it's off then.
+   */
+  private leave(): void {
+    if (this.app.store.doc.variables.length) this.app.setTool(null);
+    else this.app.variablesOff();
+  }
+
   tap(): void {
-    this.app.setTool(null);
+    this.leave();
   }
 
   key(e: KeyboardEvent): boolean {
     if (e.key === "Escape" || e.key === "Enter") {
-      this.app.setTool(null);
+      this.leave();
       return true;
     }
     return false;

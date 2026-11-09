@@ -115,12 +115,33 @@ export function hitToSel(h: PickHit | null): Sel | null {
 
 export function faceRefOf(app: AppContext, s: { body: string; face: number }): FaceRef | null {
   const info = app.view.body(s.body)?.faces[s.face];
-  return info ? { body: s.body, center: info.center, normal: info.normal, area: info.area } : null;
+  return info ? { body: s.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}) } : null;
 }
 
-export function edgeRefOf(app: AppContext, s: { body: string; edge: number }): EdgeRef | null {
+/**
+ * Picks whose face or edge is gone from the model as it is now (the step that
+ * made it switched off or changed): what the step said with "pick it again".
+ * Only picks that know their step can tell (older ones are kept).
+ */
+export function goneRefs<R extends FaceRef | EdgeRef>(app: AppContext, refs: R[], step: string): R[] {
+  // Only for a step that says so: one that worked shows the model after it,
+  // where what it worked on (an edge it rounded, a face it opened) is gone by design.
+  if (!app.result?.errors.some((e) => e.featureId === step && / is gone /.test(e.message))) return [];
+  return refs.filter((r) => {
+
+    const b = app.view.body(r.body);
+    if (!b) return true;
+    if ("step" in r && r.step) return !b.faces.some((f) => f.step === r.step);
+    if ("steps" in r && r.steps) return !b.edges.some((e) => e.steps?.join() === r.steps!.join());
+    return false;
+  });
+}
+
+export function edgeRefOf(
+app: AppContext, s: { body: string; edge: number }): EdgeRef | null {
   const info = app.view.body(s.body)?.edges[s.edge];
-  return info ? { body: s.body, mid: info.mid, dir: info.dir, length: info.length } : null;
+  return info ? { body: s.body, mid: info.mid, dir: info.dir, length: info.length, ...(info.steps ? { steps: info.steps } : {}) } : null;
+
 }
 
 /** A selected profile or flat face as something extrude/revolve/… can use. */
