@@ -418,7 +418,12 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "shell": {
       const body = need(bodies, f.body);
-      const faces = f.faces.map((r) => resolveFace(body, r));
+      let faces = f.faces.map((r) => resolveFace(body, r));
+      // Every face picked (a ball's one round face) leaves no wall to keep: hollow it sealed instead.
+      if (faces.length && body.faces.every((g) => faces.some((h) => h.isSame(g)))) {
+        faces = [];
+        editNotes.push("Every face of the body was picked, so there's no opening: it's hollow inside, sealed. Pick fewer faces for an opening.");
+      }
       // A freeform: drop the picked cage faces and thicken the rest inward -
       // exact, where shelling its smooth surfaces is unreliable.
       const ff = ctx.freeforms.get(f.body);

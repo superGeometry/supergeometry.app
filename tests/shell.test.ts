@@ -60,4 +60,20 @@ await check("24-sided prism", [sketch("s", poly), extrude("b", "s", poly, 20)], 
 const star = [{ id: "st", kind: "polyline", closed: true, points: Array.from({ length: 20 }, (_, i) => { const a = (i / 20) * Math.PI * 2; const r = i % 2 ? 9 : 20; return [r * Math.cos(a), r * Math.sin(a)]; }) }];
 await check("10-point star prism", [sketch("s", star), extrude("b", "s", star, 15)], "b", 0.8);
 
+// A ball tapped and shelled: its one round face picked leaves no wall, so it's hollowed sealed, with a note (it said "try a smaller thickness").
+{
+  const XZ: PlaneDef = { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, -1, 0] };
+  const es = [{ id: "c", kind: "circle", center: [0, 0], radius: 15.8 }, { id: "l", kind: "line", a: [-35, 0], b: [35, 0] }];
+  const up = arrangement(es as any).regions.map(regionRef).filter((r: any) => r.c[1] > 0);
+  const ball: Feature[] = [sketch("s", es, XZ), { id: "b", name: "b", type: "revolve", source: { kind: "profile", sketch: "s", regions: up }, axis: { origin: [0, 0, 0], dir: [1, 0, 0] }, angle: 360, mode: "new" } as any];
+  const r0 = await regenerate(ball);
+  const f = r0.bodies[0].faces[0];
+  const r = await regenerate([...ball, { id: "sh", name: "Shell", type: "shell", body: "b", faces: [{ body: "b", center: f.center, normal: f.normal, area: f.area }], thickness: 1 }]);
+  const v = volume(r.bodies[0]);
+  const want = (4 / 3) * Math.PI * (15.8 ** 3 - 14.8 ** 3);
+  const ok = !r.errors.length && r0.bodies[0].faces.length === 1 && Math.abs(v - want) < want * 0.01 && (r as any).notes?.some((n: any) => n.featureId === "sh");
+  if (!ok) failed++;
+  console.log(ok ? "ok  " : "FAIL", "ball with its one face picked: hollow, sealed, with a note", `vol ${v.toFixed(0)} (${want.toFixed(0)})`, r.errors.map((e) => e.message).join("; "));
+}
+
 process.exit(failed ? 1 : 0);
