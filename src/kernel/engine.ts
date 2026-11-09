@@ -360,7 +360,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // half a turn where a bend changes side (an S curve) and is undefined
       // where the path runs straight, so the tube broke into pieces that
       // jumped sideways there - a profile off the path's centre most of all.
-      const parts = sourceWires(f.source, ctx).map((w) => genericSweep(w, spine, { frenet: false, transitionMode: "round" }) as Shape3D);
+      const parts = sourceWires(f.source, ctx).map((w) => flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: "round" }) as Shape3D));
       combine(f.id, f.mode, f.target, fuseAll(parts), false, ctx);
       ctx.sweeps.set(f.id, spine);
       return;
@@ -524,19 +524,28 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     case "split": {
       const body = need(bodies, f.body);
       const half = halfSpace(f.plane, body);
-      let a: Shape3D, b: Shape3D;
+      let a: Shape3D | null = null, b: Shape3D | null = null;
       try {
         a = body.intersect(half);
         b = body.cut(half);
       } catch {
         // Faces lying on the plane (a coil's end drawn on it) can stop the
         // plain split: the tolerant one treats them as on it.
+      }
+      // A plane crossing a round face's seam twice (the top off a ball turned
+      // round the pipe's axis) gives the plain split an empty, broken half,
+      // with no error: the halves must be sound and add up to the body.
+      const whole = Math.abs(volumeOf(body));
+      const sound = (s: Shape3D | null) => !!s && !isEmpty(s) && shapeValid(s);
+      const addsUp = () => Math.abs(Math.abs(volumeOf(a!)) + Math.abs(volumeOf(b!)) - whole) <= Math.max(1e-9, whole * 1e-4);
+      if (!sound(a) || !sound(b) || !addsUp()) {
         a = fuzzyBoolean("common", body, half);
         b = fuzzyBoolean("cut", body, half);
       }
-      if (isEmpty(a) || isEmpty(b)) throw new Error("The plane doesn't cut through the body");
-      bodies.set(f.body, b);
-      bodies.set(f.id, a);
+      const [inside, outside] = [a as Shape3D, b as Shape3D];
+      if (isEmpty(inside) || isEmpty(outside)) throw new Error("The plane doesn't cut through the body");
+      bodies.set(f.body, outside);
+      bodies.set(f.id, inside);
       return;
     }
 
@@ -833,7 +842,13 @@ function scaleFace(body: Shape3D, face: Face, u0: Vec3, [su, sv]: [number, numbe
     return { sig: faceInfo(g), plane: { origin: a2, normal: nn, xDir: xDirFor(nn) } };
   });
   let out = body;
-  for (const t of targets) out = replaceFacePlane(out, resolveFace(out, { body: "", center: t.sig.center, normal: t.sig.normal, area: t.sig.area }), t.plane);
+  for (const t of targets) {
+    // A side that stays where it is (scaled 1 that way): left alone - it may
+    // run the whole length of the part (a lever's side, from the hub to the tip).
+    const old = { origin: t.sig.center, normal: norm(t.sig.normal) };
+    if (Math.abs(dot(norm(t.plane.normal), old.normal)) > 1 - 1e-12 && Math.abs(dot(sub(t.plane.origin, old.origin), old.normal)) < sizeOf(body) * 1e-9) continue;
+    out = replaceFacePlane(out, resolveFace(out, { body: "", center: t.sig.center, normal: t.sig.normal, area: t.sig.area }), t.plane);
+  }
   return out;
 }
 
@@ -1236,9 +1251,18 @@ export function threadFace(body: Shape3D, face: Face, pitch: number, left = fals
   const section = depth * depth * Math.tan(Math.PI / 6);
   const rc = inside ? cy.r + depth / 3 : cy.r - depth / 3;
   const expect = section * Math.hypot(2 * Math.PI * rc, pitch) * ((hi - lo) / pitch);
-  const ok = (r: Shape3D) => {
+  // A face that isn't a whole ring (a shank with flats cut along it, a slot
+  // across a hole) loses less: what the groove overlaps, if that's no more.
+  const ok = (r: Shape3D, cut: Shape3D) => {
     const v = Math.abs(measureVolume(r));
-    return Number.isFinite(v) && Math.abs(v0 - v - expect) < expect * 0.03;
+    if (!Number.isFinite(v)) return false;
+    if (Math.abs(v0 - v - expect) < expect * 0.03) return true;
+    try {
+      const want = Math.abs(measureVolume(fuzzyBoolean("common", body, cut)));
+      return want > expect * 0.05 && want < expect * 1.03 && Math.abs(v0 - v - want) < want * 0.03;
+    } catch {
+      return false;
+    }
   };
   // Where the thread starts round the face doesn't matter: if OpenCascade
   // trips on one start (a groove lining up with the face's seams), another
@@ -1263,7 +1287,7 @@ export function threadFace(body: Shape3D, face: Face, pitch: number, left = fals
     for (const fuzzy of [true, false]) {
       try {
         const res = fuzzy ? fuzzyBoolean("cut", body, cut) : body.cut(cut);
-        if (ok(res)) return res;
+        if (ok(res, cut)) return res;
       } catch {
         // the other way, or the next start
       }
@@ -1622,6 +1646,130 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
     algo.delete();
     args.delete();
     tools.delete();
+  }
+}
+
+/** Is the face flat (every point on one plane, every normal the same)? */
+function isFlat(face: Face, tol: number): boolean {
+  try {
+    const p0 = face.pointOnSurface(0.5, 0.5);
+    const n0 = norm(face.normalAt(p0).toTuple() as Vec3);
+    const o = p0.toTuple() as Vec3;
+    for (let i = 0; i <= 4; i++)
+      for (let j = 0; j <= 4; j++) {
+        const p = face.pointOnSurface(i / 4, j / 4);
+        if (Math.abs(dot(sub(p.toTuple() as Vec3, o), n0)) > tol) return false;
+        if (len(cross(norm(face.normalAt(p).toTuple() as Vec3), n0)) > 1e-7) return false;
+      }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The cylinder a face lies on (its axis and radius), if it's one: every normal square to one direction, meeting one line. */
+function cylinderFit(face: Face, tol: number): { c: Vec3; a: Vec3; r: number } | null {
+  const P: Vec3[] = [];
+  const N: Vec3[] = [];
+  for (let i = 0; i <= 4; i++)
+    for (let j = 0; j <= 4; j++) {
+      const p = face.pointOnSurface(i / 4, j / 4);
+      P.push(p.toTuple() as Vec3);
+      N.push(norm(face.normalAt(p).toTuple() as Vec3));
+    }
+  // The axis: square to the two normals furthest apart.
+  let best = 0;
+  let a: Vec3 = [0, 0, 0];
+  for (let k = 1; k < N.length; k++) {
+    const c = cross(N[0], N[k]);
+    if (len(c) > best) [best, a] = [len(c), c];
+  }
+  if (best < 1e-3) return null;
+  a = norm(a);
+  if (N.some((n) => Math.abs(dot(n, a)) > 1e-7)) return null;
+  // Where the normals at 0 and the furthest one meet (seen along the axis): the centre.
+  const k = N.findIndex((n) => len(cross(N[0], n)) === best);
+  const flat = (p: Vec3) => sub(p, scale(a, dot(p, a)));
+  const [p0, pk, n0, nk] = [flat(P[0]), flat(P[k]), flat(N[0]), flat(N[k])];
+  // p0 + t n0 = pk + s nk: solved in the plane square to the axis.
+  const w = sub(pk, p0);
+  const den = dot(cross(n0, nk), a);
+  if (Math.abs(den) < 1e-9) return null;
+  const t = dot(cross(w, nk), a) / den;
+  const c = add(p0, scale(n0, t));
+  const r = Math.abs(t);
+  if (P.some((p) => Math.abs(len(sub(flat(p), c)) - r) > tol * 10)) return null;
+  return { c, a, r };
+}
+
+/** The face rebuilt on a true cylinder, within its own edges (null if that doesn't work out). */
+function asCylinder(face: Face, cyl: { c: Vec3; a: Vec3; r: number }, size: number): Face | null {
+  const oc = getOC();
+  const L = size * 4 + cyl.r;
+  const solid = makeCylinder(cyl.r, 2 * L, sub(cyl.c, scale(cyl.a, L)), cyl.a);
+  const side = solid.faces.find((g) => g.geomType === "CYLINDRE");
+  if (!side) return null;
+  const surface = oc.BRep_Tool.Surface(side.wrapped);
+  const wires = [face.clone().outerWire(), ...face.clone().innerWires()];
+  const maker = new oc.BRepBuilderAPI_MakeFace(surface, wires[0].wrapped, true);
+  try {
+    for (const w of wires.slice(1)) maker.Add(w.wrapped);
+    if (!maker.IsDone()) return null;
+    const fix = new oc.ShapeFix_Face(maker.Face());
+    try {
+      fix.Perform();
+      fix.FixOrientation();
+      const out = cast(fix.Face()) as Face;
+      return out.geomType === "CYLINDRE" && Math.abs(measureArea(out) - measureArea(face)) < Math.max(1e-9, measureArea(face) * 1e-5) ? out : null;
+    } finally {
+      fix.delete();
+    }
+  } finally {
+    maker.delete();
+  }
+}
+
+/**
+ * Faces that are flat but not stored as planes - a straight side swept round
+ * an arc is a "surface of revolution" - made planes: they merge with the flat
+ * faces either side, and Move / Scale / Replace Face can tilt and trim them
+ * (a lever's tip couldn't be narrowed, its bottom couldn't be brought down:
+ * "the neighbouring faces don't enclose it"). The shape stays as it was if
+ * anything doesn't come out exactly the same.
+ */
+function flatFaces(s: Shape3D): Shape3D {
+  const size = sizeOf(s);
+  const tol = size * 1e-7 + 1e-9;
+  let changed = false;
+  const faces = s.faces.map((f) => {
+    if (f.geomType === "PLANE" || f.geomType === "CYLINDRE") return f;
+    try {
+      if (isFlat(f, tol)) {
+        // (outerWire uses up the face it is asked of.)
+        const flat = makeFace(f.clone().outerWire(), f.clone().innerWires());
+        if (flat.geomType !== "PLANE") return f;
+        changed = true;
+        return flat;
+      }
+      // A straight line swept round an arc, along its axis: a cylinder.
+      const cyl = cylinderFit(f, tol);
+      if (!cyl) return f;
+      const round = asCylinder(f, cyl, size);
+      if (!round) return f;
+      changed = true;
+      return round;
+    } catch {
+      return f;
+    }
+  });
+  if (!changed) return s;
+  try {
+    const solid = makeSolid(faces) as unknown as Shape3D;
+    const v = Math.abs(volumeOf(s));
+    if (!shapeValid(solid) || Math.abs(Math.abs(volumeOf(solid)) - v) > Math.max(1e-9, v * 1e-6)) return s;
+    return unify(solid, size) as Shape3D;
+  } catch {
+    return s;
   }
 }
 

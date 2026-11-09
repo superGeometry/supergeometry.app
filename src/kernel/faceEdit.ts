@@ -172,12 +172,12 @@ function neighbours(body: Shape3D, F: Face): Face[] {
  * E: the region bounded by F's neighbours' extended surfaces, each on the side
  * that contains `q` (a point just inside the body under F). Bounded by a box.
  */
-export function extendedRegion(body: Shape3D, F: Face, q: Vec3, L: number): Shape3D {
-  return regionAround(body, F, neighbours(body, F), q, L);
+export function extendedRegion(body: Shape3D, F: Face, q: Vec3, L: number, part?: Vec3[]): Shape3D {
+  return regionAround(body, F, neighbours(body, F), q, L, part);
 }
 
 /** As extendedRegion, bounded by the given faces round F (those along one of its outlines). */
-function regionAround(body: Shape3D, F: Face, nb: Face[], q: Vec3, L: number): Shape3D {
+function regionAround(body: Shape3D, F: Face, nb: Face[], q: Vec3, L: number, part?: Vec3[]): Shape3D {
   const c = body.boundingBox.center as Vec3;
   // Bounding box, bigger than the other tools so no faces coincide with theirs.
   const big = () => halfSpace({ origin: sub(c, [0, 0, 1.5 * L]), xDir: [1, 0, 0], normal: [0, 0, 1] }, 3 * L);
@@ -208,6 +208,22 @@ function regionAround(body: Shape3D, F: Face, nb: Face[], q: Vec3, L: number): S
       const rel = sub(q, cy.c);
       const radial = len(sub(rel, scale(cy.a, dot(rel, cy.a))));
       (radial < cy.r ? keep : remove).push(infiniteCylinder(cy, cy.r, L));
+      // A flat face ending on a round boss from one side (a lever's arm on its
+      // hub): taking the boss out isn't enough, the arm's side faces carry on
+      // past it and out the far side. The face lies all on one side of the
+      // boss's axis: the region does too. (`part`: the piece of F it's for, one of F's cells.)
+      if (radial >= cy.r && F.geomType === "PLANE") {
+        const off = (p: Vec3) => {
+          const r = sub(p, cy.c);
+          return sub(r, scale(cy.a, dot(r, cy.a)));
+        };
+        const pts = part ?? F.edges.flatMap((e) => [0, 0.25, 0.5, 0.75].map((t) => tup(e.pointAt(t))));
+        const d = off(scale(pts.reduce((a, b) => add(a, b), [0, 0, 0] as Vec3), 1 / pts.length));
+        if (len(d) > cy.r * 1e-3) {
+          const dn = norm(d);
+          if (pts.every((p) => dot(off(p), dn) > -cy.r * 1e-6)) keep.push(halfSpace({ origin: cy.c, normal: dn, xDir: xDirFor(dn) }, L));
+        }
+      }
     } else {
       // A curve pulled straight (a spline side extruded) meeting F along a
       // straight edge: it carries on along its tangent there. Bounded only by
@@ -425,6 +441,7 @@ function faceColumn(body: Shape3D, F: Face, L: number): Shape3D {
   if (!t || !t.trianglesIndexes.length) return extendedRegion(body, F, q0, L);
   const v = (i: number): Vec3 => [t!.vertices[3 * i], t!.vertices[3 * i + 1], t!.vertices[3 * i + 2]];
   const cells = new Map<string, Vec3>();
+  const parts = new Map<string, Vec3[]>();
   for (let k = 0; k < t.trianglesIndexes.length; k += 3) {
     const [a, b, c] = [0, 1, 2].map((j) => v(t!.trianglesIndexes[k + j]));
     // The middle and near each corner: a triangle may straddle a line where a neighbour's surface crosses the face.
@@ -443,12 +460,13 @@ function faceColumn(body: Shape3D, F: Face, L: number): Shape3D {
       if (ds.some((d, i) => sides[i] && Math.abs(d) < tol)) continue;
       const key = ds.map((d, i) => (!sides[i] ? "" : d < 0 ? "-" : "+")).join("");
       if (!cells.has(key)) cells.set(key, q);
+      (parts.get(key) ?? parts.set(key, []).get(key)!).push(on);
     }
   }
   if (cells.size <= 1) return extendedRegion(body, F, q0, L);
   let E: Shape3D | null = null;
-  for (const q of cells.values()) {
-    const c = extendedRegion(body, F, q, L);
+  for (const [key, q] of cells) {
+    const c = extendedRegion(body, F, q, L, parts.get(key));
     E = E ? fuseCells(E, c) : c;
   }
   return E!;
