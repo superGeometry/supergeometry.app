@@ -93,6 +93,9 @@ export interface HistoryHandlers {
   /** Pointer over a step (null: left it): show what it works on. */
   hover?(id: string | null): void;
   toggle(id: string): void;
+  /** Shown in the view, or hidden (a sketch, plane or axis: its eye hides it, never switches it off). */
+  isHidden?(id: string): boolean;
+  toggleHidden?(id: string): void;
   remove(id: string): void;
   /** History groups (runs of steps under one name), and changing them. */
   groups: HistoryGroup[];
@@ -1333,7 +1336,15 @@ export class UI {
       name.addEventListener("click", (e) => (e.ctrlKey || e.metaKey || e.shiftKey || this.historyPicking ? this.checkStep(f.id) : h.edit(f.id)));
       li.addEventListener("pointerenter", () => h.hover?.(f.id));
       li.addEventListener("pointerleave", () => h.hover?.(null));
-      const eye = iconButton(f.suppressed ? "eyeOff" : "eye", f.suppressed ? "Enable" : "Suppress", () => h.toggle(f.id));
+      // A sketch, plane or axis: the eye shows or hides it, like everywhere else. Switching
+      // one off broke every step made from it ("Its sketch was deleted") when a beginner only
+      // wanted its lines out of the way. (One switched off before still gets switched back on.)
+      const looks = (f.type === "sketch" || f.type === "plane" || f.type === "axis") && !f.suppressed && !!h.toggleHidden;
+      const hid = looks && !!h.isHidden?.(f.id);
+      const eye = looks
+        ? iconButton(hid ? "eyeOff" : "eye", hid ? "Show" : "Hide", () => h.toggleHidden!(f.id))
+        : iconButton(f.suppressed ? "eyeOff" : "eye", f.suppressed ? "Enable" : "Suppress", () => h.toggle(f.id));
+      if (hid) li.classList.add("hidden-step");
       // Two taps: the bin sits where a phone user expects the panel's close
       // button, and one stray tap deleted a whole extrude.
       const del = iconButton("trash", "Delete", () => undefined);
@@ -1436,7 +1447,8 @@ export class UI {
 
 /** Does the text use a variable (a name that isn't a unit suffix)? */
 export function isExpression(text: string): boolean {
-  return /[a-z_]/i.test(text.replace(/(\d|\))\s*(mm|cm|m|in|ft)\b/gi, "$1"));
+  // A variable name in it; units, pi and sqrt(...)-style functions alone are just a number.
+  return /[a-z_]/i.test(text.replace(/(\d|\))\s*(mm|cm|m|in|ft)\b/gi, "$1").replace(/\b(sqrt|abs|sin|cos|tan)\s*\(|\bpi\b/gi, "("));
 }
 
 function unitScale(): number {

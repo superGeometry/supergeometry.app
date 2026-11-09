@@ -28,6 +28,7 @@ import { FreeformTool } from "./tools/freeform";
 import { sectionPlane, SectionTool, type SectionState } from "./tools/section";
 import { SelectTool } from "./tools/select";
 import { BooleanOp } from "./tools/booleanOp";
+import { sketchesUsed } from "./tools/featureOp";
 import { SketchTool } from "./tools/sketch";
 import { bodiesOf, edgeRefOf, faceRefOf, sameSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tools/tool";
 import { setupRightColumn } from "./ui/panels";
@@ -473,7 +474,10 @@ export class App implements AppContext {
     const sketches = features
       .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && ((!hidden.has(f.id) && (!iso || iso.includes(f.id))) || f.id === this.tool.activeSketch))
       .map((s) => ({ ...s, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }));
-    this.view.setSketches(sketches, this.tool.activeSketch);
+    // Drawn but not made into anything yet: shown through bodies, and a tap on it finds it there
+    // (a pocket sketched on a plane through the middle of a body is inside it).
+    const used = new Set(features.filter((f) => !f.suppressed).flatMap(sketchesUsed));
+    this.view.setSketches(sketches, this.tool.activeSketch, new Set(sketches.filter((s) => !used.has(s.id)).map((s) => s.id)));
   }
 
   private refreshHighlights(): void {
@@ -509,6 +513,8 @@ export class App implements AppContext {
         const f = this.store.find(id);
         if (f) this.store.update(id, { suppressed: !f.suppressed });
       },
+      isHidden: (id) => this.store.doc.hidden.includes(id),
+      toggleHidden: (id) => this.store.commit((d) => (d.hidden = d.hidden.includes(id) ? d.hidden.filter((x) => x !== id) : [...d.hidden, id])),
       remove: (id) => {
         if (this.tool !== this.selectTool) this.setTool(null);
         this.store.remove(id);
@@ -574,6 +580,8 @@ export class App implements AppContext {
         if (f.op !== "union") return this.setTool(new BooleanOp(this, f.op, f.target, f.tools, f));
         break;
       case "sketch":
+        // A phone: History goes, so the sketch and its tool column aren't drawn under it.
+        if (window.innerWidth <= 720 && document.body.classList.contains("history-open")) this.ui.toggleHistory(false);
         return this.setTool(new SketchTool(this, { sketchId: f.id }));
       case "extrude":
         return this.setTool(new ExtrudeOp(this, f.source, f as ExtrudeFeature));

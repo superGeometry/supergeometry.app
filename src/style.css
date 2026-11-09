@@ -1409,6 +1409,10 @@ body.sketching .right-btn.sketch-only {
   opacity: 0.45;
   text-decoration: line-through;
 }
+/* A hidden sketch / plane: still there, just out of view (not crossed out). */
+.history-item.hidden-step .history-name {
+  opacity: 0.6;
+}
 .history-name {
   flex: 1;
   text-align: left;

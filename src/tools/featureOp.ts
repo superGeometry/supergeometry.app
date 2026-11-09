@@ -335,9 +335,31 @@ function allRegionsUsed(app: AppContext, sketch: string, features: Feature[]): b
         if (r) used.push(r);
       }
     };
+    // A full turn's axis in the sketch: what's drawn across it (a whole circle
+    // for a ball, its lower half never picked) is in the solid too.
+    const mirrors: ((q: Vec2) => Vec2)[] = [];
+    const pl = app.sketchPlane(sketch);
     for (const g of features) {
       if (g.type === "extrude" || g.type === "revolve" || g.type === "sweep") add(g.source);
       else if (g.type === "loft") g.sections.forEach(add);
+      if (g.type === "revolve" && pl && Math.abs(g.angle) >= 360 - 1e-9 && g.source.kind === "profile" && g.source.sketch === sketch) {
+        const n = pl.normal;
+        const y: [number, number, number] = [n[1] * pl.xDir[2] - n[2] * pl.xDir[1], n[2] * pl.xDir[0] - n[0] * pl.xDir[2], n[0] * pl.xDir[1] - n[1] * pl.xDir[0]];
+        const d3 = g.axis.dir;
+        const dl = Math.hypot(d3[0], d3[1], d3[2]) || 1;
+        const off = (d3[0] * n[0] + d3[1] * n[1] + d3[2] * n[2]) / dl;
+        const rel = [g.axis.origin[0] - pl.origin[0], g.axis.origin[1] - pl.origin[1], g.axis.origin[2] - pl.origin[2]];
+        if (Math.abs(off) > 1e-9 || Math.abs(rel[0] * n[0] + rel[1] * n[1] + rel[2] * n[2]) > 1e-6) continue;
+        const dot2 = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        const o: Vec2 = [dot2(rel, pl.xDir), dot2(rel, y)];
+        const du = dot2(d3, pl.xDir) / dl;
+        const dv = dot2(d3, y) / dl;
+        mirrors.push((q) => {
+          const t = (q[0] - o[0]) * du + (q[1] - o[1]) * dv;
+          const f: Vec2 = [o[0] + t * du, o[1] + t * dv];
+          return [2 * f[0] - q[0], 2 * f[1] - q[1]];
+        });
+      }
     }
     // Every shape drawn has been made into something. (Matched shape by shape,
     // not piece by piece: where the drawing meets an edge in its plane - the
@@ -346,14 +368,16 @@ function allRegionsUsed(app: AppContext, sketch: string, features: Feature[]): b
     // use; the sketch stayed in view and its face-wide region took every later
     // tap on that face.)
     const inside = (m: Region, q: Vec2) => pointInPoly(q, m.outer.poly) && !m.holes.some((h) => pointInPoly(q, h.poly));
-    return drawn.every((m) => used.some((r) => inside(m, pointInRegion(r))));
+    const covered = (m: Region) => used.some((r) => inside(m, pointInRegion(r)));
+    const turnedIn = (m: Region) => mirrors.some((mir) => used.some((r) => inside(r, mir(pointInRegion(m)))));
+    return drawn.every((m) => covered(m) || turnedIn(m));
   } catch {
     return true;
   }
 }
 
 /** The sketches an extrude / revolve / sweep / loft was made from. */
-function sketchesUsed(f: Feature): string[] {
+export function sketchesUsed(f: Feature): string[] {
   const of = (s: ExtrudeSource) => (s.kind === "profile" ? [s.sketch] : []);
   switch (f.type) {
     case "extrude":

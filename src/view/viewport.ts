@@ -652,7 +652,7 @@ export class Viewport {
   private sketchMats: LineMaterial[] = [];
   private sketchPoints: { sketch: string; entity: string; p: string; pos: Vector3 }[] = [];
 
-  setSketches(sketches: SketchView[], activeId?: string): void {
+  setSketches(sketches: SketchView[], activeId?: string, fresh: ReadonlySet<string> = new Set()): void {
     this.sketches = sketches;
     this.sketchGroup.traverse((o) => {
       if (o instanceof Mesh || o instanceof Line || o instanceof LineSegments2 || o instanceof Points) o.geometry.dispose();
@@ -666,6 +666,8 @@ export class Viewport {
     const wpp = this.cam.worldPerPixel(this.height);
     for (const s of sketches) {
       const active = s.id === activeId;
+      // Not made into anything yet: drawn on top of bodies, so one inside a body still shows.
+      const onTop = active || fresh.has(s.id);
       const m = planeMatrix(s.plane, this.cam.distance * 1e-5);
       // Clean 2px lines; the sketch being edited is brighter and on top.
       const solid: number[] = [];
@@ -680,14 +682,14 @@ export class Viewport {
         if (active) for (const q of pointsOf(e)) this.sketchPoints.push({ sketch: s.id, entity: e.id, p: q.p, pos: new Vector3(q.at[0], q.at[1], 0).applyMatrix4(m) });
       }
       if (solid.length) {
-        const mat = this.lineMaterial(active ? 0xffffff : COLORS.sketch, active ? 2.2 : 1.6, !active);
+        const mat = this.lineMaterial(active ? 0xffffff : COLORS.sketch, active ? 2.2 : 1.6, !onTop);
         this.sketchMats.push(mat);
         const l = new LineSegments2(new LineSegmentsGeometry().setPositions(solid), mat);
         l.renderOrder = 2;
         this.sketchGroup.add(l);
       }
       if (dashed.length) {
-        const mat = this.lineMaterial(COLORS.construction, 1.4, !active);
+        const mat = this.lineMaterial(COLORS.construction, 1.4, !onTop);
         mat.dashed = true;
         mat.dashSize = wpp * 6;
         mat.gapSize = wpp * 4;
@@ -708,6 +710,7 @@ export class Viewport {
         opacity: active ? 0.16 : 0.1,
         side: DoubleSide,
         depthWrite: false,
+        depthTest: !fresh.has(s.id) || active,
         polygonOffset: true,
         polygonOffsetFactor: -2,
         polygonOffsetUnits: -2,
@@ -718,7 +721,7 @@ export class Viewport {
         for (const h of r.holes) shape.holes.push(new Path(h.poly.map((p) => new Vector2(p[0], p[1]))));
         const fill = new Mesh(new ShapeGeometry(shape), fillMat);
         fill.applyMatrix4(m);
-        fill.userData = { sketch: s.id, region: r.index, area: r.area };
+        fill.userData = { sketch: s.id, region: r.index, area: r.area, fresh: fresh.has(s.id) };
         fill.renderOrder = 1;
         this.sketchGroup.add(fill);
         this.profileMeshes.push(fill);
@@ -1149,7 +1152,8 @@ export class Viewport {
       if (c) return c;
     }
     if (profiles) {
-      const ph = this.raycaster.intersectObjects(this.profileMeshes, false).filter((h) => h.distance <= faceDist + near);
+      // A fresh sketch (drawn on top) is found behind a face too.
+      const ph = this.raycaster.intersectObjects(this.profileMeshes, false).filter((h) => h.distance <= faceDist + near || h.object.userData.fresh);
       if (ph.length) {
         // Smallest region under the pointer at the nearest depth.
         const d0 = ph[0].distance;

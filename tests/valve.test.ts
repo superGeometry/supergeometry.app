@@ -100,6 +100,8 @@ const roundFace = (body: string, r: number, axis: Vec3, at: Vec3, inside: boolea
     const along = d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2];
     const off = Math.hypot(d[0] - along * axis[0], d[1] - along * axis[1], d[2] - along * axis[2]);
     if (off > 0.5) return false;
+    // ...and near `at` along it (both ports are on one axis: the left port's thread went into the right one).
+    if (Math.abs(along) > 3) return false;
     // Its radius, from a point on it.
     const p = f.pointOnSurface(0.5, 0.5).toTuple();
     const q = [p[0] - at[0], p[1] - at[1], p[2] - at[2]];
@@ -406,8 +408,9 @@ for (const [a, b, tol] of pairs) {
 // The ball turns in its seats: the stem's tang sits in its slot.
 check("the tang is in the slot", overlap("stem", ballId) < 0.5 && box("stem")[0][2] < 9.5);
 // Threads really cut: the ports' faces aren't plain cylinders any more.
-const grooveFaces = (id: string) => B(id).faces.filter((f: any) => f.geomType === "BSPLINE_SURFACE").length;
-check("the ports are threaded", grooveFaces(mainId) >= 3 && grooveFaces(endId) >= 3, `${grooveFaces(mainId)} / ${grooveFaces(endId)} groove faces`);
+// (Counted at each port: the main body's boss thread used to hide a left port left plain.)
+const grooveFaces = (id: string, side: number) => B(id).faces.filter((f: any) => f.geomType === "BSPLINE_SURFACE" && f.center.toTuple()[0] * side > 25).length;
+check("the ports are threaded", grooveFaces(mainId, -1) >= 2 && grooveFaces(endId, 1) >= 2, `${grooveFaces(mainId, -1)} / ${grooveFaces(endId, 1)} groove faces`);
 // The bore follows its variable.
 variables[0].expr = "20 mm";
 const narrow = await build(true);

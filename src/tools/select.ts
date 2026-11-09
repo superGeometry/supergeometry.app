@@ -515,7 +515,12 @@ export class SelectTool implements Tool {
     const info = app.view.body(s.body)?.edges[s.edge];
     const bodies = bodiesOf(sel);
     const straight = info?.type === "LINE";
-    const ref = this.edgeRefs()[0];
+    // The edges as picked now: Fillet starts at once (its preview takes the body's place in the
+    // view) and its list stays open - the selection's edge numbers then point at the preview's
+    // edges, and "Drag / type" picked two other edges (rounding the valve's creases failed).
+    const picked = this.edgeRefs();
+    const refs = () => picked.map((r) => ({ ...r }));
+    const ref = picked[0];
     // With variables defined, Fillet/Chamfer open a list: a free size, or one of the variables.
     const vars = app.store.doc.variables ?? [];
     const sized = (kind: "fillet" | "chamfer"): Partial<ToolItem> =>
@@ -523,14 +528,14 @@ export class SelectTool implements Tool {
         ? {
             sub: "Pick a size",
             children: [
-              { id: `${kind}-free`, label: "Drag / type", icon: kind, run: () => app.setTool(new EdgeOp(app, kind, this.edgeRefs())) },
-              ...vars.map((v) => ({ id: `${kind}-var-${v.name}`, label: `${v.name} = ${v.expr}`, icon: "variable" as const, run: () => app.setTool(new EdgeOp(app, kind, this.edgeRefs(), undefined, v.name)) })),
+              { id: `${kind}-free`, label: "Drag / type", icon: kind, run: () => app.setTool(new EdgeOp(app, kind, refs())) },
+              ...vars.map((v) => ({ id: `${kind}-var-${v.name}`, label: `${v.name} = ${v.expr}`, icon: "variable" as const, run: () => app.setTool(new EdgeOp(app, kind, refs(), undefined, v.name)) })),
             ],
           }
         : {};
     return [
-      { id: "fillet", label: "Fillet", icon: "fillet", shortcut: "F", active: true, run: () => app.setTool(new EdgeOp(app, "fillet", this.edgeRefs())), ...sized("fillet") },
-      { id: "chamfer", label: "Chamfer", icon: "chamfer", shortcut: "C", run: () => app.setTool(new EdgeOp(app, "chamfer", this.edgeRefs())), ...sized("chamfer") },
+      { id: "fillet", label: "Fillet", icon: "fillet", shortcut: "F", active: true, run: () => app.setTool(new EdgeOp(app, "fillet", refs())), ...sized("fillet") },
+      { id: "chamfer", label: "Chamfer", icon: "chamfer", shortcut: "C", run: () => app.setTool(new EdgeOp(app, "chamfer", refs())), ...sized("chamfer") },
       // A line on a face, parallel to this edge (the face is tapped next).
       { id: "offsetEdge", label: "Offset Edge", icon: "offsetEdge", disabled: !straight || sel.length !== 1, why: "Needs one straight edge", run: () => app.setTool(new OffsetEdgeOp(app, s)) },
       // Moves just this edge: the faces on it tilt to follow.

@@ -160,6 +160,7 @@ async function run(features: Feature[]) {
   const errors: FeatureError[] = [];
   const notes: FeatureError[] = [];
   let ctx: Ctx = { bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map() };
+  switchedOff = new Set(features.filter((f) => f.suppressed).map((f) => f.id));
   let key = "";
   const next: CacheEntry[] = [];
   let hit = true;
@@ -1358,11 +1359,15 @@ function deleteVertex(body: Shape3D, at: Vec3): Shape3D {
 
 // ------------------------------------------------------------ feature helpers
 
+/** Steps switched off in this rebuild (a step made from one says so, not "deleted"). */
+let switchedOff = new Set<string>();
+const noSketch = (id: string) => new Error(switchedOff.has(id) ? "Its sketch is switched off - turn it back on in History" : "Its sketch was deleted");
+
 /** Faces (with their outward normal) for a profile or a body face. */
 function sourceFaces(src: ExtrudeSource, ctx: Ctx): { face: Face; normal: Vec3 }[] {
   if (src.kind === "profile") {
     const sketch = ctx.sketches.get(src.sketch);
-    if (!sketch) throw new Error("Its sketch was deleted");
+    if (!sketch) throw noSketch(src.sketch);
     return regionFaces(allCurves(sketch), sketch.plane, src.regions).map((face) => ({ face, normal: sketch.plane.normal }));
   }
   const face = resolveFace(need(ctx.bodies, src.face.body), src.face);
@@ -1374,7 +1379,7 @@ function sourceFaces(src: ExtrudeSource, ctx: Ctx): { face: Face; normal: Vec3 }
 function sectionFrame(src: ExtrudeSource, ctx: Ctx): { origin: Vec3; normal: Vec3 } {
   if (src.kind === "profile") {
     const sketch = ctx.sketches.get(src.sketch);
-    if (!sketch) throw new Error("Its sketch was deleted");
+    if (!sketch) throw noSketch(src.sketch);
     return { origin: sketch.plane.origin, normal: norm(sketch.plane.normal) };
   }
   const face = resolveFace(need(ctx.bodies, src.face.body), src.face);
@@ -1384,7 +1389,7 @@ function sectionFrame(src: ExtrudeSource, ctx: Ctx): { origin: Vec3; normal: Vec
 function sourceWires(src: ExtrudeSource, ctx: Ctx): Wire[] {
   if (src.kind === "profile") {
     const sketch = ctx.sketches.get(src.sketch);
-    if (!sketch) throw new Error("Its sketch was deleted");
+    if (!sketch) throw noSketch(src.sketch);
     return src.regions.map((r) => regionWire(allCurves(sketch), sketch.plane, r));
   }
   return [resolveFace(need(ctx.bodies, src.face.body), src.face).outerWire()];

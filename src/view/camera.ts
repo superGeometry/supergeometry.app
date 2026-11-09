@@ -152,7 +152,8 @@ export class CameraController {
    * fitted into that and centred in it - on a phone the columns cover a fifth
    * of each side, and a ruler fitted to the whole screen lost both ends.
    */
-  fit(box: Box3, animate = true, free: Insets = NO_INSETS): void {
+  /** Frame `box` in the free part of the screen; `noZoomIn`: only move over (and out if it must), never closer. */
+  fit(box: Box3, animate = true, free: Insets = NO_INSETS, noZoomIn = false): void {
     this.pivot = null;
     const finite = (v: Vector3) => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
     if (box.isEmpty() || !finite(box.min) || !finite(box.max)) box = new Box3(new Vector3(-50, -50, 0), new Vector3(50, 50, 20));
@@ -176,7 +177,7 @@ export class CameraController {
     const tanV = Math.tan(MathUtils.degToRad(FOV / 2));
     const tanH = tanV * this.aspect;
     // Half the free width at distance d is d·tanH·fw; a margin of 12 % around.
-    const distance = Math.max(hw / (tanH * fw), hh / (tanV * fh)) * 1.12 + (this.ortho ? 0 : hd);
+    const distance = Math.max(Math.max(hw / (tanH * fw), hh / (tanV * fh)) * 1.12 + (this.ortho ? 0 : hd), noZoomIn ? to.distance : 0);
     // Put the box's centre in the middle of the free area, not of the screen.
     const ox = ((free.left - free.right) / 2) * 2 * distance * tanH;
     const oy = ((free.top - free.bottom) / 2) * 2 * distance * tanV;
@@ -197,7 +198,7 @@ export class CameraController {
         const sy = (1 - v.dot(up) / (depth * tanV)) / 2;
         x0 = Math.min(x0, sx), x1 = Math.max(x1, sx), y0 = Math.min(y0, sy), y1 = Math.max(y1, sy);
       }
-      const k = Math.max((x1 - x0) / (fw / 1.12), (y1 - y0) / (fh / 1.12), 1e-6);
+      const k = Math.max((x1 - x0) / (fw / 1.12), (y1 - y0) / (fh / 1.12), 1e-6, noZoomIn ? to.distance / dest.distance : 0);
       const dx = (x0 + x1) / 2 - fx, dy = (y0 + y1) / 2 - fy;
       if (Math.abs(k - 1) < 0.01 && Math.abs(dx) < 0.002 && Math.abs(dy) < 0.002) break;
       // The extremes are mostly the near corners: they move by the shift over their own depth.

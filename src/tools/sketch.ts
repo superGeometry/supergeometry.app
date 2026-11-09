@@ -1,6 +1,6 @@
 import { isTouchDevice } from "../device";
 import { simplifyStroke } from "../sketch/freehand";
-import { BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
+import { Box3, BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
 import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
 import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, patternSpacing, planeY, roundSig, scale as scale3, sub as sub3, toPlane } from "../geom";
 import { addForUser, addStrict, constraintError, constraintName, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
@@ -55,7 +55,7 @@ import { axisDrag, Handle } from "./handles";
 import { ExtrudeOp } from "./ops";
 import { CopyToggle, copyMode } from "./copyToggle";
 import type { PanelItem, ToolItem } from "../ui/ui";
-import { fmtLen, trim as trimNum } from "../units";
+import { evaluate, fmtLen, trim as trimNum } from "../units";
 import type { ToolPointer } from "../view/input";
 import { dotMaterial, sketchToWorld } from "../view/viewport";
 import { hitToSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
@@ -142,6 +142,8 @@ function runsAlongside(a: Vec2, b: Vec2, from: Vec2, to: Vec2, minOff: number): 
 /** The hint for a tool, as its chosen variant works. */
 function hintOf(kind: Kind): string {
   if (kind === "arc" && memory.arc === "center") return "Tap the centre, then where the arc starts, then where it ends.";
+  if (kind === "rect" && memory.rect === "center") return "Tap the centre, then a corner.";
+  if (kind === "rect" && memory.rect === "3pt") return "Tap two corners along one side, then tap to set the width.";
   if (kind === "circle" && memory.circle === "2pt") return "Tap two points on opposite sides of the circle.";
   if (kind === "circle" && memory.circle === "3pt") return "Tap three points on the circle's edge.";
   if (kind === "fillet" && memory.corner === "chamfer") return "Tap a corner where two lines meet to cut it off straight.";
@@ -262,6 +264,8 @@ export class SketchTool implements Tool {
   private locks: Record<string, number> = {};
   /** The length typed while drawing as a formula (with variables), for the value it gave. */
   private lenExpr: { v: number; text: string } | null = null;
+  /** A size typed into the card as a variable ("bore", "wall*2"): kept on its dimension, so it follows the variable. */
+  private lockExprs: Record<string, { v: number; text: string }> = {};
   private selected = new Set<string>();
   private construction = false;
   private edit: {
@@ -901,6 +905,30 @@ export class SketchTool implements Tool {
     this.updatePanel();
     this.setHint();
     this.refreshConstraintUI();
+    // On a face, or a sketch opened again: what's drawn on comes to the free part of the screen
+    // (centred on the old view, an end face ended up under the tool column on a phone).
+    const focus = this.focusBox(p);
+    if (focus) this.app.view.cam.fit(focus, true, this.app.view.coveredInsets(), true);
+  }
+
+  /** The sketch's drawing (or the face it's on), a little roomy, for the camera to bring into view. */
+  private focusBox(p: PlaneDef): Box3 | null {
+    const pts: Vec2[] = [];
+    for (const e of this.entities) for (const poly of entityPolylines(e)) pts.push(...poly);
+    let lo: Vec2, hi: Vec2;
+    if (pts.length) {
+      lo = [Math.min(...pts.map((q) => q[0])), Math.min(...pts.map((q) => q[1]))];
+      hi = [Math.max(...pts.map((q) => q[0])), Math.max(...pts.map((q) => q[1]))];
+    } else if (this.attachedTo) {
+      const c = toPlane(p, this.attachedTo.center);
+      const r = Math.sqrt(this.attachedTo.area) / 2;
+      lo = [c[0] - r, c[1] - r];
+      hi = [c[0] + r, c[1] + r];
+    } else return null;
+    const pad = Math.max(hi[0] - lo[0], hi[1] - lo[1]) * 0.25 + 1;
+    const box = new Box3();
+    for (const u of [lo[0] - pad, hi[0] + pad]) for (const v of [lo[1] - pad, hi[1] + pad]) box.expandByPoint(sketchToWorld(p, [u, v]));
+    return box;
   }
 
   // ---------------------------------------------------------------- menu
@@ -1110,6 +1138,10 @@ export class SketchTool implements Tool {
         onInput: (v) => {
           this.locks[key] = v;
           this.refreshPreview();
+        },
+        onExpr: (text) => {
+          if (text) this.lockExprs[key] = { v: evaluate(text, kind === "angle" ? "angle" : "length") ?? NaN, text };
+          else delete this.lockExprs[key];
         },
       };
       lockOf.set(it, key);
@@ -2814,18 +2846,25 @@ export class SketchTool implements Tool {
         const cs: SketchConstraint[] = [];
         if (e) {
           const L = this.locks;
-          const dim = (prop: string, value?: number) => value !== undefined && cs.push({ id: uid(), type: "dim", curves: [e.id], prop, value });
+          // Typed with a variable ("bore"): the dimension keeps it, so it follows the variable.
+          const dim = (prop: string, key: string) => {
+            const value = L[key];
+            if (value === undefined) return;
+            const x = this.lockExprs[key];
+            cs.push({ id: uid(), type: "dim", curves: [e.id], prop, value, ...(x && Math.abs(x.v - value) < 1e-9 ? { expr: x.text } : {}) });
+          };
           if (e.kind === "rect") {
             // The typed Width and Height are the whole rectangle's, in every mode
             // (a centre rectangle typed 100 × 150 used to come out 200 × 300).
-            dim("w", memory.rect === "3pt" ? L.len : L.w);
-            dim("h", L.h);
+            dim("w", memory.rect === "3pt" ? "len" : "w");
+            dim("h", "h");
           }
           // An arc's typed radius (a centre arc's in the box on its radius line too) is kept as a dimension.
-          if (e.kind === "arc") dim("radius", memory.arc === "center" ? (L.r ?? L.len) : L.r);
-          if (e.kind === "circle") dim("diameter", L.r);
-          if (e.kind === "polygon") dim("radius", L.r);
-          if (e.kind === "ellipse") (dim("dx", L.rx), dim("dy", L.ry));
+          if (e.kind === "arc") dim("radius", memory.arc === "center" && L.r === undefined ? "len" : "r");
+          if (e.kind === "circle") dim("diameter", "r");
+          if (e.kind === "polygon") dim("radius", "r");
+          if (e.kind === "ellipse") (dim("dx", "rx"), dim("dy", "ry"));
+          this.lockExprs = {};
           // A centre placed on an existing point stays on it.
           const centred = (e.kind === "circle" && memory.circle === "center") || e.kind === "polygon" || e.kind === "ellipse" || (e.kind === "rect" && memory.rect === "center") || (e.kind === "arc" && memory.arc === "center");
           if (settings.value.autoConstrain && centred && this.startRef) {
@@ -2855,7 +2894,7 @@ export class SketchTool implements Tool {
   /** Done / Enter in the card: the shape at its typed size (the first point is where it was tapped). */
   private finishTyped(): void {
     if (!this.pts.length) return;
-    if (!Object.keys(this.locks).length) return this.app.ui.toast("Type a size first (or tap where it should end)");
+    if (!Object.keys(this.locks).length) return this.app.ui.toast(document.querySelector("input.invalid") ? "That size can't be read - try a number like 20.8, or 36/sqrt(3)" : "Type a size first (or tap where it should end)");
     // No pointer to go by (a phone): the typed size from the first point, up and to the right.
     if (!this.cursor) this.cursor = { uv: [...this.pts[0]] as Vec2 };
     this.addPoint(this.cursor!.uv, 1);
