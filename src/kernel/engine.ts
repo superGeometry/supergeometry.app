@@ -53,7 +53,7 @@ import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "
 import { outlineOffsetCurves, projectPolyline } from "../sketch/edit";
 
 import { cageToShape } from "./freeform";
-import { gentle, guideCurve, plainSpine } from "../freeform/connect";
+import { evenly, gentle, guideCurve, oriented, plainSpine, smoothed } from "../freeform/connect";
 import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from "./health";
 import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
@@ -734,10 +734,15 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const width = (n: Vec3) => Math.max(...[ea, eb].flatMap((e) => e.ring.map((p) => dot(p, n))));
       let along: (t: number) => Vec3;
       if (f.guide) {
-        // Eased onto the guide over a longer stretch when it leaves the face steeply.
-        const pts = curvePoints(pathWire(f.guide, ctx).wrapped, 200);
-        const tries = [1.5, 2.5, 3.5, 5].map((k) => guideCurve(pts, ea.center, eb.center, ea.dir, eb.dir, k * reach));
-        along = tries.find((c) => gentle(c, width)) ?? tries[0];
+        // Eased onto the guide over a longer stretch when it leaves the face
+        // steeply; where the guide itself turns tighter than the bridge is
+        // wide, rounded off a little at a time until it fits.
+        const drawn = curvePoints(pathWire(f.guide, ctx).wrapped, 200);
+        const fit = (pts: Vec3[]) => [1.5, 2.5, 3.5, 5].map((k) => guideCurve(pts, ea.center, eb.center, ea.dir, eb.dir, k * reach)).find((c) => gentle(c, width));
+        let pts = oriented(evenly(drawn, 60), ea.center, eb.center);
+        let found = fit(pts);
+        for (let k = 0; k < 40 && !found; k++) found = fit((pts = smoothed(pts, 10, ea.dir, eb.dir)));
+        along = found ?? guideCurve(drawn, ea.center, eb.center, ea.dir, eb.dir, 1.5 * reach);
       } else along = plainSpine(ea.center, ea.dir, eb.center, eb.dir, f.bulge ?? 1, width);
       let bridge: Shape3D;
       try {

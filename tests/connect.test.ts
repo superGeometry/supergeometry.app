@@ -149,4 +149,21 @@ check("Cut: the bridge's ends are cut out of both cubes", !r.errors && !r.bad &&
   check("…Cut along it", !r.errors && !r.bad && vol("A") < 8000 && vol("B") < 8000, `${r.errors}${r.bad}`);
 }
 
+// A guide with a corner too tight for the bridge (drawn by hand, out of one
+// face and down onto another): rounded off just enough, still joined - and
+// the guide edited, the bridge follows it.
+{
+  const fs = [...box("A", 40, 30, 20, [0, 0, 0]), ...box("B", 40, 30, 20, [0, 66, 65])];
+  const side: PlaneDef = { origin: [20, 0, 0], xDir: [0, 1, 0], normal: [1, 0, 0] };
+  const g = (pts: [number, number][]) => ({ id: "g", name: "g", type: "sketch", plane: side, entities: [{ id: "s", kind: "spline", points: pts, closed: false, mode: "fit" }] }) as Feature;
+  const ends = [face("B", [0, 51, 75], [0, -1, 0], 800), face("A", [0, 0, 20], [0, 0, 1], 1200)];
+  const along = { guide: { kind: "sketch", sketch: "g", entities: ["s"] } };
+  r = await build([...fs, g([[51, 75], [1, 78], [0, 20]]), connect(ends[0], ends[1], "auto", along)]);
+  const yLo = (debugBodies().get("B") as Shape3D)?.boundingBox.bounds[0][1];
+  check("a guide with a corner tighter than the bridge is wide: rounded off, joined", !r.errors && !r.bad && r.ids.length === 1, `${r.errors}${r.bad} ${r.ids}`);
+  r = await build([...fs, g([[51, 75], [-25, 70], [0, 20]]), connect(ends[0], ends[1], "auto", along)]);
+  const yLo2 = (debugBodies().get("B") as Shape3D)?.boundingBox.bounds[0][1];
+  check("...the guide edited to swing out further: the bridge goes with it", !r.errors && !r.bad && yLo2 < yLo - 5, `${r.errors}${r.bad} reaches y ${yLo?.toFixed(1)} then ${yLo2?.toFixed(1)}`);
+}
+
 process.exit(failed ? 1 : 0);

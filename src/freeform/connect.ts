@@ -18,7 +18,7 @@ const unit = (a: Vec3): Vec3 => mul(a, 1 / (len(a) || 1));
  * from the way it leaves A (arrives at B) onto the curve.
  */
 export function guideCurve(pts: Vec3[], ca: Vec3, cb: Vec3, da0?: Vec3, db0?: Vec3, ease = 0): (t: number) => Vec3 {
-  const p = len(sub(pts[0], ca)) + len(sub(pts[pts.length - 1], cb)) <= len(sub(pts[pts.length - 1], ca)) + len(sub(pts[0], cb)) ? pts : [...pts].reverse();
+  const p = oriented(pts, ca, cb);
   const acc = [0];
   for (let i = 1; i < p.length; i++) acc.push(acc[i - 1] + len(sub(p[i], p[i - 1])));
   const total = acc[acc.length - 1] || 1;
@@ -28,27 +28,31 @@ export function guideCurve(pts: Vec3[], ca: Vec3, cb: Vec3, da0?: Vec3, db0?: Ve
     const want = Math.max(0, Math.min(1, t)) * total;
     let i = 1;
     while (i < p.length - 1 && acc[i] < want) i++;
-    const f = acc[i] > acc[i - 1] ? (want - acc[i - 1]) / (acc[i] - acc[i - 1]) : 0;
-    const q = add(p[i - 1], mul(sub(p[i], p[i - 1]), Math.max(0, Math.min(1, f))));
+    const f = Math.max(0, Math.min(1, acc[i] > acc[i - 1] ? (want - acc[i - 1]) / (acc[i] - acc[i - 1]) : 0));
+    // Smoothly through the points (Catmull-Rom), not straight from one to the
+    // next: the corners between straight pieces read as turns far too tight.
+    const P0 = p[Math.max(0, i - 2)];
+    const P1 = p[i - 1];
+    const P2 = p[i];
+    const P3 = p[Math.min(p.length - 1, i + 1)];
+    const f2 = f * f;
+    const f3 = f2 * f;
+    const q = mul(add(add(mul(P1, 2), mul(sub(P2, P0), f)), add(mul(add(sub(mul(P0, 2), mul(P1, 5)), sub(mul(P2, 4), P3)), f2), mul(add(sub(mul(P1, 3), P0), sub(P3, mul(P2, 3))), f3))), 0.5);
     const s = want / total;
     return add(q, add(mul(da, 1 - s), mul(db, s)));
   };
   if (!da0 || !db0 || !(ease > 0)) return on;
-  // Near each end, eased from straight out of the face onto the curve: the
-  // bridge leaves the face square, with no kink.
+  // Near each end, a smooth curve from straight out of the face onto the
+  // guide (meeting it going its way): the bridge leaves the face square, with no kink.
   const w = Math.min(0.45, ease / total);
-  const smooth = (x: number) => x * x * (3 - 2 * x);
-  return (t: number) => {
-    let q = on(t);
-    if (t < w) {
-      const k = smooth(t / w);
-      q = add(mul(add(ca, mul(unit(da0), t * total)), 1 - k), mul(q, k));
-    } else if (t > 1 - w) {
-      const k = smooth((1 - t) / w);
-      q = add(mul(add(cb, mul(unit(db0), (1 - t) * total)), 1 - k), mul(q, k));
-    }
-    return q;
-  };
+  const slope = (t: number) => mul(sub(on(t + 1e-4), on(t - 1e-4)), w / 2e-4);
+  const hermite = (p0: Vec3, t0: Vec3, p1: Vec3, t1: Vec3) => (s: number) =>
+    add(add(mul(p0, 2 * s ** 3 - 3 * s ** 2 + 1), mul(t0, s ** 3 - 2 * s ** 2 + s)), add(mul(p1, -2 * s ** 3 + 3 * s ** 2), mul(t1, s ** 3 - s ** 2)));
+  const ta = slope(w);
+  const tb = slope(1 - w);
+  const startA = hermite(ca, mul(unit(da0), len(ta)), on(w), ta);
+  const intoB = hermite(on(1 - w), tb, cb, mul(unit(db0), -len(tb)));
+  return (t: number) => (t < w ? startA(t / w) : t > 1 - w ? intoB((t - (1 - w)) / w) : on(t));
 }
 
 /**
@@ -100,4 +104,43 @@ export function plainSpine(ca: Vec3, na: Vec3, cb: Vec3, nb: Vec3, bulge: number
   for (let k = 0; k < 40; k++)
     for (const lead of k ? [want * 1.06 ** k, want / 1.06 ** k] : [want]) if (gentle(curve(lead), width)) return curve(lead);
   return curve(want);
+}
+
+/** `n` points evenly along a polyline (by length), its ends kept. */
+export function evenly(pts: Vec3[], n: number): Vec3[] {
+  const acc = [0];
+  for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1] + len(sub(pts[i], pts[i - 1])));
+  const total = acc[acc.length - 1];
+  if (!(total > 0)) return pts;
+  const out: Vec3[] = [];
+  let i = 1;
+  for (let k = 0; k < n; k++) {
+    const want = (total * k) / (n - 1);
+    while (i < pts.length - 1 && acc[i] < want) i++;
+    const f = acc[i] > acc[i - 1] ? Math.max(0, Math.min(1, (want - acc[i - 1]) / (acc[i] - acc[i - 1]))) : 0;
+    out.push(add(pts[i - 1], mul(sub(pts[i], pts[i - 1]), f)));
+  }
+  return out;
+}
+
+/** A guide's points run from the end nearer A to the end nearer B. */
+export function oriented(pts: Vec3[], ca: Vec3, cb: Vec3): Vec3[] {
+  return len(sub(pts[0], ca)) + len(sub(pts[pts.length - 1], cb)) <= len(sub(pts[pts.length - 1], ca)) + len(sub(pts[0], cb)) ? pts : [...pts].reverse();
+}
+
+/**
+ * A polyline (run from A to B) rounded off `passes` times - each point
+ * towards its neighbours' middle - its ends kept, and still leaving the first
+ * along `da` and arriving at the last against `db` (held by points out past
+ * each end that don't move): its tight turns open out, its ends stay square.
+ */
+export function smoothed(pts: Vec3[], passes: number, da: Vec3, db: Vec3): Vec3[] {
+  const step = len(sub(pts[1], pts[0])) || 1;
+  const n = pts.length;
+  const before = Array.from({ length: n }, (_, k) => sub(pts[0], mul(unit(da), step * (n - k))));
+  const after = Array.from({ length: n }, (_, k) => add(pts[n - 1], mul(unit(db), step * (k + 1))));
+  let p = [...before, ...pts, ...after];
+  const fixed = (i: number) => i <= n || i >= 2 * n - 1;
+  for (let k = 0; k < passes; k++) p = p.map((q, i) => (fixed(i) ? q : mul(add(add(p[i - 1], p[i + 1]), mul(q, 2)), 0.25)));
+  return p.slice(n, 2 * n);
 }
