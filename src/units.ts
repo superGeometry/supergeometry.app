@@ -59,11 +59,20 @@ export function trim(v: number, digits = 3): string {
 export function evaluate(text: string, kind: "length" | "number" | "angle" = "length"): number | null {
   try {
     const scaleFor = kind === "length" ? UNIT_MM[current] : 1;
-    const v = new Parser(text, scaleFor, kind === "length", 0).parse();
-    return Number.isFinite(v) ? v : null;
+    const v = new Parser(decimalComma(text), scaleFor, kind === "length", 0).parse();
+    // (2^1000 is a number, but no size: 1000 km is the most a box takes.)
+    return Number.isFinite(v) && Math.abs(v) <= 1e9 ? v : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * "5,5" is 5.5 (a decimal comma: much of Europe writes it so, and a phone's
+ * keyboard offers it). "1,000" stays unread: one, or a thousand?
+ */
+function decimalComma(text: string): string {
+  return /,\d{3}(?!\d)/.test(text) ? text : text.replace(/(\d),(\d)/g, "$1.$2");
 }
 
 const DEG = Math.PI / 180;
@@ -136,6 +145,10 @@ class Parser {
       this.i++;
       return -this.factor();
     }
+    if (c === "+") {
+      this.i++;
+      return this.factor();
+    }
     if (c === "(") {
       this.i++;
       const v = this.expr();
@@ -144,7 +157,8 @@ class Parser {
       // Already in mm; a suffix re-interprets the bracketed number in that unit.
       return this.unit(v / this.defaultScale);
     }
-    const num = /^\d*\.?\d+(e[-+]?\d+)?/i.exec(this.s.slice(this.i));
+    // (Also "5." - a dot typed and nothing after it yet.)
+    const num = /^(\d+\.?\d*|\.\d+)(e[-+]?\d+)?/i.exec(this.s.slice(this.i));
     if (num) {
       this.i += num[0].length;
       return this.unit(parseFloat(num[0]));
@@ -178,6 +192,12 @@ class Parser {
    */
   private unit(v: number): number {
     this.ws();
+    // An angle or a plain number may say "deg" / "°" (a variable "30 deg" used for a revolve).
+    const deg = !this.lengths && /^(deg|°)(?![a-z])/i.exec(this.s.slice(this.i));
+    if (deg) {
+      this.i += deg[0].length;
+      return v;
+    }
     const m = /^(mm|cm|m|in|ft|"|')(?![a-z])/i.exec(this.s.slice(this.i));
     if (m) {
       this.i += m[0].length;

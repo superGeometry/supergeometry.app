@@ -1448,7 +1448,7 @@ export class UI {
 /** Does the text use a variable (a name that isn't a unit suffix)? */
 export function isExpression(text: string): boolean {
   // A variable name in it; units, pi and sqrt(...)-style functions alone are just a number.
-  return /[a-z_]/i.test(text.replace(/(\d|\))\s*(mm|cm|m|in|ft)\b/gi, "$1").replace(/\b(sqrt|abs|sin|cos|tan)\s*\(|\bpi\b/gi, "("));
+  return /[a-z_]/i.test(text.replace(/(\d|\))\s*(mm|cm|m|in|ft|deg)\b/gi, "$1").replace(/\b(sqrt|abs|sin|cos|tan)\s*\(|\bpi\b/gi, "("));
 }
 
 function unitScale(): number {

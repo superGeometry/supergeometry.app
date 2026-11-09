@@ -10,7 +10,7 @@ function check(text: string, kind: "length" | "number" | "angle", want: number |
   console.log(ok ? "ok  " : "FAIL", `${kind} "${text}" = ${got} (want ${want})`);
 }
 
-setVariables([{ name: "af", expr: "36 mm" }]);
+setVariables([{ name: "af", expr: "36 mm" }, { name: "tilt", expr: "30 deg" }]);
 check("36/sqrt(3)", "length", 36 / Math.sqrt(3)); // a hex's corner radius from its size across the flats
 check("af/sqrt(3)", "length", 36 / Math.sqrt(3));
 check("2^3", "number", 8);
@@ -24,5 +24,13 @@ check("1in + 1", "length", 26.4);
 check("sqrt 3", "length", null); // needs its brackets
 check("sqrt(3", "length", null);
 check("nope(3)", "length", null);
+check("5,5", "length", 5.5); // a decimal comma
+check("1,000", "length", null); // one, or a thousand? not guessed
+check("+5", "length", 5);
+check("5.", "length", 5); // a dot typed, nothing after it yet
+check("2^1000", "length", null); // no size is that big
+check("tilt", "angle", 30); // a variable that is an angle, in an angle box
+check("30°", "angle", 30);
+check("30 deg", "length", null);
 
 process.exit(failed ? 1 : 0);

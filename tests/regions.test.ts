@@ -26,6 +26,10 @@ const cases: [string, SketchEntity[], string[]][] = [
   ["two circles crossing → 3", [{ id: "c1", kind: "circle", center: [0, 0], radius: 10 }, { id: "c2", kind: "circle", center: [10, 0], radius: 10 }], ["*", "*", "*"]],
   // Lines drawn over a face's outline (the rect): the doubled edges count once.
   ["lines on a rect's edges → 2", [rect("f", 0, 0, 20, 10), line("1", [-10, -5], [0, -5]), line("2", [0, -5], [0, 5]), line("3", [0, 5], [-10, 5]), line("4", [-10, 5], [-10, -5])], ["100.00", "100.00"]],
+  // A spline crossing itself is split where it crosses (it had no region at all).
+  ["figure-8 spline → 2", [{ id: "s", kind: "spline", points: [[0, 0], [20, 20], [20, 0], [0, 20]], closed: true, mode: "fit" }], ["*", "*"]],
+  ["hand-drawn loop past its start → 1", [{ id: "s", kind: "spline", points: [[0, -3], [0, 10], [10, 20], [20, 10], [10, 0], [-3, 0]], closed: false, mode: "fit" }], ["*"]],
+  ["hairpin spline (no crossing) → 0", [{ id: "s", kind: "spline", points: [[0, 0], [10, 0], [10.3, 0.4], [0, 0.8]], closed: false, mode: "fit" }], []],
   ["partly overlapping lines → square", [line("1", [0, 0], [10, 0]), line("1b", [3, 0], [14, 0]), line("2", [10, 0], [10, 10]), line("3", [10, 10], [0, 10]), line("4", [0, 10], [0, 0])], ["100.00"]],
 ];
 

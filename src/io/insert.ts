@@ -1,6 +1,6 @@
 // Insert menu: files (STEP/STL/OBJ/DXF/projects), images, variables.
 
-import { migrate, newId } from "../doc/store";
+import { newId, parseProject } from "../doc/store";
 import type { Feature, ImageFeature, PlaneDef, SketchEntity, SketchFeature } from "../doc/types";
 import { GROUND } from "../geom";
 import { uid } from "../sketch/edit";
@@ -17,6 +17,24 @@ export function pickFile(accept: string): Promise<File | null> {
     input.onchange = () => resolve(input.files?.[0] ?? null);
     input.click();
   });
+}
+
+/** Why a mesh / STEP file can't be what it says (null: it looks right). */
+function unreadable(bytes: Uint8Array, format: "step" | "stl"): string | null {
+  if (format === "step") {
+    const head = new TextDecoder().decode(bytes.subarray(0, 4096));
+    if (!/ISO-10303-21/.test(head)) return "it isn't a STEP file";
+    if (!new TextDecoder().decode(bytes).includes("DATA;")) return "the file is damaged (it has no shapes in it)";
+    return null;
+  }
+  // Binary STL: 80 bytes, a triangle count, 50 bytes per triangle.
+  if (bytes.length >= 84) {
+    const n = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(80, true);
+    if (n > 0 && 84 + n * 50 === bytes.length) return null;
+  }
+  const text = new TextDecoder().decode(bytes);
+  if (/\bfacet\b/i.test(text) && /\bvertex\b/i.test(text)) return null;
+  return bytes.length ? "it isn't an STL file, or it is damaged" : "the file is empty";
 }
 
 export async function insertFile(app: AppContext): Promise<void> {
@@ -45,7 +63,7 @@ export async function insertFile(app: AppContext): Promise<void> {
       return;
     }
     if (ext === "super" || ext === "tessel") {
-      insertProject(app, migrate(JSON.parse(await file.text())).features, file.name);
+      insertProject(app, parseProject(await file.text()).features, file.name);
       return;
     }
     let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
@@ -54,6 +72,10 @@ export async function insertFile(app: AppContext): Promise<void> {
       bytes = objToStl(new TextDecoder().decode(bytes));
       format = "stl";
     }
+    // A damaged or wrong file stops here, not as a failed step in History
+    // (that kept the broken file in the project).
+    const why = unreadable(bytes, format);
+    if (why) return app.ui.toast(`Could not insert ${file.name}: ${why}`, "error");
     app.ui.setStatus(`Importing ${file.name}…`);
     app.store.add({ ...app.store.newIdentity("import"), type: "import", format, fileName: file.name, data: toBase64(bytes) });
     app.ui.setStatus(null);
@@ -76,14 +98,32 @@ function insertProject(app: AppContext, features: Feature[], name: string): void
 export async function insertImage(app: AppContext, plane: PlaneDef = GROUND): Promise<ImageFeature | null> {
   const file = await pickFile("image/*");
   if (!file) return null;
-  const src = await new Promise<string>((resolve) => {
+  let src = await new Promise<string>((resolve) => {
     const r = new FileReader();
     r.onload = () => resolve(r.result as string);
     r.readAsDataURL(file);
   });
   const img = new Image();
   img.src = src;
-  await img.decode();
+  try {
+    await img.decode();
+  } catch {
+    app.ui.toast(`${file.name} can't be shown here - save it as JPG or PNG first (an iPhone's HEIC photos too)`, "error");
+    return null;
+  }
+  // A phone photo (4000 px, 12 MB) kept whole went into the project and was
+  // saved again on every change, and wider than a phone can draw (4096 px):
+  // 2048 px across is plenty to trace over.
+  const MAX = 2048;
+  const k = Math.min(1, MAX / Math.max(img.width, img.height));
+  if (k < 1 || file.size > 2e6) {
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.width * k);
+    c.height = Math.round(img.height * k);
+    c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+    // PNG keeps see-through parts (a logo); a photo is smaller as JPEG.
+    src = file.type === "image/png" ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.85);
+  }
   const width = 100;
   const f: ImageFeature = { ...app.store.newIdentity("image"), type: "image", plane, src, width, height: (width * img.height) / img.width, opacity: 0.8 };
   app.store.add(f);
@@ -101,8 +141,9 @@ export async function createVariable(app: AppContext, value = ""): Promise<strin
   ], note);
   if (!v) return null;
   const name = v.name.trim();
-  if (!/^[a-z_][a-z0-9_]*$/i.test(name) || /^(mm|cm|m|in|ft)$/i.test(name)) {
-    app.ui.toast("Names use letters, digits and _ (not starting with a digit, not a unit)", "error");
+  // (A variable called sin or pi hid the function: sin(30) stopped working.)
+  if (!/^[a-z_][a-z0-9_]*$/i.test(name) || /^(mm|cm|m|in|ft|deg|pi|sqrt|abs|sin|cos|tan)$/i.test(name)) {
+    app.ui.toast("Names use letters, digits and _ (not starting with a digit, and not a unit or a function like sin or pi)", "error");
     return null;
   }
   const next = [...list.filter((x) => x.name !== name), { name, expr: v.expr.trim() || "0" }];
@@ -138,12 +179,26 @@ export async function editVariables(app: AppContext): Promise<void> {
       // Shown without the unit in use ("220"): a plain number keeps the unit it had.
       const next = list.filter((x) => v[x.name]?.trim()).map((x) => ({ name: x.name, expr: withUnitOf(v[x.name], x.expr) }));
       setVariables(next);
-      const bad = next.find((x) => evaluate(x.expr) === null);
+      // (An angle - "30 deg" - is a value too: it was refused as a length.)
+      const bad = next.find((x) => evaluate(x.expr) === null && evaluate(x.expr, "angle") === null);
       if (bad) {
         setVariables(list);
         return app.ui.toast(`"${bad.expr}" isn't a valid value for ${bad.name}`, "error");
       }
-      if (next.some((x, i) => x.name !== list[i]?.name || x.expr !== list[i]?.expr) || next.length !== list.length) app.store.commit((d) => (d.variables = next));
+      // Deleted while steps still use it: they keep the sizes they have now, as
+      // plain numbers (else every rebuild said "can't be evaluated").
+      const gone = list.filter((x) => !next.some((y) => y.name === x.name)).map((x) => x.name);
+      const uses = (expr: string) => gone.some((n) => new RegExp(`(^|[^a-z0-9_])${n}($|[^a-z0-9_])`, "i").test(expr));
+      let kept = 0;
+      if (next.some((x, i) => x.name !== list[i]?.name || x.expr !== list[i]?.expr) || next.length !== list.length)
+        app.store.commit((d) => {
+          d.variables = next;
+          for (const f of d.features) {
+            for (const [path, expr] of Object.entries(f.exprs ?? {})) if (uses(expr)) (delete f.exprs![path], kept++);
+            if (f.type === "sketch") for (const c of f.constraints ?? []) if (c.expr && uses(c.expr)) (delete c.expr, kept++);
+          }
+        });
+      if (kept) app.ui.toast(`${gone.join(", ")} deleted - the ${kept === 1 ? "size" : `${kept} sizes`} that used ${gone.length > 1 ? "them" : "it"} ${kept === 1 ? "keeps its value" : "keep their values"}`);
     }
     if (!v[DIALOG_ACTION]) return;
     await createVariable(app);

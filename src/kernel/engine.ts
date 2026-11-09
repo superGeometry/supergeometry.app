@@ -349,6 +349,9 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         }
         return revolution(face, axis.origin, axis.dir, f.angle) as Shape3D;
       };
+      // A shape across the axis turns into itself (the kernel only said it
+      // "could not compute this").
+      for (const { face } of sourceFaces(f.source, ctx)) if (crossesAxis(face, axis.origin, norm(axis.dir))) throw new Error("The shape crosses the axis - it has to stay on one side of it (touching it is fine)");
       const turn = () => sourceFaces(f.source, ctx).map(({ face }) => turnFace(face));
       let parts: Shape3D[];
       try {
@@ -587,7 +590,12 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       if (!shape) {
         const bytes = Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0));
         const blob = new Blob([bytes]);
-        shape = (f.format === "step" ? await importSTEP(blob) : readSTL(bytes)) as Shape3D;
+        try {
+          shape = (f.format === "step" ? await importSTEP(blob) : readSTL(bytes)) as Shape3D;
+        } catch {
+          // (OpenCascade's own words were "This shape has not type, it is null".)
+          throw new Error(f.format === "step" ? "This STEP file couldn't be read - it may be damaged" : "This STL file couldn't be read");
+        }
         if (isEmpty(shape)) throw new Error("The file contains no solid geometry");
         importCache.set(f.data, shape);
       }
@@ -1231,6 +1239,8 @@ function pipeAlong(profile: Wire, path: Wire, up: Vec3): Shape3D {
 export function threadFace(body: Shape3D, face: Face, pitch: number, left = false): Shape3D {
   if (face.geomType !== "CYLINDRE") throw new Error("Threads go on round faces (a shank or a hole)");
   if (!(pitch > 0)) throw new Error("The pitch must be more than 0");
+  // (Finer than any standard thread: it failed with "try a slightly different pitch".)
+  if (pitch < 0.2 - 1e-9) throw new Error("That pitch is too fine - the finest is 0.2 mm");
   const cy = cylinderOf(face);
   if (!cy) throw new Error("Threads go on round faces (a shank or a hole)");
   const inside = cy.s < 0;
@@ -1306,7 +1316,8 @@ export function threadFace(body: Shape3D, face: Face, pitch: number, left = fals
       }
     }
   }
-  throw new Error("The thread couldn't be cut here - try a slightly different pitch");
+  // A very fine pitch on a wide face is where this happens: "slightly different" sent people from 0.2 to 0.21.
+  throw new Error(pitch < 0.1 * cy.r ? "The thread couldn't be cut here - try a coarser pitch" : "The thread couldn't be cut here - try a slightly different pitch");
 }
 
 /**
@@ -1880,9 +1891,13 @@ function transform(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {
         results.push(body.clone().mirror(op.plane.normal, op.plane.origin));
         break;
       case "linear":
+        patternCount(op.count);
+        if (Math.abs(op.spacing) < 1e-9 || len(op.dir) < 1e-12) throw new Error("The spacing is zero: the copies would all sit in one place");
         for (let k = 1; k < op.count; k++) results.push(body.clone().translate(scale(norm(op.dir), op.spacing * k)));
         break;
       case "circular": {
+        patternCount(op.count);
+        if (Math.abs(op.angle) < 1e-9) throw new Error("The angle is zero: the copies would all sit in one place");
         const ax = resolveAxis(op.axis, ctx);
         const full = Math.abs(Math.abs(op.angle) - 360) < 1e-6;
         const step = op.angle / (full ? op.count : Math.max(1, op.count - 1));
@@ -2069,6 +2084,33 @@ function touchedBodies(f: Feature, ctx: Ctx): string[] {
   const mode = (f as { mode?: string }).mode;
   if ((f.type === "extrude" || f.type === "revolve" || f.type === "sweep" || f.type === "loft") && mode && mode !== "new") for (const id of ctx.bodies.keys()) named.add(id);
   return [...named].filter((id) => ctx.bodies.has(id));
+}
+
+/** Does a flat shape in a plane through the axis reach both sides of it? */
+function crossesAxis(face: Face, origin: Vec3, dir: Vec3): boolean {
+  const n = norm(face.normalAt().toTuple() as Vec3);
+  if (Math.abs(dot(n, dir)) > 1e-6) return false; // tilted to the axis: not this question
+  const side = cross(dir, n);
+  let lo = 0, hi = 0;
+  for (const e of face.edges)
+    for (const k of [0, 0.25, 0.5, 0.75, 1]) {
+      const d = dot(sub(e.pointAt(k).toTuple() as Vec3, origin), side);
+      lo = Math.min(lo, d);
+      hi = Math.max(hi, d);
+    }
+  const tol = Math.max(1e-6, (hi - lo) * 1e-6);
+  return lo < -tol && hi > tol;
+}
+
+/**
+ * A pattern's count, held to what a phone can build: a typo (3000 for 30)
+ * stops at once with a message, not after minutes (and again each time the
+ * project is opened).
+ */
+const MAX_COPIES = 1000;
+function patternCount(n: number): void {
+  if (!(n >= 1) || !Number.isFinite(n)) throw new Error("The count must be 2 or more");
+  if (n > MAX_COPIES) throw new Error(`${Math.round(n)} copies is too many - up to ${MAX_COPIES} at once`);
 }
 
 /** Edits that change a solid in place (their results are checked). */

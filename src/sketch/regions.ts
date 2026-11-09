@@ -148,7 +148,15 @@ function compute(entities: SketchEntity[]): Arrangement {
     for (let j = i + 1; j < segs.length && segs[j].x0 <= A.x1; j++) {
       const B = segs[j];
       if (B.y0 > A.y1 || B.y1 < A.y0) continue;
-      if (A.p === B.p) continue; // self-intersections are ignored
+      if (A.p === B.p) {
+        // A spline crossing itself (a loop drawn by hand that runs past its
+        // start, a figure 8) is split there like two curves crossing: it had
+        // no region at all. Neighbouring pieces of it always touch, so skip those.
+        if (prims[A.p].t !== "spline") continue;
+        const n = samples[A.p].pts.length - 1;
+        const gap = Math.abs(A.i - B.i);
+        if (gap <= 1 || (isClosedPrim(prims[A.p]) && gap >= n - 1)) continue;
+      }
       // Lines lying on each other (e.g. drawn over a face's edge): each is split
       // where the other one ends, and the doubled pieces merge below.
       const lap = overlap(A.a, A.b, B.a, B.b, eps);
