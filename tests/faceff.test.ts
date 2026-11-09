@@ -155,4 +155,41 @@ check("points moved sideways as well as up", !r.errors && !r.bad, `${r.errors}${
   check("a 9-across cage raised: fine, and built in under 2 s", !r.errors && !r.bad && ms < 2000, `${r.errors}${r.bad} ${ms.toFixed(0)} ms, ${nine.cage.faces.length} faces`);
 }
 
+// One point at a time, pulled well out: on outlines with inward corners (an
+// L, a T, a U) the cage's smooth surface has points past the corner, outside
+// the face - one point by the corner pulled 5 mm folded the face over.
+{
+  const outlines: Record<string, [number, number][]> = {
+    L: [[0, 50], [40, 50], [40, 65], [15, 65], [15, 90], [0, 90]],
+    T: [[0, 0], [40, 0], [40, 10], [25, 10], [25, 40], [15, 40], [15, 10], [0, 10]],
+    U: [[0, 0], [40, 0], [40, 30], [30, 30], [30, 10], [10, 10], [10, 30], [0, 30]],
+  };
+  for (const [name, points] of Object.entries(outlines)) {
+    const part = body("L", [{ id: "p", kind: "polyline", points, closed: true }], 10);
+    const l = faceOf((await build(part)).r, "L", [0, 0, 1], 5);
+    const bad: number[] = [];
+    for (let k = 0; k < l.grid.length; k++) {
+      r = await build([...part, ff(l.ref, l.cage, (_, i) => [0, 0, i === k ? 5 : 0])]);
+      if (r.errors || r.bad) bad.push(k);
+    }
+    check(`${name}-shaped top: each inside point pulled out 5 mm on its own`, l.grid.length > 3 && !bad.length, `${l.grid.length} points, failing: ${bad.join(",")}`);
+  }
+  // A triangle: three points of outline, the grid's fourth corner goes along an edge.
+  const tri = body("T", [{ id: "p", kind: "polyline", points: [[0, 0], [40, 0], [10, 30]], closed: true }], 10);
+  const base = await build(tri);
+  const b = base.r.bodies.find((x: any) => x.id === "T");
+  const i = b.faces.findIndex((f: any) => f.normal[2] > 0.999);
+  const g = b.faceGroups.find((x: any) => x.face === i);
+  const P = (k: number): Vec3 => [b.positions[3 * k], b.positions[3 * k + 1], b.positions[3 * k + 2]];
+  const tris: [Vec3, Vec3, Vec3][] = [];
+  for (let t = g.start; t < g.start + g.count; t += 3) tris.push([P(b.indices[t]), P(b.indices[t + 1]), P(b.indices[t + 2])]);
+  const cage = faceCage(tris, b.faces[i].center, b.faces[i].normal, 5);
+  check("a triangular top takes a cage", !!cage && cage.verts.length > 8, `${cage?.verts.length ?? 0} points`);
+  if (cage) {
+    const t = faceOf(base.r, "T", [0, 0, 1], 5);
+    r = await build([...tri, ff(t.ref, t.cage, () => [0, 0, 3])]);
+    check("...and is raised", !r.errors && !r.bad && vol("T") > 6000, `${r.errors}${r.bad} ${vol("T").toFixed(0)}`);
+  }
+}
+
 process.exit(failed ? 1 : 0);

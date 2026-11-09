@@ -107,6 +107,93 @@ let cache: CacheEntry[] = [];
  */
 let savedCache: CacheEntry[] = [];
 
+/**
+ * The engine itself broke down on a step (out of memory, a fault inside
+ * OpenCascade): nothing it holds can be trusted after that. Whoever runs the
+ * engine loads a fresh one, calls `resetKernel`, and asks again - the step
+ * that did it is remembered (by its key) and refused with words from then on.
+ */
+export class KernelFault extends Error {
+  constructor(readonly featureId: string) {
+    super("The geometry engine broke down and has to be restarted");
+  }
+}
+const FAULT_TEXT = "This step made the geometry engine run out of memory or break down (a value far too big, or too small?) - change its values, or delete it";
+/** Steps (by key) that broke the engine: not tried again. */
+const crashed = new Map<string, string>();
+/**
+ * Steps the engine broke down on once. The first time may be the engine's
+ * memory having filled up over a long session (it never gives any back), so
+ * the step gets a second go on the fresh engine; only if that breaks too is it the step.
+ */
+const suspects = new Set<string>();
+function blame(key: string): void {
+  if (crashed.size > 200) crashed.clear();
+  if (suspects.size > 200) suspects.clear();
+  if (suspects.has(key)) crashed.set(key, FAULT_TEXT);
+  else suspects.add(key);
+}
+
+/** Is this the engine breaking down (not a step that merely can't be done)? */
+export function isFault(err: unknown): boolean {
+  if (err instanceof KernelFault) return true;
+  if (typeof WebAssembly !== "undefined" && err instanceof WebAssembly.RuntimeError) return true;
+  const text = err instanceof Error ? `${err.name} ${err.message}` : typeof err === "string" ? err : "";
+  return /memory access out of bounds|out of memory|unreachable|table index is out of bounds|null function or function signature mismatch|Aborted\(|Maximum call stack|Expected null or instance of|Cannot pass deleted object|BindingError/i.test(text);
+}
+
+/** After a fresh OpenCascade was loaded: everything made with the old one is dropped. */
+export function resetKernel(): void {
+  cache = [];
+  savedCache = [];
+  lastBodies = new Map();
+  importCache.clear();
+}
+
+/**
+ * `work`, and if the engine breaks down in it: a fresh engine (`reload` loads
+ * OpenCascade again) and once more, the step that did it now refused.
+ */
+export async function withFreshKernel<T>(reload: () => Promise<void>, work: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await work();
+    } catch (err) {
+      if (!isFault(err) || attempt >= 3) throw err;
+      await reload();
+      resetKernel();
+    }
+  }
+}
+
+/** The furthest from the origin a body may reach (mm): past it OpenCascade's own tolerances stop meaning anything. */
+const MAX_REACH = 1e7;
+
+/** A step's vectors, where the file should hold [x, y, z] (or [x, y]). */
+const VECTOR_KEYS = new Set(["origin", "xDir", "normal", "dir", "mid", "center", "translate", "factors"]);
+/**
+ * Is a step's saved data broken (a damaged file, or one written by something
+ * else): a vector that isn't numbers, a number that is missing from a list of them?
+ */
+function damaged(v: unknown, key = "", depth = 0): boolean {
+  if (v === null || typeof v !== "object") return VECTOR_KEYS.has(key) && v !== undefined;
+  if (Array.isArray(v)) {
+    const numbers = v.some((x) => typeof x === "number");
+    if (numbers && !v.every((x) => typeof x === "number" && Number.isFinite(x))) return true;
+    if (VECTOR_KEYS.has(key) && (!numbers || v.length < 2 || v.length > 3)) return true;
+    if (numbers) return false;
+    return v.some((x) => damaged(x, "", depth + 1));
+  }
+  if (VECTOR_KEYS.has(key)) return true;
+  for (const [k, x] of Object.entries(v)) {
+    // (An imported file's bytes, a sketch's history: not values of the step.)
+    if (depth === 0 && (k === "data" || k === "log")) continue;
+    if (damaged(x, k, depth + 1)) return true;
+  }
+  return false;
+}
+const DAMAGED_TEXT = "This step's saved values are damaged or incomplete - open it and set them again, or delete it";
+
 // ------------------------------------------------------------------ public API
 
 export async function exportBodies(features: Feature[], format: ExportFormat, only?: string[]): Promise<Blob> {
@@ -144,6 +231,13 @@ export async function regenerate(features: Feature[], saved = false): Promise<Re
     try {
       meshes.push(meshBody(id, names.get(id)!, shape));
     } catch (err) {
+      if (isFault(err)) {
+        // The last step that changed this body is the one whose result can't be shown.
+        let k = cache.length - 1;
+        while (k > 0 && cache[k - 1].ctx.bodies.get(id) === shape) k--;
+        if (cache[k]) blame(cache[k].key);
+        throw new KernelFault(features[k]?.id ?? baseId(id));
+      }
       errors.push({ featureId: baseId(id), message: `Could not display body: ${errorText(err)}` });
     }
   }
@@ -192,6 +286,8 @@ async function run(features: Feature[], saved = false) {
       if (!f.suppressed) {
         try {
           editNotes.length = 0;
+          if (crashed.has(key)) throw new Error(crashed.get(key));
+          if (damaged(f)) throw new Error(DAMAGED_TEXT);
           // An edit works on copies of the bodies it may touch: OpenCascade is
           // allowed to adjust the shapes it is given, and the earlier steps'
           // results (kept in the cache) must never change - not even when this
@@ -209,6 +305,17 @@ async function run(features: Feature[], saved = false) {
           }
           await apply(f, out);
           for (const [id, c] of copies) if (out.bodies.get(id) === c) out.bodies.set(id, ctx.bodies.get(id)!);
+          // Nothing kilometres across, or away: a typo (a size with six noughts
+          // too many), and more than the engine or the view can work with.
+          for (const [id, after] of out.bodies) {
+            if (after === ctx.bodies.get(id)) continue;
+            const [lo, hi] = after.boundingBox.bounds;
+            const reach = Math.max(...lo.map(Math.abs), ...hi.map(Math.abs));
+            // (An empty result has an upside-down box: left to the checks below.)
+            if (lo[0] <= hi[0] && !(reach < MAX_REACH)) throw new Error("This would reach more than 10 km from the origin - check its values (a typo?)");
+            // ...and nothing scaled away to a speck (a factor of 0.0000008).
+            if (lo[0] <= hi[0] && Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) < 1e-4) throw new Error("This would be smaller than a ten-thousandth of a mm - check its values (a typo?)");
+          }
           // Every edit of a solid ends in one: checked (and tidied) before it counts.
           if (GUARDED.has(f.type)) {
             for (const [id, after] of [...out.bodies]) {
@@ -235,6 +342,11 @@ async function run(features: Feature[], saved = false) {
           // Anything but a move/scale changing a freeform body makes it an ordinary body.
           if (f.type !== "freeform" && f.type !== "transform") for (const id of [...out.freeforms.keys()]) if (out.bodies.get(id) !== ctx.bodies.get(id)) out.freeforms.delete(id);
         } catch (err) {
+          if (isFault(err)) {
+            blame(key);
+            console.error(err);
+            throw new KernelFault(f.id);
+          }
           entry.error = errorText(err);
           entry.ctx = { ...ctx, sketches: f.type === "sketch" ? new Map(ctx.sketches).set(f.id, { ...f, boundary: [] }) : ctx.sketches };
         }
@@ -662,10 +774,24 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       if (!f.cage?.verts?.length) throw new Error("Made before Freeform Face had a cage: tap the face, Edit Freeform, and shape it again");
       // The cage follows the face (an earlier step moved it).
       const c = face.center.toTuple() as Vec3;
-      const pts = faceCagePoints({ faces: f.cage.faces, verts: f.cage.verts.map((v) => add(c, v)) }, norm(face.normalAt().toTuple() as Vec3));
-      if (!pts) return;
-      bodies.set(f.face.body, staysClosed(body, freeformFace(body, face, pts)));
-      return;
+      const cage = { faces: f.cage.faces, verts: f.cage.verts.map((v) => add(c, v)) };
+      const n = norm(face.normalAt().toTuple() as Vec3);
+      // Through the cage's surface twice as fine as the cage; if the face
+      // can't be filled through that many points (a fine cage on an outline
+      // with inward corners), through the cage's own.
+      let last: unknown;
+      for (const fine of [true, false]) {
+        const pts = faceCagePoints(cage, n, fine);
+        if (!pts) return;
+        try {
+          bodies.set(f.face.body, staysClosed(body, freeformFace(body, face, onFace(face, pts))));
+          return;
+        } catch (err) {
+          if (isFault(err)) throw err;
+          last = err;
+        }
+      }
+      throw last;
     }
 
     case "replaceFace": {
@@ -2220,14 +2346,51 @@ function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3): Sh
  * out: the face's own edges are kept), for the face to be filled through; null
  * when every inside point is still on the face (nothing to do).
  */
-function faceCagePoints(cage: { verts: Vec3[]; faces: [number, number, number, number][] }, normal: Vec3): Vec3[] | null {
+/**
+ * Those of `pts` that lie over the flat face itself (seen along its normal),
+ * clear of its edge. A cage's smooth surface cuts an inward corner of the
+ * face's outline (an L's) a little short: the points it has out there, past
+ * the edge, would fold the face over when it is filled through them.
+ */
+function onFace(face: Face, pts: Vec3[]): Vec3[] {
+  const n = norm(face.normalAt().toTuple() as Vec3);
+  const u = xDirFor(n);
+  const v = norm(cross(n, u));
+  // (outerWire uses up the face it's called on: a clone.)
+  const wire = face.clone().outerWire();
+  const loop = curvePoints(wire.wrapped, 600, true).map((p) => [dot(p, u), dot(p, v)]);
+  wire.delete();
+  const N = loop.length;
+  let area = 0;
+  for (let a = 0, b = N - 1; a < N; b = a++) area += loop[b][0] * loop[a][1] - loop[a][0] * loop[b][1];
+  const margin = Math.sqrt(Math.abs(area) / 2) * 0.01;
+  const kept = pts.filter((p) => {
+    const x = dot(p, u);
+    const y = dot(p, v);
+    let inside = false;
+    let near = Infinity;
+    for (let a = 0, b = N - 1; a < N; b = a++) {
+      const [ax, ay] = loop[a];
+      const [bx, by] = loop[b];
+      if (ay > y !== by > y && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) inside = !inside;
+      const L = (bx - ax) ** 2 + (by - ay) ** 2;
+      const t = L > 0 ? Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L)) : 0;
+      near = Math.min(near, Math.hypot(x - ax - t * (bx - ax), y - ay - t * (by - ay)));
+    }
+    return inside && near > margin;
+  });
+  // (None left - a sliver of a face: as they were, and the fill says what it can't do.)
+  return kept.length ? kept : pts;
+}
+
+function faceCagePoints(cage: { verts: Vec3[]; faces: [number, number, number, number][] }, normal: Vec3, fine = true): Vec3[] | null {
   const border = new Set(boundaryEdges(cage).flat());
   const inside = cage.verts.map((_, i) => i).filter((i) => !border.has(i));
   const o = cage.verts[[...border][0]];
   // All still in the face's plane: the smooth surface is the flat face itself.
   if (!o || !inside.some((i) => Math.abs(dot(sub(cage.verts[i], o), normal)) > 1e-9)) return null;
   // Twice as fine as the cage, as long as that isn't too many to fill through.
-  const plan = cachedPlan(cage, inside.length > 60 ? 0 : 1);
+  const plan = cachedPlan(cage, !fine || inside.length > 60 ? 0 : 1);
   const pos = applyPlan(plan, cage.verts);
   const { ptr, idx } = plan.rows;
   const out: Vec3[] = [];
@@ -2325,7 +2488,8 @@ function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
   if (cached) return { ...cached, id, name };
   const bb = shape.boundingBox;
   const diag = Math.hypot(bb.width, bb.height, bb.depth) || 1;
-  const tolerance = Math.min(0.1, Math.max(0.001, diag * 0.0008));
+  // (Never finer than 1/50 000 of its size: a 100 m arc at 0.1 mm is millions of triangles.)
+  const tolerance = Math.max(Math.min(0.1, Math.max(0.001, diag * 0.0008)), diag * 2e-5);
   const angularTolerance = 0.25;
   const m = shape.mesh({ tolerance, angularTolerance });
   const e = shape.meshEdges({ tolerance, angularTolerance });
@@ -2626,7 +2790,14 @@ function bodyNames(features: Feature[], ids: string[], numbers: Map<string, numb
 }
 
 export function errorText(err: unknown): string {
-  if (err instanceof Error) return err.message;
+  // A step whose saved values are missing or the wrong kind (a damaged file, a
+  // step from a newer version) trips the code itself: said in words, not "x is not iterable".
+  if (err instanceof RangeError && /allocation|array length|Array buffer|too large/i.test(err.message)) return "This is too big to compute (a value far too big?)";
+  if (err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError) {
+    console.error(err);
+    return DAMAGED_TEXT;
+  }
+  if (err instanceof Error) return err.message.trim() || "The geometry kernel could not compute this (try other values)";
   // OpenCascade gave up (a raw exception from the kernel): say so in words.
   if (typeof err === "number" || String(err).includes("WebAssembly.Exception") || String(err) === "[object Object]") return "The geometry kernel could not compute this (try other values)";
   return String(err);

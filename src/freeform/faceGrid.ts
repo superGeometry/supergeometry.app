@@ -131,8 +131,17 @@ export function faceCage(tris: [Vec3, Vec3, Vec3][], center: Vec3, normal: Vec3,
   const u = xDirFor(nn);
   const v = norm(cross(nn, u));
   const uv = (p: Vec3): P2 => [dot(sub(p, center), u), dot(sub(p, center), v)];
-  const loop = outline(tris, uv);
-  if (loop.length < 3) return null;
+  const drawn = outline(tris, uv);
+  if (drawn.length < 3) return null;
+  // Points along its straight edges too (a triangle's outline is three points:
+  // nowhere for a fourth corner of the grid to go but a point along an edge).
+  const around = drawn.reduce((t, p, i) => t + Math.hypot(drawn[(i + 1) % drawn.length][0] - p[0], drawn[(i + 1) % drawn.length][1] - p[1]), 0);
+  const loop: P2[] = [];
+  drawn.forEach((p, i) => {
+    const q = drawn[(i + 1) % drawn.length];
+    const pieces = Math.max(1, Math.ceil((Math.hypot(q[0] - p[0], q[1] - p[1]) / around) * 32));
+    for (let k = 0; k < pieces; k++) loop.push([p[0] + ((q[0] - p[0]) * k) / pieces, p[1] + ((q[1] - p[1]) * k) / pieces]);
+  });
   const N = loop.length;
   const acc = [0];
   for (let i = 1; i <= N; i++) acc.push(acc[i - 1] + Math.hypot(loop[i % N][0] - loop[i - 1][0], loop[i % N][1] - loop[i - 1][1]));
