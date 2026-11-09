@@ -411,14 +411,26 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       for (const [bodyId, refs] of byBody) {
         const body = need(bodies, bodyId);
         const edges = refs.map((r) => resolveEdge(body, r));
-        let result: Shape3D;
+        let result: Shape3D | null = null;
+        const edge = (r: number) => (f.type === "fillet" ? body.fillet(r, (finder) => finder.inList(edges)) : body.chamfer(r, (finder) => finder.inList(edges)));
         try {
-          result =
-            f.type === "fillet"
-              ? body.fillet(f.radius, (finder) => finder.inList(edges))
-              : body.chamfer(f.radius, (finder) => finder.inList(edges));
+          result = edge(f.radius);
         } catch (err) {
           if (err instanceof Error && !/WebAssembly|kernel/i.test(err.message)) throw err;
+          // Exactly the size that uses up a face (4 mm on both edges of an
+          // 8 mm block: a full round): the two roundings meet with nothing
+          // between, and that exact case fails where 3.999 works. A hair
+          // less gives the same shape, to a millionth of a millimetre.
+          for (const k of [1 - 1e-6, 1 - 1e-5, 1 - 1e-4]) {
+            try {
+              result = edge(f.radius * k);
+              break;
+            } catch {
+              // a bit less again
+            }
+          }
+        }
+        if (!result) {
           const what = f.type === "fillet" ? "radius" : "distance";
           throw new Error(`That ${f.type} doesn't fit here - the ${what} is too big for the faces around ${edges.length > 1 ? "those edges" : "that edge"}. Try a smaller ${what}.`);
         }
@@ -459,6 +471,14 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // Many-faced shapes trip the one-step shell: hollow with an offset copy
       // of the body instead, then cut the openings through.
       if (!hollowed(out)) out = shellByOffset(body, faces, Math.abs(f.thickness));
+      // A wall exactly as thick as the corners are round (2 mm walls in a box
+      // with 2 mm corners): the inside corners shrink to nothing, and that
+      // exact case defeats both. A hair thicker gives the sharp inside corner
+      // it should have.
+      for (const k of [1 + 1e-4, 1 + 1e-3]) {
+        if (hollowed(out) || !faces.length) break;
+        out = shellByOffset(body, faces, Math.abs(f.thickness) * k);
+      }
       // OpenCascade can "succeed" without hollowing anything: say so.
       if (!hollowed(out)) throw new Error("Shell didn't work on this shape (try a smaller thickness)");
       bodies.set(f.body, out!);
@@ -467,12 +487,13 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "boolean": {
       let target = need(bodies, f.target);
+      const toolIds = bodyList(f.tools, bodies, "tools");
       const solidsIn = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;
       // Subtract: every tool at once - joined, then one tolerant cut checked by
       // its volume. Cut one by one, eight vents round a lamp shade left it with
       // no solid after the sixth, and the message blamed an "open surface".
-      if (f.op === "subtract" && f.tools.length) {
-        const tools = f.tools.map((t) => need(bodies, t));
+      if (f.op === "subtract" && toolIds.length) {
+        const tools = toolIds.map((t) => need(bodies, t));
         if (!solidsIn(target) || tools.some((t) => !solidsIn(t)))
           throw new Error("One of these is an open surface (e.g. a freeform with a hole), not a solid. Close it first: tap an edge of the hole → Fill hole, or give it a Thickness - then Union.");
         const all = fuseAll(tools.map((t) => t.clone()));
@@ -493,13 +514,13 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
             // No plain cut either (it can come back empty): the tolerant one goes on to be checked.
           }
         }
-        if (!f.keepTools) for (const t of f.tools) bodies.delete(t);
+        if (!f.keepTools) for (const t of toolIds) bodies.delete(t);
         // Kept as it was: the result is a body of its own.
         bodies.set(f.keepTarget ? f.id : f.target, out);
         return;
       }
       let open: number | undefined;
-      for (const t of f.tools) {
+      for (const t of toolIds) {
         const tool = need(bodies, t);
         const solids = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;
         // An open freeform (a surface with a hole) isn't a solid: nothing to join into.
@@ -604,7 +625,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     }
 
     case "delete":
-      for (const b of f.bodies) bodies.delete(b);
+      for (const b of bodyList(f.bodies, bodies, "bodies")) bodies.delete(b);
       return;
 
     case "image":
@@ -646,7 +667,23 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "thread": {
       const body = need(bodies, f.face.body);
-      const face = resolveFace(body, f.face);
+      // Only a round face of the kind picked (a hole stays a hole): with the
+      // boss its hole was in switched off, the nearest face was the box's
+      // rounded corner - threaded, 60 turns of it, for over a minute. And
+      // about its size: a shelled box's inside corner is a "hole" too.
+      const round = (g: Face) => {
+        if (g.geomType !== "CYLINDRE") return false;
+        const cy = cylinderOf(g);
+        return !!cy && (!f.round || ((cy.s < 0) === f.round.hole && cy.r < f.round.r * 2 && cy.r > f.round.r / 2));
+      };
+      let face: Face;
+      try {
+        face = resolveFace(body, f.face, round);
+      } catch {
+        // Never a round face (a flat one picked): threadFace says threads go on round faces.
+        if (!f.round) face = resolveFace(body, f.face);
+        else throw new Error(f.round.hole ? "The hole it was cut in is gone" : "The round face it was cut on is gone");
+      }
       bodies.set(f.face.body, threadFace(body, face, f.pitch, !!f.left));
       return;
     }
@@ -1229,6 +1266,9 @@ function pipeAlong(profile: Wire, path: Wire, up: Vec3): Shape3D {
   }
 }
 
+/** Turns of a thread's groove made in one piece (see threadFace). */
+const MAX_THREAD_TURNS = 8;
+
 /**
  * Cut an ISO 60° thread into a round face: a V groove swept along a helix
  * round the face's axis (deepest at the minor diameter of a shank, the major
@@ -1295,15 +1335,24 @@ export function threadFace(body: Shape3D, face: Face, pitch: number, left = fals
     const turns = Math.ceil((hi - start) / pitch) + 1;
     // An exact helix (a line wound on a cylinder, not a fitted spline: those
     // drift over many turns and the sweep fails), through the groove's middle.
-    const base = add(cy.c, scale(a, start));
-    const helix = makeHelix(pitch, pitch * turns, (tip + mouth) / 2, base, a, left);
-    const r0 = sub(helix.startPoint.toTuple() as Vec3, base);
-    const ur = norm(sub(r0, scale(a, dot(r0, a))));
-    const at = (rr: number, t: number): Vec3 => add(add(base, scale(a, t)), scale(ur, rr));
-    const profile = makePolygon([at(mouth, -hm), at(tip, 0), at(mouth, hm)]).outerWire();
+    // Long threads go in pieces of a few whole turns: one 40-turn groove in an
+    // M3 boss hole made OpenCascade's cut find nothing to cut (after 40 s).
+    // Whole turns, so each piece ends on the very face the next starts on.
+    const per = Math.ceil(turns / Math.ceil(turns / MAX_THREAD_TURNS));
     let cut: Shape3D;
     try {
-      cut = pipeAlong(profile, helix, a).intersect(slab);
+      const pieces: Shape3D[] = [];
+      for (let k = 0; k * per < turns; k++) {
+        const n = Math.min(per, turns - k * per);
+        const base = add(cy.c, scale(a, start + k * per * pitch));
+        const helix = makeHelix(pitch, pitch * n, (tip + mouth) / 2, base, a, left);
+        const r0 = sub(helix.startPoint.toTuple() as Vec3, base);
+        const ur = norm(sub(r0, scale(a, dot(r0, a))));
+        const at = (rr: number, t: number): Vec3 => add(add(base, scale(a, t)), scale(ur, rr));
+        const profile = makePolygon([at(mouth, -hm), at(tip, 0), at(mouth, hm)]).outerWire();
+        pieces.push(pipeAlong(profile, helix, a).intersect(slab));
+      }
+      cut = pieces.length === 1 ? pieces[0] : (makeCompound(pieces) as unknown as Shape3D);
     } catch {
       continue;
     }
@@ -1991,10 +2040,11 @@ function edgeInfo(edge: Edge): EdgeInfo {
 }
 
 /** Best-matching face for a stored signature (survives upstream edits). */
-function resolveFace(body: Shape3D, ref: FaceRef): Face {
+function resolveFace(body: Shape3D, ref: FaceRef, only?: (f: Face) => boolean): Face {
   const size = Math.sqrt(ref.area) || 1;
   let best: { face: Face; score: number } | null = null;
   for (const face of body.faces) {
+    if (only && !only(face)) continue;
     const fi = faceInfo(face);
     const align = dot(fi.normal, ref.normal);
     if (align < 0.5) continue;
@@ -2242,6 +2292,44 @@ function readSTL(bytes: Uint8Array): Shape3D {
     oc.FS.unlink(`/${name}`);
     reader.delete();
   }
+}
+
+/**
+ * The bodies a step names, as they are now. A whole pattern picked (the
+ * original and every copy - "Whole Pattern") stays whole when the pattern's
+ * count changes: 8 vents subtracted, made 10, all 10 are cut (and made 6, the
+ * step still works). Copies no longer there are left out with a note, as long
+ * as something is left to work with.
+ */
+function bodyList(ids: string[], bodies: Bodies, what: "tools" | "bodies"): string[] {
+  const out: string[] = [];
+  const copyOf = (id: string) => /^([^:]+:.+):(\d+)$/.exec(id);
+  const groups = new Map<string, number[]>();
+  for (const id of ids) {
+    const m = copyOf(id);
+    if (m) groups.set(m[1], [...(groups.get(m[1]) ?? []), +m[2]]);
+  }
+  const whole = new Set<string>();
+  for (const [prefix, ks] of groups) {
+    const original = prefix.slice(prefix.indexOf(":") + 1);
+    const sorted = [...new Set(ks)].sort((a, b) => a - b);
+    if (ids.includes(original) && sorted.every((k, i) => k === i)) whole.add(prefix);
+  }
+  // Copies of copies too (a row of holes, then mirrored: the mirror's copies of the row's copies).
+  const add = (id: string) => {
+    if (out.includes(id)) return;
+    out.push(id);
+    for (const p of whole) if (p.slice(p.indexOf(":") + 1) === id) for (const k of [...bodies.keys()]) if (k.startsWith(`${p}:`) && /^\d+$/.test(k.slice(p.length + 1))) add(k);
+  };
+  for (const id of ids) {
+    const m = copyOf(id);
+    if (!m || !whole.has(m[1])) add(id);
+  }
+  const have = [...new Set(out)].filter((id) => bodies.has(id));
+  const gone = new Set(out).size - have.length;
+  if (!have.length) throw new Error("A body it uses no longer exists");
+  if (gone) editNotes.push(`${gone} of the ${what === "tools" ? "bodies it used" : "bodies it named"} no longer exist - it works with the rest.`);
+  return have;
 }
 
 function need(bodies: Bodies, id: string): Shape3D {
