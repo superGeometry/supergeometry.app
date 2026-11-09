@@ -53,11 +53,11 @@ import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "
 import { outlineOffsetCurves, projectPolyline } from "../sketch/edit";
 
 import { cageToShape } from "./freeform";
-import { bridgeCage, type BridgeEnd } from "../freeform/connect";
+import { gentle, guideCurve, plainSpine } from "../freeform/connect";
 import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from "./health";
 import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
-import { deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
+import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
 import { edgeSteps, faceSteps, inheritTags, sameSteps, seamEdges, tagBody } from "./provenance";
 
@@ -659,10 +659,11 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     case "faceFreeform": {
       const body = need(bodies, f.face.body);
       const face = resolveFace(body, f.face);
-      if (!f.points.some((p) => len(p.move) > 1e-9)) return;
-      // The grid follows the face (an earlier step moved it).
+      if (!f.cage?.verts?.length) throw new Error("Made before Freeform Face had a cage: tap the face, Edit Freeform, and shape it again");
+      // The cage follows the face (an earlier step moved it).
       const c = face.center.toTuple() as Vec3;
-      const pts = f.points.map((p) => add(add(c, p.at), p.move));
+      const pts = faceCagePoints({ faces: f.cage.faces, verts: f.cage.verts.map((v) => add(c, v)) }, norm(face.normalAt().toTuple() as Vec3));
+      if (!pts) return;
       bodies.set(f.face.body, staysClosed(body, freeformFace(body, face, pts)));
       return;
     }
@@ -720,15 +721,31 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const fa = resolveFace(A, ra);
       const fb = resolveFace(B, rb);
       if (ra.body === rb.body && fa.isSame(fb)) throw new Error("Pick two different faces to connect");
-      const guide = f.guide ? curvePoints(pathWire(f.guide, ctx).wrapped, 200) : undefined;
-      const cage = bridgeCage(bridgeEnd(A, fa), bridgeEnd(B, fb), { bulge: f.bulge ?? 1, size: f.size ?? 0.92, guide });
+      const m = f.mode === "auto" ? "join" : f.mode;
+      const size = f.size ?? 1;
+      // Cut between two faces of one body: a tunnel, into the faces (else out of them).
+      const inward = m === "cut" && ra.body === rb.body;
+      // Cutting a face's whole outline out: the cutter a hair wider, so no sliver stays on the walls beside it.
+      const cutSize = m === "cut" && !inward && size > 0.99 ? size * 1.002 : size;
+      const ea = bridgeEnd(A, fa, cutSize, inward, m !== "new");
+      const eb = bridgeEnd(B, fb, cutSize, inward, m !== "new");
+      const reach = Math.max(ea.reach, eb.reach);
+      // How far the bridge reaches one way across it (the wider of its ends).
+      const width = (n: Vec3) => Math.max(...[ea, eb].flatMap((e) => e.ring.map((p) => dot(p, n))));
+      let along: (t: number) => Vec3;
+      if (f.guide) {
+        // Eased onto the guide over a longer stretch when it leaves the face steeply.
+        const pts = curvePoints(pathWire(f.guide, ctx).wrapped, 200);
+        const tries = [1.5, 2.5, 3.5, 5].map((k) => guideCurve(pts, ea.center, eb.center, ea.dir, eb.dir, k * reach));
+        along = tries.find((c) => gentle(c, width)) ?? tries[0];
+      } else along = plainSpine(ea.center, ea.dir, eb.center, eb.dir, f.bulge ?? 1, width);
       let bridge: Shape3D;
       try {
-        bridge = checkedFreeform(cage);
-      } catch {
-        throw new Error("The bridge folds into itself here - make it bow out less (Bend), or pick faces that face each other more");
+        bridge = sweepBridge(ea, eb, along);
+      } finally {
+        ea.outline.delete();
+        eb.outline.delete();
       }
-      const m = f.mode === "auto" ? "join" : f.mode;
       if (m === "new") {
         bodies.set(f.id, bridge);
         return;
@@ -2107,16 +2124,114 @@ function curvePoints(wire: any, n: number, closed = false): Vec3[] {
   return out;
 }
 
-function bridgeEnd(body: Shape3D, face: Face): BridgeEnd {
+interface BridgeEnd {
+  center: Vec3;
+  /** The way the bridge leaves the face: out of it (into it, for a tunnel). */
+  dir: Vec3;
+  /** The outline swept (sized, and moved `depth` back against `dir`). */
+  outline: any;
+  depth: number;
+  /** How far the outline reaches from the middle. */
+  reach: number;
+  /** Points round the outline (sized), from the middle. */
+  ring: Vec3[];
+}
+
+/**
+ * One end of Connect's bridge: the face's outline (`size` of it, about its
+ * middle), moved a little way into its body when it's to be joined or cut
+ * (so the bodies overlap it, not only touch) - never out of the far side.
+ */
+function bridgeEnd(body: Shape3D, face: Face, size: number, inward: boolean, sink: boolean): BridgeEnd {
   const oc = getOC();
   const info = faceInfo(face);
-  const ring = curvePoints(oc.BRepTools.OuterWire(face.wrapped), 160, true);
-  const reach = Math.max(...ring.map((p) => dist(p, info.center)));
+  const ring = curvePoints(oc.BRepTools.OuterWire(face.wrapped), 64, true);
+  const reach = Math.max(...ring.map((p) => dist(p, info.center))) * size;
+  const around = ring.map((p) => scale(sub(p, info.center), size));
+  const dir = inward ? scale(info.normal, -1) : info.normal;
+  // The ends start a little back from the faces so the bridge overlaps what it
+  // joins (into the body, but not out of its back; for a tunnel, outside it).
   const [lo, hi] = body.boundingBox.bounds as [Vec3, Vec3];
   let behind = 0;
   for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) behind = Math.max(behind, dot(sub(info.center, [x, y, z]), info.normal));
-  const depth = Math.max(1e-3, Math.min(reach * 0.35, behind * 0.45 || reach * 0.1));
-  return { ring, center: info.center, normal: info.normal, depth };
+  const depth = !sink ? 0 : inward ? reach * 0.25 : Math.max(1e-3, Math.min(reach * 0.25, behind * 0.45 || reach * 0.1));
+  const t = new oc.gp_Trsf();
+  const at = new oc.gp_Pnt(info.center[0], info.center[1], info.center[2]);
+  t.SetScale(at, size);
+  const move = new oc.gp_Trsf();
+  const v = new oc.gp_Vec(-dir[0] * depth, -dir[1] * depth, -dir[2] * depth);
+  move.SetTranslation(v);
+  const both = move.Multiplied(t);
+  const mk = new oc.BRepBuilderAPI_Transform(oc.BRepTools.OuterWire(face.wrapped), both, true);
+  const outline = mk.Shape();
+  for (const x of [t, at, move, v, both, mk]) x.delete();
+  return { center: info.center, dir, outline, depth, reach, ring: around };
+}
+
+/**
+ * Connect's bridge: face A's outline swept along `along` (0..1, from A's
+ * middle to B's) turning into face B's - it starts and ends exactly on the
+ * faces (as sized, and set back, by bridgeEnd).
+ */
+function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3): Shape3D {
+  const oc = getOC();
+  // In from deep in A, straight out through its face; along the curve; and the same into B.
+  const lead = (e: BridgeEnd, back: boolean) => {
+    const k = [0, 1, 2, 3].map((i) => (e.depth * (back ? i : 3 - i)) / 3);
+    return e.depth > 0 ? k.filter((x) => x > 0).map((x) => sub(e.center, scale(e.dir, x))) : [];
+  };
+  const pts = [...lead(a, false), ...Array.from({ length: 61 }, (_, i) => along(i / 60)), ...lead(b, true)];
+  const span = dist(pts[0], pts[pts.length - 1]) + 1;
+  const spine = assembleWire([makeBSplineApproximation(pts, { tolerance: span * 1e-4, degMax: 5, degMin: 3 })]);
+  const ends = [a.outline, b.outline];
+  // The way the outline is carried along: each copes with curves the others don't.
+  for (const mode of ["discrete", "corrected"]) {
+    const mk = new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped);
+    const progress = new oc.Message_ProgressRange();
+    try {
+      if (mode === "discrete") mk.SetDiscreteMode();
+      else mk.SetMode(false);
+      mk.Add(ends[0], false, false);
+      mk.Add(ends[1], false, false);
+      mk.Build(progress);
+      if (!mk.IsDone()) throw new Error("sweep");
+      mk.MakeSolid();
+      let s = cast(mk.Shape()) as Shape3D;
+      if (measureVolume(s) < 0) s = cast(s.wrapped.Reversed()) as Shape3D;
+      if (!shapeValid(s) || !(measureVolume(s) > 0)) throw new Error("bad");
+      return s;
+    } catch {
+      /* the next way, or none */
+    } finally {
+      mk.delete();
+      progress.delete();
+    }
+  }
+  throw new Error("The bridge can't be made along this curve (it turns too tightly for its width, or twists through itself) - try a gentler curve, or a smaller Size");
+}
+
+/**
+ * Points on the smooth surface a Freeform Face cage makes (its border left
+ * out: the face's own edges are kept), for the face to be filled through; null
+ * when every inside point is still on the face (nothing to do).
+ */
+function faceCagePoints(cage: { verts: Vec3[]; faces: [number, number, number, number][] }, normal: Vec3): Vec3[] | null {
+  const border = new Set(boundaryEdges(cage).flat());
+  const inside = cage.verts.map((_, i) => i).filter((i) => !border.has(i));
+  const o = cage.verts[[...border][0]];
+  // All still in the face's plane: the smooth surface is the flat face itself.
+  if (!o || !inside.some((i) => Math.abs(dot(sub(cage.verts[i], o), normal)) > 1e-9)) return null;
+  // Twice as fine as the cage, as long as that isn't too many to fill through.
+  const plan = cachedPlan(cage, inside.length > 60 ? 0 : 1);
+  const pos = applyPlan(plan, cage.verts);
+  const { ptr, idx } = plan.rows;
+  const out: Vec3[] = [];
+  for (let k = 0; k < ptr.length - 1; k++) {
+    let onBorder = true;
+    for (let t = ptr[k]; t < ptr[k + 1] && onBorder; t++) if (!border.has(idx[t])) onBorder = false;
+    if (!onBorder) out.push([pos[3 * k], pos[3 * k + 1], pos[3 * k + 2]]);
+  }
+  return out;
 }
 
 function faceInfo(face: Face): FaceInfo {

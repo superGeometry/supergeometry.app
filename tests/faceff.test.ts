@@ -1,13 +1,14 @@
 // Run: npx tsx tests/faceff.test.ts
-// Freeform Face: a flat face of a body made a smooth surface through a grid
-// of points, its edges kept - raised, pushed in, on a round face, on an
+// Freeform Face: a flat face of a body made a smooth surface by a cage laid
+// over it, its edges kept - raised, pushed in, on a round face, on an
 // L-shaped face, after fillets, followed when an earlier step moves the face,
 // joined to another body after, and refused on a face with a hole.
 import opencascade from "replicad-opencascadejs";
 import { getOC, measureVolume, setOC, type Shape3D } from "replicad";
 import { debugBodies, regenerate, shapeValid } from "../src/kernel/engine";
 import { arrangement, regionRef } from "../src/sketch/regions";
-import { faceGrid } from "../src/freeform/faceGrid";
+import { faceCage } from "../src/freeform/faceGrid";
+import { boundaryEdges, type Cage } from "../src/freeform/cage";
 import type { Feature, PlaneDef, Vec3 } from "../src/doc/types";
 
 setOC(await (opencascade as unknown as () => Promise<any>)());
@@ -45,7 +46,7 @@ async function build(fs: Feature[]) {
   return { r, errors, bad: bad.join(", ") };
 }
 
-/** The (first) face of a body facing `normal`: its ref and grid. */
+/** The (first) face of a body facing `normal`: its ref and cage. */
 function faceOf(r: any, id: string, normal: Vec3, n = 5) {
   const b = r.bodies.find((x: any) => x.id === id);
   const i = b.faces.findIndex((f: any) => f.normal[0] * normal[0] + f.normal[1] * normal[1] + f.normal[2] * normal[2] > 0.999);
@@ -55,66 +56,79 @@ function faceOf(r: any, id: string, normal: Vec3, n = 5) {
   const tris: [Vec3, Vec3, Vec3][] = [];
   for (let t = g.start; t < g.start + g.count; t += 3) tris.push([P(b.indices[t]), P(b.indices[t + 1]), P(b.indices[t + 2])]);
   const ref = { body: id, center: f.center, normal: f.normal, area: f.area, ...(f.step ? { step: f.step } : {}) };
-  return { ref, grid: faceGrid(tris, f.center, f.normal, n) };
+  const cage = faceCage(tris, f.center, f.normal, n)!;
+  const border = new Set(boundaryEdges(cage).flat());
+  // (`grid`: the inside points, which are the ones moved.)
+  return { ref, cage, grid: cage.verts.filter((_, i) => !border.has(i)) };
 }
-const ff = (face: any, grid: Vec3[], move: (at: Vec3, i: number) => Vec3, id = "ff"): Feature =>
-  ({ id, name: id, type: "faceFreeform", face, points: grid.map((at, i) => ({ at, move: move(at, i) })) }) as Feature;
+/** The cage with each inside point moved by `move` (its border stays). */
+const ff = (face: any, cage: Cage, move: (at: Vec3, i: number) => Vec3, id = "ff"): Feature => {
+  const border = new Set(boundaryEdges(cage).flat());
+  let k = 0;
+  const verts = cage.verts.map((v, i) => (border.has(i) ? v : (([a, b, c]) => [v[0] + a, v[1] + b, v[2] + c] as Vec3)(move(v, k++))));
+  return { id, name: id, type: "faceFreeform", face, cage: { faces: cage.faces, verts } } as Feature;
+};
 const up = (k: number) => (at: Vec3): Vec3 => [0, 0, k * Math.max(0, 1 - Math.hypot(at[0], at[1]) / 18)];
 
 // A 40 x 30 x 20 box, its top raised in the middle like a pillow.
 const box = body("A", [rect(0, 0, 40, 30)], 20);
 let r = await build(box);
-const { ref, grid } = faceOf(r.r, "A", [0, 0, 1]);
-check("a 5-across grid on a 40 x 30 top: points inside, none on the edges", grid.length >= 9 && grid.every((p) => Math.abs(p[0]) < 18 && Math.abs(p[1]) < 13), `${grid.length}`);
-r = await build([...box, ff(ref, grid, up(6))]);
+const { ref, cage, grid } = faceOf(r.r, "A", [0, 0, 1]);
+const bx = cage.verts.filter((v) => !grid.includes(v));
+check("a 5-across cage on a 40 x 30 top: its border round the edge, points inside", cage.faces.length >= 12 && grid.length >= 6 && bx.every((p) => Math.abs(Math.abs(p[0]) - 20) < 1e-6 || Math.abs(Math.abs(p[1]) - 15) < 1e-6) && grid.every((p) => Math.abs(p[0]) < 19 && Math.abs(p[1]) < 14), `${cage.faces.length} faces, ${grid.length} inside`);
+r = await build([...box, ff(ref, cage, up(6))]);
 const vUp = vol("A");
 const top = (debugBodies().get("A") as Shape3D).boundingBox.bounds[1][2];
-check("top raised: a valid closed body, bigger, as high as the middle point", !r.errors && !r.bad && vUp > 24000 + 500 && top > 25 && top < 27.5, `${r.errors}${r.bad} ${vUp.toFixed(0)} top ${top.toFixed(2)}`);
+// (The smooth surface lies inside its cage: a little lower than the raised points.)
+check("top raised: a valid closed body, bigger, nearly as high as the raised points", !r.errors && !r.bad && vUp > 24000 + 500 && top > 23 && top < 27.5, `${r.errors}${r.bad} ${vUp.toFixed(0)} top ${top.toFixed(2)}`);
 const bb = (debugBodies().get("A") as Shape3D).boundingBox.bounds;
 check("...its edges stay put (the sides are as they were)", Math.abs(bb[0][0] + 20) < 1e-3 && Math.abs(bb[1][0] - 20) < 1e-3 && Math.abs(bb[1][1] - 15) < 1e-3, JSON.stringify(bb));
-r = await build([...box, ff(ref, grid, up(-6))]);
+r = await build([...box, ff(ref, cage, up(-6))]);
 check("top pushed in: smaller", !r.errors && !r.bad && vol("A") < 24000 - 500, `${r.errors}${r.bad} ${vol("A").toFixed(0)}`);
-r = await build([...box, ff(ref, grid, () => [0, 0, 0])]);
+r = await build([...box, ff(ref, cage, () => [0, 0, 0])]);
 check("nothing moved: the body as it was", !r.errors && !r.bad && Math.abs(vol("A") - 24000) < 1e-6, `${r.errors}${r.bad}`);
-r = await build([...box, ff(ref, grid, (_, i) => [0, 0, i % 2 ? 3 : -3])]);
+r = await build([...box, ff(ref, cage, (_, i) => [0, 0, i % 2 ? 3 : -3])]);
 check("points up and down in turn: a wavy top", !r.errors && !r.bad, `${r.errors}${r.bad}`);
-r = await build([...box, ff(ref, grid, (at) => [at[0] * 0.1, 0, 4])]);
+r = await build([...box, ff(ref, cage, (at) => [at[0] * 0.1, 0, 4])]);
 check("points moved sideways as well as up", !r.errors && !r.bad, `${r.errors}${r.bad}`);
 
 // The face follows: the box made taller after.
 {
   const taller = body("A", [rect(0, 0, 40, 30)], 30);
-  r = await build([...taller, ff(ref, grid, up(6))]);
+  r = await build([...taller, ff(ref, cage, up(6))]);
   const t = (debugBodies().get("A") as Shape3D).boundingBox.bounds[1][2];
-  check("box made 30 tall after: the raised top goes with it", !r.errors && !r.bad && t > 35 && t < 37.5, `${r.errors}${r.bad} top ${t.toFixed(2)}`);
+  check("box made 30 tall after: the raised top goes with it", !r.errors && !r.bad && t > 33 && t < 37.5, `${r.errors}${r.bad} top ${t.toFixed(2)}`);
 }
 
 // A side face, a round top, an L-shaped top.
 {
   const side = faceOf((await build(box)).r, "A", [1, 0, 0]);
-  r = await build([...box, ff(side.ref, side.grid, () => [5, 0, 0])]);
+  r = await build([...box, ff(side.ref, side.cage, () => [5, 0, 0])]);
   check("a side face pushed out", !r.errors && !r.bad && vol("A") > 24000, `${r.errors}${r.bad}`);
   const cyl = body("C", [{ id: "c", kind: "circle", center: [0, 0], radius: 15 }], 10);
   const c = faceOf((await build(cyl)).r, "C", [0, 0, 1]);
-  r = await build([...cyl, ff(c.ref, c.grid, up(8))]);
+  r = await build([...cyl, ff(c.ref, c.cage, up(8))]);
   check("a cylinder's round top made a dome", !r.errors && !r.bad && vol("C") > Math.PI * 225 * 10, `${r.errors}${r.bad} ${c.grid.length} points`);
+  // Its cage's border on the circle (four sides of it, no corners to go by).
+  const cb = c.cage.verts.filter((v) => !c.grid.includes(v));
+  check("...its cage's border lies on the round edge", cb.every((v) => Math.abs(Math.hypot(v[0], v[1]) - 15) < 0.2), cb.map((v) => Math.hypot(v[0], v[1]).toFixed(2)).join(" "));
   const L = body("L", [{ id: "p", kind: "polyline", points: [[0, 0], [40, 0], [40, 15], [15, 15], [15, 40], [0, 40]], closed: true }], 10);
   const l = faceOf((await build(L)).r, "L", [0, 0, 1], 7);
-  const outside = l.grid.filter((p) => p[0] + l.ref.center[0] > 15.5 && p[1] + l.ref.center[1] > 15.5);
-  r = await build([...L, ff(l.ref, l.grid, () => [0, 0, 3])]);
-  check("an L-shaped top: points only on the L, raised", outside.length === 0 && l.grid.length > 5 && !r.errors && !r.bad, `${r.errors}${r.bad} ${l.grid.length} points, ${outside.length} outside`);
+  const outside = l.cage.verts.filter((p) => p[0] + l.ref.center[0] > 15.5 && p[1] + l.ref.center[1] > 15.5);
+  r = await build([...L, ff(l.ref, l.cage, () => [0, 0, 3])]);
+  check("an L-shaped top: its cage only on the L, raised", outside.length === 0 && l.grid.length > 5 && !r.errors && !r.bad, `${r.errors}${r.bad} ${l.grid.length} points, ${outside.length} outside`);
 }
 
 // After fillets on the top's edges; and joined to / cut by another body after.
 {
   const fil: Feature = { id: "f", name: "f", type: "fillet", radius: 3, edges: [[0, 15], [0, -15]].map(([x, y]) => ({ body: "A", mid: [x, y, 20], dir: [1, 0, 0], length: 40, steps: ["A"] })) } as Feature;
   const t = faceOf((await build([...box, fil])).r, "A", [0, 0, 1]);
-  r = await build([...box, fil, ff(t.ref, t.grid, up(5))]);
+  r = await build([...box, fil, ff(t.ref, t.cage, up(5))]);
   check("top rounded along two edges first, then raised", !r.errors && !r.bad, `${r.errors}${r.bad}`);
   const other = body("B", [rect(30, 0, 30, 10, "r2")], 10);
-  r = await build([...box, ff(ref, grid, up(6)), ...other, { id: "u", name: "u", type: "boolean", op: "union", target: "A", tools: ["B"] } as Feature]);
+  r = await build([...box, ff(ref, cage, up(6)), ...other, { id: "u", name: "u", type: "boolean", op: "union", target: "A", tools: ["B"] } as Feature]);
   check("the raised box joined to another box after", !r.errors && !r.bad && [...debugBodies().keys()].length === 1, `${r.errors}${r.bad}`);
-  r = await build([...box, ff(ref, grid, up(6)), ...body("H", [{ id: "c", kind: "circle", center: [0, 0], radius: 5 }], 40, { origin: [0, 0, -5], xDir: [1, 0, 0], normal: [0, 0, 1] }), { id: "s", name: "s", type: "boolean", op: "subtract", target: "A", tools: ["H"] } as Feature]);
+  r = await build([...box, ff(ref, cage, up(6)), ...body("H", [{ id: "c", kind: "circle", center: [0, 0], radius: 5 }], 40, { origin: [0, 0, -5], xDir: [1, 0, 0], normal: [0, 0, 1] }), { id: "s", name: "s", type: "boolean", op: "subtract", target: "A", tools: ["H"] } as Feature]);
   check("...a hole cut down through the raised top", !r.errors && !r.bad && vol("A") < vUp, `${r.errors}${r.bad}`);
 }
 
@@ -126,10 +140,19 @@ check("points moved sideways as well as up", !r.errors && !r.bad, `${r.errors}${
     { id: "R", name: "R", type: "extrude", source: { kind: "profile", sketch: "sR", regions: arrangement(res as any).regions.filter((g: any) => g.area > 1000 || Math.abs(regionRef(g).a) > 1000).map(regionRef) }, distance: 10, mode: "new" } as Feature,
   ];
   const t = faceOf((await build(ring)).r, "R", [0, 0, 1]);
-  r = await build([...ring, ff(t.ref, t.grid, () => [0, 0, 3])]);
+  r = await build([...ring, ff(t.ref, t.cage, () => [0, 0, 3])]);
   check("a face with a hole in it: refused, saying so", /holes/.test(r.errors), r.errors);
-  r = await build([...box, ff(ref, grid, (_, i) => (i === Math.floor(grid.length / 2) ? [0, 0, -40] : [0, 0, 0]))]);
+  r = await build([...box, ff(ref, cage, (_, i) => (i === Math.floor(grid.length / 2) ? [0, 0, -120] : [0, 0, 0]))]);
   check("a point pushed right through the bottom: refused (not a broken body)", !!r.errors && !r.bad, `${r.errors}${r.bad}`);
+}
+
+// The finest preset (9 across), every inside point raised: still quick enough to drag.
+{
+  const nine = faceOf((await build(box)).r, "A", [0, 0, 1], 9);
+  const t0 = performance.now();
+  r = await build([...box, ff(nine.ref, nine.cage, up(6))]);
+  const ms = performance.now() - t0;
+  check("a 9-across cage raised: fine, and built in under 2 s", !r.errors && !r.bad && ms < 2000, `${r.errors}${r.bad} ${ms.toFixed(0)} ms, ${nine.cage.faces.length} faces`);
 }
 
 process.exit(failed ? 1 : 0);

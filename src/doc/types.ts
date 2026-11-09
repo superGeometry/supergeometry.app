@@ -407,12 +407,12 @@ export interface FaceFreeformFeature extends FeatureBase {
   type: "faceFreeform";
   face: FaceRef;
   /**
-   * The grid: where each point sits on the face (relative to the face's
-   * middle, so it follows the face when an earlier step moves it) and how far
-   * it has been moved from there.
+   * The cage shaping it, laid over the face: points relative to the face's
+   * middle (so it follows the face when an earlier step moves it). Its border
+   * runs round the face's edge and stays there; the inside points are moved.
    */
-  points: { at: Vec3; move: Vec3 }[];
-  /** How many points across the grid was laid (3, 5, 7, 9). */
+  cage: { verts: Vec3[]; faces: [number, number, number, number][] };
+  /** How many cells across the cage was laid (3, 5, 7, 9). */
   grid?: number;
 }
 

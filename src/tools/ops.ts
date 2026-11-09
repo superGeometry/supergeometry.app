@@ -2114,7 +2114,7 @@ export class ConnectOp extends FeatureOp<ConnectFeature> {
 
   constructor(app: AppContext, faces: Sel[], existing?: ConnectFeature) {
     const refs = faces.flatMap((s) => (s.kind === "face" ? [faceRefOf(app, s)] : [])).filter((r): r is FaceRef => !!r);
-    super(app, { ...app.store.newIdentity("connect"), type: "connect", faces: [refs[0], refs[1]] as [FaceRef, FaceRef], mode: "auto", bulge: 1, size: 0.92 }, existing);
+    super(app, { ...app.store.newIdentity("connect"), type: "connect", faces: [refs[0], refs[1]] as [FaceRef, FaceRef], mode: "auto", bulge: 1, size: 1 }, existing);
     if (!existing) this.picked = [faces[0] ?? null, faces[1] ?? null];
     const slot = (k: 0 | 1, label: string): Slot => ({
       label,
@@ -2147,7 +2147,7 @@ export class ConnectOp extends FeatureOp<ConnectFeature> {
       modeChoice(() => f.mode, (m) => (f.mode = m), () => (this.render(), this.update())),
       // (Without a guide - a step made before guides - it bows out by Bend.)
       ...(f.guide || !this.existing ? [] : [{ type: "slider" as const, label: "Bend", value: f.bulge ?? 1, min: 0.2, max: 2.5, step: 0.05, show: (v: number) => v.toFixed(2), onInput: (v: number) => ((f.bulge = v), this.update()) }]),
-      { type: "slider", label: "Size", value: f.size ?? 0.92, min: 0.1, max: 1, step: 0.01, show: (v) => `${Math.round(v * 100)}%`, onInput: (v) => ((f.size = v), this.update()) },
+      { type: "slider", label: "Size", value: f.size ?? 1, min: 0.1, max: 1, step: 0.01, show: (v) => `${Math.round(v * 100)}%`, onInput: (v) => ((f.size = v), this.update()) },
     ];
   }
 }

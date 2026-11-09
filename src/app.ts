@@ -21,7 +21,7 @@ import { PinLayer } from "./tools/annotate";
 import { MeasureTool } from "./tools/measure";
 import { ItemsPanel } from "./ui/items";
 import { OffsetEdgeOp } from "./tools/offsetEdge";
-import { FaceFreeformOp } from "./tools/faceFreeform";
+import { faceFreeformTool } from "./tools/faceFreeform";
 import { AxisOp, ConnectOp, EdgeOp, ExtrudeOp, FillToPlaneOp, ThreadOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, ScaleRefOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
 import { add, dist, scale, toWorld, xDirFor } from "./geom";
 import { entityPolylines } from "./sketch/curves";
@@ -651,7 +651,7 @@ export class App implements AppContext {
       case "connect":
         return this.setTool(new ConnectOp(this, [], f));
       case "faceFreeform":
-        return this.setTool(new FaceFreeformOp(this, null, f));
+        return this.setTool(faceFreeformTool(this, null, f));
       case "moveFace": {
         const target = f.face ? { face: f.face, plane: { origin: f.face.center, normal: f.face.normal, xDir: xDirFor(f.face.normal) } } : f.edge ? { edge: f.edge } : f.vertex ? { vertex: f.vertex } : null;
         if (target) return this.setTool(new MoveFaceOp(this, target, f));
@@ -698,7 +698,8 @@ export class App implements AppContext {
             run: wait("Freeform Face (tap a flat face)", ["face"], () => {
               const s = this.selection[0];
               if (s?.kind !== "face" || !this.view.body(s.body)?.faces[s.face]?.plane) return void this.ui.toast("Freeform Face works on flat faces for now");
-              this.setTool(new FaceFreeformOp(this, s));
+              const t = faceFreeformTool(this, s);
+              if (t) this.setTool(t);
             }),
           },
           // A smooth bridge between two faces.
