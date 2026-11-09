@@ -692,6 +692,7 @@ export class App implements AppContext {
           // A flat face of a body made smooth (its edges stay put).
           {
             id: "faceFreeform",
+            beta: true,
             label: "Freeform Face",
             icon: "freeform" as const,
             sub: "a face of a body",
@@ -703,7 +704,7 @@ export class App implements AppContext {
             }),
           },
           // A smooth bridge between two faces.
-          { id: "connect", label: "Connect", icon: "freeform" as const, sub: "two faces", run: () => this.setTool(new ConnectOp(this, this.selection.filter((s) => s.kind === "face").slice(0, 2))) },
+          { id: "connect", label: "Connect", icon: "freeform" as const, sub: "two faces", beta: true, run: () => this.setTool(new ConnectOp(this, this.selection.filter((s) => s.kind === "face").slice(0, 2))) },
         ],
       },
       {

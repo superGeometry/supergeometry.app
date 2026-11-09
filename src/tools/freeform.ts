@@ -492,6 +492,7 @@ export class FreeformTool implements Tool {
     const n = this.selectedVerts().length;
     this.app.ui.showPanel({
       title: `Freeform Face${n ? ` · ${n} point${n > 1 ? "s" : ""}` : ""}`,
+      beta: true,
       items,
       actions: [
         { id: "all", label: "Select all", icon: "pointer", run: () => ((this.picks = this.cage.verts.map((_, i) => ({ kind: "vert" as const, i }))), this.selectionChanged()) },

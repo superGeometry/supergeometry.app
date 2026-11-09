@@ -487,7 +487,7 @@ export class SelectTool implements Tool {
     const ref = faceRefOf(app, s);
     // A face a Freeform Face step made: that step opens again to reshape it.
     const shaped = info?.step ? app.store.find(info.step) : undefined;
-    const editFree: ToolItem[] = shaped?.type === "faceFreeform" && one ? [{ id: "editFreeform", label: "Edit Freeform", icon: "freeform", active: true, run: () => app.editStep(shaped.id) }] : [];
+    const editFree: ToolItem[] = shaped?.type === "faceFreeform" && one ? [{ id: "editFreeform", label: "Edit Freeform", icon: "freeform", active: true, beta: true, run: () => app.editStep(shaped.id) }] : [];
     return [
       ...editFree,
       { id: "sketch", label: "Sketch", icon: "sketch", shortcut: "S", ...needFlat, run: () => this.sketchOnFace() },
@@ -508,9 +508,9 @@ export class SelectTool implements Tool {
       { id: "plane", label: "Plane – Offset", icon: "plane", ...needFlat, run: () => info?.plane && app.setTool(new PlaneOp(app, info.plane, faceRefOf(app, s)!)) },
       { id: "loft", label: "Loft", icon: "loft", ...needFlat, run: () => app.setTool(new LoftOp(app, sourcesOf(app, sel).flatMap(splitRegions), sel)) },
       // The face made smooth: a grid of points over it to pull out or push in; its edges stay put.
-      { id: "faceFreeform", label: "Freeform Face", icon: "freeform", ...needFlat, run: () => { const t = faceFreeformTool(app, s); if (t) app.setTool(t); } },
+      { id: "faceFreeform", label: "Freeform Face", icon: "freeform", beta: true, ...needFlat, run: () => { const t = faceFreeformTool(app, s); if (t) app.setTool(t); } },
       // A smooth freeform bridge between two faces (the second tapped next when one is picked).
-      { id: "connect", label: "Connect", icon: "freeform", disabled: sel.length > 2, why: "Needs two faces", run: () => app.setTool(new ConnectOp(app, sel)) },
+      { id: "connect", label: "Connect", icon: "freeform", beta: true, disabled: sel.length > 2, why: "Needs two faces", run: () => app.setTool(new ConnectOp(app, sel)) },
       { id: "split", label: "Split Body", icon: "split", disabled: !flat || app.view.bodyList.length < 2, why: "Needs another body to split", run: () => this.splitWith(info!.plane!, s.body) },
       { id: "revolve", label: "Revolve", icon: "revolve", ...needFlat, run: () => src && app.setTool(new RevolveOp(app, src)) },
       { id: "sweep", label: "Sweep", icon: "sweep", ...needFlat, run: () => src && app.setTool(new SweepOp(app, src)) },

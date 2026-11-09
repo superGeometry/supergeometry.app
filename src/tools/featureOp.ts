@@ -1,4 +1,5 @@
 import { getPath, setPath } from "../doc/params";
+import { BETA_TYPES } from "../doc/store";
 import type { ExtrudeSource, Feature, SketchFeature, Vec2 } from "../doc/types";
 import type { FieldKind, PanelItem, ToolItem } from "../ui/ui";
 import { isExpression } from "../ui/ui";
@@ -206,6 +207,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     ]);
     this.app.ui.showPanel({
       title: this.feature.name,
+      beta: BETA_TYPES.has(this.feature.type),
       items: [...slotItems, ...this.items()],
       actions: this.actions(),
       onDone: () => this.done(),

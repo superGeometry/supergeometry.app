@@ -59,6 +59,9 @@ const LABELS: Record<FeatureType, string> = {
   thread: "Thread",
 };
 
+/** Steps still being tried out: shown with a BETA tag wherever they appear. */
+export const BETA_TYPES: ReadonlySet<string> = new Set(["connect", "faceFreeform"]);
+
 /**
  * Holds the document and its undo/redo history. Every change goes through
  * `commit`, which snapshots the previous state, so undo is exact.

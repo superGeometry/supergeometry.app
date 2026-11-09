@@ -1,4 +1,4 @@
-import { mergingCommits } from "../doc/store";
+import { BETA_TYPES, mergingCommits } from "../doc/store";
 import { ungroupedSteps } from "../doc/historyGroups";
 import type { Feature, HistoryGroup } from "../doc/types";
 import { screenClass, watchScreenClass } from "../device";
@@ -28,6 +28,8 @@ export interface ToolItem {
   swatch?: string;
   /** Small icons after the label (e.g. ⟲ + what a toggle switches to). */
   trailing?: IconName[];
+  /** Still being tried out: a BETA tag on it. */
+  beta?: boolean;
   run?(): void;
 }
 
@@ -74,6 +76,8 @@ export interface ValueField {
 
 export interface ValuePanel {
   title: string;
+  /** A tool still being tried out: a BETA tag by the title. */
+  beta?: boolean;
   fields?: ValueField[];
   items?: PanelItem[];
   onDone?(): void;
@@ -680,7 +684,9 @@ export class UI {
     const phone = document.documentElement.dataset.screen === "phone";
     const chipOnly = items.length === 1 && items[0].type === "button" && !spec.fields?.length && !spec.actions?.length;
     if (!(phone && chipOnly)) this.panel.append(this.panelGrip());
-    this.panel.append(el("div", "panel-title", spec.title));
+    const title = el("div", "panel-title", spec.title);
+    if (spec.beta) title.append(betaTag());
+    this.panel.append(title);
     const unfold = el("button", "text-btn panel-unfold");
     unfold.innerHTML = icons.numpad;
     unfold.append("Values");
@@ -1340,6 +1346,7 @@ export class UI {
       if (f.suppressed) li.classList.add("suppressed");
       if (f.id === activeId) li.classList.add("active");
       const name = el("button", "history-name", f.name);
+      if (BETA_TYPES.has(f.type)) name.append(betaTag());
       name.title = err ? err.message : "Edit";
       // A step that works but leaves something to look at (e.g. a body that isn't closed).
       const warn = warnings.get(f.id);
@@ -1525,6 +1532,13 @@ function renderTools(host: HTMLElement, all: ToolItem[], onFlyout: (item: ToolIt
   }
 }
 
+/** The small BETA tag on a tool still being tried out. */
+function betaTag(): HTMLElement {
+  const t = el("span", "beta-tag", "BETA");
+  t.title = "New and still being tried out: it may change, or not work on every shape";
+  return t;
+}
+
 function toolButton(item: ToolItem, withLabel: boolean): HTMLButtonElement {
   const b = document.createElement("button");
   b.className = "tool";
@@ -1539,6 +1553,7 @@ function toolButton(item: ToolItem, withLabel: boolean): HTMLButtonElement {
   if (withLabel) {
     const l = el("span", "tool-label");
     const top = el("span", "tool-name", item.label);
+    if (item.beta) top.append(betaTag());
     if (item.shortcut) top.append(el("kbd", "", item.shortcut));
     l.append(top);
     if (item.sub) l.append(el("span", "tool-sub", item.sub));
