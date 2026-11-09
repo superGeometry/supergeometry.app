@@ -1156,8 +1156,21 @@ export class Viewport {
 
     if (bodies && vertices) {
       const v = this.pickVertex(x, y, edgeTolPx, faceDist);
+      // A corner within a finger's reach - but a short edge tapped in its
+      // middle (a 3 mm high box's upright edge) is the edge: the tap is much
+      // nearer it than either end.
+      if (v?.kind === "vertex" && edges) {
+        const dist = (p: Vec3) => {
+          const q = this.toScreen(new Vector3(...p));
+          return q ? Math.hypot(q[0] - x, q[1] - y) : Infinity;
+        };
+        const dv = dist(v.point);
+        const e = dv > 6 ? this.pickEdge(x, y, faceHit ? Math.max(5, edgeTolPx * 0.6) : edgeTolPx, faceDist) : null;
+        if (e && dist(e.point) + 5 < dv) return e;
+      }
       if (v) return v;
     }
+
     if (curves) {
       const only = typeof curves === "string" ? curves : undefined;
       // Points first: endpoints sit on curves, and are what you usually mean.

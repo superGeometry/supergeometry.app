@@ -357,7 +357,8 @@ export class SketchTool implements Tool {
   }
   /** Outline of the face this sketch sits on, and its linked offsets (snaps, trims against; not editable as curves). */
   private get boundary(): SketchEntity[] {
-    return this.sketchId ? this.app.sketchCurves(this.sketchId).filter((e) => e.id.startsWith("bnd-") || e.id.startsWith("lnk-")) : [];
+    const id = this.sketchId ?? this.pending?.id;
+    return id ? this.app.sketchCurves(id).filter((e) => e.id.startsWith("bnd-") || e.id.startsWith("lnk-")) : [];
   }
   /** Just the face's own outline. */
   private get outline(): SketchEntity[] {
@@ -440,13 +441,33 @@ export class SketchTool implements Tool {
             c.n++;
             count.set(k, c);
           }
-        const best = [...count.values()]
+        let best = [...count.values()]
           .filter((c) => {
             const f = view.body(c.body)?.faces[c.face];
             return !!f?.plane && dot(f.normal, normal) > 0.9999;
           })
           .sort((a, b) => b.n - a.n)[0];
+        // A thin one the grid's points all missed (a 3 mm slab's front, seen
+        // from Front: the sketch went through the origin behind it): a face
+        // square to the view whose middle shows, the biggest.
+        if (!best) {
+          let most = 0;
+          // (A hidden body's faces don't show: the tap check below leaves them out.)
+          for (const id of (this.app.result?.bodies ?? []).map((b) => b.id)) {
+            view.body(id)?.faces.forEach((f, i) => {
+              if (!f.plane || dot(f.normal, normal) <= 0.9999 || f.area <= most) return;
+              const q = view.toScreen(f.center);
+              if (!q) return;
+              const hit = view.pick(q[0], q[1], { edges: false, vertices: false, planes: false, profiles: false, axes: false, images: false, edgeTolPx: 0 });
+              if (hit?.kind === "face" && hit.body === id && hit.face === i) {
+                most = f.area;
+                best = { n: 1, body: id, face: i };
+              }
+            });
+          }
+        }
         const info = best && view.body(best.body)?.faces[best.face];
+
         if (best && info?.plane) {
           this.plane = originOnPlane({ origin: info.plane.origin, normal: info.plane.normal, xDir });
           this.attachedTo = { body: best.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}) };
@@ -532,9 +553,12 @@ export class SketchTool implements Tool {
     this.app.ui.setLabel(0, 0, null);
     this.app.ui.setHint(null);
     this.app.setSelection([]);
+    // Left without drawing: the outline asked for (fetchOutline) goes with it.
+    if (this.pending && !this.sketchId) void this.app.preview([...this.app.store.features]);
   }
 
   refresh(): void {
+
     if (this.sketchId) this.plane = this.app.sketchPlane(this.sketchId) ?? this.plane;
     for (const id of [...this.selected]) if (!this.entities.some((e) => e.id === id)) this.selected.delete(id);
     this.selPts = this.selPts.filter((r) => this.entities.some((e) => e.id === r.e));
@@ -922,6 +946,21 @@ export class SketchTool implements Tool {
     // (centred on the old view, an end face ended up under the tool column on a phone).
     const focus = this.focusBox(p);
     if (focus) this.app.view.cam.fit(focus, true, this.app.view.coveredInsets(), true);
+    this.fetchOutline();
+  }
+
+  /**
+   * The id and name the sketch gets once something's drawn: a new sketch on a
+   * face asks for the face's outline under it straight away, so Offset (and
+   * Trim, snaps) can use the face's edge before the first line is drawn.
+   */
+  private pending: { id: string; name: string } | null = null;
+
+  private fetchOutline(): void {
+    if (this.sketchId || !this.attachedTo || !this.plane) return;
+    this.pending ??= this.app.store.newIdentity("sketch");
+    const f: SketchFeature = { ...this.pending, type: "sketch", plane: this.plane, attachedTo: this.attachedTo, entities: [], constraints: [] };
+    void this.app.preview([...this.app.store.features, f]);
   }
 
   /** The sketch's drawing (or the face it's on), a little roomy, for the camera to bring into view. */
@@ -2235,10 +2274,15 @@ export class SketchTool implements Tool {
       case "split":
         return this.tapCurve(p, (id, uv) => this.tapSplit(id, uv, p.shift));
       case "offset":
-        // The face's own edge too (it isn't a curve of the sketch the view picks).
-        if (!this.curveAt(p)) {
+        // The face's own edge too (it isn't a curve of the sketch the view picks) -
+        // also when an offset of it made before runs close by and the tap is
+        // nearer the edge (a second lip line 2 mm further in).
+        {
+          const c = this.curveAt(p);
           const o = this.outlineAt(p);
-          if (o) {
+          const link = c?.id.startsWith("lnk-") ? this.boundary.find((x) => x.id === c.id) : undefined;
+          const nearer = o && link && o.d <= Math.min(...entityPrims(link).map((pr) => closestOnPrim(pr, o.uv).d));
+          if (o && (!c || nearer)) {
             memory.offset = -Math.abs(defaultOffset(o.e));
             this.edit.offsetAt = o.uv;
             this.edit.offsetOf = o.e.id;
@@ -3590,7 +3634,7 @@ export class SketchTool implements Tool {
     if (this.sketchId && this.sketch) {
       store.update(this.sketchId, patch);
     } else {
-      const f: SketchFeature = { ...store.newIdentity("sketch"), type: "sketch", plane: this.plane!, attachedTo: this.attachedTo, ...patch };
+      const f: SketchFeature = { ...(this.pending ?? store.newIdentity("sketch")), type: "sketch", plane: this.plane!, attachedTo: this.attachedTo, ...patch };
       store.add(f);
       this.sketchId = f.id;
     }
@@ -3622,7 +3666,7 @@ export class SketchTool implements Tool {
   }
 
   /** The edge of the face this sketch is on, under the pointer (it's drawn by the body, not the sketch). */
-  private outlineAt(p: ToolPointer): { e: SketchEntity; uv: Vec2 } | null {
+  private outlineAt(p: ToolPointer): { e: SketchEntity; uv: Vec2; d: number } | null {
     const uv = this.uvAt(p);
     if (!uv) return null;
     const tol = this.app.view.cam.worldPerPixel(this.app.view.height) * Math.max(8, p.tol);
@@ -3631,7 +3675,8 @@ export class SketchTool implements Tool {
       const d = Math.min(...entityPrims(e).map((pr) => closestOnPrim(pr, uv).d));
       if (d < tol && (!best || d < best.d)) best = { e, d };
     }
-    return best ? { e: best.e, uv } : null;
+    return best ? { e: best.e, uv, d: best.d } : null;
+
   }
 
   private curveAt(p: ToolPointer): { id: string; uv: Vec2 } | null {
@@ -4259,13 +4304,21 @@ export class SketchTool implements Tool {
     const made = this.offsetResult();
     if (!made.length) return this.app.ui.toast("That offset would collapse the curve");
     // Of the face's outline: kept as a link to it, not as curves of their own.
-    if (this.edit.offsetOf?.startsWith("bnd-") && this.edit.offsetAt && this.sketchId) {
+    if (this.edit.offsetOf?.startsWith("bnd-") && this.edit.offsetAt) {
       const link = { id: uid(), distance: memory.offset, at: this.edit.offsetAt };
-      const sid = this.sketchId;
-      this.app.store.commit((d) => {
-        const f = d.features.find((x) => x.id === sid);
-        if (f?.type === "sketch") f.outlineOffsets = [...(f.outlineOffsets ?? []), link];
-      });
+      // (Nothing drawn on it yet: the sketch is made with the offset in it - one step.)
+      if (!this.sketchId) {
+        const f: SketchFeature = { ...(this.pending ?? this.app.store.newIdentity("sketch")), type: "sketch", plane: this.plane!, attachedTo: this.attachedTo, entities: [], constraints: [], outlineOffsets: [link] };
+        this.app.store.add(f);
+        this.sketchId = f.id;
+      } else {
+        const sid = this.sketchId;
+        this.app.store.commit((d) => {
+          const f = d.features.find((x) => x.id === sid);
+          if (f?.type === "sketch") f.outlineOffsets = [...(f.outlineOffsets ?? []), link];
+        });
+      }
+
       this.app.ui.toast("Offset of the face's edge: it follows the face when the face changes size");
       this.edit.offsetOf = this.edit.offsetAt = undefined;
       return this.resetDrawing();

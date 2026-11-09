@@ -95,4 +95,22 @@ o = await run("old taps", (d) => {
 });
 check("taps without steps (older projects) still build", !o.msg && Math.abs(vol("box") - v0) < 1e-6 * v0, o.msg);
 
+// The hand-built lid (tests/fixtures/lid-hand.json), its rectangle swapped
+// for a circle: the corner fillet's 3 mm upright edges are gone - not the
+// cylinder's seam (also 3 mm and upright) or its rim circles.
+{
+  const { readFileSync } = await import("node:fs");
+  const hand = JSON.parse(readFileSync(new URL("./fixtures/lid-hand.json", import.meta.url), "utf8"));
+  hand.features[0].entities = [{ id: "c1", kind: "circle", center: [0, 0], radius: 40 }];
+  hand.features[1].source.regions = regs(hand.features[0].entities);
+  resolveDoc(hand);
+  const r: any = await regenerate(hand.features);
+  const msg = r.errors.map((e: any) => `${e.featureId}: ${e.message}`).join(" | ");
+  const want = Math.PI * 1600 * 3 + Math.PI * (38 ** 2 - 36 ** 2) * 4;
+  const v = vol("extrude-mw9gghgi-u7ha");
+  check("lid made round: its corner fillet says the edges are gone (it rounded the seam: 'radius too big')", r.errors.length === 1 && /fillet-mw9gjf18-wv70: An edge it was built on is gone/.test(msg), msg);
+  check("…and the lip follows the circle", Math.abs(v - want) < 0.5, `${v.toFixed(1)} want ${want.toFixed(1)}`);
+}
+
+
 process.exit(failed ? 1 : 0);

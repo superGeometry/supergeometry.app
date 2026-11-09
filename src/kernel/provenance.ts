@@ -148,7 +148,35 @@ export function edgeSteps(shape: Shape3D): string[][] | undefined {
   return out;
 }
 
+const seamTags = new WeakMap<Shape3D, boolean[]>();
+
+/**
+ * Per edge: it has the same face on both sides (the seam of a cylinder or a
+ * sphere). Nothing to round there - a fillet's corner that's gone mustn't
+ * land on one (a lid's 4 corner edges all went to its seam when the lid
+ * was made round: "radius too big", not "the edges are gone").
+ */
+export function seamEdges(shape: Shape3D): boolean[] {
+  const known = seamTags.get(shape);
+  if (known) return known;
+  const edges = shape.edges;
+  const buckets = new Map<number, { i: number; faces: Set<number> }[]>();
+  edges.forEach((e, i) => buckets.set(e.hashCode, [...(buckets.get(e.hashCode) ?? []), { i, faces: new Set<number>() }]));
+  shape.faces.forEach((f, fi) => {
+    for (const fe of f.edges) {
+      const list = buckets.get(fe.hashCode);
+      const m = list?.length === 1 ? list[0] : list?.find((x) => edges[x.i].isSame(fe));
+      m?.faces.add(fi);
+    }
+  });
+  const out: boolean[] = new Array(edges.length).fill(false);
+  for (const list of buckets.values()) for (const { i, faces } of list) out[i] = faces.size === 1;
+  seamTags.set(shape, out);
+  return out;
+}
+
 /** Same steps, as stored in a reference. */
+
 export function sameSteps(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }

@@ -58,7 +58,8 @@ import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
-import { edgeSteps, faceSteps, inheritTags, sameSteps, tagBody } from "./provenance";
+import { edgeSteps, faceSteps, inheritTags, sameSteps, seamEdges, tagBody } from "./provenance";
+
 import { cylinderOf, deleteFace,
  deleteFaces as deleteBodyFaces, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
@@ -422,7 +423,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       for (const e of f.edges) byBody.set(e.body, [...(byBody.get(e.body) ?? []), e]);
       for (const [bodyId, refs] of byBody) {
         const body = need(bodies, bodyId);
-        const edges = refs.map((r) => resolveEdge(body, r));
+        const edges = refs.map((r) => resolveEdge(body, r, true));
         let result: Shape3D | null = null;
         const edge = (r: number) => (f.type === "fillet" ? body.fillet(r, (finder) => finder.inList(edges)) : body.chamfer(r, (finder) => finder.inList(edges)));
         try {
@@ -2085,24 +2086,32 @@ function resolveFace(body: Shape3D, ref: FaceRef, only?: (f: Face) => boolean): 
 const FACE_GONE = "The face it was built on is gone (something before it changed). Tap this step and pick the face again.";
 const EDGE_GONE = "An edge it was built on is gone (something before it changed). Tap this step and pick the edges again.";
 
-function resolveEdge(body: Shape3D, ref: EdgeRef): Edge {
+/** `rounding`: for a fillet or chamfer - a seam (nothing to round) is never it. */
+function resolveEdge(body: Shape3D, ref: EdgeRef, rounding = false): Edge {
   const size = ref.length || 1;
   let best: { edge: Edge; score: number } | null = null;
   // Only edges between faces made by the same steps as the one picked.
   const steps = ref.steps ? edgeSteps(body) : undefined;
+  const seams = rounding && steps ? seamEdges(body) : undefined;
   const all = body.edges;
-  if (steps && !all.some((_, i) => sameSteps(steps[i], ref.steps!))) throw new Error(EDGE_GONE);
+  if (steps && !all.some((_, i) => sameSteps(steps[i], ref.steps!) && !seams?.[i])) throw new Error(EDGE_GONE);
   for (const [i, edge] of all.entries()) {
     if (steps && !sameSteps(steps[i], ref.steps!)) continue;
+    if (seams?.[i]) continue;
     const ei = edgeInfo(edge);
     const align = Math.abs(dot(ei.dir, ref.dir));
-    const score = dist(ei.mid, ref.mid) / size + (1 - align) * 2 + Math.abs(Math.log((ei.length + 1e-9) / (ref.length + 1e-9)));
+    const like = (1 - align) * 2 + Math.abs(Math.log((ei.length + 1e-9) / (ref.length + 1e-9)));
+    // Picked with its steps, the candidates are edges of the same kind: the
+    // nearest is it, however far a resize moved it (a 3 mm lid's corner edges,
+    // 20 mm out when the lid was made 40 wider, were "gone") - if it's still
+    // much the same edge (the lid made round: its 3 mm corners aren't the rim circles).
+    if (steps && like > 1.5) continue;
+    const score = dist(ei.mid, ref.mid) / size + like;
     if (!best || score < best.score) best = { edge, score };
   }
-  // Picked with its steps, the candidates are edges of the same kind: the
-  // nearest is it, however far a resize moved it (a 3 mm lid's corner edges,
-  // 20 mm out when the lid was made 40 wider, were "gone"). Without, only one close by.
+  // Without steps, only one close by.
   if (!best || (!steps && best.score > 3)) throw new Error(EDGE_GONE);
+
 
   return best.edge;
 }

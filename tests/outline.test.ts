@@ -64,4 +64,20 @@ r = await regenerate(d.features);
 const want = 80 * 50 * 3 - (4 - Math.PI) * 100 * 3 + ringArea(80, 10) * 4;
 check("corners made 10: the lip's corners follow", !r.errors.length && Math.abs(vol("lid") - want) < 0.5, `${r.errors.map((e: any) => e.message).join()} ${vol("lid").toFixed(1)} want ${want.toFixed(1)}`);
 
+// The same lid made by hand on a phone (tests/fixtures/lid-hand.json): drawn
+// 80 x 50, corners 6, the lip from two offsets of the top face's edge; then
+// the rectangle deleted and drawn again 100 x 60 and the corners made 10. The
+// fillet finds the new corners (edges of the same step), the lip follows.
+{
+  const { readFileSync } = await import("node:fs");
+  const hand = JSON.parse(readFileSync(new URL("./fixtures/lid-hand.json", import.meta.url), "utf8"));
+  resolveDoc(hand);
+  r = await regenerate(hand.features);
+  const rr = (d: number) => (100 - 2 * d) * (60 - 2 * d) - (4 - Math.PI) * (10 - d) ** 2;
+  const want = (100 * 60 - (4 - Math.PI) * 100) * 3 + (rr(2) - rr(4)) * 4;
+  const v = vol("extrude-mw9gghgi-u7ha");
+  check("hand-built lid: 100 x 60, corners 10, lip 2-4 mm in", !r.errors.length && !(r.notes ?? []).length && Math.abs(v - want) < 0.5, `${[...r.errors, ...(r.notes ?? [])].map((e: any) => e.message).join()} ${v.toFixed(1)} want ${want.toFixed(1)}`);
+}
+
 process.exit(failed ? 1 : 0);
+
