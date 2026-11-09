@@ -147,6 +147,8 @@ function hintOf(kind: Kind): string {
   if (kind === "circle" && memory.circle === "2pt") return "Tap two points on opposite sides of the circle.";
   if (kind === "circle" && memory.circle === "3pt") return "Tap three points on the circle's edge.";
   if (kind === "fillet" && memory.corner === "chamfer") return "Tap a corner where two lines meet to cut it off straight.";
+  if (kind === "spline" && memory.spline === "control") return "Tap points that pull the curve towards them (it passes through the first and last). Tap the first point to close it, or double-tap to stop.";
+  if (kind === "trim" && memory.trim === "join") return "Tap a line to merge it with the one it continues.";
   if (kind === "spline" && memory.spline === "draw") return isTouchDevice ? "Draw with one finger, like a pencil (two move the view). End where you began to close it." : "Press and drag to draw, like a pencil. End where you began to close it.";
   return HINTS[kind];
 }
@@ -1140,7 +1142,7 @@ export class SketchTool implements Tool {
           this.refreshPreview();
         },
         onExpr: (text) => {
-          if (text) this.lockExprs[key] = { v: evaluate(text, kind === "angle" ? "angle" : "length") ?? NaN, text };
+          if (text && isExpression(text)) this.lockExprs[key] ={ v: evaluate(text, kind === "angle" ? "angle" : "length") ?? NaN, text };
           else delete this.lockExprs[key];
         },
       };
@@ -1245,6 +1247,7 @@ export class SketchTool implements Tool {
             onCancel: () => this.setKind("text"),
           });
           this.addTextInput();
+          this.setHint("Type the text in the card, then tap Done.");
           return;
         }
         break;

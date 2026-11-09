@@ -516,6 +516,28 @@ export class Viewport {
   }
 
   /**
+   * Bring what a tool is working on (its highlighted picks, else everything)
+   * into the free part of the screen - only when some of it is outside it,
+   * and never zooming in.
+   */
+  keepInView(): void {
+    const box = new Box3();
+    this.highlightGroup.traverse((o) => {
+      const b = new Box3().expandByObject(o, true);
+      if (!b.isEmpty() && [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].every((v) => Number.isFinite(v) && Math.abs(v) < 1e8)) box.union(b);
+    });
+    if (box.isEmpty()) box.copy(this.bounds());
+    if (box.isEmpty()) return;
+    const ins = this.coveredInsets();
+    const w = this.width, h = this.height;
+    const inside = [0, 1, 2, 3, 4, 5, 6, 7].every((i) => {
+      const s = this.toScreen(new Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
+      return !!s && s[0] >= ins.left * w && s[0] <= (1 - ins.right) * w && s[1] >= ins.top * h && s[1] <= (1 - ins.bottom) * h;
+    });
+    if (!inside) this.cam.fit(box, true, ins, true);
+  }
+
+  /**
    * How much of each side of the canvas the tool columns and bars cover: a
    * column hugging the left or right edge, a bar along the top or bottom.
    * Panels that cover most of the screen (History on a phone) don't count -

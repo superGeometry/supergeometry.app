@@ -261,12 +261,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
       min: opts.min,
       expr: f.exprs?.[path],
       inBox: opts.inBox,
-      onExpr: (expr) => {
-        const exprs = { ...(f.exprs ?? {}) };
-        if (expr) exprs[path] = expr;
-        else delete exprs[path];
-        f.exprs = Object.keys(exprs).length ? exprs : undefined;
-      },
+      onExpr: (expr) => this.setExpr(path, expr),
       onInput: (v) => {
         setPath(f, path, v);
         if (opts.onInput) opts.onInput(v);
@@ -279,6 +274,15 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
    * Text typed into a value box at the model: a formula with variables keeps
    * the value linked to them (as the panel's field does); a plain number unlinks it.
    */
+  /** The value at `path` follows this formula (null: just a number). */
+  protected setExpr(path: string, expr: string | null): void {
+    const f = this.feature as Feature;
+    const exprs = { ...(f.exprs ?? {}) };
+    if (expr) exprs[path] = expr;
+    else delete exprs[path];
+    f.exprs = Object.keys(exprs).length ? exprs : undefined;
+  }
+
   protected typedInto(path: string, text: string, wrap: (t: string) => string = (t) => t): void {
     const f = this.feature as Feature;
     const exprs = { ...(f.exprs ?? {}) };

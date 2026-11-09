@@ -212,6 +212,12 @@ export class App implements AppContext {
     this.hover = null;
     this.ui.closeFlyout();
     this.ui.unfoldPanel();
+    // A phone: History and Items go, so the tool, its arrows and its value
+    // boxes aren't drawn under them (they can be opened again while it runs).
+    if (next !== this.selectTool && window.innerWidth <= 720) {
+      if (document.body.classList.contains("history-open")) this.ui.toggleHistory(false);
+      if (document.getElementById("items")?.classList.contains("open")) this.items.toggle(false);
+    }
     next.enter?.();
     this.updateUndo();
     // Leaving an operation drops its preview.
@@ -406,7 +412,7 @@ export class App implements AppContext {
 
   private async regenerate(): Promise<void> {
     const features = this.store.doc.features;
-    const r = await this.kernel.regenerate(features);
+    const r = await this.kernel.regenerate(features, true);
     if (r) this.apply(r, features);
   }
 
@@ -574,14 +580,18 @@ export class App implements AppContext {
     const f = this.store.find(id);
     if (!f) return;
     this.setSelection([]);
+    // What the step works on can be off screen (or under History): once its
+    // tool shows its picks, bring them into view. A sketch frames itself.
+    if (f.type !== "sketch") {
+      const before = this.tool;
+      setTimeout(() => this.tool !== before && this.view.keepInView(), 400);
+    }
     switch (f.type) {
       case "boolean":
         // Subtract / Intersect open their tool (picks, Keep options); Union has nothing to set.
         if (f.op !== "union") return this.setTool(new BooleanOp(this, f.op, f.target, f.tools, f));
         break;
       case "sketch":
-        // A phone: History goes, so the sketch and its tool column aren't drawn under it.
-        if (window.innerWidth <= 720 && document.body.classList.contains("history-open")) this.ui.toggleHistory(false);
         return this.setTool(new SketchTool(this, { sketchId: f.id }));
       case "extrude":
         return this.setTool(new ExtrudeOp(this, f.source, f as ExtrudeFeature));

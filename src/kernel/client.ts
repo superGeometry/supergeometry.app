@@ -12,7 +12,7 @@ export class KernelClient {
 
   // Coalesce regenerations: while one runs, only the most recent request waits.
   private regenRunning = false;
-  private regenQueued: { features: Feature[]; resolve: (r: RegenResult | null) => void } | null = null;
+  private regenQueued: { features: Feature[]; saved: boolean; resolve: (r: RegenResult | null) => void } | null = null;
   /** The last answer's meshes by key: the worker sends a mesh once, then just its key. */
   private meshes = new Map<number, BodyMesh>();
 
@@ -70,23 +70,24 @@ export class KernelClient {
    * Rebuild geometry. If calls arrive faster than the kernel can answer, the
    * intermediate ones resolve with null (they were superseded).
    */
-  regenerate(features: Feature[]): Promise<RegenResult | null> {
+  regenerate(features: Feature[], saved = false): Promise<RegenResult | null> {
     return new Promise((resolve) => {
       if (this.regenRunning) {
         this.regenQueued?.resolve(null);
-        this.regenQueued = { features, resolve };
+        this.regenQueued = { features, saved, resolve };
         return;
       }
-      this.runRegen(features, resolve);
+      this.runRegen(features, saved, resolve);
     });
   }
 
-  private async runRegen(features: Feature[], resolve: (r: RegenResult | null) => void) {
+  /** `saved`: the project as saved (not a tool's preview) - the engine keeps its steps for Cancel. */
+  private async runRegen(features: Feature[], saved: boolean, resolve: (r: RegenResult | null) => void) {
     this.regenRunning = true;
     await this.ready;
     this.running = features;
     const worker = this.worker;
-    const r = await this.call({ type: "regenerate", features });
+    const r = await this.call({ type: "regenerate", features, saved });
     // Stopped meanwhile: the fresh worker has its own queue.
     if (worker !== this.worker) return resolve(null);
     this.running = null;
@@ -95,7 +96,7 @@ export class KernelClient {
     this.regenRunning = false;
     const q = this.regenQueued;
     this.regenQueued = null;
-    if (q) this.runRegen(q.features, q.resolve);
+    if (q) this.runRegen(q.features, q.saved, q.resolve);
   }
 
   /** Meshes sent as their key only (unchanged bodies): the ones the page has. */

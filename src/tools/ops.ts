@@ -990,7 +990,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
             ...deltas(),
             o.rotate
               ? this.num(`Rotate ${axisName(o.rotate.axis)}`, "op.rotate.angle", "angle")
-              : { type: "number", label: "Rotate Z", value: 0, kind: "angle", onInput: (v) => ((o.rotate = { origin: this.center, axis: [0, 0, 1], angle: v }), up()) },
+              : { type: "number", label: "Rotate Z", value: 0, kind: "angle", onExpr: (e) => this.setExpr("op.rotate.angle", e), onInput: (v) => ((o.rotate = { origin: this.center, axis: [0, 0, 1], angle: v }), up()) },
             ...(this.existing && o.rotate?.angle ? pivot() : []),
             ...copy,
           ];
@@ -1213,7 +1213,7 @@ export class MoveFaceOp extends FeatureOp<MoveFaceFeature> {
     if (f.vertex) return xyz;
     return [
       ...xyz,
-      f.rotate ? this.num("Tilt", "rotate.angle", "angle") : { type: "number", label: "Tilt", value: 0, kind: "angle", onInput: (v) => ((f.rotate = { origin: this.center, axis: this.axes[0], angle: v }), this.update()) },
+      f.rotate ? this.num("Tilt", "rotate.angle", "angle") : { type: "number", label: "Tilt", value: 0, kind: "angle", onExpr: (e) => this.setExpr("rotate.angle", e), onInput: (v) => ((f.rotate = { origin: this.center, axis: this.axes[0], angle: v }), this.update()) },
     ];
   }
 

@@ -24,7 +24,7 @@ self.onmessage = async (e: MessageEvent<Envelope<Request>>) => {
         reply({ type: "ready" });
         break;
       case "regenerate": {
-        const result = await regenerate(msg.features);
+        const result = await regenerate(msg.features, msg.saved);
         const bodies = result.bodies.map((b) => (sent.has(b.key) ? ({ id: b.id, name: b.name, key: b.key, same: true } as unknown as BodyMesh) : b));
         sent = new Set(result.bodies.map((b) => b.key));
         reply({ type: "regenerated", result: { ...result, bodies } });

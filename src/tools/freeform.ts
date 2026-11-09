@@ -160,7 +160,22 @@ export class FreeformTool implements Tool {
       for (const o of [this.surface, this.faceEdges, this.lines, this.dots]) o.visible = false;
       view.setOriginPlanesVisible(true);
       this.app.ui.setHint("Tap a plane or a flat face to put the shape on.");
-      this.app.ui.showPanel({ title: "Freeform surface", items: [], onCancel: () => this.cancel() });
+      // The planes as buttons too (like Sketch): a plane behind a body, or the
+      // floor among the three near the origin, is hard to hit with a finger.
+      const on = (id: string) => () => {
+        const plane = this.app.view.planeOf(id);
+        if (plane && this.choosingPlane) this.placeOn({ plane, at: plane.origin });
+      };
+      this.app.ui.showPanel({
+        title: "Freeform surface",
+        items: [
+          { type: "button", label: "XY (floor)", onClick: on("XY") },
+          { type: "button", label: "XZ (front)", onClick: on("XZ") },
+          { type: "button", label: "YZ (side)", onClick: on("YZ") },
+          ...view.construction.planes.map((c) => ({ type: "button" as const, label: c.name, onClick: on(c.id) })),
+        ],
+        onCancel: () => this.cancel(),
+      });
       return;
     }
     this.startEditing();
@@ -796,24 +811,32 @@ export class FreeformTool implements Tool {
     if (this.choosingPlane) {
       const at = this.planeAt(p);
       if (!at) return this.app.ui.toast("Select a plane or a flat face");
-      // The flat sheet (made on XY at the origin) laid onto that plane.
-      const x = norm(at.plane.xDir);
-      const n = norm(at.plane.normal);
-      const y = cross(n, x);
-      this.cage = { faces: this.cage.faces, verts: this.cage.verts.map((v) => add(at.at, add(add(scale(x, v[0]), scale(y, v[1])), scale(n, v[2])))) };
-      // Its size and faces in the card, like a new box (a 50 × 30 pad was a
-      // 60 × 60 sheet to be scaled by 0.83 and 0.5).
-      this.live = { kind: "sheet", size: [60, 60], rows: 4, at: at.at, x, y, n };
-      this.choosingPlane = false;
-      this.app.setHover(null);
-      this.app.view.setOriginPlanesVisible(false);
-      for (const o of [this.surface, this.faceEdges, this.lines, this.dots]) o.visible = true;
-      this.startEditing();
-      return;
+      return this.placeOn(at);
     }
     // Tapped again where a face was just picked: the face behind it (a face
     // hidden behind another part - a handle's end behind its own arm - could
     // never be reached). Past the last one, it's dropped.
+    this.tapCage(p, count);
+  }
+
+  /** The new flat sheet put on a plane or flat face (centred at `at`). */
+  private placeOn(at: { plane: PlaneDef; at: Vec3 }): void {
+    // The flat sheet (made on XY at the origin) laid onto that plane.
+    const x = norm(at.plane.xDir);
+    const n = norm(at.plane.normal);
+    const y = cross(n, x);
+    this.cage = { faces: this.cage.faces, verts: this.cage.verts.map((v) => add(at.at, add(add(scale(x, v[0]), scale(y, v[1])), scale(n, v[2])))) };
+    // Its size and faces in the card, like a new box (a 50 × 30 pad was a
+    // 60 × 60 sheet to be scaled by 0.83 and 0.5).
+    this.live = { kind: "sheet", size: [60, 60], rows: 4, at: at.at, x, y, n };
+    this.choosingPlane = false;
+    this.app.setHover(null);
+    this.app.view.setOriginPlanesVisible(false);
+    for (const o of [this.surface, this.faceEdges, this.lines, this.dots]) o.visible = true;
+    this.startEditing();
+  }
+
+  private tapCage(p: ToolPointer, count: number): void {
     const lt = this.lastFaceTap;
     if (lt && Math.hypot(p.x - lt.x, p.y - lt.y) < 14 && performance.now() - lt.t < 4000 && this.picks.some((x) => x.kind === "face" && x.f === lt.f)) {
       const under = this.facesUnder(p);

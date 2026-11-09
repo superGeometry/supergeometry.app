@@ -82,7 +82,7 @@ export type ExportFormat = "stl" | "step" | "mesh";
 
 export type Request =
   | { type: "init" }
-  | { type: "regenerate"; features: Feature[] }
+  | { type: "regenerate"; features: Feature[]; saved?: boolean }
   | { type: "export"; features: Feature[]; format: ExportFormat; bodies?: string[] };
 
 export type Response =

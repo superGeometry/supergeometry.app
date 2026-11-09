@@ -95,6 +95,12 @@ const meshCache = new WeakMap<Shape3D, BodyMesh>();
 let meshKey = 1;
 const importCache = new Map<string, Shape3D>();
 let cache: CacheEntry[] = [];
+/**
+ * The saved project's steps, kept while a step is being changed (its previews
+ * fill `cache`): Cancel goes back to them at once, not after a rebuild of
+ * every step after the one that was open.
+ */
+let savedCache: CacheEntry[] = [];
 
 // ------------------------------------------------------------------ public API
 
@@ -124,9 +130,9 @@ export async function exportBodies(features: Feature[], format: ExportFormat, on
 const PRINT_TOLERANCE = 0.01;
 const PRINT_ANGLE = 0.05;
 
-export async function regenerate(features: Feature[]): Promise<RegenResult> {
+export async function regenerate(features: Feature[], saved = false): Promise<RegenResult> {
   const t0 = performance.now();
-  const { ctx, errors, numbers, notes } = await run(features);
+  const { ctx, errors, numbers, notes } = await run(features, saved);
   const names = bodyNames(features, [...ctx.bodies.keys()], numbers);
   const meshes: BodyMesh[] = [];
   for (const [id, shape] of ctx.bodies) {
@@ -155,7 +161,7 @@ export function debugBodies(): Map<string, Shape3D> {
   return lastBodies;
 }
 
-async function run(features: Feature[]) {
+async function run(features: Feature[], saved = false) {
   useSafeBooleans();
   const errors: FeatureError[] = [];
   const notes: FeatureError[] = [];
@@ -170,7 +176,7 @@ async function run(features: Feature[]) {
     // Chained hashes, not the text itself: a key holding every step's JSON
     // grew with the square of the project (an import's megabytes in each one).
     key = chainKey(key, JSON.stringify(f));
-    const cached: CacheEntry | undefined = hit && cache[i]?.key === key ? cache[i] : undefined;
+    const cached: CacheEntry | undefined = !hit ? undefined : cache[i]?.key === key ? cache[i] : savedCache[i]?.key === key ? savedCache[i] : undefined;
     hit = !!cached;
     let entry: CacheEntry;
     if (cached) {
@@ -228,6 +234,7 @@ async function run(features: Feature[]) {
     next.push(entry);
   }
   cache = next;
+  if (saved) savedCache = next;
   lastBodies = ctx.bodies;
   // Bodies are numbered in the order they first appeared (a body that's
   // deleted later keeps its number used, so the others don't change names).

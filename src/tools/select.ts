@@ -167,6 +167,12 @@ export class SelectTool implements Tool {
     } else {
       this.app.setSelection([s]);
     }
+    // Waiting for a body, and a corner of one was tapped (an STL's faces meet
+    // in corners everywhere): that body is the pick.
+    if (this.pending && s.kind === "vertex" && !this.pending.accepts.includes("vertex") && this.pending.accepts.includes("body")) {
+      s = { kind: "body", body: s.body };
+      this.app.setSelection([s]);
+    }
     if (this.pending && this.pending.accepts.includes(s.kind)) {
       const run = this.pending.run;
       this.pending = null;
