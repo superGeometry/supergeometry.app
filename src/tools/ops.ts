@@ -3,15 +3,15 @@
 
 import type { ThreadFeature } from "../doc/types";
 import { defaultPitch, threadLabel } from "../kernel/threads";
-import type { AxisFeature, AxisRef, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
+import type { AxisFeature, AxisRef, ConnectFeature, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
 import { FRONT, GROUND, RIGHT, add, cross, dot, len, norm, niceStep, patternSpacing, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { evaluate, fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
-import { FeatureOp } from "./featureOp";
+import { FeatureOp, type Slot } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
 import { axisSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
-import { faceIndexOf, goneRefs, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
+import { faceIndexOf, faceRefOf, goneRefs, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
 import { SketchTool } from "./sketch";
 import { screenClass } from "../device";
 import { faceBeforeShell } from "./shellFace";
@@ -2099,6 +2099,53 @@ export class SplitOp extends FeatureOp<SplitFeature> {
 
   protected items(): PanelItem[] {
     return [];
+  }
+}
+
+// ----------------------------------------------------------------- connect
+
+/**
+ * Connect: a smooth freeform bridge from one face to another (of two bodies,
+ * or two faces of one), joined to them, cut out of them or a body of its own.
+ */
+export class ConnectOp extends FeatureOp<ConnectFeature> {
+  readonly id = "connect";
+  private picked: (Sel | null)[] = [null, null];
+
+  constructor(app: AppContext, faces: Sel[], existing?: ConnectFeature) {
+    const refs = faces.flatMap((s) => (s.kind === "face" ? [faceRefOf(app, s)] : [])).filter((r): r is FaceRef => !!r);
+    super(app, { ...app.store.newIdentity("connect"), type: "connect", faces: [refs[0], refs[1]] as [FaceRef, FaceRef], mode: "auto", bulge: 1, size: 0.92 }, existing);
+    if (!existing) this.picked = [faces[0] ?? null, faces[1] ?? null];
+    const slot = (k: 0 | 1, label: string): Slot => ({
+      label,
+      describe: () => (this.feature.faces[k] ? "1 face" : "Tap a face"),
+      filled: () => !!this.feature.faces[k],
+      pick: { profiles: false, edges: false, planes: false, axes: false },
+      shows: () => (this.picked[k] ? [this.picked[k]!] : []),
+      rejectHint: "Tap a face",
+      accept: (hit) => {
+        if (hit.kind !== "face") return false;
+        const ref = faceRefOf(app, hit);
+        if (!ref) return false;
+        this.picked[k] = { kind: "face", body: hit.body, face: hit.face };
+        this.feature.faces[k] = ref;
+        return true;
+      },
+    });
+    this.slots = [slot(0, "From"), slot(1, "To")];
+  }
+
+  protected hint(): string {
+    return "The bridge leaves each face straight out of it. Bend: how far it bows out; Size: how big its ends are.";
+  }
+
+  protected items(): PanelItem[] {
+    const f = this.feature;
+    return [
+      modeChoice(() => f.mode, (m) => (f.mode = m), () => (this.render(), this.update())),
+      { type: "slider", label: "Bend", value: f.bulge ?? 1, min: 0.2, max: 2.5, step: 0.05, show: (v) => v.toFixed(2), onInput: (v) => ((f.bulge = v), this.update()) },
+      { type: "slider", label: "Size", value: f.size ?? 0.92, min: 0.1, max: 1, step: 0.01, show: (v) => `${Math.round(v * 100)}%`, onInput: (v) => ((f.size = v), this.update()) },
+    ];
   }
 }
 

@@ -4,7 +4,7 @@
 // in the card. The smooth surface updates live; Done turns it into a body.
 // Undo/Redo step through the cage changes made here.
 
-import { Box3, BufferAttribute, BufferGeometry, DoubleSide, Sprite, LineBasicMaterial, LineSegments, Mesh, MeshBasicMaterial, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
+import { Box3, BufferAttribute, BufferGeometry, DoubleSide, Sprite, LineBasicMaterial, LineSegments, type Material, Mesh, MeshBasicMaterial, MeshStandardMaterial, Points, Raycaster, Vector2, Vector3 } from "three";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import type { Feature, FreeformFeature, PlaneDef, TransformFeature, Vec3 } from "../doc/types";
@@ -80,8 +80,18 @@ export class FreeformTool implements Tool {
   private faceEdges: LineSegments2;
   /** Which surface points the face outlines join (pairs), for the layout shown. */
   private faceEdgeIdx: Uint32Array = new Uint32Array(0);
-  private lines = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x5f8fe8, transparent: true, opacity: 0.85, depthTest: false }));
-  private dots = new Points(new BufferGeometry(), dotMaterial({ color: 0xffffff, size: isCoarse ? 13 : 9 }));
+  /**
+   * The cage: what's in front of the shape bright, what's behind it faint
+   * (all of it equally bright, the far side's points crowded the near ones).
+   * The bright pass is depth-tested, pulled toward the eye by `pull` (a tenth
+   * of the shape's size): a point just under the surface in a hollow still
+   * counts as in front. The faint pass is the same points drawn through everything.
+   */
+  private pull = { value: 1 };
+  private lines = new LineSegments(new BufferGeometry(), pulled(new LineBasicMaterial({ color: 0x5f8fe8, transparent: true, opacity: 0.85 }), this.pull));
+  private dots = new Points(new BufferGeometry(), pulled(dotMaterial({ color: 0xffffff, size: isCoarse ? 13 : 9, depthTest: true }), this.pull));
+  private backLines = new LineSegments(this.lines.geometry, new LineBasicMaterial({ color: 0x5f8fe8, transparent: true, opacity: 0.16, depthTest: false }));
+  private backDots = new Points(this.dots.geometry, faint(dotMaterial({ color: 0xffffff, size: isCoarse ? 11 : 8, opacity: 0.28 })));
   // Picked points / edges / faces stand out: thick lines (a plain line is
   // always 1 px), bigger dots, and picked faces filled.
   private marks: LineSegments2;
@@ -135,6 +145,8 @@ export class FreeformTool implements Tool {
     // The cage on top of everything (planes, other bodies, the gimbal).
     this.lines.renderOrder = 68;
     this.dots.renderOrder = 70;
+    this.backLines.renderOrder = 66;
+    this.backDots.renderOrder = 66.5;
     for (const o of [this.marks, this.hoverMarks]) o.renderOrder = 69;
     for (const o of [this.markDots, this.hoverDots]) o.renderOrder = 71;
   }
@@ -148,7 +160,7 @@ export class FreeformTool implements Tool {
     if (this.sym) queueMicrotask(() => this.drawSymPlane());
     this.symMark.renderOrder = 72;
     this.symMark.visible = false;
-    view.overlay.add(this.symPlane, this.symMark, this.surface, this.faceEdges, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots);
+    view.overlay.add(this.symPlane, this.symMark, this.surface, this.faceEdges, this.backLines, this.backDots, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots);
     // Editing an existing freeform: hide its finished body while the cage is out.
     if (this.existing) view.setHidden(new Set([...this.app.store.doc.hidden, this.existing.id]));
     this.app.setSelection([]);
@@ -157,7 +169,7 @@ export class FreeformTool implements Tool {
     this.app.ui.setBottom([]);
     if (this.choosingPlane) {
       // Nothing shown yet: the origin planes (and flat faces) to put it on.
-      for (const o of [this.surface, this.faceEdges, this.lines, this.dots]) o.visible = false;
+      for (const o of [this.surface, this.faceEdges, this.lines, this.dots, this.backLines, this.backDots]) o.visible = false;
       view.setOriginPlanesVisible(true);
       this.app.ui.setHint("Tap a plane or a flat face to put the shape on.");
       // The planes as buttons too (like Sketch): a plane behind a body, or the
@@ -233,6 +245,8 @@ export class FreeformTool implements Tool {
     // (A sprite's geometry is shared by every sprite: only taken off, not disposed.)
     view.overlay.remove(this.symMark);
     view.overlay.remove(this.faceEdges);
+    // (They share the front pass's points and lines: disposed with those.)
+    view.overlay.remove(this.backLines, this.backDots);
     for (const o of [this.symPlane, this.surface, this.lines, this.dots, this.markFill, this.marks, this.markDots, this.hoverMarks, this.hoverDots]) {
       view.overlay.remove(o);
       o.geometry.dispose();
@@ -832,7 +846,7 @@ export class FreeformTool implements Tool {
     this.choosingPlane = false;
     this.app.setHover(null);
     this.app.view.setOriginPlanesVisible(false);
-    for (const o of [this.surface, this.faceEdges, this.lines, this.dots]) o.visible = true;
+    for (const o of [this.surface, this.faceEdges, this.lines, this.dots, this.backLines, this.backDots]) o.visible = true;
     this.startEditing();
   }
 
@@ -1281,6 +1295,7 @@ export class FreeformTool implements Tool {
       na.needsUpdate = true;
     }
     g.computeBoundingSphere();
+    this.pull.value = (g.boundingSphere?.radius || 10) * 0.1;
     const sp = g.getAttribute("position").array as Float32Array;
     const fe: number[] = new Array(this.faceEdgeIdx.length * 3);
     this.faceEdgeIdx.forEach((v, k) => ((fe[k * 3] = sp[v * 3]), (fe[k * 3 + 1] = sp[v * 3 + 1]), (fe[k * 3 + 2] = sp[v * 3 + 2])));
@@ -1434,6 +1449,24 @@ export class FreeformTool implements Tool {
 }
 
 /** Thick lines (segment pairs). */
+/** Drawn as if `pull` (world units) nearer the eye - for the depth test only (never past halfway). */
+function pulled<M extends Material>(m: M, pull: { value: number }): M {
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.pull = pull;
+    sh.vertexShader =
+      "uniform float pull;\n" +
+      sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\n  mvPosition.z = min(mvPosition.z + pull, mvPosition.z * 0.5);\n  gl_Position = projectionMatrix * mvPosition;");
+  };
+  m.customProgramCacheKey = () => "pulled";
+  return m;
+}
+
+/** A see-through dot: its texture's edge is cut at a lower alpha (the faint dot's whole alpha is under 0.5). */
+function faint<M extends Material>(m: M): M {
+  m.alphaTest = 0.05;
+  return m;
+}
+
 function setLines(o: LineSegments2, xyz: number[]): void {
   const g = o.geometry as LineSegmentsGeometry;
   // (No segments: an empty instanced line draws nothing.)

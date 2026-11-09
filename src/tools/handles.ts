@@ -71,7 +71,15 @@ export class Handle {
     return this.view.toScreen(this.tip());
   }
 
+  /** Shown or not (a hidden one can't be grabbed). */
+  setVisible(on: boolean): void {
+    if (this.group.visible === on) return;
+    this.group.visible = on;
+    this.view.requestRender();
+  }
+
   hit(p: ToolPointer): boolean {
+    if (!this.group.visible) return false;
     const s = this.grabPoint();
     return !!s && Math.hypot(s[0] - p.x, s[1] - p.y) < Math.max(30, p.tol * 1.8);
   }

@@ -79,6 +79,8 @@ export interface RegenResult {
   /** Steps that worked but had to give something up (a fillet that no longer fits…). */
   notes?: FeatureError[];
   ms: number;
+  /** The engine's memory after it (MB): it never gives any back, so the page starts a fresh engine when it's big. */
+  memoryMB?: number;
 }
 
 /** "mesh": each body as triangles, as finely as an STL (for a 3MF), JSON: { id, positions, indices }[]. */

@@ -16,22 +16,84 @@ export class KernelClient {
   /** The last answer's meshes by key: the worker sends a mesh once, then just its key. */
   private meshes = new Map<number, BodyMesh>();
 
+  /**
+   * The engine (OpenCascade) never hands memory back, and some of its
+   * operations leak (a union with a freeform body: ~10 MB each time). Past
+   * this much a spare engine is started, brought up to date in the
+   * background, and swapped in while nothing is running - a phone would
+   * otherwise run out after a while of editing.
+   */
+  static RECYCLE_MB = 500;
+  private last: { features: Feature[]; saved: Feature[] | null } = { features: [], saved: null };
+  private spare: { worker: Worker; bodies: BodyMesh[] | null } | null = null;
+
   constructor() {
     this.start();
   }
+
+  private handler = (e: MessageEvent<Envelope<Response>>) => {
+    const cb = this.pending.get(e.data.id);
+    this.pending.delete(e.data.id);
+    cb?.(e.data.msg);
+  };
 
   private start(): void {
     // A fresh worker sends every mesh again.
     this.meshes = new Map();
     this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
-    this.worker.onmessage = (e: MessageEvent<Envelope<Response>>) => {
-      const cb = this.pending.get(e.data.id);
-      this.pending.delete(e.data.id);
-      cb?.(e.data.msg);
-    };
+    this.worker.onmessage = this.handler;
     this.ready = this.call({ type: "init" }).then((r) => {
       if (r.type === "error") throw new Error(r.message);
     });
+  }
+
+  /** A spare engine, given the last saved project (and the last preview): it's ready to take over. */
+  private warmSpare(): void {
+    if (this.spare) return;
+    const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+    const spare: { worker: Worker; bodies: BodyMesh[] | null } = { worker, bodies: null };
+    this.spare = spare;
+    let n = 0;
+    const waiting = new Map<number, (r: Response) => void>();
+    worker.onmessage = (e: MessageEvent<Envelope<Response>>) => waiting.get(e.data.id)?.(e.data.msg);
+    const ask = (msg: Request) =>
+      new Promise<Response>((resolve) => {
+        waiting.set(++n, resolve);
+        worker.postMessage({ id: n, msg } satisfies Envelope<Request>);
+      });
+    const { features, saved } = this.last;
+    (async () => {
+      if ((await ask({ type: "init" })).type !== "ready") throw new Error("init");
+      const got = new Map<number, BodyMesh>();
+      const regen = async (fs: Feature[], asSaved: boolean) => {
+        const r = await ask({ type: "regenerate", features: fs, saved: asSaved });
+        if (r.type !== "regenerated") throw new Error("regenerate");
+        const bodies = r.result.bodies.map((b) => ((b as { same?: boolean }).same ? got.get(b.key)! : b));
+        for (const b of bodies) got.set(b.key, b);
+        return bodies;
+      };
+      let bodies = saved ? await regen(saved, true) : [];
+      if (!saved || features !== saved) bodies = await regen(features, false);
+      if (this.spare !== spare) throw new Error("stopped");
+      spare.bodies = bodies;
+      this.swapIfIdle();
+    })().catch(() => {
+      worker.terminate();
+      if (this.spare === spare) this.spare = null;
+    });
+  }
+
+  /** The spare engine takes over, if it's ready and nothing is running. */
+  private swapIfIdle(): void {
+    const s = this.spare;
+    if (!s?.bodies || this.regenRunning || this.pending.size) return;
+    this.spare = null;
+    this.worker.terminate();
+    this.worker = s.worker;
+    this.worker.onmessage = this.handler;
+    this.ready = Promise.resolve();
+    // It sends meshes it already sent (to us, while warming) as keys only.
+    this.meshes = new Map(s.bodies.map((b) => [b.key, b]));
   }
 
   /**
@@ -39,6 +101,8 @@ export class KernelClient {
    * the worker is thrown away and a fresh one started). Waiting calls end empty.
    */
   stop(): void {
+    this.spare?.worker.terminate();
+    this.spare = null;
     this.worker.terminate();
     const waiting = [...this.pending.values()];
     this.pending.clear();
@@ -86,6 +150,7 @@ export class KernelClient {
     this.regenRunning = true;
     await this.ready;
     this.running = features;
+    this.last = { features, saved: saved ? features : this.last.saved };
     const worker = this.worker;
     const r = await this.call({ type: "regenerate", features, saved });
     // Stopped meanwhile: the fresh worker has its own queue.
@@ -97,6 +162,8 @@ export class KernelClient {
     const q = this.regenQueued;
     this.regenQueued = null;
     if (q) this.runRegen(q.features, q.saved, q.resolve);
+    else if (r.type === "regenerated" && (r.result.memoryMB ?? 0) > KernelClient.RECYCLE_MB) this.warmSpare();
+    if (!q) this.swapIfIdle();
   }
 
   /** Meshes sent as their key only (unchanged bodies): the ones the page has. */

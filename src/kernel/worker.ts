@@ -13,6 +13,7 @@ import type { BodyMesh, Envelope, Request, Response } from "./protocol";
  * across on each move of a drag.
  */
 let sent = new Set<number>();
+let oc: { wasmMemory?: WebAssembly.Memory } = {};
 
 self.onmessage = async (e: MessageEvent<Envelope<Request>>) => {
   const { id, msg } = e.data;
@@ -20,14 +21,15 @@ self.onmessage = async (e: MessageEvent<Envelope<Request>>) => {
   try {
     switch (msg.type) {
       case "init":
-        setOC(await opencascade({ locateFile: () => wasmUrl }));
+        oc = await opencascade({ locateFile: () => wasmUrl });
+        setOC(oc as never);
         reply({ type: "ready" });
         break;
       case "regenerate": {
         const result = await regenerate(msg.features, msg.saved);
         const bodies = result.bodies.map((b) => (sent.has(b.key) ? ({ id: b.id, name: b.name, key: b.key, same: true } as unknown as BodyMesh) : b));
         sent = new Set(result.bodies.map((b) => b.key));
-        reply({ type: "regenerated", result: { ...result, bodies } });
+        reply({ type: "regenerated", result: { ...result, bodies, memoryMB: (oc.wasmMemory?.buffer.byteLength ?? 0) / 2 ** 20 } });
         break;
       }
       case "export":

@@ -79,7 +79,17 @@ function thickenSheet(sheet: unknown, { thickness: t, side }: Thicken): Shape3D 
   };
   if (side === "up") return thick(t);
   if (side === "down") return thick(-t);
-  return thick(t / 2).fuse(thick(-t / 2));
+  // Both ways: the sheet moved half the thickness back, then thickened the
+  // whole way forward - one solid. (Two halves fused leaked ~50 MB of the
+  // engine's memory on every rebuild: a phone ran out after a few dozen.)
+  const mk = new oc.BRepOffsetAPI_MakeOffsetShape();
+  try {
+    mk.PerformBySimple(sheet as never, -t / 2);
+    if (!mk.IsDone()) throw new Error("offset");
+    return thickenSheet(mk.Shape(), { thickness: t, side: "up" });
+  } finally {
+    mk.delete();
+  }
 }
 
 function sizeOf(pts: number[][]): number {

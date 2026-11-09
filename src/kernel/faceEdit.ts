@@ -258,6 +258,89 @@ function regionAround(body: Shape3D, F: Face, nb: Face[], q: Vec3, L: number, pa
  * radius afterwards - extending a fillet's cylinder through the body would
  * carve a tunnel into it.
  */
+/**
+ * The face made a smooth surface through `points` (absolute), its own edges
+ * kept: the rest of the body is untouched and closes round it again.
+ */
+export function freeformFace(body: Shape3D, F: Face, points: Vec3[]): Shape3D {
+  const oc = getOC();
+  const ex = new oc.TopExp_Explorer(F.wrapped, oc.TopAbs_ShapeEnum.TopAbs_WIRE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+  let wires = 0;
+  for (; ex.More(); ex.Next()) wires++;
+  ex.delete();
+  if (wires !== 1) throw new Error("Faces with holes in them can't be made freeform yet");
+  // Degree 2 overshoots least between points pulled out together; it can't
+  // always follow an outline with inward corners (an L): then 3.
+  for (const degree of [2, 3]) {
+    try {
+      const solid = filledFace(body, F, points, degree);
+      const check = new oc.BRepCheck_Analyzer(solid.wrapped, true, false);
+      const ok = check.IsValid();
+      check.delete();
+      if (ok) return solid;
+    } catch {
+      // the next degree
+    }
+  }
+  throw new Error("This face can't be shaped like that (it would fold over itself) - move the points less, or not past each other");
+}
+
+function filledFace(body: Shape3D, F: Face, points: Vec3[], degree: number): Shape3D {
+  const oc = getOC();
+  const fill = new oc.BRepOffsetAPI_MakeFilling(degree, 15, 2, false, 1e-5, 1e-4, 0.01, 0.1, 8, 9);
+  const progress = new oc.Message_ProgressRange();
+  const sew = new oc.BRepBuilderAPI_Sewing(1e-4, true, true, true, false);
+  try {
+    for (const e of F.edges) fill.Add(e.wrapped, oc.GeomAbs_Shape.GeomAbs_C0, true);
+    for (const p of points) {
+      const g = new oc.gp_Pnt(p[0], p[1], p[2]);
+      fill.Add(g);
+      g.delete();
+    }
+    fill.Build(progress);
+    if (!fill.IsDone()) throw new Error("fill");
+    const filled = fill.Shape();
+    const others = body.faces.filter((f) => !f.isSame(F));
+    // The new surface may meet the rest of the body only along its own edges
+    // (a point pushed through the far side passes the body's checks, but
+    // crosses itself).
+    const rim = F.edges.flatMap((e) => Array.from({ length: 41 }, (_, i) => e.pointAt(i / 40).toTuple() as Vec3));
+    const size = Math.sqrt(measureArea(F));
+    for (const other of others) {
+      const sec = new oc.BRepAlgoAPI_Section();
+      try {
+        sec.Init1(filled);
+        sec.Init2(other.wrapped);
+        sec.Build(progress);
+        const cut = cast(sec.Shape());
+        for (const e of "edges" in cut ? cut.edges : [])
+          for (const t of [0.25, 0.5, 0.75]) {
+            const p = e.pointAt(t).toTuple() as Vec3;
+            if (Math.min(...rim.map((q) => dist(p, q))) > Math.max(0.05, size * 0.01)) throw new Error("crosses");
+          }
+      } finally {
+        sec.delete();
+      }
+    }
+    for (const f of others) sew.Add(f.wrapped);
+    sew.Add(filled);
+    sew.Perform(progress);
+    const shells = subShapes(cast(sew.SewedShape()) as Shape3D, "SHELL");
+    if (shells.length !== 1) throw new Error("sew");
+    const fix = new oc.ShapeFix_Solid();
+    const made = fix.SolidFromShell(shells[0]);
+    fix.delete();
+    oc.BRepLib.OrientClosedSolid(oc.TopoDS.Solid(made));
+    const solid = cast(made) as Shape3D;
+    if (!(measureVolume(solid) > 0)) throw new Error("volume");
+    return solid;
+  } finally {
+    fill.delete();
+    sew.delete();
+    progress.delete();
+  }
+}
+
 export function replaceFacePlane(body: Shape3D, F: Face, to: PlaneDef): Shape3D {
   if (F.geomType !== "PLANE") throw new Error("Only flat faces can be moved or tilted");
   const blends = blendsOf(body, F);

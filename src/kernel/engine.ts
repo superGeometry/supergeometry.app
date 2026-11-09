@@ -53,6 +53,7 @@ import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "
 import { outlineOffsetCurves, projectPolyline } from "../sketch/edit";
 
 import { cageToShape } from "./freeform";
+import { bridgeCage, type BridgeEnd } from "../freeform/connect";
 import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from "./health";
 import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
@@ -61,7 +62,7 @@ import { useSafeBooleans } from "./safeBooleans";
 import { edgeSteps, faceSteps, inheritTags, sameSteps, seamEdges, tagBody } from "./provenance";
 
 import { cylinderOf, deleteFace,
- deleteFaces as deleteBodyFaces, editNotes, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
+ deleteFaces as deleteBodyFaces, editNotes, freeformFace, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
@@ -655,6 +656,17 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       return;
     }
 
+    case "faceFreeform": {
+      const body = need(bodies, f.face.body);
+      const face = resolveFace(body, f.face);
+      if (!f.points.some((p) => len(p.move) > 1e-9)) return;
+      // The grid follows the face (an earlier step moved it).
+      const c = face.center.toTuple() as Vec3;
+      const pts = f.points.map((p) => add(add(c, p.at), p.move));
+      bodies.set(f.face.body, staysClosed(body, freeformFace(body, face, pts)));
+      return;
+    }
+
     case "replaceFace": {
       const body = need(bodies, f.face.body);
       const face = resolveFace(body, f.face);
@@ -698,6 +710,38 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         else throw new Error(f.round.hole ? "The hole it was cut in is gone" : "The round face it was cut on is gone");
       }
       bodies.set(f.face.body, threadFace(body, face, f.pitch, !!f.left));
+      return;
+    }
+
+    case "connect": {
+      const [ra, rb] = f.faces;
+      const A = need(bodies, ra.body);
+      const B = need(bodies, rb.body);
+      const fa = resolveFace(A, ra);
+      const fb = resolveFace(B, rb);
+      if (ra.body === rb.body && fa.isSame(fb)) throw new Error("Pick two different faces to connect");
+      const cage = bridgeCage(bridgeEnd(A, fa), bridgeEnd(B, fb), { bulge: f.bulge ?? 1, size: f.size ?? 0.92 });
+      let bridge: Shape3D;
+      try {
+        bridge = checkedFreeform(cage);
+      } catch {
+        throw new Error("The bridge folds into itself here - make it bow out less (Bend), or pick faces that face each other more");
+      }
+      const m = f.mode === "auto" ? "join" : f.mode;
+      if (m === "new") {
+        bodies.set(f.id, bridge);
+        return;
+      }
+      // Into both bodies (one, when both faces are on it).
+      combine(f.id, m, ra.body, bridge, false, ctx);
+      if (rb.body !== ra.body) {
+        if (m === "join") {
+          combine(f.id, "join", ra.body, need(bodies, rb.body), false, ctx);
+          bodies.delete(rb.body);
+          ctx.freeforms.delete(rb.body);
+        } else combine(f.id, "cut", rb.body, bridge, false, ctx);
+      }
+      ctx.freeforms.delete(ra.body);
       return;
     }
 
@@ -2036,6 +2080,38 @@ function followFace(f: SketchFeature, bodies: Bodies): PlaneDef {
 }
 
 // ----------------------------------------------------- geometric references
+
+/**
+ * One end of a Connect bridge: the face's outer edge as points in order, its
+ * middle and outward normal, and how far the bridge may go into the body
+ * behind it (a third of the face's size, less than half the body's depth
+ * there - a 3 mm plate's end doesn't poke out of its back).
+ */
+function bridgeEnd(body: Shape3D, face: Face): BridgeEnd {
+  const oc = getOC();
+  const info = faceInfo(face);
+  const wire = oc.BRepTools.OuterWire(face.wrapped);
+  const curve = new oc.BRepAdaptor_CompCurve(wire, false);
+  const ring: Vec3[] = [];
+  try {
+    const a = curve.FirstParameter();
+    const b = curve.LastParameter();
+    const n = 160;
+    for (let k = 0; k < n; k++) {
+      const p = curve.Value(a + ((b - a) * k) / n);
+      ring.push([p.X(), p.Y(), p.Z()]);
+      p.delete();
+    }
+  } finally {
+    curve.delete();
+  }
+  const reach = Math.max(...ring.map((p) => dist(p, info.center)));
+  const [lo, hi] = body.boundingBox.bounds as [Vec3, Vec3];
+  let behind = 0;
+  for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) behind = Math.max(behind, dot(sub(info.center, [x, y, z]), info.normal));
+  const depth = Math.max(1e-3, Math.min(reach * 0.35, behind * 0.45 || reach * 0.1));
+  return { ring, center: info.center, normal: info.normal, depth };
+}
 
 function faceInfo(face: Face): FaceInfo {
   const center = face.center.toTuple() as Vec3;

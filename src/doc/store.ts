@@ -54,6 +54,8 @@ const LABELS: Record<FeatureType, string> = {
   replaceFace: "Replace Face",
   repair: "Repair",
   fillToPlane: "Fill to Plane",
+  connect: "Connect",
+  faceFreeform: "Freeform Face",
   thread: "Thread",
 };
 

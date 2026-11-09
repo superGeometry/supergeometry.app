@@ -18,7 +18,8 @@ import { isClosed } from "../freeform/cage";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 import { connectEdges } from "../doc/freeformConnect";
 import { OffsetEdgeOp } from "./offsetEdge";
-import { AxisOp, bodyCenter as centerOf, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MoveFaceOp, PlaneMoveOp, PlaneOp, planeAxes, ReplaceFaceOp, ScaleFaceOp, ScaleOp, ScaleRefOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
+import { FaceFreeformOp } from "./faceFreeform";
+import { AxisOp, bodyCenter as centerOf, ConnectOp, EdgeOp, ExtrudeOp, FillToPlaneOp, ImageOp, LoftOp, MoveFaceOp, PlaneMoveOp, PlaneOp, planeAxes, ReplaceFaceOp, ScaleFaceOp, ScaleOp, ScaleRefOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./ops";
 import { SketchTool, type SketchKind } from "./sketch";
 import { BooleanOp } from "./booleanOp";
 import { pickColor } from "../ui/colorPicker";
@@ -502,6 +503,10 @@ export class SelectTool implements Tool {
       { id: "axis", label: "Axis – Perp. to Face", icon: "axis", run: () => info && app.setTool(new AxisOp(app, info.center, info.normal)) },
       { id: "plane", label: "Plane – Offset", icon: "plane", ...needFlat, run: () => info?.plane && app.setTool(new PlaneOp(app, info.plane, faceRefOf(app, s)!)) },
       { id: "loft", label: "Loft", icon: "loft", ...needFlat, run: () => app.setTool(new LoftOp(app, sourcesOf(app, sel).flatMap(splitRegions), sel)) },
+      // The face made smooth: a grid of points over it to pull out or push in; its edges stay put.
+      { id: "faceFreeform", label: "Freeform Face", icon: "freeform", ...needFlat, run: () => app.setTool(new FaceFreeformOp(app, s)) },
+      // A smooth freeform bridge between two faces (the second tapped next when one is picked).
+      { id: "connect", label: "Connect", icon: "freeform", disabled: sel.length > 2, why: "Needs two faces", run: () => app.setTool(new ConnectOp(app, sel)) },
       { id: "split", label: "Split Body", icon: "split", disabled: !flat || app.view.bodyList.length < 2, why: "Needs another body to split", run: () => this.splitWith(info!.plane!, s.body) },
       { id: "revolve", label: "Revolve", icon: "revolve", ...needFlat, run: () => src && app.setTool(new RevolveOp(app, src)) },
       { id: "sweep", label: "Sweep", icon: "sweep", ...needFlat, run: () => src && app.setTool(new SweepOp(app, src)) },

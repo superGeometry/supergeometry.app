@@ -21,7 +21,8 @@ import { PinLayer } from "./tools/annotate";
 import { MeasureTool } from "./tools/measure";
 import { ItemsPanel } from "./ui/items";
 import { OffsetEdgeOp } from "./tools/offsetEdge";
-import { AxisOp, EdgeOp, ExtrudeOp, FillToPlaneOp, ThreadOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, ScaleRefOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
+import { FaceFreeformOp } from "./tools/faceFreeform";
+import { AxisOp, ConnectOp, EdgeOp, ExtrudeOp, FillToPlaneOp, ThreadOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, ScaleRefOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
 import { add, dist, scale, toWorld, xDirFor } from "./geom";
 import { entityPolylines } from "./sketch/curves";
 import { FreeformTool } from "./tools/freeform";
@@ -643,6 +644,10 @@ export class App implements AppContext {
         return this.setTool(new ImageOp(this, f as ImageFeature));
       case "freeform":
         return this.setTool(new FreeformTool(this, { feature: f }));
+      case "connect":
+        return this.setTool(new ConnectOp(this, [], f));
+      case "faceFreeform":
+        return this.setTool(new FaceFreeformOp(this, null, f));
       case "moveFace": {
         const target = f.face ? { face: f.face, plane: { origin: f.face.center, normal: f.face.normal, xDir: xDirFor(f.face.normal) } } : f.edge ? { edge: f.edge } : f.vertex ? { vertex: f.vertex } : null;
         if (target) return this.setTool(new MoveFaceOp(this, target, f));
@@ -673,12 +678,28 @@ export class App implements AppContext {
         id: "freeform",
         label: "Freeform",
         icon: "freeform",
-        children: (["box", "sphere", "cylinder", "plane"] as const).map((k) => ({
-          id: `ff-${k}`,
-          label: { box: "Box", sphere: "Sphere", cylinder: "Cylinder", plane: "Surface (plane)" }[k],
-          icon: "freeform" as const,
-          run: () => this.setTool(new FreeformTool(this, { primitive: k })),
-        })),
+        children: [
+          ...(["box", "sphere", "cylinder", "plane"] as const).map((k) => ({
+            id: `ff-${k}`,
+            label: { box: "Box", sphere: "Sphere", cylinder: "Cylinder", plane: "Surface (plane)" }[k],
+            icon: "freeform" as const,
+            run: () => this.setTool(new FreeformTool(this, { primitive: k })),
+          })),
+          // A flat face of a body made smooth (its edges stay put).
+          {
+            id: "faceFreeform",
+            label: "Freeform Face",
+            icon: "freeform" as const,
+            sub: "a face of a body",
+            run: wait("Freeform Face (tap a flat face)", ["face"], () => {
+              const s = this.selection[0];
+              if (s?.kind !== "face" || !this.view.body(s.body)?.faces[s.face]?.plane) return void this.ui.toast("Freeform Face works on flat faces for now");
+              this.setTool(new FaceFreeformOp(this, s));
+            }),
+          },
+          // A smooth bridge between two faces.
+          { id: "connect", label: "Connect", icon: "freeform" as const, sub: "two faces", run: () => this.setTool(new ConnectOp(this, this.selection.filter((s) => s.kind === "face").slice(0, 2))) },
+        ],
       },
       {
         id: "insert",

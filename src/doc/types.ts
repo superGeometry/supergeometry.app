@@ -392,12 +392,46 @@ export interface ThreadFeature extends FeatureBase {
  * removed, faces fixed and merged, inside-out solids turned - the shape
  * itself stays. Turns loose faces (an imported mesh or STEP surface) into a solid.
  */
+/**
+ * Connect: a smooth freeform bridge from one face to another (of two bodies,
+ * or of one), made again from the faces on every rebuild. Like an extrude it
+ * joins the bodies (Add / Auto), cuts its way through them (Cut), or is a
+ * body of its own (New body).
+ */
+/**
+ * A face of a body made freeform: its edges stay where they are, and the face
+ * becomes a smooth surface through a grid of points over it - some of them
+ * pulled out of it or pushed in.
+ */
+export interface FaceFreeformFeature extends FeatureBase {
+  type: "faceFreeform";
+  face: FaceRef;
+  /**
+   * The grid: where each point sits on the face (relative to the face's
+   * middle, so it follows the face when an earlier step moves it) and how far
+   * it has been moved from there.
+   */
+  points: { at: Vec3; move: Vec3 }[];
+}
+
+export interface ConnectFeature extends FeatureBase {
+  type: "connect";
+  faces: [FaceRef, FaceRef];
+  mode: "auto" | "new" | "join" | "cut";
+  /** How far the bridge bows out of each face (1: plain; 0: straight across). */
+  bulge?: number;
+  /** Its outline, as a fraction of the faces' (1: their own edges). */
+  size?: number;
+}
+
 export interface RepairFeature extends FeatureBase {
   type: "repair";
   bodies: string[];
 }
 
 export type Feature =
+  | ConnectFeature
+  | FaceFreeformFeature
   | FillToPlaneFeature
   | ThreadFeature
   | RepairFeature
