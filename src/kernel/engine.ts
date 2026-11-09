@@ -59,7 +59,8 @@ import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
-import { edgeSteps, faceSteps, inheritTags, sameSteps, seamEdges, tagBody } from "./provenance";
+import { edgeOrigins, edgeSteps, faceOrigins, faceSteps, inheritTags, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
+import { closestOnEntity } from "../sketch/regions";
 
 import { cylinderOf, deleteFace,
  deleteFaces as deleteBodyFaces, editNotes, freeformFace, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
@@ -93,6 +94,8 @@ interface CacheEntry {
   error?: string;
   /** Worked, but had to give something up (shown on the step in History). */
   note?: string;
+  /** Which of its faces a face is (see provenance.ts): for steps made from a sketch. */
+  origin?: OriginOf;
 }
 
 const meshCache = new WeakMap<Shape3D, BodyMesh>();
@@ -269,6 +272,10 @@ async function run(features: Feature[], saved = false) {
   let key = "";
   const next: CacheEntry[] = [];
   let hit = true;
+  // Which of a step's faces is which, for the steps so far (a step looking for
+  // the face it was built on asks; so does the mesh, for what gets picked next).
+  const origins = new Map<string, OriginOf>();
+  setOrigins(origins);
 
   for (let i = 0; i < features.length; i++) {
     const f = features[i];
@@ -304,6 +311,8 @@ async function run(features: Feature[], saved = false) {
             }
           }
           await apply(f, out);
+          entry.origin = originsOf(f, out);
+          if (entry.origin) origins.set(f.id, entry.origin);
           for (const [id, c] of copies) if (out.bodies.get(id) === c) out.bodies.set(id, ctx.bodies.get(id)!);
           // Nothing kilometres across, or away: a typo (a size with six noughts
           // too many), and more than the engine or the view can work with.
@@ -352,6 +361,7 @@ async function run(features: Feature[], saved = false) {
         }
       }
     }
+    if (entry.origin) origins.set(f.id, entry.origin);
     if (entry.error) errors.push({ featureId: f.id, message: entry.error });
     if (entry.note && !entry.error) notes.push({ featureId: f.id, message: entry.note });
     ctx = entry.ctx;
@@ -872,7 +882,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       } else along = plainSpine(ea.center, ea.dir, eb.center, eb.dir, f.bulge ?? 1, width);
       let bridge: Shape3D;
       try {
-        bridge = sweepBridge(ea, eb, along);
+        bridge = sweepBridge(ea, eb, along, !!f.guide);
       } finally {
         ea.outline.delete();
         eb.outline.delete();
@@ -2304,7 +2314,7 @@ function bridgeEnd(body: Shape3D, face: Face, size: number, inward: boolean, sin
  * middle to B's) turning into face B's - it starts and ends exactly on the
  * faces (as sized, and set back, by bridgeEnd).
  */
-function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3): Shape3D {
+function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3, guided: boolean): Shape3D {
   const oc = getOC();
   // In from deep in A, straight out through its face; along the curve; and the same into B.
   const lead = (e: BridgeEnd, back: boolean) => {
@@ -2314,9 +2324,25 @@ function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3): Sh
   const pts = [...lead(a, false), ...Array.from({ length: 61 }, (_, i) => along(i / 60)), ...lead(b, true)];
   const span = dist(pts[0], pts[pts.length - 1]) + 1;
   const spine = assembleWire([makeBSplineApproximation(pts, { tolerance: span * 1e-4, degMax: 5, degMin: 3 })]);
-  const ends = [a.outline, b.outline];
+  // The faces' own outlines; and, where one can't be turned into the other (a
+  // square into an L: not the same number of sides, corners that don't pair
+  // up), each as one smooth closed curve through points round it.
+  const smooth = (e: BridgeEnd) => {
+    const base = sub(e.center, scale(e.dir, e.depth));
+    // (A little inside the face's own edge: walls a hair apart from the body's make its join leave gaps.)
+    const round = e.ring.map((p) => add(base, scale(p, 0.97)));
+    return assembleWire([makeBSplineApproximation([...round, round[0]], { tolerance: Math.max(1e-4, e.reach * 1e-3), degMax: 5, degMin: 3 })]).wrapped;
+  };
+  const sections: (() => any[])[] = [() => [a.outline, b.outline], () => [smooth(a), smooth(b)]];
   // The way the outline is carried along: each copes with curves the others don't.
+  for (const section of sections)
   for (const mode of ["discrete", "corrected"]) {
+    let ends: any[];
+    try {
+      ends = section();
+    } catch {
+      continue;
+    }
     const mk = new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped);
     const progress = new oc.Message_ProgressRange();
     try {
@@ -2338,7 +2364,11 @@ function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3): Sh
       progress.delete();
     }
   }
-  throw new Error("The bridge can't be made along this curve (it turns too tightly for its width, or twists through itself) - try a gentler curve, or a smaller Size");
+  throw new Error(
+    guided
+      ? "The bridge can't be made along this curve (it turns too tightly for its width, or twists through itself) - try a gentler curve, or a smaller Size"
+      : "The bridge can't be made between these two faces as they are (too close for its width, or outlines too unlike each other) - try a smaller Size or another Bend, or draw a curve for it to follow",
+  );
 }
 
 /**
@@ -2426,6 +2456,65 @@ function edgeInfo(edge: Edge): EdgeInfo {
   return info;
 }
 
+/**
+ * For a step made from a sketch (an extrusion, a revolve): which of its faces
+ * a face is - the sketch curve its surface was drawn out of ("line3:0": the
+ * curve's id and which piece of it), or an end ("cap:0" on the sketch's plane,
+ * "cap:1" away from it, and the curve nearest its middle). Told from the face
+ * as it is, so a face trimmed or cut by later steps still says the same.
+ */
+function originsOf(f: Feature, ctx: Ctx): OriginOf | undefined {
+  if ((f.type !== "extrude" && f.type !== "revolve") || f.source.kind !== "profile") return undefined;
+  if (f.type === "extrude" && f.taper !== undefined && Math.abs(f.taper - 1) > 1e-9) return undefined;
+  const s = ctx.sketches.get(f.source.sketch);
+  if (!s) return undefined;
+  // The curves round the shapes it was made from (all of the sketch's, when not known).
+  const ids = new Set(f.source.regions.flatMap((r) => r.k ?? []));
+  const known = f.source.regions.every((r) => r.k?.length);
+  const curves = s.entities.filter((e) => !e.construction && (!known || ids.has(e.id)));
+  if (!curves.length || curves.length > 400) return undefined;
+  const { origin, normal } = s.plane;
+  const n = norm(normal);
+  const u = norm(s.plane.xDir);
+  const v = norm(cross(n, u));
+  const flat = (p: Vec3): [number, number] => [dot(sub(p, origin), u), dot(sub(p, origin), v)];
+  const nearest = (q: [number, number]) => {
+    let best: { key: string; d: number } | null = null;
+    for (const e of curves) {
+      const c = closestOnEntity(e, q);
+      if (!best || c.d < best.d) best = { key: `${e.id}:${c.prim}`, d: c.d };
+    }
+    return best!;
+  };
+  const axis = f.type === "revolve" ? resolveAxis(f.axis, ctx) : null;
+  return (face) => {
+    const p = face.pointOnSurface(0.5, 0.5);
+    const at = p.toTuple() as Vec3;
+    p.delete();
+    const fn = face.geomType === "PLANE" ? norm(face.normalAt().toTuple() as Vec3) : null;
+    if (axis) {
+      // An end of a part turn: a flat face the axis lies in.
+      if (fn && Math.abs(dot(fn, axis.dir)) < 1e-6 && Math.abs(dot(sub(at, axis.origin), fn)) < 1e-4) return `cap:${Math.abs(dot(fn, n)) > 0.999 ? 0 : 1}`;
+      // Turned back into the sketch's plane (either side of the axis).
+      const along = dot(sub(at, axis.origin), axis.dir);
+      const foot = add(axis.origin, scale(axis.dir, along));
+      const r = dist(at, foot);
+      const out = norm(cross(n, axis.dir));
+      const a = nearest(flat(add(foot, scale(out, r))));
+      const b = nearest(flat(add(foot, scale(out, -r))));
+      const best = a.d <= b.d ? a : b;
+      return best.d < 1e-3 + r * 1e-6 ? best.key : null;
+    }
+    const q = flat(at);
+    const hit = nearest(q);
+    if (fn && Math.abs(dot(fn, n)) > 0.999) {
+      const h = dot(sub(at, origin), n);
+      return `cap:${Math.abs(h) < 1e-4 ? 0 : h > 0 ? 1 : 2}@${hit.key}`;
+    }
+    return hit.d < 1e-3 ? hit.key : null;
+  };
+}
+
 /** Best-matching face for a stored signature (survives upstream edits). */
 function resolveFace(body: Shape3D, ref: FaceRef, only?: (f: Face) => boolean): Face {
   const size = Math.sqrt(ref.area) || 1;
@@ -2434,12 +2523,18 @@ function resolveFace(body: Shape3D, ref: FaceRef, only?: (f: Face) => boolean): 
   const steps = ref.step ? faceSteps(body) : undefined;
   const faces = body.faces;
   if (steps && !faces.some((_, i) => steps[i] === ref.step)) throw new Error(FACE_GONE);
+  // The one made from the same sketch curve, if that can be told: wherever it
+  // is now. (Cut in two since: the nearer piece, below.)
+  const origins = steps && ref.curve ? faceOrigins(body) : undefined;
+  const same = origins ? faces.filter((face, i) => steps![i] === ref.step && origins[i] === ref.curve && (!only || only(face))) : [];
+  if (same.length === 1) return same[0];
   for (const [i, face] of faces.entries()) {
     if (steps && steps[i] !== ref.step) continue;
+    if (same.length && origins![i] !== ref.curve) continue;
     if (only && !only(face)) continue;
     const fi = faceInfo(face);
     const align = dot(fi.normal, ref.normal);
-    if (align < 0.5) continue;
+    if (align < 0.5 && !same.length) continue;
     const score = dist(fi.center, ref.center) / size + (1 - align) * 4 + Math.abs(Math.log((fi.area + 1e-9) / (ref.area + 1e-9)));
     if (!best || score < best.score) best = { face, score };
   }
@@ -2460,8 +2555,14 @@ function resolveEdge(body: Shape3D, ref: EdgeRef, rounding = false): Edge {
   const seams = rounding && steps ? seamEdges(body) : undefined;
   const all = body.edges;
   if (steps && !all.some((_, i) => sameSteps(steps[i], ref.steps!) && !seams?.[i])) throw new Error(EDGE_GONE);
+  // The one between the same two faces (by the sketch curves they came from), wherever it is now.
+  const origins = steps && ref.curves ? edgeOrigins(body) : undefined;
+  const isIt = (i: number) => !!origins?.[i] && sameSteps(origins[i]!, ref.curves!) && !seams?.[i];
+  const same = origins ? all.filter((_, i) => isIt(i)) : [];
+  if (same.length === 1) return same[0];
   for (const [i, edge] of all.entries()) {
     if (steps && !sameSteps(steps[i], ref.steps!)) continue;
+    if (same.length && !isIt(i)) continue;
     if (seams?.[i]) continue;
     const ei = edgeInfo(edge);
     const align = Math.abs(dot(ei.dir, ref.dir));
@@ -2470,7 +2571,7 @@ function resolveEdge(body: Shape3D, ref: EdgeRef, rounding = false): Edge {
     // nearest is it, however far a resize moved it (a 3 mm lid's corner edges,
     // 20 mm out when the lid was made 40 wider, were "gone") - if it's still
     // much the same edge (the lid made round: its 3 mm corners aren't the rim circles).
-    if (steps && like > 1.5) continue;
+    if (steps && like > 1.5 && !same.length) continue;
     const score = dist(ei.mid, ref.mid) / size + like;
     if (!best || score < best.score) best = { edge, score };
   }
@@ -2504,8 +2605,8 @@ function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
     faceGroups: m.faceGroups.map((g, i) => ({ start: g.start, count: g.count, face: i })),
     edgePositions: new Float32Array(e.lines),
     edgeGroups: e.edgeGroups.map((g, i) => ({ start: g.start, count: g.count, edge: i })),
-    faces: shape.faces.map((f, i) => ({ ...faceInfo(f), step: faceSteps(shape)?.[i] })),
-    edges: shape.edges.map((e, i) => ({ ...edgeInfo(e), steps: edgeSteps(shape)?.[i] })),
+    faces: shape.faces.map((f, i) => ({ ...faceInfo(f), step: faceSteps(shape)?.[i], curve: faceOrigins(shape)?.[i] })),
+    edges: shape.edges.map((e, i) => ({ ...edgeInfo(e), steps: edgeSteps(shape)?.[i], curves: edgeOrigins(shape)?.[i] })),
 
     openEdges: openEdges(shape),
   };

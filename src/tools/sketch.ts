@@ -470,7 +470,7 @@ export class SketchTool implements Tool {
 
         if (best && info?.plane) {
           this.plane = originOnPlane({ origin: info.plane.origin, normal: info.plane.normal, xDir });
-          this.attachedTo = { body: best.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}) };
+          this.attachedTo = { body: best.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}), ...(info.curve ? { curve: info.curve } : {}) };
           this.app.ui.toast("Sketching on the face in front of you");
         } else if (view.construction.planes.some((c) => Math.abs(dot(c.plane.normal, normal)) > 0.9999)) {
           // Planes of the project's own face this way (a blade's tip plane,
@@ -2422,7 +2422,7 @@ export class SketchTool implements Tool {
       const info = this.app.view.body(hit.body)?.faces[hit.face];
       if (!info?.plane) return this.app.ui.toast("Pick a flat face");
       this.plane = originOnPlane(info.plane);
-      this.attachedTo = { body: hit.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}) };
+      this.attachedTo = { body: hit.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}), ...(info.curve ? { curve: info.curve } : {}) };
 
     } else if (hit.kind === "profile") {
       // Tapping an existing sketch continues it.

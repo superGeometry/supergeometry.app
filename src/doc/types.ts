@@ -60,6 +60,12 @@ export interface FaceRef {
   area: number;
   /** The step that made the face (only faces made by it are matched; none left: it's gone). */
   step?: string;
+  /**
+   * Which of that step's faces it is: the sketch curve it was made from (a
+   * side of an extrusion), or the end of it. Where the face is can change
+   * (the sketch redrawn, the holes moved past each other); this doesn't.
+   */
+  curve?: string;
 }
 
 export interface EdgeRef {
@@ -69,6 +75,8 @@ export interface EdgeRef {
   length: number;
   /** The steps that made the faces either side of it (sorted). */
   steps?: string[];
+  /** Which faces of those steps it lies between (their curves, see FaceRef; sorted). */
+  curves?: string[];
 }
 
 

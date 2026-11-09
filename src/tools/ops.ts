@@ -743,7 +743,7 @@ export class ShellOp extends FeatureOp<ShellFeature> {
 
   constructor(app: AppContext, body: string, faces: FaceRef[], existing?: ShellFeature) {
     super(app, { ...app.store.newIdentity("shell"), type: "shell", body, faces, thickness: 1 }, existing);
-    this.original = (app.view.body(body)?.faces ?? []).map((f) => ({ body, center: f.center, normal: f.normal, area: f.area, ...(f.step ? { step: f.step } : {}) }));
+    this.original = (app.view.body(body)?.faces ?? []).map((f) => ({ body, center: f.center, normal: f.normal, area: f.area, ...(f.step ? { step: f.step } : {}), ...(f.curve ? { curve: f.curve } : {}) }));
 
     this.slots = [facesSlot(app, "Open faces", () => this.feature.faces, (f) => (this.feature.faces = f.map((r) => this.onOriginal(r))), true)];
     this.active = 0;
@@ -2132,21 +2132,31 @@ export class ConnectOp extends FeatureOp<ConnectFeature> {
         return true;
       },
     });
-    // The curve the bridge follows (a spline drawn from one face to the other).
+    // A curve for the bridge to follow (a spline drawn from one face to the
+    // other), if there is one: without, it bows from face to face by Bend.
     const guide = pathSlot(app, () => this.feature.guide ?? null, (p) => (this.feature.guide = p));
-    this.slots = [slot(0, "From"), slot(1, "To"), { ...guide, label: "Guide", describe: () => (this.feature.guide ? guide.describe() : "Tap a sketch curve (a spline from face to face)") }];
+    this.slots = [slot(0, "From"), slot(1, "To"), { ...guide, label: "Guide", describe: () => (this.feature.guide ? guide.describe() : "None - tap a sketch curve for the bridge to follow") }];
+  }
+
+  /** Two faces are enough: the bridge shows at once (the guide is a choice). */
+  protected ready(): boolean {
+    return !!this.feature.faces[0] && !!this.feature.faces[1];
   }
 
   protected hint(): string {
-    return "The bridge runs along the guide from face to face. Size: how big it is against the faces.";
+    return this.feature.guide
+      ? "The bridge runs along the guide from face to face. Size: how big it is against the faces."
+      : "Bend: how far the bridge bows out of the faces. Tap a sketch curve (a spline from face to face) to have it follow that instead.";
   }
 
   protected items(): PanelItem[] {
     const f = this.feature;
     return [
       modeChoice(() => f.mode, (m) => (f.mode = m), () => (this.render(), this.update())),
-      // (Without a guide - a step made before guides - it bows out by Bend.)
-      ...(f.guide || !this.existing ? [] : [{ type: "slider" as const, label: "Bend", value: f.bulge ?? 1, min: 0.2, max: 2.5, step: 0.05, show: (v: number) => v.toFixed(2), onInput: (v: number) => ((f.bulge = v), this.update()) }]),
+      // Without a guide it bows out by Bend; with one, the guide can be let go again.
+      ...(f.guide
+        ? [{ type: "button" as const, label: "No guide", icon: "close" as const, onClick: () => ((f.guide = undefined), this.render(), this.update()) }]
+        : [{ type: "slider" as const, label: "Bend", value: f.bulge ?? 1, min: 0.2, max: 2.5, step: 0.05, show: (v: number) => v.toFixed(2), onInput: (v: number) => ((f.bulge = v), this.update()) }]),
       { type: "slider", label: "Size", value: f.size ?? 1, min: 0.1, max: 1, step: 0.01, show: (v) => `${Math.round(v * 100)}%`, onInput: (v) => ((f.size = v), this.update()) },
     ];
   }

@@ -117,7 +117,7 @@ export function hitToSel(h: PickHit | null): Sel | null {
 
 export function faceRefOf(app: AppContext, s: { body: string; face: number }): FaceRef | null {
   const info = app.view.body(s.body)?.faces[s.face];
-  return info ? { body: s.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}) } : null;
+  return info ? { body: s.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}), ...(info.curve ? { curve: info.curve } : {}) } : null;
 }
 
 /**
@@ -142,7 +142,7 @@ export function goneRefs<R extends FaceRef | EdgeRef>(app: AppContext, refs: R[]
 export function edgeRefOf(
 app: AppContext, s: { body: string; edge: number }): EdgeRef | null {
   const info = app.view.body(s.body)?.edges[s.edge];
-  return info ? { body: s.body, mid: info.mid, dir: info.dir, length: info.length, ...(info.steps ? { steps: info.steps } : {}) } : null;
+  return info ? { body: s.body, mid: info.mid, dir: info.dir, length: info.length, ...(info.steps ? { steps: info.steps } : {}), ...(info.curves ? { curves: info.curves } : {}) } : null;
 
 }
 

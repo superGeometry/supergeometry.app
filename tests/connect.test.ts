@@ -166,4 +166,29 @@ check("Cut: the bridge's ends are cut out of both cubes", !r.errors && !r.bad &&
   check("...the guide edited to swing out further: the bridge goes with it", !r.errors && !r.bad && yLo2 < yLo - 5, `${r.errors}${r.bad} reaches y ${yLo?.toFixed(1)} then ${yLo2?.toFixed(1)}`);
 }
 
+// Outlines that don't pair up: a square top to an L-shaped top beside it
+// (four sides to six, one of them an inward corner), and to a triangle.
+{
+  const poly = (id: string, points: [number, number][], h: number): Feature[] => {
+    const es = [{ id: "p", kind: "polyline", points, closed: true }];
+    return [
+      { id: `s${id}`, name: `s${id}`, type: "sketch", plane: plane(0), entities: es } as Feature,
+      { id, name: id, type: "extrude", source: { kind: "profile", sketch: `s${id}`, regions: arrangement(es as any).regions.map(regionRef) }, distance: h, mode: "new" } as Feature,
+    ];
+  };
+  const top = (id: string) => {
+    const s = debugBodies().get(id) as Shape3D;
+    const f = s.faces.find((x) => x.normalAt().z > 0.99)!;
+    const c = f.center;
+    return face(id, [c.x, c.y, c.z], [0, 0, 1], 0);
+  };
+  for (const [name, pts] of [["an L", [[0, 50], [40, 50], [40, 65], [15, 65], [15, 90], [0, 90]]], ["a triangle", [[0, 50], [30, 50], [10, 80]]]] as [string, [number, number][]][]) {
+    const fs = [...box("A", 20, 20, 20, [60, 0, 0]), ...poly("B", pts, 10)];
+    await build(fs);
+    const [ta, tb] = [top("A"), top("B")];
+    r = await build([...fs, connect({ ...ta, area: 400 }, { ...tb, area: 300 }, "join")]);
+    check(`a square top to ${name}-shaped top, no guide: joined`, !r.errors && !r.bad && r.ids.length === 1, `${r.errors}${r.bad} ${r.ids}`);
+  }
+}
+
 process.exit(failed ? 1 : 0);

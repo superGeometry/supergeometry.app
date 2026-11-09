@@ -15,6 +15,8 @@ export interface FaceInfo {
   round?: { r: number; hole: boolean };
   /** The step that made it (see provenance.ts). */
   step?: string;
+  /** Which of that step's faces it is (the sketch curve it came from; see FaceRef.curve). */
+  curve?: string;
 }
 
 export interface EdgeInfo {
@@ -27,6 +29,8 @@ export interface EdgeInfo {
   type: string;
   /** The steps that made the faces either side (sorted). */
   steps?: string[];
+  /** Which faces of those steps (see EdgeRef.curves). */
+  curves?: string[];
 }
 
 export interface BodyMesh {

@@ -148,6 +148,63 @@ export function edgeSteps(shape: Shape3D): string[][] | undefined {
   return out;
 }
 
+/**
+ * Which of a step's faces a face is: told from the face itself and what the
+ * step was made from (an extrusion's side by the sketch curve under it). One
+ * per step that can tell; set by the engine as it replays the steps.
+ */
+export type OriginOf = (face: Face) => string | null;
+let originOf: Map<string, OriginOf> = new Map();
+export function setOrigins(of: Map<string, OriginOf>): void {
+  originOf = of;
+}
+
+const originTags = new WeakMap<Shape3D, (string | undefined)[]>();
+/** For each face of a body, which of its step's faces it is (undefined: can't be told). */
+export function faceOrigins(shape: Shape3D): (string | undefined)[] | undefined {
+  const known = originTags.get(shape);
+  if (known) return known;
+  const steps = faceSteps(shape);
+  if (!steps) return undefined;
+  const out = shape.faces.map((face, i) => {
+    const of = originOf.get(steps[i]);
+    if (!of) return undefined;
+    try {
+      return of(face) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  originTags.set(shape, out);
+  return out;
+}
+
+const edgeOriginTags = new WeakMap<Shape3D, (string[] | undefined)[]>();
+/** For each edge, the faces it lies between as "step|origin" (sorted); undefined when one of them can't be told. */
+export function edgeOrigins(shape: Shape3D): (string[] | undefined)[] | undefined {
+  const known = edgeOriginTags.get(shape);
+  if (known) return known;
+  const steps = faceSteps(shape);
+  const origins = faceOrigins(shape);
+  if (!steps || !origins) return undefined;
+  const edges = shape.edges;
+  const buckets = new Map<number, { i: number; s: Set<string>; all: boolean }[]>();
+  edges.forEach((e, i) => buckets.set(e.hashCode, [...(buckets.get(e.hashCode) ?? []), { i, s: new Set<string>(), all: true }]));
+  shape.faces.forEach((f, fi) => {
+    for (const fe of f.edges) {
+      const list = buckets.get(fe.hashCode);
+      const m = list?.length === 1 ? list[0] : list?.find((x) => edges[x.i].isSame(fe));
+      if (!m) continue;
+      if (origins[fi] === undefined) m.all = false;
+      else m.s.add(`${steps[fi]}|${origins[fi]}`);
+    }
+  });
+  const out: (string[] | undefined)[] = new Array(edges.length).fill(undefined);
+  for (const list of buckets.values()) for (const { i, s, all } of list) out[i] = all && s.size ? [...s].sort() : undefined;
+  edgeOriginTags.set(shape, out);
+  return out;
+}
+
 const seamTags = new WeakMap<Shape3D, boolean[]>();
 
 /**
