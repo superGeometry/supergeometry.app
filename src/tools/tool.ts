@@ -47,6 +47,8 @@ export interface AppContext {
   readonly selection: Sel[];
   /** Thread the selected round face. */
   startThread(): void;
+  /** Open a step of the history to change it (as tapping it in History does). */
+  editStep(id: string): void;
   setSelection(sel: Sel[]): void;
   setHover(h: Sel | null): void;
   /** null returns to the selection tool. */

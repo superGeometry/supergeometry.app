@@ -1,11 +1,12 @@
 // Freeform Face: a face of a body made a smooth surface. A grid of points
-// lies over the face; tap points to pick them (tap again to let go), drag the
-// arrow (or type a height) to pull them out of the face or push them in. The
-// face's edges stay where they are - the rest of the body doesn't move.
+// lies over the face; tap points to pick them (tap again to let go), then move
+// them with the gimbal - its arrows along the face and out of it, its squares
+// within a plane, its rings to turn them - or type how far out of the face
+// they are. The face's edges stay where they are: the rest of the body doesn't move.
 
 import { BufferAttribute, BufferGeometry, Points } from "three";
 import type { FaceFreeformFeature, FaceRef, Vec3 } from "../doc/types";
-import { add, dot, niceStep, scale } from "../geom";
+import { add, cross, dot, len, niceStep, norm, scale, sub, xDirFor } from "../geom";
 import { faceGrid } from "../freeform/faceGrid";
 import type { PanelItem } from "../ui/ui";
 import { fmtLen } from "../units";
@@ -13,16 +14,17 @@ import type { ToolPointer } from "../view/input";
 import { dotMaterial } from "../view/viewport";
 import { isCoarse } from "../device";
 import { FeatureOp } from "./featureOp";
-import { axisDrag, Handle } from "./handles";
+import { Gimbal, type GimbalPart } from "./gimbal";
+import { axisDrag } from "./handles";
 import { faceRefOf, type AppContext, type Sel } from "./tool";
 
 const SEL = 0xffa31a;
 const GRIDS = [3, 5, 7, 9];
 
-/** The face's triangles as shown (for the grid: points only where the face is). */
-function faceTriangles(app: AppContext, s: Extract<Sel, { kind: "face" }>): [Vec3, Vec3, Vec3][] {
-  const b = app.view.body(s.body);
-  const g = b?.faceGroups.find((x) => x.face === s.face);
+/** The triangles of face `i` of a body as shown (the grid goes only where the face is). */
+function faceTriangles(app: AppContext, body: string, i: number): [Vec3, Vec3, Vec3][] {
+  const b = app.view.body(body);
+  const g = b?.faceGroups.find((x) => x.face === i);
   if (!b || !g) return [];
   const P = (k: number): Vec3 => [b.positions[3 * k], b.positions[3 * k + 1], b.positions[3 * k + 2]];
   const out: [Vec3, Vec3, Vec3][] = [];
@@ -32,21 +34,27 @@ function faceTriangles(app: AppContext, s: Extract<Sel, { kind: "face" }>): [Vec
 
 export class FaceFreeformOp extends FeatureOp<FaceFreeformFeature> {
   readonly id = "faceFreeform";
-  private tris: [Vec3, Vec3, Vec3][];
-  private grid: number;
+  private tris: [Vec3, Vec3, Vec3][] = [];
   private picked = new Set<number>();
   private dots = new Points(new BufferGeometry(), dotMaterial({ color: 0xffffff, size: isCoarse ? 13 : 9 }));
   private marks = new Points(new BufferGeometry(), dotMaterial({ color: SEL, size: isCoarse ? 19 : 14 }));
-  private handle: Handle;
-  private dragging: { from: ToolPointer; start: Vec3[]; base: Vec3 } | null = null;
+  private gimbal: Gimbal | null = null;
+  private dragging: { part: GimbalPart; from: ToolPointer; start: Vec3[]; center: Vec3 } | null = null;
 
+  /**
+   * `face`: the flat face to make freeform. Editing (`existing`): the face it
+   * made is found on the body (the grid can be laid again over its outline).
+   */
   constructor(app: AppContext, face: Extract<Sel, { kind: "face" }> | null, existing?: FaceFreeformFeature) {
-    const ref = (face && faceRefOf(app, face)) as FaceRef;
-    super(app, { ...app.store.newIdentity("faceFreeform"), type: "faceFreeform", face: ref, points: [] }, existing);
-    this.tris = face ? faceTriangles(app, face) : [];
-    this.grid = existing ? 0 : 5;
-    if (!existing) this.layGrid(5);
-    this.handle = new Handle(app.view, "arrow");
+    const ref = (face && !existing && faceRefOf(app, face)) as FaceRef;
+    super(app, { ...app.store.newIdentity("faceFreeform"), type: "faceFreeform", face: ref, points: [], grid: 5 }, existing);
+    if (existing) {
+      const i = app.view.body(existing.face.body)?.faces.findIndex((f) => f.step === existing.id) ?? -1;
+      if (i >= 0) this.tris = faceTriangles(app, existing.face.body, i);
+    } else if (face) {
+      this.tris = faceTriangles(app, face.body, face.face);
+      this.layGrid(5);
+    }
     this.dots.renderOrder = 70;
     this.marks.renderOrder = 71;
     app.view.overlay.add(this.dots, this.marks);
@@ -56,11 +64,19 @@ export class FaceFreeformOp extends FeatureOp<FaceFreeformFeature> {
     return this.feature.face.normal;
   }
 
+  /** The face's own directions: along it (two) and out of it. */
+  private axes(): Vec3[] {
+    const n = norm(this.normal);
+    const u = xDirFor(n);
+    return [u, norm(cross(n, u)), n];
+  }
+
   /** Points `n` across the face, none moved. */
   private layGrid(n: number): void {
-    this.grid = n;
     const f = this.feature.face;
+    // (Over a face already shaped, the grid lies on the face as it was: its edges are the same.)
     this.feature.points = faceGrid(this.tris, f.center, f.normal, n).map((at) => ({ at, move: [0, 0, 0] as Vec3 }));
+    this.feature.grid = n;
     this.picked.clear();
   }
 
@@ -71,7 +87,7 @@ export class FaceFreeformOp extends FeatureOp<FaceFreeformFeature> {
 
   protected hint(): string {
     if (!this.feature.points.length) return "This face is too small for a grid of points - pick a bigger face";
-    return this.picked.size ? "Drag the arrow (or type a height) to pull the picked points out or push them in. Tap points to pick more." : "Tap points on the face to pick them (tap again to let go), then drag the arrow. The face's edges stay put.";
+    return this.picked.size ? "Move the picked points with the gimbal (arrows, squares, rings), or type how far out of the face they are. Tap points to pick more." : "Tap points on the face to pick them (tap again to let go), then move them. The face's edges stay put.";
   }
 
   protected ready(): boolean {
@@ -87,9 +103,21 @@ export class FaceFreeformOp extends FeatureOp<FaceFreeformFeature> {
 
   protected items(): PanelItem[] {
     const items: PanelItem[] = [];
-    // Another grid starts over (nothing moved); an edited step keeps its own.
-    if (!this.existing || this.grid)
-      items.push({ type: "choice", label: "Points across", options: GRIDS.map((n) => ({ id: String(n), label: String(n) })), value: String(this.grid), onChange: (v) => (this.layGrid(Number(v)), this.render(), this.update()) });
+    // Another grid starts over (nothing moved).
+    if (this.tris.length)
+      items.push({
+        type: "choice",
+        label: "Points across",
+        options: GRIDS.map((n) => ({ id: String(n), label: String(n) })),
+        value: String(this.feature.grid ?? ""),
+        onChange: (v) => {
+          const moved = this.feature.points.some((p) => len(p.move) > 1e-9);
+          this.layGrid(Number(v));
+          if (moved) this.app.ui.toast("A new grid: the points start flat again");
+          this.render();
+          this.update();
+        },
+      });
     items.push({
       type: "choice",
       options: [
@@ -111,7 +139,7 @@ export class FaceFreeformOp extends FeatureOp<FaceFreeformFeature> {
     return items;
   }
 
-  /** The picked points this far out of the face (keeping any sideways move). */
+  /** The picked points this far out of the face (keeping any move along it). */
   private setHeight(h: number): void {
     for (const i of this.picked) {
       const m = this.feature.points[i].move;
@@ -119,6 +147,10 @@ export class FaceFreeformOp extends FeatureOp<FaceFreeformFeature> {
     }
     this.app.ui.updatePanelValues([h]);
     this.update();
+  }
+
+  private centroid(ids: number[]): Vec3 {
+    return scale(ids.reduce((s, i) => add(s, this.where(i)), [0, 0, 0] as Vec3), 1 / ids.length);
   }
 
   protected onDraftChanged(): void {
@@ -130,9 +162,13 @@ export class FaceFreeformOp extends FeatureOp<FaceFreeformFeature> {
     set(this.dots, all);
     set(this.marks, [...this.picked].map((i) => all[i]));
     const ids = [...this.picked];
-    const mid = ids.length ? scale(ids.reduce((s, i) => add(s, all[i]), [0, 0, 0] as Vec3), 1 / ids.length) : null;
-    this.handle.set(mid ?? this.feature.face.center, this.normal);
-    this.handle.setVisible(!!mid);
+    if (!ids.length) {
+      this.gimbal?.dispose();
+      this.gimbal = null;
+    } else {
+      this.gimbal ??= new Gimbal(this.app.view, { axes: this.axes() });
+      this.gimbal.setCenter(this.centroid(ids));
+    }
     this.app.view.requestRender();
   }
 
@@ -149,9 +185,9 @@ export class FaceFreeformOp extends FeatureOp<FaceFreeformFeature> {
   }
 
   hover(p: ToolPointer | null): void {
-    const on = !!p && this.picked.size > 0 && (!!this.dragging || this.handle.hit(p));
-    this.handle.setHot(on);
-    this.app.view.canvas.style.cursor = on || (p && this.pointAt(p) !== null) ? "pointer" : "";
+    const part = p && !this.dragging ? (this.gimbal?.hit(p) ?? null) : null;
+    if (!this.dragging) this.gimbal?.setHot(part);
+    this.app.view.canvas.style.cursor = part || (p && this.pointAt(p) !== null) ? "pointer" : "";
   }
 
   tap(p: ToolPointer): void {
@@ -164,34 +200,82 @@ export class FaceFreeformOp extends FeatureOp<FaceFreeformFeature> {
   }
 
   down(p: ToolPointer): boolean {
-    if (!this.picked.size || !this.handle.hit(p)) return false;
+    const part = this.gimbal?.hit(p);
+    if (!part || !this.gimbal) return false;
+    // Another point right under the finger: a tap on it, not a drag of the gimbal's middle.
+    if (part.kind === "center" || part.kind === "plane") {
+      const i = this.pointAt(p);
+      if (i !== null && !this.picked.has(i)) return false;
+    }
     const ids = [...this.picked];
-    const base = scale(ids.reduce((s, i) => add(s, this.where(i)), [0, 0, 0] as Vec3), 1 / ids.length);
-    this.dragging = { from: p, start: this.feature.points.map((q) => q.move), base };
-    this.handle.setHot(true);
+    // One point turned about itself wouldn't move: it turns about the face's middle.
+    const center = part.kind === "ring" && ids.length === 1 ? this.feature.face.center : this.gimbal.origin;
+    this.dragging = { part, from: p, start: this.feature.points.map((q) => q.move), center };
+    this.gimbal.setHot(part);
     return true;
   }
 
   drag(p: ToolPointer): void {
     const dr = this.dragging;
     if (!dr) return;
-    const raw = axisDrag(this.app.view, dr.base, this.normal, dr.from, p);
-    const step = niceStep(this.app.view.cam.worldPerPixel(this.app.view.height) * 4);
-    const d = Math.round(raw / step) * step;
-    for (const i of this.picked) this.feature.points[i].move = add(dr.start[i], scale(this.normal, d));
+    const view = this.app.view;
+    const AX = this.axes();
+    const step = niceStep(view.cam.worldPerPixel(view.height) * 4);
+    const snap = (v: number) => (p.shift ? v : Math.round(v / step) * step);
+    let d: Vec3 = [0, 0, 0];
+    let deg = 0;
+    let label = "";
+    const part = dr.part;
+    if (part.kind === "axis") {
+      const t = snap(axisDrag(view, dr.center, AX[part.i], dr.from, p));
+      d = scale(AX[part.i], t);
+      label = `${t >= 0 ? "+" : ""}${fmtLen(t)}`;
+    } else if (part.kind === "plane" || part.kind === "center") {
+      const n = part.kind === "plane" ? AX[part.i] : (view.cam.viewDir().toArray() as Vec3);
+      const plane = { origin: dr.center, normal: n, xDir: xDirFor(n) };
+      const a = view.rayToPlane(dr.from.x, dr.from.y, plane);
+      const b = view.rayToPlane(p.x, p.y, plane);
+      if (!a || !b) return;
+      d = sub(b, a).map(snap) as Vec3;
+      label = fmtLen(len(d));
+    } else {
+      const axis = AX[part.i];
+      const c = view.toScreen(dr.center);
+      if (!c) return;
+      const ang = (q: { x: number; y: number }) => Math.atan2(q.y - c[1], q.x - c[0]);
+      const facing = dot(axis, view.cam.viewDir().toArray() as Vec3) < 0 ? 1 : -1;
+      deg = ((-(ang(p) - ang(dr.from)) * 180) / Math.PI) * facing;
+      deg = ((deg + 540) % 360) - 180;
+      if (!p.shift) deg = Math.round(deg);
+      label = `${deg}°`;
+    }
+    const t = (deg * Math.PI) / 180;
+    const axis = part.kind === "ring" ? AX[part.i] : null;
+    const base = this.feature.face.center;
+    for (const i of this.picked) {
+      const pt = this.feature.points[i];
+      let q = add(add(base, pt.at), dr.start[i]);
+      if (axis && deg) {
+        // Rodrigues: turned about the axis through the centre.
+        const v = sub(q, dr.center);
+        q = add(dr.center, add(add(scale(v, Math.cos(t)), scale(cross(axis, v), Math.sin(t))), scale(axis, dot(axis, v) * (1 - Math.cos(t)))));
+      }
+      pt.move = sub(add(q, d), add(base, pt.at));
+    }
     this.app.ui.updatePanelValues([this.height()]);
-    this.app.ui.setLabel(p.x, p.y, `${d >= 0 ? "+" : ""}${fmtLen(d)}`);
+    this.app.ui.setLabel(p.x, p.y, label);
     this.update();
   }
 
   up(): void {
     this.dragging = null;
-    this.handle.setHot(false);
+    this.gimbal?.setHot(null);
     this.app.ui.setLabel(0, 0, null);
   }
 
   exit(): void {
-    this.handle.dispose();
+    this.gimbal?.dispose();
+    this.gimbal = null;
     this.app.view.overlay.remove(this.dots, this.marks);
     this.dots.geometry.dispose();
     this.marks.geometry.dispose();

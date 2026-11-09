@@ -412,6 +412,8 @@ export interface FaceFreeformFeature extends FeatureBase {
    * it has been moved from there.
    */
   points: { at: Vec3; move: Vec3 }[];
+  /** How many points across the grid was laid (3, 5, 7, 9). */
+  grid?: number;
 }
 
 export interface ConnectFeature extends FeatureBase {
@@ -422,6 +424,8 @@ export interface ConnectFeature extends FeatureBase {
   bulge?: number;
   /** Its outline, as a fraction of the faces' (1: their own edges). */
   size?: number;
+  /** A curve the bridge follows from one face to the other (a sketch spline, say). */
+  guide?: PathRef;
 }
 
 export interface RepairFeature extends FeatureBase {

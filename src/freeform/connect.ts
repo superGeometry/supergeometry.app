@@ -20,6 +20,11 @@ export interface BridgeOptions {
   bulge: number;
   /** The bridge's outline as a fraction of the face's (1: the face's own edge). */
   size: number;
+  /**
+   * A curve to follow (points along it, either way round): the bridge's middle
+   * runs along it, moved a little so its ends sit on the faces' middles.
+   */
+  guide?: Vec3[];
 }
 
 /** Points round each ring (the border of a 5 × 5 cap grid). */
@@ -79,6 +84,29 @@ function unsmoothRing(t: [number, number][]): [number, number][] {
   return q;
 }
 
+/**
+ * A guide curve as a function of 0..1 (by length): run from the end nearer
+ * A's middle, and moved (gradually, end to end) so it starts at A's middle and
+ * ends at B's.
+ */
+function guideCurve(pts: Vec3[], ca: Vec3, cb: Vec3): (t: number) => Vec3 {
+  const p = len(sub(pts[0], ca)) + len(sub(pts[pts.length - 1], cb)) <= len(sub(pts[pts.length - 1], ca)) + len(sub(pts[0], cb)) ? pts : [...pts].reverse();
+  const acc = [0];
+  for (let i = 1; i < p.length; i++) acc.push(acc[i - 1] + len(sub(p[i], p[i - 1])));
+  const total = acc[acc.length - 1] || 1;
+  const da = sub(ca, p[0]);
+  const db = sub(cb, p[p.length - 1]);
+  return (t: number) => {
+    const want = Math.max(0, Math.min(1, t)) * total;
+    let i = 1;
+    while (i < p.length - 1 && acc[i] < want) i++;
+    const f = acc[i] > acc[i - 1] ? (want - acc[i - 1]) / (acc[i] - acc[i - 1]) : 0;
+    const q = add(p[i - 1], mul(sub(p[i], p[i - 1]), Math.max(0, Math.min(1, f))));
+    const s = want / total;
+    return add(q, add(mul(da, 1 - s), mul(db, s)));
+  };
+}
+
 /** The 5 × 5 cap grid's border, in order round it: (row, col) for each ring point. */
 const BORDER: [number, number][] = [
   ...[0, 1, 2, 3].map((c) => [0, c] as [number, number]),
@@ -94,7 +122,8 @@ const BORDER: [number, number][] = [
  */
 export function bridgeCage(a: BridgeEnd, b: BridgeEnd, o: BridgeOptions): Cage {
   let first: Cage | null = null;
-  for (const reach of [1, 1.5, 2.2, 3.2]) {
+  // Along a guide there's nothing to lengthen: the curve is the user's.
+  for (const reach of o.guide ? [1] : [1, 1.5, 2.2, 3.2]) {
     const c = bridgeTry(a, b, o, reach);
     if (!selfCrossings(c, 2, 1).length) return c;
     first ??= c;
@@ -124,14 +153,21 @@ function bridgeTry(a: BridgeEnd, b: BridgeEnd, o: BridgeOptions, reach: number):
   const lead = Math.max(gap * o.bulge, 1.2 * Math.max(wide(a), wide(b))) * reach;
   const T0 = mul(nA, lead);
   const T1 = mul(nB, -lead);
-  const at = (t: number): Vec3 => {
+  const hermite = (t: number): Vec3 => {
     const h00 = 2 * t ** 3 - 3 * t ** 2 + 1;
     const h10 = t ** 3 - 2 * t ** 2 + t;
     const h01 = -2 * t ** 3 + 3 * t ** 2;
     const h11 = t ** 3 - t ** 2;
     return add(add(mul(a.center, h00), mul(T0, h10)), add(mul(b.center, h01), mul(T1, h11)));
   };
+  const guided = o.guide && o.guide.length > 1 ? guideCurve(o.guide, a.center, b.center) : null;
+  const at = guided ?? hermite;
   const along = (t: number): Vec3 => {
+    if (guided) {
+      const e = 1e-4;
+      const d = sub(guided(Math.min(1, t + e)), guided(Math.max(0, t - e)));
+      return len(d) > 1e-12 ? unit(d) : unit(sub(b.center, a.center));
+    }
     const d = add(add(mul(a.center, 6 * t ** 2 - 6 * t), mul(T0, 3 * t ** 2 - 4 * t + 1)), add(mul(b.center, -6 * t ** 2 + 6 * t), mul(T1, 3 * t ** 2 - 2 * t)));
     return len(d) > 1e-9 ? unit(d) : unit(sub(b.center, a.center));
   };

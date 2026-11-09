@@ -2132,18 +2132,21 @@ export class ConnectOp extends FeatureOp<ConnectFeature> {
         return true;
       },
     });
-    this.slots = [slot(0, "From"), slot(1, "To")];
+    // The curve the bridge follows (a spline drawn from one face to the other).
+    const guide = pathSlot(app, () => this.feature.guide ?? null, (p) => (this.feature.guide = p));
+    this.slots = [slot(0, "From"), slot(1, "To"), { ...guide, label: "Guide", describe: () => (this.feature.guide ? guide.describe() : "Tap a sketch curve (a spline from face to face)") }];
   }
 
   protected hint(): string {
-    return "The bridge leaves each face straight out of it. Bend: how far it bows out; Size: how big its ends are.";
+    return "The bridge runs along the guide from face to face. Size: how big it is against the faces.";
   }
 
   protected items(): PanelItem[] {
     const f = this.feature;
     return [
       modeChoice(() => f.mode, (m) => (f.mode = m), () => (this.render(), this.update())),
-      { type: "slider", label: "Bend", value: f.bulge ?? 1, min: 0.2, max: 2.5, step: 0.05, show: (v) => v.toFixed(2), onInput: (v) => ((f.bulge = v), this.update()) },
+      // (Without a guide - a step made before guides - it bows out by Bend.)
+      ...(f.guide || !this.existing ? [] : [{ type: "slider" as const, label: "Bend", value: f.bulge ?? 1, min: 0.2, max: 2.5, step: 0.05, show: (v: number) => v.toFixed(2), onInput: (v: number) => ((f.bulge = v), this.update()) }]),
       { type: "slider", label: "Size", value: f.size ?? 0.92, min: 0.1, max: 1, step: 0.01, show: (v) => `${Math.round(v * 100)}%`, onInput: (v) => ((f.size = v), this.update()) },
     ];
   }

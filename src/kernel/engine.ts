@@ -720,7 +720,8 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const fa = resolveFace(A, ra);
       const fb = resolveFace(B, rb);
       if (ra.body === rb.body && fa.isSame(fb)) throw new Error("Pick two different faces to connect");
-      const cage = bridgeCage(bridgeEnd(A, fa), bridgeEnd(B, fb), { bulge: f.bulge ?? 1, size: f.size ?? 0.92 });
+      const guide = f.guide ? curvePoints(pathWire(f.guide, ctx).wrapped, 200) : undefined;
+      const cage = bridgeCage(bridgeEnd(A, fa), bridgeEnd(B, fb), { bulge: f.bulge ?? 1, size: f.size ?? 0.92, guide });
       let bridge: Shape3D;
       try {
         bridge = checkedFreeform(cage);
@@ -2087,24 +2088,29 @@ function followFace(f: SketchFeature, bodies: Bodies): PlaneDef {
  * behind it (a third of the face's size, less than half the body's depth
  * there - a 3 mm plate's end doesn't poke out of its back).
  */
-function bridgeEnd(body: Shape3D, face: Face): BridgeEnd {
+/** `n` points along a wire (end to end; a closed one's start not repeated). */
+function curvePoints(wire: any, n: number, closed = false): Vec3[] {
   const oc = getOC();
-  const info = faceInfo(face);
-  const wire = oc.BRepTools.OuterWire(face.wrapped);
   const curve = new oc.BRepAdaptor_CompCurve(wire, false);
-  const ring: Vec3[] = [];
+  const out: Vec3[] = [];
   try {
     const a = curve.FirstParameter();
     const b = curve.LastParameter();
-    const n = 160;
-    for (let k = 0; k < n; k++) {
+    for (let k = 0; k < (closed ? n : n + 1); k++) {
       const p = curve.Value(a + ((b - a) * k) / n);
-      ring.push([p.X(), p.Y(), p.Z()]);
+      out.push([p.X(), p.Y(), p.Z()]);
       p.delete();
     }
   } finally {
     curve.delete();
   }
+  return out;
+}
+
+function bridgeEnd(body: Shape3D, face: Face): BridgeEnd {
+  const oc = getOC();
+  const info = faceInfo(face);
+  const ring = curvePoints(oc.BRepTools.OuterWire(face.wrapped), 160, true);
   const reach = Math.max(...ring.map((p) => dist(p, info.center)));
   const [lo, hi] = body.boundingBox.bounds as [Vec3, Vec3];
   let behind = 0;

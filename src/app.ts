@@ -593,6 +593,10 @@ export class App implements AppContext {
     return { bodies: [...bodies].filter((b) => have.has(b)), lines };
   }
 
+  editStep(id: string): void {
+    this.editFeature(id);
+  }
+
   private editFeature(id: string): void {
     const f = this.store.find(id);
     if (!f) return;

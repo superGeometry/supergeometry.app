@@ -117,4 +117,33 @@ check("Cut: the bridge's ends are cut out of both cubes", !r.errors && !r.bad &&
   check("cube A made taller after: the bridge still finds its face and follows", !r.errors && !r.bad && r.ids.length === 1, `${r.errors}${r.bad}`);
 }
 
+// Along a guide: a spline drawn in a sketch, the bridge follows it.
+{
+  // The front plane (XZ): sketch y is world z. A note: its normal is -Y.
+  const front: PlaneDef = { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, -1, 0] };
+  const guide = (id: string, pts: [number, number][], plane = front): Feature => ({ id, name: id, type: "sketch", plane, entities: [{ id: "g", kind: "spline", points: pts, closed: false, mode: "fit" }] }) as Feature;
+  const up = [face("A", [0, 0, 20], [0, 0, 1], 400), face("B", [60, 0, 20], [0, 0, 1], 400)];
+  const arch = guide("g1", [[0, 20], [10, 45], [30, 55], [50, 45], [60, 20]]);
+  r = await build([...two, arch, connect(up[0], up[1], "join", { guide: { kind: "sketch", sketch: "g1", entities: ["g"] } })]);
+  const top = (debugBodies().get("A") as Shape3D)?.boundingBox.bounds[1][2];
+  check("both tops up, along a high arch drawn as a spline: the bridge goes over it", !r.errors && !r.bad && r.ids.length === 1 && top > 55 && top < 70, `${r.errors}${r.bad} top at ${top?.toFixed(1)}`);
+  // The same curve drawn the other way round.
+  const back = guide("g1", [[60, 20], [50, 45], [30, 55], [10, 45], [0, 20]]);
+  r = await build([...two, back, connect(up[0], up[1], "join", { guide: { kind: "sketch", sketch: "g1", entities: ["g"] } })]);
+  const top2 = (debugBodies().get("A") as Shape3D)?.boundingBox.bounds[1][2];
+  check("…the curve drawn from B to A: the same bridge", !r.errors && !r.bad && Math.abs(top2 - top) < 0.5, `${r.errors}${r.bad} top at ${top2?.toFixed(1)}`);
+  // Ends a few mm off the faces' middles: pulled onto them.
+  const loose = guide("g1", [[3, 23], [10, 45], [30, 55], [50, 45], [57, 22]]);
+  r = await build([...two, loose, connect(up[0], up[1], "join", { guide: { kind: "sketch", sketch: "g1", entities: ["g"] } })]);
+  check("…its ends a few mm off the faces: still joined", !r.errors && !r.bad && r.ids.length === 1, `${r.errors}${r.bad}`);
+  // Cubes facing each other, the bridge swinging out sideways (a guide on the ground plane).
+  const ground: PlaneDef = { origin: [0, 0, 10], xDir: [1, 0, 0], normal: [0, 0, 1] };
+  const swing = guide("g2", [[10, 0], [20, 15], [30, 25], [40, 15], [50, 0]], ground);
+  r = await build([...two, swing, connect(fA, fB, "new", { guide: { kind: "sketch", sketch: "g2", entities: ["g"] } })]);
+  const yMax = (debugBodies().get("cn") as Shape3D)?.boundingBox.bounds[1][1];
+  check("facing cubes, the bridge swung out sideways along a curve on the ground", !r.errors && !r.bad && yMax > 25 && yMax < 40, `${r.errors}${r.bad} reaches y ${yMax?.toFixed(1)}`);
+  r = await build([...two, swing, connect(fA, fB, "cut", { guide: { kind: "sketch", sketch: "g2", entities: ["g"] } })]);
+  check("…Cut along it", !r.errors && !r.bad && vol("A") < 8000 && vol("B") < 8000, `${r.errors}${r.bad}`);
+}
+
 process.exit(failed ? 1 : 0);

@@ -485,7 +485,11 @@ export class SelectTool implements Tool {
     const faceRefs = sel.flatMap((x) => (x.kind === "face" ? [faceRefOf(app, x)!] : []));
     const needFlat = { disabled: !flat || !one, why: "Needs one flat face" };
     const ref = faceRefOf(app, s);
+    // A face a Freeform Face step made: that step opens again to reshape it.
+    const shaped = info?.step ? app.store.find(info.step) : undefined;
+    const editFree: ToolItem[] = shaped?.type === "faceFreeform" && one ? [{ id: "editFreeform", label: "Edit Freeform", icon: "freeform", active: true, run: () => app.editStep(shaped.id) }] : [];
     return [
+      ...editFree,
       { id: "sketch", label: "Sketch", icon: "sketch", shortcut: "S", ...needFlat, run: () => this.sketchOnFace() },
       // Moves just this face; the rest of the body stretches to follow.
       { id: "move", label: "Move/Rotate Face", icon: "moveFace", shortcut: "M", ...needFlat, run: () => ref && info?.plane && app.setTool(new MoveFaceOp(app, { face: ref, plane: info.plane })) },
@@ -493,7 +497,7 @@ export class SelectTool implements Tool {
       { id: "scale", label: "Scale Face", icon: "scale", ...needFlat, run: () => ref && info?.plane && app.setTool(new ScaleFaceOp(app, ref, info.plane)) },
       { id: "align", label: "Align", icon: "align", disabled: true, why: SOON },
       { id: "thread", label: "Thread", icon: "thread", disabled: !one || !info?.round, why: "Needs one round face (a shank or a hole)", run: () => app.startThread() },
-      { id: "offsetFace", label: "Offset Face", icon: "offsetFace", shortcut: "E", active: true, disabled: !one || !offsettable(info?.type), why: "Needs one flat or round face", run: () => src && app.setTool(new ExtrudeOp(app, src)) },
+      { id: "offsetFace", label: "Offset Face", icon: "offsetFace", shortcut: "E", active: !editFree.length, disabled: !one || !offsettable(info?.type), why: "Needs one flat or round face", run: () => src && app.setTool(new ExtrudeOp(app, src)) },
       // A line on this face, parallel to an edge (tapped next): Offset Edge started from the face.
       { id: "offsetFromEdge", label: "Offset from Edge", icon: "offsetEdge", ...needFlat, run: () => app.setTool(new OffsetEdgeOp(app, undefined, { body: s.body, face: s.face })) },
       { id: "fillet", label: "Fillet", icon: "fillet", shortcut: "F", run: () => this.edgesOfFaces("fillet") },
