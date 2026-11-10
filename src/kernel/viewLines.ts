@@ -178,7 +178,8 @@ function meshView(bodies: { id: string; shape: Shape3D; mesh: BodyMesh }[], kind
       const i1 = Math.min(gw - 1, Math.ceil(Math.max(ax, bx, cx)));
       const j0 = Math.max(0, Math.floor(Math.min(ay, by, cy)));
       const j1 = Math.min(gh - 1, Math.ceil(Math.max(ay, by, cy)));
-      const e = -1e-6 * Math.abs(area);
+      // (The weights are fractions: a pixel's centre on a shared side belongs to both triangles.)
+      const e = -1e-9;
       for (let j = j0; j <= j1; j++) {
         const y = j + 0.5;
         for (let i = i0; i <= i1; i++) {
@@ -375,17 +376,20 @@ function meshView(bodies: { id: string; shape: Shape3D; mesh: BodyMesh }[], kind
     const y = l.xyz[k * 3 + 1];
     return Math.hypot(x - l.xyz[0], y - l.xyz[1]) < 2.5 * px || Math.hypot(x - l.xyz[n * 3], y - l.xyz[n * 3 + 1]) < 2.5 * px;
   };
-  // Every seen sample, nearest first.
+  // Every seen sample, nearest first - the tangent lines after all the others:
+  // one on a seen edge or outline (a face split in two, seen edge on) gives
+  // way to it, nearer or not.
   const order: [number, number, number][] = [];
   lines.forEach((l, li) => {
     for (let k = 0; k < l.state.length; k++) if (l.state[k] === 1) order.push([l.xyz[k * 3 + 2], li, k]);
   });
-  order.sort((a, b) => b[0] - a[0]);
+  const soft = (li: number) => (lines[li].kind === "smooth" ? 1 : 0);
+  order.sort((a, b) => soft(a[1]) - soft(b[1]) || b[0] - a[0]);
   for (const [z, li, k] of order) {
     const l = lines[li];
     const x = l.xyz[k * 3];
     const y = l.xyz[k * 3 + 1];
-    if (!nearEnd(l, k) && underInk(x, y, z, li, k)) {
+    if (!nearEnd(l, k) && underInk(x, y, l.kind === "smooth" ? -Infinity : z, li, k)) {
       l.state[k] = -1;
       continue;
     }

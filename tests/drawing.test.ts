@@ -113,6 +113,33 @@ check("a plate with a hole, from the top: its 4 sides and the hole as a circle",
   const rf = (await projectViews(rod, [VIEW_SPECS[0]], undefined, "mesh"))[0].bodies[0].edges.filter((e) => !("c" in e) && Math.abs(e.a[0] - e.b[0]) < 1e-6 && Math.abs(Math.abs(e.b[1] - e.a[1]) - 30) < 1e-3);
   const xs = rf.map((e) => e.a[0]).sort((a, b) => a - b);
   check("meshes: a rod's outlines from the side, 30 long and exactly 10 apart", xs.length === 2 && Math.abs(xs[1] - xs[0] - 10) < 1e-6, JSON.stringify(rf));
+  // A tall thin panel from the isometric view: its big flat faces' triangles
+  // must not cover the edges beside them (they hid its top edges).
+  const panel = block("Q", [[0, 0], [18, 0], [18, 479], [0, 479]], 0, 1800);
+  const isoSpec = VIEW_SPECS.filter((v) => v.id === "iso");
+  const len = (d: string) => {
+    let n = 0;
+    let at: number[] | null = null;
+    for (const m of d.matchAll(/([ML])(-?[\d.e-]+) (-?[\d.e-]+)/g)) {
+      const p = [+m[2], +m[3]];
+      if (m[1] === "L" && at) n += Math.hypot(p[0] - at[0], p[1] - at[1]);
+      at = p;
+    }
+    return n;
+  };
+  const pe = (await projectViews(panel, isoSpec, undefined, "exact"))[0].bodies[0];
+  const pm = (await projectViews(panel, isoSpec, undefined, "mesh"))[0].bodies[0];
+  check("meshes: a thin panel from the isometric view shows the same lines as exactly", Math.abs(len(pm.visible) - len(pe.visible)) < len(pe.visible) * 0.01 && Math.abs(len(pm.hidden) - len(pe.hidden)) < len(pe.hidden) * 0.01, `${len(pm.visible)} / ${len(pe.visible)}, hidden ${len(pm.hidden)} / ${len(pe.hidden)}`);
+}
+// A scale too big for the sheet: said so, the views cut at the frame.
+{
+  const big = emptyDoc();
+  big.drawing = { size: "A4", scale: 10 };
+  const bl = layoutSheet(views, drawingOptions(big), 2);
+  const bs = drawingSVG({ doc: big, views, parts: [], date: new Date() }).svg;
+  check("10:1 on A4 doesn't fit: cut at the frame", !bl.fits && bs.includes('clip-path="url(#sheet-area)"'));
+  big.drawing = { size: "A4" };
+  check("the automatic scale fits, nothing cut", layoutSheet(views, drawingOptions(big), 2).fits && !drawingSVG({ doc: big, views, parts: [], date: new Date() }).svg.includes("clipPath"));
 }
 const ddoc = emptyDoc();
 const dL = layoutSheet(dv, drawingOptions(ddoc), 0);

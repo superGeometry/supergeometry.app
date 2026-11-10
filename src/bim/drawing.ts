@@ -520,6 +520,8 @@ export async function openDrawing(app: AppContext): Promise<void> {
         set({ scale: v === "auto" ? undefined : Number(v) }),
       ),
     );
+    if (layout && !layout.fits)
+      props.append(el("div", "bim-sub bim-props-note", o.scale ? "The views don't fit the sheet at this scale: they're cut at the frame. Pick a smaller scale or a bigger sheet." : "A view is moved off the drawing area: it's cut at the frame."));
     row(
       "Projection",
       choose(

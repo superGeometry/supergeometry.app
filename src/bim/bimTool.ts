@@ -20,6 +20,11 @@ import { openDrawing } from "./drawing";
 /** Each body's properties, measured on the solids (kept until the project changes). */
 export async function measureBodies(app: AppContext): Promise<Map<string, BodyProps>> {
   const props = await app.kernel.properties(app.store.doc.features as never);
+  // Opened right as a project loads, the model on screen may not be this one
+  // yet: the parts are listed from it, so wait for it (a while at most).
+  const t0 = performance.now();
+  const shown = () => new Set(app.view.bodyList.map((b) => b.id));
+  while (props.some((p) => !shown().has(p.id)) && performance.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 100));
   return new Map(props.map((p) => [p.id, p]));
 }
 

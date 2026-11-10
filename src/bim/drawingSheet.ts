@@ -142,6 +142,8 @@ export interface Layout {
   views: Placed[];
   /** The side view used: "left" (first angle) or "right" (third angle). */
   side: "left" | "right";
+  /** Every view inside the frame, off the title block (a scale too big, or moved off it, doesn't). */
+  fits: boolean;
 }
 
 /** Where a view's point (its own mm) is on the paper, and back. */
@@ -242,7 +244,12 @@ export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: n
     p.x += gx + ox;
     p.y += gy + oy;
   }
-  return { W, H, scale: s, isoScale: isoAt?.si, views: placed, side };
+  const e = 0.01;
+  const fits = placed.every((p) => {
+    const r = { x0: p.x, y0: p.y, x1: p.x + bw(p.box) * p.s, y1: p.y + bh(p.box) * p.s };
+    return r.x0 >= FRAME_L - e && r.y0 >= T - e && r.x1 <= R + e && r.y1 <= B + e && !(blockH && overlaps(r, { x0: cornerRect.x0 + e, y0: cornerRect.y0 + e, x1: R, y1: B }));
+  });
+  return { W, H, scale: s, isoScale: isoAt?.si, views: placed, side, fits };
 }
 
 /**
@@ -395,8 +402,19 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     );
   }
 
-  // ---- Views
+  // ---- Views (and their dimensions and balloons): inside the frame, off the
+  // title block - at a scale too big for the sheet they're cut there, not
+  // drawn over them.
   const placed = new Map(L.views.map((p) => [p.id, p]));
+  if (!L.fits) {
+    const R = W - FRAME;
+    const B = H - FRAME;
+    const blockH = o.titleBlock === "table" ? TB_H + (parts.length ? ROW * (listRows(parts.length, H) + 1) : 0) : o.titleBlock === "simple" ? TB_H : 0;
+    const area = blockH
+      ? `M${FRAME_L} ${FRAME}H${R}V${f(B - blockH)}H${R - TB_W}V${B}H${FRAME_L}Z`
+      : `M${FRAME_L} ${FRAME}H${R}V${B}H${FRAME_L}Z`;
+    out.push(`<clipPath id="sheet-area"><path d="${area}"/></clipPath><g clip-path="url(#sheet-area)">`);
+  }
   for (const p of L.views) {
     const v = views.get(p.id)!;
     const iso = p.id === "iso";
@@ -495,9 +513,27 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
       const m = 9 + ring * 10;
       const rect = { x0: host.x - m, y0: host.y - m, x1: host.x + bw(host.box) * host.s + m, y1: host.y + bh(host.box) * host.s + m };
       const got = balloonSpots(rect, left, ring ? [] : avoid, freeFor(host));
-      const last = ring === 4;
-      for (const b of got) if (b.clear || last) (spots.push(b), taken.push([b.x, b.y]));
-      left = last ? [] : left.filter((it) => !got.find((b) => b.item === it.item && b.clear));
+      for (const b of got) if (b.clear) (spots.push(b), taken.push([b.x, b.y]));
+      left = left.filter((it) => !got.find((b) => b.item === it.item && b.clear));
+      if (ring === 4) break;
+    }
+    // No room round the view (a small sheet, many parts): the free place on the
+    // sheet nearest each, or at last on the frame's edge.
+    const hx1 = host.x + bw(host.box) * host.s;
+    const hy1 = host.y + bh(host.box) * host.s;
+    const open = freeFor(host);
+    for (const it of left) {
+      let best: [number, number] | null = null;
+      let bd = Infinity;
+      for (let x = FRAME_L + 5; x <= L.W - FRAME - 5; x += 2)
+        for (let y = FRAME + 5; y <= L.H - FRAME - 5; y += 2) {
+          if (x > host.x - 4.5 && x < hx1 + 4.5 && y > host.y - 4.5 && y < hy1 + 4.5) continue;
+          const d = Math.hypot(x - it.at[0], y - it.at[1]);
+          if (d < bd && open(x, y)) (best = [x, y]), (bd = d);
+        }
+      const [x, y] = best ?? [Math.min(L.W - FRAME - 4.5, Math.max(FRAME_L + 4.5, hx1 + 9)), Math.min(L.H - FRAME - 4.5, Math.max(FRAME + 4.5, host.y))];
+      spots.push({ item: it.item, at: it.at, x, y, clear: !!best });
+      taken.push([x, y]);
     }
     for (const b of spots) {
       const dx = b.at[0] - b.x;
@@ -509,6 +545,8 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
       out.push(text(b.x, b.y + 1.4, String(b.item), 4, { anchor: "middle" }));
     }
   }
+
+  if (!L.fits) out.push(`</g>`);
 
   // ---- Title block (ISO 7200), and the parts list above it.
   if (o.titleBlock === "simple" || o.titleBlock === "table") out.push(titleBlock(o, doc.info ?? {}, data.date, L, o.titleBlock === "table" ? parts : []));
