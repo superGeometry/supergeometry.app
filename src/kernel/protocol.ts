@@ -119,7 +119,12 @@ export interface ViewBody {
   hidden: string;
   /** A point on one of its seen edges, near its middle: where a balloon's leader ends. */
   anchor?: [number, number];
+  /** Its seen straight edges and circles (arcs), to dimension by tapping them. */
+  edges: ViewEdge[];
 }
+
+/** A seen edge in a view (mm, y down): a line from a to b, or a circle (an arc from a through m to b; whole when a = b). */
+export type ViewEdge = { a: [number, number]; b: [number, number] } | { a: [number, number]; m: [number, number]; b: [number, number]; c: [number, number]; r: number };
 
 /** A drawn view: each body, and the box around them all (2D, y down). */
 export interface ProjectedView {

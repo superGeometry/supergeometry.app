@@ -534,11 +534,61 @@ export interface ProjectDoc {
 
 /** The drawing sheet: paper size, projection method, scale (missing: the largest that fits), what it shows. */
 export interface DrawingOptions {
-  size?: "A4" | "A3" | "A2" | "A1";
+  /** The sheet's title (missing: the project's name). */
+  title?: string;
+  size?: "A4" | "A3" | "A2" | "A1" | "A0" | "ANSI A" | "ANSI B" | "ANSI C" | "ANSI D";
+  portrait?: boolean;
   angle?: "first" | "third";
   scale?: number;
   hidden?: boolean;
+  /** Old projects: the isometric view on or off (now in `views`). */
   iso?: boolean;
+  /** Which views are drawn (missing: all four). */
+  views?: { front?: boolean; top?: boolean; side?: boolean; iso?: boolean };
+  /** The bodies drawn (missing: every body shown). */
+  bodies?: string[];
+  titleBlock?: "none" | "border" | "simple" | "table";
+  dateFormat?: "iso" | "dmy" | "mdy";
+  units?: "mm" | "cm" | "m" | "in";
+  /** Decimals shown in dimensions. */
+  precision?: number;
+  comma?: boolean;
+  /** Line widths, mm. */
+  lines?: { visible?: number; hidden?: number; dims?: number };
+  balloons?: boolean;
+  /** The overall sizes dimensioned by themselves. */
+  overall?: boolean;
+  /** Views moved by hand: mm on the paper, by view. */
+  moved?: Record<string, [number, number]>;
+  dims?: DrawingDim[];
+  notes?: DrawingNote[];
+}
+
+/**
+ * A dimension put on a drawing: its points in its view's own coordinates
+ * (model mm, y down), so it stays on its edge at any scale or place of the view.
+ */
+export interface DrawingDim {
+  id: string;
+  view: string;
+  kind: "length" | "distance" | "radius" | "diameter";
+  a: [number, number];
+  b?: [number, number];
+  /** Circle (radius, diameter): its centre and radius. */
+  c?: [number, number];
+  r?: number;
+  /** How far out from what it measures (mm on the paper); for a circle, past it. */
+  offset: number;
+  /** Circle: the leader's direction (radians). */
+  angle?: number;
+}
+
+/** A note on the sheet (mm on the paper). */
+export interface DrawingNote {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
 }
 
 /** The title block: who made it, for whom, which revision. */

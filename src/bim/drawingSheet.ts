@@ -1,26 +1,43 @@
 // Drawings: the model on a sheet of paper, the way a workshop or a site reads
 // it. Orthographic views (front, top, side) in first-angle (ISO, the default)
-// or third-angle projection, an isometric view, overall dimensions, balloons
-// with the item numbers of the technical sheet's parts list, that parts list,
-// and an ISO 7200 title block inside an ISO 5457 frame. The views are the
-// solids themselves, hidden lines found by the kernel - not a picture of the
-// screen - so the sheet is at a true scale and prints as one.
+// or third-angle projection, an isometric view, dimensions, balloons with the
+// item numbers of the technical sheet's parts list, that parts list, and a
+// title block inside a frame with grid zones (ISO 5457, ISO 7200). The views
+// are the solids themselves, hidden lines found by the kernel - not a picture
+// of the screen - so the sheet is at a true scale and prints as one.
 //
 // The drawing and the technical sheet are the two halves of one document: the
 // balloons here and the rows there share their item numbers.
+//
+// This file makes the sheet (SVG, mm); drawing.ts shows it and edits it.
 
-import type { DrawingOptions, ProjectDoc, ProjectInfo } from "../doc/types";
+import type { DrawingDim, DrawingNote, DrawingOptions, ProjectDoc, ProjectInfo } from "../doc/types";
 import type { ProjectedView, ViewSpec } from "../kernel/protocol";
-import { trim, UNIT_LABEL, UNIT_MM, units } from "../units";
+import { trim, UNIT_MM, units } from "../units";
 import { fmtMass } from "./materials";
 import type { PartRow } from "./sheet";
 
-/** Paper sizes, landscape, mm (ISO 216). */
-export const SHEETS = { A4: [297, 210], A3: [420, 297], A2: [594, 420], A1: [841, 594] } as const;
+/** Paper sizes, landscape, mm (ISO 216 and ANSI). */
+export const SHEETS: Record<NonNullable<DrawingOptions["size"]>, [number, number]> = {
+  A4: [297, 210],
+  A3: [420, 297],
+  A2: [594, 420],
+  A1: [841, 594],
+  A0: [1189, 841],
+  "ANSI A": [279.4, 215.9],
+  "ANSI B": [431.8, 279.4],
+  "ANSI C": [558.8, 431.8],
+  "ANSI D": [863.6, 558.8],
+};
 export type SheetSize = keyof typeof SHEETS;
 
-/** The standard scales (ISO 5455), largest first. */
-export const SCALES = [10, 5, 2, 1, 1 / 2, 1 / 5, 1 / 10, 1 / 20, 1 / 50, 1 / 100, 1 / 200, 1 / 500, 1 / 1000, 1 / 2000, 1 / 5000];
+/** Every scale offered, largest first. */
+export const SCALES = [
+  10, 5, 4, 3, 2, 1, 1 / 2, 1 / 3, 1 / 4, 1 / 5, 1 / 6, 1 / 7, 1 / 8, 1 / 9, 1 / 10, 1 / 12, 1 / 16, 1 / 20, 1 / 25, 1 / 32, 1 / 40, 1 / 50, 1 / 75, 1 / 100, 1 / 200,
+  1 / 500, 1 / 1000, 1 / 2000, 1 / 5000,
+];
+/** The standard ones (ISO 5455), which the automatic scale picks from. */
+export const AUTO_SCALES = [10, 5, 2, 1, 1 / 2, 1 / 5, 1 / 10, 1 / 20, 1 / 50, 1 / 100, 1 / 200, 1 / 500, 1 / 1000, 1 / 2000, 1 / 5000];
 
 export const scaleLabel = (s: number) => (s >= 1 ? `${trim(s, 3)}:1` : `1:${trim(1 / s, 3)}`);
 
@@ -35,10 +52,58 @@ export const VIEW_SPECS: ViewSpec[] = [
   { id: "iso", dir: [1, -1, 1], xAxis: [1, 1, 0] },
 ];
 
+export const VIEW_NAMES: Record<string, string> = { front: "Front view", top: "Top view", left: "Side view", right: "Side view", iso: "Isometric view" };
+
 /** The options, with their defaults. */
-export function drawingOptions(doc: ProjectDoc): Required<Omit<DrawingOptions, "scale">> & { scale?: number } {
-  const o = doc.drawing ?? {};
-  return { size: o.size ?? "A3", angle: o.angle ?? "first", hidden: o.hidden ?? true, iso: o.iso ?? true, scale: o.scale };
+export function drawingOptions(doc: ProjectDoc) {
+  const o: DrawingOptions = doc.drawing ?? {};
+  const appUnits = units();
+  return {
+    title: o.title ?? (doc.name || "Untitled"),
+    size: (o.size ?? "A3") as SheetSize,
+    portrait: o.portrait ?? false,
+    angle: o.angle ?? "first",
+    scale: o.scale,
+    hidden: o.hidden ?? true,
+    views: { front: o.views?.front ?? true, top: o.views?.top ?? true, side: o.views?.side ?? true, iso: o.views?.iso ?? o.iso ?? true },
+    bodies: o.bodies,
+    titleBlock: o.titleBlock ?? "table",
+    dateFormat: o.dateFormat ?? "iso",
+    units: o.units ?? (appUnits === "ft" ? "in" : appUnits),
+    precision: o.precision ?? 2,
+    comma: o.comma ?? false,
+    lines: { visible: o.lines?.visible ?? 0.5, hidden: o.lines?.hidden ?? 0.25, dims: o.lines?.dims ?? 0.25 },
+    balloons: o.balloons ?? true,
+    overall: o.overall ?? true,
+    moved: o.moved ?? {},
+    dims: o.dims ?? [],
+    notes: o.notes ?? [],
+  };
+}
+export type Opts = ReturnType<typeof drawingOptions>;
+
+/** The paper, as it lies (portrait: turned). */
+export function sheetSize(o: Opts): [number, number] {
+  const [w, h] = SHEETS[o.size];
+  return o.portrait ? [h, w] : [w, h];
+}
+
+/** A length (mm) as the drawing writes it: its units, its decimals (no trailing zeros), its decimal mark. */
+export function lengthText(mm: number, o: Opts): string {
+  const v = mm / UNIT_MM[o.units];
+  let t = v.toFixed(o.precision);
+  if (t.includes(".")) t = t.replace(/0+$/, "").replace(/\.$/, "");
+  if (t === "-0") t = "0";
+  return o.comma ? t.replace(".", ",") : t;
+}
+
+export function dateText(d: Date, f: Opts["dateFormat"]): string {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = String(d.getFullYear() % 100).padStart(2, "0");
+  if (f === "dmy") return `${dd}/${mm}/${yy}`;
+  if (f === "mdy") return `${mm}/${dd}/${yy}`;
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 // ---- Layout (all in mm on the paper)
@@ -46,7 +111,7 @@ export function drawingOptions(doc: ProjectDoc): Required<Omit<DrawingOptions, "
 const FRAME_L = 20;
 const FRAME = 10;
 /** Title block: ISO 7200 width. */
-const TB_W = 180;
+export const TB_W = 180;
 const TB_H = 36;
 const ROW = 6;
 /** Room for dimensions around the orthographic views, and between them. */
@@ -79,40 +144,48 @@ export interface Layout {
   side: "left" | "right";
 }
 
-/** Where each view goes, and at which scale: the largest standard scale at which they fit. */
-export function layoutSheet(views: Map<string, ProjectedView>, opts: ReturnType<typeof drawingOptions>, parts: number): Layout {
-  const [W, H] = SHEETS[opts.size];
+/** Where a view's point (its own mm) is on the paper, and back. */
+export const toPaper = (p: Placed, q: [number, number]): [number, number] => [p.x + (q[0] - p.box[0][0]) * p.s, p.y + (q[1] - p.box[0][1]) * p.s];
+export const fromPaper = (p: Placed, q: [number, number]): [number, number] => [p.box[0][0] + (q[0] - p.x) / p.s, p.box[0][1] + (q[1] - p.y) / p.s];
+
+/** Where each view goes, and at which scale: the largest standard scale at which they fit. Views moved by hand stay moved. */
+export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: number): Layout {
+  const [W, H] = sheetSize(o);
   const R = W - FRAME;
   const B = H - FRAME;
   const T = FRAME;
-  const corner = { x0: R - TB_W, y0: B - TB_H - (parts ? ROW * (parts + 1) : 0) - 2 };
-  const side = opts.angle === "first" ? "left" : "right";
-  const first = opts.angle === "first";
-  const front = views.get("front")?.box ?? null;
-  const top = views.get("top")?.box ?? null;
-  const sideBox = views.get(side)?.box ?? null;
-  const iso = opts.iso ? (views.get("iso")?.box ?? null) : null;
+  const blockH = o.titleBlock === "table" ? TB_H + (parts ? ROW * (parts + 1) : 0) + 2 : o.titleBlock === "simple" ? TB_H + 2 : 0;
+  const corner = { x0: R - TB_W, y0: B - blockH };
+  const side = o.angle === "first" ? "left" : "right";
+  const first = o.angle === "first";
+  const box = (id: string) => views.get(id)?.box ?? null;
+  const front = o.views.front ? box("front") : null;
+  const top = o.views.top ? box("top") : null;
+  const sideBox = o.views.side ? box(side) : null;
+  const iso = o.views.iso ? box("iso") : null;
   type Rect = { x0: number; y0: number; x1: number; y1: number };
   const overlaps = (a: Rect, b: Rect) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
   const cornerRect: Rect = { x0: corner.x0, y0: corner.y0, x1: R, y1: B };
+  // The orthographic views share their sizes: width with the top view, height with the side view.
+  const W_ = bw(front ?? top ?? box("front"));
+  const H_ = bh(front ?? sideBox ?? box("front"));
+  const D_ = bh(top) || bw(sideBox);
 
   /** The orthographic views at scale s: each placed, and the room it takes (with its dimensions). */
   const ortho = (s: number) => {
     const x0 = FRAME_L + DIM;
     const y0 = T + (first ? DIM : 3);
-    const fw = bw(front) * s;
-    const fh = bh(front) * s;
-    const th = bh(top) * s;
-    const sw = bw(sideBox) * s;
-    // Dimensions: width and height on the front view, depth on the side view, on the side away from the top view.
-    const fy = first ? y0 : y0 + th + GAP;
-    const ty = first ? y0 + fh + GAP : y0;
-    const sx = x0 + fw + GAP;
+    const fw = W_ * s;
+    const fh = H_ * s;
+    const th = D_ * s;
+    const fy = top && !first ? y0 + th + GAP : y0;
+    const ty = first ? y0 + (front || sideBox ? fh + GAP : 0) : y0;
+    const sx = x0 + (front || top ? fw + GAP : 0);
     const out: { id: string; box: Box; x: number; y: number; room: Rect }[] = [];
     const dimTop = first ? DIM : 3;
     const dimBottom = first ? 3 : DIM;
     if (front) out.push({ id: "front", box: front, x: x0, y: fy, room: { x0: x0 - DIM, y0: fy - dimTop, x1: x0 + fw + 3, y1: fy + fh + dimBottom } });
-    if (sideBox) out.push({ id: side, box: sideBox, x: sx, y: fy, room: { x0: sx - 3, y0: fy - dimTop, x1: sx + sw + 3, y1: fy + bh(sideBox) * s + dimBottom } });
+    if (sideBox) out.push({ id: side, box: sideBox, x: sx, y: fy, room: { x0: sx - 3, y0: fy - dimTop, x1: sx + bw(sideBox) * s + 3, y1: fy + bh(sideBox) * s + dimBottom } });
     if (top) out.push({ id: "top", box: top, x: x0, y: ty, room: { x0: x0 - 3, y0: ty - 3, x1: x0 + fw + 3, y1: ty + th + 3 } });
     return out;
   };
@@ -121,173 +194,250 @@ export function layoutSheet(views: Map<string, ProjectedView>, opts: ReturnType<
   /** Free places for the isometric view, beside the orthographic ones. */
   const isoRooms = (s: number): Rect[] => {
     const vs = ortho(s);
+    if (!vs.length) return [{ x0: FRAME_L, y0: T, x1: R, y1: corner.y0 }];
     const right = Math.max(...vs.map((v) => v.room.x1));
+    const bottom = Math.max(...vs.map((v) => v.room.y1));
     const f = vs.find((v) => v.id === "front")?.room;
     const sd = vs.find((v) => v.id === side)?.room;
     const rooms: Rect[] = [{ x0: right, y0: T, x1: R, y1: corner.y0 }];
     // The quadrant the projection leaves empty: below the side view (first angle), above it (third angle).
     if (f && sd) rooms.push(first ? { x0: sd.x0, y0: f.y1, x1: R, y1: corner.y0 } : { x0: sd.x0, y0: T, x1: R, y1: f.y0 });
+    // Below them all, left of the title block.
+    rooms.push({ x0: FRAME_L, y0: bottom, x1: blockH ? corner.x0 : R, y1: B });
     return rooms.filter((r) => r.x1 > r.x0 && r.y1 > r.y0);
   };
   const isoFor = (s: number, least: number): { si: number; room: Rect } | undefined => {
     if (!iso) return undefined;
     const rooms = isoRooms(s);
-    for (const si of SCALES) {
+    for (const si of AUTO_SCALES) {
       if (si > s || si < s * least) continue;
       const room = rooms.find((r) => bw(iso) * si + 2 * ISO_PAD <= r.x1 - r.x0 && bh(iso) * si + 2 * ISO_PAD + 5 <= r.y1 - r.y0);
       if (room) return { si, room };
     }
     return undefined;
   };
-  let scale = opts.scale;
+  let scale = o.scale;
   if (!scale) {
     // The largest scale the views fit at, with the isometric one no smaller than a fifth of it if it can be.
-    scale = SCALES.find((s) => orthoFits(s) && (!iso || isoFor(s, 1 / 5))) ?? SCALES.find(orthoFits) ?? SCALES[SCALES.length - 1];
+    const ok = (s: number) => (front || top || sideBox ? orthoFits(s) : !!isoFor(s, 1));
+    scale = AUTO_SCALES.find((s) => ok(s) && (!iso || isoFor(s, 1 / 5))) ?? AUTO_SCALES.find(ok) ?? AUTO_SCALES[AUTO_SCALES.length - 1];
   }
   const s = scale;
   const placed: Placed[] = ortho(s).map((v) => ({ id: v.id, x: v.x, y: v.y, s, box: v.box }));
-  const isoAt = isoFor(s, 1 / 20);
+  const isoAt = isoFor(s, 1 / 20) ?? (iso ? { si: s, room: { x0: FRAME_L, y0: T, x1: R, y1: B } } : undefined);
   if (iso && isoAt) {
     const { si, room } = isoAt;
     placed.push({ id: "iso", x: (room.x0 + room.x1 - bw(iso) * si) / 2, y: (room.y0 + room.y1 - bh(iso) * si - 5) / 2, s: si, box: iso });
   }
+  // Moved by hand: the front view takes the projected ones along; they move only along their line with it.
+  const m = (k: string) => o.moved[k] ?? [0, 0];
+  for (const p of placed) {
+    const [gx, gy] = p.id === "iso" ? [0, 0] : m("front");
+    const [ox, oy] = p.id === "iso" ? m("iso") : p.id === "top" ? [0, m("top")[1]] : p.id === side ? [m("side")[0], 0] : [0, 0];
+    p.x += gx + ox;
+    p.y += gy + oy;
+  }
   return { W, H, scale: s, isoScale: isoAt?.si, views: placed, side };
 }
+
+/** The key a view's hand move is kept under. */
+export const moveKey = (id: string) => (id === "left" || id === "right" ? "side" : id);
 
 // ---- Drawing the sheet (SVG, mm)
 
 const f = (n: number) => String(Math.round(n * 100) / 100);
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const FONT = `font-family="Arial, Helvetica, sans-serif"`;
+const SEL = "#1a73e8";
 
 /** A path from the kernel (mm, at 1:1) moved to its place on the paper. */
 function placePath(d: string, p: Placed): string {
   return d.replace(/([ML])(-?[\d.]+) (-?[\d.]+)/g, (_, c: string, x: string, y: string) => `${c}${f(p.x + (Number(x) - p.box[0][0]) * p.s)} ${f(p.y + (Number(y) - p.box[0][1]) * p.s)}`);
 }
 
-const toPaper = (p: Placed, q: [number, number]): [number, number] => [p.x + (q[0] - p.box[0][0]) * p.s, p.y + (q[1] - p.box[0][1]) * p.s];
-
-function text(x: number, y: number, t: string, size: number, opts: { anchor?: string; rotate?: boolean; weight?: string; fill?: string } = {}): string {
-  const rot = opts.rotate ? ` transform="rotate(-90 ${f(x)} ${f(y)})"` : "";
+function text(x: number, y: number, t: string, size: number, opts: { anchor?: string; angle?: number; weight?: string; fill?: string } = {}): string {
+  const rot = opts.angle ? ` transform="rotate(${f(opts.angle)} ${f(x)} ${f(y)})"` : "";
   return `<text x="${f(x)}" y="${f(y)}" font-size="${size}" ${FONT} text-anchor="${opts.anchor ?? "start"}"${opts.weight ? ` font-weight="${opts.weight}"` : ""} fill="${opts.fill ?? "#000"}"${rot}>${esc(t)}</text>`;
 }
 
-function arrow(x: number, y: number, dx: number, dy: number): string {
-  // A filled arrowhead, 3 mm long, its tip at (x, y), pointing along (dx, dy).
+/** A filled arrowhead, 3 mm long, its tip at (x, y), pointing along (dx, dy). */
+function arrow(x: number, y: number, dx: number, dy: number, color: string): string {
   const l = 3;
   const w = 0.9;
   const bx = x - dx * l;
   const by = y - dy * l;
-  return `<path d="M${f(x)} ${f(y)}L${f(bx - dy * w)} ${f(by + dx * w)}L${f(bx + dy * w)} ${f(by - dx * w)}Z" fill="#000"/>`;
+  return `<path d="M${f(x)} ${f(y)}L${f(bx - dy * w)} ${f(by + dx * w)}L${f(bx + dy * w)} ${f(by - dx * w)}Z" fill="${color}"/>`;
 }
 
-/** A dimension along x (from a to b, at height `at`, measured from edge `from`) or along y. */
-function dimension(axis: "x" | "y", a: number, b: number, from: number, at: number, label: string): string {
-  const thin = `stroke="#000" stroke-width="0.25" fill="none"`;
-  const dir = Math.sign(at - from) || 1;
-  const ext = (p: number) =>
-    axis === "x" ? `<path d="M${f(p)} ${f(from + dir * 1)}L${f(p)} ${f(at + dir * 2)}" ${thin}/>` : `<path d="M${f(from + dir * 1)} ${f(p)}L${f(at + dir * 2)} ${f(p)}" ${thin}/>`;
-  const mid = (a + b) / 2;
-  if (axis === "x")
-    return (
-      ext(a) +
-      ext(b) +
-      `<path d="M${f(a)} ${f(at)}L${f(b)} ${f(at)}" ${thin}/>` +
-      arrow(a, at, -1, 0) +
-      arrow(b, at, 1, 0) +
-      text(mid, at - 1, label, 3.5, { anchor: "middle" })
-    );
-  return (
-    ext(a) +
-    ext(b) +
-    `<path d="M${f(at)} ${f(a)}L${f(at)} ${f(b)}" ${thin}/>` +
-    arrow(at, a, 0, -1) +
-    arrow(at, b, 0, 1) +
-    text(at - 1, mid, label, 3.5, { anchor: "middle", rotate: true })
-  );
+/**
+ * A dimension between two points on the paper, its line `offset` mm off to
+ * the left of a→b (negative: to the right), with extension lines and the
+ * value written along it, readable from the bottom or the right (ISO 129).
+ */
+export function linearDim(A: [number, number], B: [number, number], offset: number, label: string, width: number, color = "#000"): string {
+  const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
+  if (L < 1e-9) return "";
+  const u = [(B[0] - A[0]) / L, (B[1] - A[1]) / L];
+  const n = [u[1], -u[0]];
+  const sg = Math.sign(offset) || 1;
+  const thin = `stroke="${color}" stroke-width="${width}" fill="none"`;
+  const P = (p: [number, number], k: number) => [p[0] + n[0] * k, p[1] + n[1] * k];
+  const [a1, a2, b1, b2, da, db] = [P(A, sg * 1), P(A, offset + sg * 2), P(B, sg * 1), P(B, offset + sg * 2), P(A, offset), P(B, offset)];
+  let out = Math.abs(offset) > 1 ? `<path d="M${f(a1[0])} ${f(a1[1])}L${f(a2[0])} ${f(a2[1])}M${f(b1[0])} ${f(b1[1])}L${f(b2[0])} ${f(b2[1])}" ${thin}/>` : "";
+  out += `<path d="M${f(da[0])} ${f(da[1])}L${f(db[0])} ${f(db[1])}" ${thin}/>`;
+  out += arrow(da[0], da[1], -u[0], -u[1], color) + arrow(db[0], db[1], u[0], u[1], color);
+  let ang = (Math.atan2(u[1], u[0]) * 180) / Math.PI;
+  if (ang > 90.01) ang -= 180;
+  if (ang <= -90.01) ang += 180;
+  const t = (ang * Math.PI) / 180;
+  const mid = [(da[0] + db[0]) / 2 + Math.sin(t) * 1.2, (da[1] + db[1]) / 2 - Math.cos(t) * 1.2];
+  return out + text(mid[0], mid[1], label, 3.5, { anchor: "middle", angle: ang, fill: color });
 }
 
-/** The projection method symbol (ISO 5456-2): a truncated cone and its end view. */
-function projectionSymbol(cx: number, cy: number, angle: "first" | "third"): string {
-  const thick = `stroke="#000" stroke-width="0.35" fill="none"`;
-  const R = 2.6;
-  const r = 1.3;
-  const L = 6;
-  // First angle: the cone's wide end faces the circles; third angle: its narrow end.
-  const circles = (x: number) => `<circle cx="${f(x)}" cy="${f(cy)}" r="${R}" ${thick}/><circle cx="${f(x)}" cy="${f(cy)}" r="${r}" ${thick}/>`;
-  const cone = (x: number, wideLeft: boolean) => {
-    const [a, b] = wideLeft ? [R, r] : [r, R];
-    return `<path d="M${f(x)} ${f(cy - a)}L${f(x + L)} ${f(cy - b)}L${f(x + L)} ${f(cy + b)}L${f(x)} ${f(cy + a)}Z" ${thick}/>`;
-  };
-  return angle === "first" ? circles(cx - 5) + cone(cx - 1, true) : cone(cx - 6, false) + circles(cx + 4);
+/** A radius or diameter: a leader through the centre to the circle, the value on a shoulder outside it. */
+export function circleDim(c: [number, number], r: number, angle: number, offset: number, label: string, diameter: boolean, width: number, color = "#000"): string {
+  const d = [Math.cos(angle), Math.sin(angle)];
+  const at = (k: number): [number, number] => [c[0] + d[0] * k, c[1] + d[1] * k];
+  const tip = at(r);
+  const end = at(r + Math.max(2, offset));
+  const start = diameter ? at(-r) : c;
+  const thin = `stroke="${color}" stroke-width="${width}" fill="none"`;
+  const w = label.length * 3.5 * 0.6 + 2;
+  const right = d[0] >= 0;
+  const sh = [end[0] + (right ? w : -w), end[1]];
+  let out = `<path d="M${f(start[0])} ${f(start[1])}L${f(end[0])} ${f(end[1])}L${f(sh[0])} ${f(sh[1])}" ${thin}/>`;
+  out += arrow(tip[0], tip[1], d[0], d[1], color);
+  if (diameter) out += arrow(start[0], start[1], -d[0], -d[1], color);
+  return out + text((end[0] + sh[0]) / 2, end[1] - 1.2, label, 3.5, { anchor: "middle", fill: color });
+}
+
+/** The projection method symbol (ISO 5456-2): a truncated cone, then its end view. */
+function projectionSymbol(cx: number, cy: number, angle: "first" | "third", width: number): string {
+  const line = `stroke="#000" stroke-width="${width}" fill="none"`;
+  const R = 2.4;
+  const r = 1.2;
+  const L = 5.5;
+  // First angle: the cone's wide end faces its end view; third angle: its narrow end.
+  const [a, b] = angle === "first" ? [r, R] : [R, r];
+  const x = cx - 7;
+  const cone = `<path d="M${f(x)} ${f(cy - a)}L${f(x + L)} ${f(cy - b)}L${f(x + L)} ${f(cy + b)}L${f(x)} ${f(cy + a)}Z" ${line}/>`;
+  const ex = cx + 4;
+  return cone + `<circle cx="${f(ex)}" cy="${f(cy)}" r="${R}" ${line}/><circle cx="${f(ex)}" cy="${f(cy)}" r="${r}" ${line}/>`;
 }
 
 export interface SheetData {
   doc: ProjectDoc;
   views: Map<string, ProjectedView>;
   parts: PartRow[];
-  date: string;
+  date: Date;
+  /** On screen: views and annotations marked for picking, one shown picked. */
+  interactive?: boolean;
+  selected?: string | null;
 }
 
 /** The whole sheet as an SVG document (mm). */
 export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
   const { doc, views, parts } = data;
-  const opts = drawingOptions(doc);
-  const L = layoutSheet(views, opts, parts.length);
+  const o = drawingOptions(doc);
+  const L = layoutSheet(views, o, parts.length);
   const { W, H } = L;
+  const lw = o.lines;
   const out: string[] = [];
-  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">`);
-  out.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="#fff"/>`);
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${f(W)}mm" height="${f(H)}mm" viewBox="0 0 ${f(W)} ${f(H)}">`);
+  out.push(`<rect x="0" y="0" width="${f(W)}" height="${f(H)}" fill="#fff"/>`);
+  const color = (id: string) => (data.interactive && data.selected === id ? SEL : "#000");
 
-  // ---- Frame (ISO 5457): border, centring marks.
-  const thick = `stroke="#000" stroke-width="0.7" fill="none"`;
-  out.push(`<rect x="${FRAME_L}" y="${FRAME}" width="${W - FRAME_L - FRAME}" height="${H - 2 * FRAME}" ${thick}/>`);
-  const cm = `stroke="#000" stroke-width="0.7"`;
-  out.push(
-    `<path d="M${f(W / 2)} 5L${f(W / 2)} ${FRAME + 5}M${f(W / 2)} ${H - 5}L${f(W / 2)} ${H - FRAME - 5}M5 ${f(H / 2)}L${FRAME_L + 5} ${f(H / 2)}M${W - 5} ${f(H / 2)}L${W - FRAME - 5} ${f(H / 2)}" ${cm}/>`,
-  );
+  // ---- Frame (ISO 5457): border, centring marks, grid zones.
+  if (o.titleBlock !== "none") {
+    const R = W - FRAME;
+    const B = H - FRAME;
+    out.push(`<rect x="${FRAME_L}" y="${FRAME}" width="${f(R - FRAME_L)}" height="${f(B - FRAME)}" stroke="#000" stroke-width="0.7" fill="none"/>`);
+    const cols = Math.max(2, 2 * Math.round(W / 100));
+    const rows = Math.max(2, 2 * Math.round(H / 100));
+    const thin = `stroke="#000" stroke-width="0.35"`;
+    let ticks = "";
+    for (let i = 0; i <= cols; i++) {
+      const x = FRAME_L + ((R - FRAME_L) * i) / cols;
+      if (i > 0 && i < cols) ticks += `M${f(x)} ${FRAME}L${f(x)} ${FRAME - 5}M${f(x)} ${f(B)}L${f(x)} ${f(B + 5)}`;
+      if (i < cols) {
+        const cx = FRAME_L + ((R - FRAME_L) * (i + 0.5)) / cols;
+        out.push(text(cx, FRAME - 3.2, String(i + 1), 3, { anchor: "middle" }), text(cx, B + 6.8, String(i + 1), 3, { anchor: "middle" }));
+      }
+    }
+    for (let j = 0; j <= rows; j++) {
+      const y = FRAME + ((B - FRAME) * j) / rows;
+      if (j > 0 && j < rows) ticks += `M${FRAME_L} ${f(y)}L${FRAME_L - 5} ${f(y)}M${f(R)} ${f(y)}L${f(R + 5)} ${f(y)}`;
+      if (j < rows) {
+        const cy = FRAME + ((B - FRAME) * (j + 0.5)) / rows + 1;
+        const letter = String.fromCharCode(65 + j);
+        out.push(text(FRAME_L - 5, cy, letter, 3, { anchor: "middle" }), text(R + 5, cy, letter, 3, { anchor: "middle" }));
+      }
+    }
+    out.push(`<path d="${ticks}" ${thin}/>`);
+    // Centring marks, across the border.
+    out.push(
+      `<path d="M${f(W / 2)} ${FRAME - 5}L${f(W / 2)} ${FRAME + 5}M${f(W / 2)} ${f(B + 5)}L${f(W / 2)} ${f(B - 5)}M${FRAME_L - 5} ${f(H / 2)}L${FRAME_L + 5} ${f(H / 2)}M${f(R + 5)} ${f(H / 2)}L${f(R - 5)} ${f(H / 2)}" stroke="#000" stroke-width="0.7"/>`,
+    );
+  }
 
   // ---- Views
-  const k = UNIT_MM[units()];
-  const num = (mm: number) => trim(mm / k, 2);
   const placed = new Map(L.views.map((p) => [p.id, p]));
   for (const p of L.views) {
     const v = views.get(p.id)!;
     const iso = p.id === "iso";
+    const c = color(`view:${p.id}`);
+    const g: string[] = [];
+    if (data.interactive)
+      g.push(`<rect x="${f(p.x - 2)}" y="${f(p.y - 2)}" width="${f(bw(p.box) * p.s + 4)}" height="${f(bh(p.box) * p.s + 4)}" fill="transparent" stroke="${c === SEL ? SEL : "none"}" stroke-width="0.3" stroke-dasharray="2 1"/>`);
     for (const b of v.bodies) {
-      if (opts.hidden && !iso && b.hidden) out.push(`<path d="${placePath(b.hidden, p)}" stroke="#000" stroke-width="0.25" stroke-dasharray="3 1" fill="none"/>`);
-      if (b.tangent) out.push(`<path d="${placePath(b.tangent, p)}" stroke="#000" stroke-width="0.18" fill="none"/>`);
-      if (b.visible) out.push(`<path d="${placePath(b.visible, p)}" stroke="#000" stroke-width="0.5" stroke-linecap="round" fill="none"/>`);
+      if (o.hidden && !iso && b.hidden) g.push(`<path d="${placePath(b.hidden, p)}" stroke="${c}" stroke-width="${lw.hidden}" stroke-dasharray="3 1" fill="none"/>`);
+      if (b.tangent) g.push(`<path d="${placePath(b.tangent, p)}" stroke="${c}" stroke-width="${lw.dims}" fill="none"/>`);
+      if (b.visible) g.push(`<path d="${placePath(b.visible, p)}" stroke="${c}" stroke-width="${lw.visible}" stroke-linecap="round" fill="none"/>`);
     }
     if (iso) {
       const label = `Isometric view${L.isoScale !== L.scale ? ` (${scaleLabel(p.s)})` : ""}`;
-      out.push(text(p.x + (bw(p.box) * p.s) / 2, p.y + bh(p.box) * p.s + ISO_PAD + 2, label, 3, { anchor: "middle" }));
+      g.push(text(p.x + (bw(p.box) * p.s) / 2, p.y + bh(p.box) * p.s + ISO_PAD + 2, label, 3, { anchor: "middle", fill: c }));
     }
+    out.push(data.interactive ? `<g data-view="${p.id}">${g.join("")}</g>` : g.join("\n"));
   }
 
   // ---- Overall dimensions: width and height on the front view, depth on the side view.
   const front = placed.get("front");
   const side = placed.get(L.side);
-  if (front) {
-    const w = bw(front.box) * front.s;
-    const h = bh(front.box) * front.s;
-    // Width: on the side of the front view away from the top view.
-    const yEdge = opts.angle === "first" ? front.y : front.y + h;
-    const yDim = opts.angle === "first" ? front.y - 9 : front.y + h + 9;
-    out.push(dimension("x", front.x, front.x + w, yEdge, yDim, num(bw(front.box))));
-    out.push(dimension("y", front.y, front.y + h, front.x, front.x - 9, num(bh(front.box))));
+  if (o.overall) {
+    const first = o.angle === "first";
+    if (front) {
+      const w = bw(front.box) * front.s;
+      const h = bh(front.box) * front.s;
+      const y = first ? front.y : front.y + h;
+      out.push(linearDim([front.x, y], [front.x + w, y], first ? 9 : -9, lengthText(bw(front.box), o), lw.dims));
+      out.push(linearDim([front.x, front.y + h], [front.x, front.y], 9, lengthText(bh(front.box), o), lw.dims));
+    }
+    if (side) {
+      const w = bw(side.box) * side.s;
+      const y = first ? side.y : side.y + bh(side.box) * side.s;
+      out.push(linearDim([side.x, y], [side.x + w, y], first ? 9 : -9, lengthText(bw(side.box), o), lw.dims));
+    }
   }
-  if (side) {
-    const w = bw(side.box) * side.s;
-    const h = bh(side.box) * side.s;
-    const yEdge = opts.angle === "first" ? side.y : side.y + h;
-    const yDim = opts.angle === "first" ? side.y - 9 : side.y + h + 9;
-    out.push(dimension("x", side.x, side.x + w, yEdge, yDim, num(bw(side.box))));
+
+  // ---- Dimensions put on by hand.
+  for (const d of o.dims) {
+    const p = placed.get(d.view);
+    if (!p) continue;
+    const c = color(d.id);
+    const svg = dimSVG(d, p, o, c);
+    out.push(data.interactive ? `<g data-ann="${d.id}">${svg}</g>` : svg);
+  }
+
+  // ---- Notes.
+  for (const n of o.notes) {
+    const svg = text(n.x, n.y, n.text, 3.5, { fill: color(n.id) });
+    out.push(data.interactive ? `<g data-ann="${n.id}">${svg}</g>` : svg);
   }
 
   // ---- Balloons: on the isometric view (or the front one), item numbers of the parts list.
   const host = placed.get("iso") ?? front;
-  if (host && parts.length) {
+  if (o.balloons && host && parts.length) {
     const v = views.get(host.id)!;
     const items = new Map(parts.map((r) => [r.id, r.item]));
     const rect = { x0: host.x - 9, y0: host.y - 9, x1: host.x + bw(host.box) * host.s + 9, y1: host.y + bh(host.box) * host.s + 9 };
@@ -299,14 +449,37 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
       const dx = b.at[0] - b.x;
       const dy = b.at[1] - b.y;
       const d = Math.hypot(dx, dy) || 1;
-      out.push(`<path d="M${f(b.x + (dx / d) * 4)} ${f(b.y + (dy / d) * 4)}L${f(b.at[0])} ${f(b.at[1])}" stroke="#000" stroke-width="0.25"/>`);
+      out.push(`<path d="M${f(b.x + (dx / d) * 4)} ${f(b.y + (dy / d) * 4)}L${f(b.at[0])} ${f(b.at[1])}" stroke="#000" stroke-width="${lw.dims}"/>`);
       out.push(`<circle cx="${f(b.at[0])}" cy="${f(b.at[1])}" r="0.6" fill="#000"/>`);
       out.push(`<circle cx="${f(b.x)}" cy="${f(b.y)}" r="4" stroke="#000" stroke-width="0.35" fill="#fff"/>`);
       out.push(text(b.x, b.y + 1.4, String(b.item), 4, { anchor: "middle" }));
     }
   }
 
-  // ---- Parts list, just above the title block (header at the bottom, item 1 above it).
+  // ---- Title block (ISO 7200), and the parts list above it.
+  if (o.titleBlock === "simple" || o.titleBlock === "table") out.push(titleBlock(o, doc.info ?? {}, data.date, L, o.titleBlock === "table" ? parts : []));
+  out.push(`</svg>`);
+  return { svg: out.join("\n"), layout: L };
+}
+
+/** One dimension put on by hand, on its view. */
+export function dimSVG(d: DrawingDim, p: Placed, o: Opts, color = "#000"): string {
+  if ((d.kind === "length" || d.kind === "distance") && d.b) {
+    const A = toPaper(p, d.a);
+    const B = toPaper(p, d.b);
+    return linearDim(A, B, d.offset, lengthText(Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), o), o.lines.dims, color);
+  }
+  if ((d.kind === "radius" || d.kind === "diameter") && d.c && d.r !== undefined) {
+    const dia = d.kind === "diameter";
+    const label = dia ? `Ø${lengthText(2 * d.r, o)}` : `R${lengthText(d.r, o)}`;
+    return circleDim(toPaper(p, d.c), d.r * p.s, d.angle ?? -Math.PI / 4, d.offset, label, dia, o.lines.dims, color);
+  }
+  return "";
+}
+
+function titleBlock(o: Opts, info: ProjectInfo, date: Date, L: Layout, parts: PartRow[]): string {
+  const out: string[] = [];
+  const { W, H } = L;
   const tbx = W - FRAME - TB_W;
   const tby = H - FRAME - TB_H;
   const line = `stroke="#000" stroke-width="0.35" fill="none"`;
@@ -320,12 +493,12 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     ];
     const rowsOf = [...parts].reverse();
     const top = tby - ROW * (parts.length + 1);
-    out.push(`<rect x="${tbx}" y="${f(top)}" width="${TB_W}" height="${ROW * (parts.length + 1)}" fill="#fff" stroke="#000" stroke-width="0.35"/>`);
+    out.push(`<rect x="${f(tbx)}" y="${f(top)}" width="${TB_W}" height="${ROW * (parts.length + 1)}" fill="#fff" stroke="#000" stroke-width="0.35"/>`);
     const cellText = (x: number, w: number, a: string, y: number, t: string, size: number, weight?: string) =>
       text(a === "middle" ? x + w / 2 : a === "end" ? x + w - 1.5 : x + 1.5, y + ROW - 1.8, fit(t, w - 3, size), size, { anchor: a, weight });
     rowsOf.forEach((r, i) => {
       const y = top + i * ROW;
-      out.push(`<path d="M${tbx} ${f(y + ROW)}L${tbx + TB_W} ${f(y + ROW)}" stroke="#000" stroke-width="0.18"/>`);
+      out.push(`<path d="M${f(tbx)} ${f(y + ROW)}L${f(tbx + TB_W)} ${f(y + ROW)}" stroke="#000" stroke-width="0.18"/>`);
       let x = tbx;
       const values = [String(r.item), "1", r.name, r.material || "-", r.mass === undefined ? "-" : fmtMass(r.mass)];
       cols.forEach(([, w, a], c) => {
@@ -338,33 +511,36 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     for (const [label, w, a] of cols) {
       out.push(cellText(x, w, a, hy, label, 2.6, "bold"));
       x += w;
-      if (x < tbx + TB_W) out.push(`<path d="M${x} ${f(top)}L${x} ${tby}" stroke="#000" stroke-width="0.18"/>`);
+      if (x < tbx + TB_W - 0.01) out.push(`<path d="M${f(x)} ${f(top)}L${f(x)} ${f(tby)}" stroke="#000" stroke-width="0.18"/>`);
     }
-    out.push(`<path d="M${tbx} ${f(hy)}L${tbx + TB_W} ${f(hy)}" ${line}/>`);
+    out.push(`<path d="M${f(tbx)} ${f(hy)}L${f(tbx + TB_W)} ${f(hy)}" ${line}/>`);
   }
-
-  // ---- Title block (ISO 7200).
-  const info: ProjectInfo = doc.info ?? {};
-  out.push(`<rect x="${tbx}" y="${tby}" width="${TB_W}" height="${TB_H}" fill="#fff" stroke="#000" stroke-width="0.7"/>`);
+  out.push(`<rect x="${f(tbx)}" y="${f(tby)}" width="${TB_W}" height="${TB_H}" fill="#fff" stroke="#000" stroke-width="0.7"/>`);
   const cell = (x: number, y: number, w: number, h: number, label: string, value: string, size = 3) => {
     out.push(`<rect x="${f(tbx + x)}" y="${f(tby + y)}" width="${w}" height="${h}" ${line}/>`);
     out.push(text(tbx + x + 1.2, tby + y + 2.6, label, 1.8, { fill: "#444" }));
     if (value) out.push(text(tbx + x + 1.2, tby + y + h - 2, fit(value, w - 2.4, size), size));
   };
   cell(0, 0, 60, 18, "Owner", info.company ?? "");
-  cell(60, 0, 120, 18, "Title", doc.name || "Untitled", 5);
-  cell(0, 18, 35, 18, "Created by", info.author ?? "");
-  cell(35, 18, 25, 18, "Date of issue", data.date, 2.6);
-  cell(60, 18, 20, 18, "Scale", scaleLabel(L.scale));
-  cell(80, 18, 25, 18, "Projection", "");
-  out.push(projectionSymbol(tbx + 92.5, tby + 28.5, opts.angle));
-  cell(105, 18, 15, 18, "Size", opts.size);
-  cell(120, 18, 35, 18, "Drawing number", info.number ?? "");
-  cell(155, 18, 15, 18, "Rev.", info.revision ?? "");
-  cell(170, 18, 10, 18, "Sheet", "1/1", 2.6);
-  out.push(text(tbx, tby + TB_H + 4, `Dimensions in ${UNIT_LABEL[units()]}`, 2.5));
-  out.push(`</svg>`);
-  return { svg: out.join("\n"), layout: L };
+  cell(60, 0, 120, 18, "Title", o.title, 5);
+  let x = 0;
+  const row: [string, string, number, number?][] = [
+    ["Created by", info.author ?? "", 30],
+    ["Date of issue", dateText(date, o.dateFormat), 25, 2.6],
+    ["Units", o.units, 12],
+    ["Scale", scaleLabel(L.scale), 18],
+    ["Projection", "", 22],
+    ["Size", o.size, 15, o.size.length > 3 ? 2.2 : 3],
+    ["Drawing number", info.number ?? "", 33],
+    ["Rev.", info.revision ?? "", 13],
+    ["Sheet", "1/1", 12, 2.6],
+  ];
+  for (const [label, value, w, size] of row) {
+    cell(x, 18, w, 18, label, value, size);
+    if (label === "Projection") out.push(projectionSymbol(tbx + x + w / 2, tby + 28.5, o.angle, 0.35));
+    x += w;
+  }
+  return out.join("\n");
 }
 
 /** Text cut to fit a width (a rough width per letter for a sans-serif). */
@@ -422,3 +598,102 @@ export function balloonSpots(
     return { item: s.item, at: s.at, x, y };
   });
 }
+
+// ---- Picking on the sheet (for the dimension tools)
+
+export interface EdgeHit {
+  view: string;
+  kind: "line" | "circle";
+  a: [number, number];
+  b: [number, number];
+  c?: [number, number];
+  r?: number;
+  /** How far from the pointer, mm on the paper. */
+  d: number;
+}
+
+/** The seen edge nearest a point on the paper (within `tol` mm), over every view but the isometric one. */
+export function edgeAt(views: Map<string, ProjectedView>, L: Layout, q: [number, number], tol: number, want?: "line" | "circle"): EdgeHit | null {
+  let best: EdgeHit | null = null;
+  for (const p of L.views) {
+    if (p.id === "iso") continue;
+    const v = views.get(p.id);
+    if (!v) continue;
+    for (const b of v.bodies)
+      for (const e of b.edges) {
+        if ("c" in e) {
+          if (want === "line") continue;
+          const c = toPaper(p, e.c);
+          const r = e.r * p.s;
+          const dc = Math.hypot(q[0] - c[0], q[1] - c[1]);
+          const d = Math.abs(dc - r);
+          if (d <= tol && (!best || d < best.d) && onArc(e, fromPaper(p, q))) best = { view: p.id, kind: "circle", a: e.a, b: e.b, c: e.c, r: e.r, d };
+        } else {
+          if (want === "circle") continue;
+          const A = toPaper(p, e.a);
+          const B = toPaper(p, e.b);
+          const d = segDist(q, A, B);
+          if (d <= tol && (!best || d < best.d)) best = { view: p.id, kind: "line", a: e.a, b: e.b, d };
+        }
+      }
+  }
+  return best;
+}
+
+/** The end of an edge (a corner) nearest a point on the paper, within `tol` mm. */
+export function pointAt(views: Map<string, ProjectedView>, L: Layout, q: [number, number], tol: number, view?: string): { view: string; p: [number, number] } | null {
+  let best: { view: string; p: [number, number]; d: number } | null = null;
+  for (const pl of L.views) {
+    if (pl.id === "iso" || (view && pl.id !== view)) continue;
+    const v = views.get(pl.id);
+    if (!v) continue;
+    const consider = (pt: [number, number]) => {
+      const P = toPaper(pl, pt);
+      const d = Math.hypot(P[0] - q[0], P[1] - q[1]);
+      if (d <= tol && (!best || d < best.d)) best = { view: pl.id, p: pt, d };
+    };
+    for (const b of v.bodies)
+      for (const e of b.edges) {
+        consider(e.a);
+        consider(e.b);
+        if ("c" in e) consider(e.c);
+      }
+  }
+  return best ? { view: (best as { view: string }).view, p: (best as { p: [number, number] }).p } : null;
+}
+
+function segDist(q: [number, number], A: [number, number], B: [number, number]): number {
+  const ab = [B[0] - A[0], B[1] - A[1]];
+  const n = ab[0] * ab[0] + ab[1] * ab[1];
+  const t = n ? Math.max(0, Math.min(1, ((q[0] - A[0]) * ab[0] + (q[1] - A[1]) * ab[1]) / n)) : 0;
+  return Math.hypot(q[0] - (A[0] + t * ab[0]), q[1] - (A[1] + t * ab[1]));
+}
+
+/** Is point q (view mm) at an angle the arc a→m→b covers? A whole circle covers all. */
+function onArc(e: { a: [number, number]; m: [number, number]; b: [number, number]; c: [number, number] }, q: [number, number]): boolean {
+  if (e.a[0] === e.b[0] && e.a[1] === e.b[1]) return true;
+  const ang = (p: [number, number]) => Math.atan2(p[1] - e.c[1], p[0] - e.c[0]);
+  const norm = (t: number) => ((t % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  const a = ang(e.a);
+  const span = norm(ang(e.b) - a);
+  const mid = norm(ang(e.m) - a);
+  const t = norm(ang(q) - a);
+  // The arc goes the way its middle point lies.
+  return mid <= span ? t <= span + 0.05 : t >= span - 0.05;
+}
+
+/** A new id for a dimension or a note. */
+export const annId = (kind: string) => `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+/** Where a new length dimension goes: off its edge, away from the middle of its view. */
+export function outward(p: Placed, a: [number, number], b: [number, number]): number {
+  const A = toPaper(p, a);
+  const B = toPaper(p, b);
+  const L = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
+  const n = [(B[1] - A[1]) / L, -(B[0] - A[0]) / L];
+  const c = [p.x + (bw(p.box) * p.s) / 2, p.y + (bh(p.box) * p.s) / 2];
+  const m = [(A[0] + B[0]) / 2 - c[0], (A[1] + B[1]) / 2 - c[1]];
+  return n[0] * m[0] + n[1] * m[1] >= 0 ? 8 : -8;
+}
+
+export type { DrawingDim, DrawingNote };

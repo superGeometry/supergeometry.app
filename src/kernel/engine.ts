@@ -71,7 +71,7 @@ import { cylinderOf, deleteFace,
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
-import type { BodyMesh, BodyProps, ProjectedView, ViewBody, ViewSpec, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
+import type { BodyMesh, BodyProps, ProjectedView, ViewBody, ViewEdge, ViewSpec, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
 type Bodies = Map<string, Shape3D>;
 type SketchState = SketchFeature & { boundary: SketchEntity[] };
@@ -376,6 +376,7 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
     };
     const result: ViewBody[] = bodies.map(([id, s]) => {
       const seen: [number, number][][] = [];
+      const edges: ViewEdge[] = [];
       const paths = (parts: unknown[], keep: boolean) => {
         let d = "";
         for (const part of parts) {
@@ -391,7 +392,11 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
               lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])];
               hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])];
             }
-            if (keep) seen.push(pts);
+            if (keep) {
+              seen.push(pts);
+              const edge = viewEdge(e, pts);
+              if (edge) edges.push(edge);
+            }
             d += pts.map((p, i) => `${i ? "L" : "M"}${r3(p[0])} ${r3(p[1])}`).join("");
           }
         }
@@ -400,7 +405,7 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
       const w = s.wrapped;
       const visible = paths([out.VCompound(w), out.OutLineVCompound(w)], true);
       const tangent = paths([out.Rg1LineVCompound(w)], true);
-      return { id, visible, tangent, hidden: "", anchor: anchorOf(seen) };
+      return { id, visible, tangent, hidden: "", anchor: anchorOf(seen), edges };
     });
     // Hidden edges once every body's seen ones are known.
     bodies.forEach(([, s], i) => {
@@ -435,6 +440,29 @@ function edgePoints(e: Edge): [number, number][] {
   if (e.geomType === "LINE") return [at(0), at(1)];
   const n = Math.max(8, Math.min(96, Math.ceil(e.length / 0.5)));
   return Array.from({ length: n + 1 }, (_, i) => at(i / n));
+}
+
+/** A seen edge as something to dimension: a line, or a circle (its centre from three of its points). */
+function viewEdge(e: Edge, pts: [number, number][]): ViewEdge | undefined {
+  const rr = (p: [number, number]): [number, number] => [Math.round(p[0] * 1000) / 1000, Math.round(p[1] * 1000) / 1000];
+  if (e.geomType === "LINE") return { a: rr(pts[0]), b: rr(pts[1]) };
+  if (e.geomType !== "CIRCLE") return undefined;
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const closed = Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6;
+  const p1 = pts[Math.round(pts.length / 3)];
+  const p2 = pts[Math.round((2 * pts.length) / 3)];
+  const m = pts[Math.round(pts.length / 2)];
+  // The circle through a, p1, p2.
+  const [ax, ay] = a;
+  const [bx, by] = p1;
+  const [cx, cy] = p2;
+  const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+  if (Math.abs(d) < 1e-12) return undefined;
+  const ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d;
+  const uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d;
+  const r = Math.hypot(ax - ux, ay - uy);
+  return { a: rr(a), m: rr(m), b: closed ? rr(a) : rr(b), c: rr([ux, uy]), r: Math.round(r * 1000) / 1000 };
 }
 
 /** On the body's seen edges, the point nearest the middle of them (where a balloon's leader ends). */

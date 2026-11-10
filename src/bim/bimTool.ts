@@ -8,6 +8,7 @@
 import type { MaterialDef } from "../doc/types";
 import type { BodyProps } from "../kernel/protocol";
 import { el } from "../ui/ui";
+import { icons } from "../ui/icons";
 import type { ToolPointer } from "../view/input";
 import { hitToSel, type AppContext, type Sel, type Tool } from "../tools/tool";
 import { allMaterials, assignMaterial, fmtMass, fmtVolume, massOf, MATERIAL_CLASSES, materialOf, materialRows } from "./materials";
@@ -26,6 +27,8 @@ export async function measureBodies(app: AppContext): Promise<Map<string, BodyPr
 export class BimTool implements Tool {
   readonly id = "bim";
   private card: HTMLElement | null = null;
+  /** What the card shows (below its grip, name and X). */
+  private body: HTMLElement | null = null;
   private props = new Map<string, BodyProps>();
   /** The project the properties were measured for. */
   private measured: unknown = null;
@@ -51,7 +54,10 @@ export class BimTool implements Tool {
     this.app.ui.setBottom(this.app.bottomTools());
     this.app.ui.setHint("Tap a body, then its material. The material's data gives the body its mass.");
     this.card = el("div", "bim-card");
+    this.body = el("div", "bim-body");
+    this.card.append(this.header(), this.body);
     document.body.append(this.card);
+    this.putCard(BimTool.spot());
     document.body.classList.add("bim-open");
     // Bodies picked before: what the materials go to.
     const bodies = this.picked;
@@ -63,6 +69,7 @@ export class BimTool implements Tool {
   exit(): void {
     this.card?.remove();
     this.card = null;
+    this.body = null;
     document.body.classList.remove("bim-open");
     this.app.ui.setHint(null);
     this.app.setSelection([]);
@@ -131,13 +138,72 @@ export class BimTool implements Tool {
     this.render();
   }
 
+  // ---- The card's top: a grip to drag it anywhere (it opens there again), its name, X to leave BIM.
+
+  private static POS = "sg-bim-card";
+  private static spot(): { x: number; y: number } | null {
+    try {
+      return JSON.parse(localStorage.getItem(BimTool.POS) ?? "{}")?.[document.documentElement.dataset.screen ?? "desktop"] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private header(): HTMLElement {
+    const head = el("div", "bim-head");
+    const grip = el("div", "bim-grip");
+    grip.append(el("span", ""));
+    const title = el("span", "panel-title", "Materials");
+    const x = el("button", "bim-close");
+    x.innerHTML = icons.close;
+    x.title = "Exit BIM";
+    x.setAttribute("aria-label", "Exit BIM");
+    x.addEventListener("click", () => this.app.setTool(null));
+    head.append(grip, title, x);
+    let drag: { id: number; dx: number; dy: number } | null = null;
+    head.addEventListener("pointerdown", (e) => {
+      if (!this.card || (e.target as HTMLElement).closest(".bim-close")) return;
+      e.preventDefault();
+      const r = this.card.getBoundingClientRect();
+      drag = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top };
+      head.setPointerCapture(e.pointerId);
+    });
+    head.addEventListener("pointermove", (e) => {
+      if (drag?.id === e.pointerId) this.putCard({ x: e.clientX - drag.dx, y: e.clientY - drag.dy });
+    });
+    const end = (e: PointerEvent) => {
+      if (drag?.id !== e.pointerId || !this.card) return;
+      drag = null;
+      try {
+        const all = JSON.parse(localStorage.getItem(BimTool.POS) ?? "{}") ?? {};
+        all[document.documentElement.dataset.screen ?? "desktop"] = { x: this.card.offsetLeft, y: this.card.offsetTop };
+        localStorage.setItem(BimTool.POS, JSON.stringify(all));
+      } catch {
+        // private window: not remembered
+      }
+    };
+    head.addEventListener("pointerup", end);
+    head.addEventListener("pointercancel", end);
+    return head;
+  }
+
+  /** The card at a spot, kept whole on screen (null: where it opens by default). */
+  private putCard(at: { x: number; y: number } | null): void {
+    const c = this.card;
+    if (!c || !at) return;
+    c.style.width = `${c.offsetWidth}px`;
+    c.style.right = "auto";
+    c.style.bottom = "auto";
+    c.style.left = `${Math.round(Math.max(4, Math.min(window.innerWidth - c.offsetWidth - 4, at.x)))}px`;
+    c.style.top = `${Math.round(Math.max(4, Math.min(window.innerHeight - c.offsetHeight - 4, at.y)))}px`;
+  }
+
   private render(): void {
-    const card = this.card;
+    const card = this.body;
     if (!card) return;
     const doc = this.app.store.doc;
     const keep = card.querySelector<HTMLElement>(".bim-materials")?.scrollTop ?? 0;
     card.innerHTML = "";
-    card.append(el("div", "panel-title", "Materials"));
 
     // ---- The bodies, each with its material and mass.
     const bodies = this.app.view.bodyList.filter((b) => !doc.hidden.includes(b.id));
