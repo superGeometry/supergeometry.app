@@ -200,6 +200,89 @@ function wrap(g: CanvasRenderingContext2D, text: string, x: number, y: number, m
 }
 
 
+/**
+ * The model's scale as a moving tape: real size (1:1) is the zero, each mark
+ * up is twice as big (2:1, 4:1), each mark down half (1:2, 1:4). The tape
+ * slides under a fixed pointer; the number on top is the scale now.
+ */
+class Tape {
+  readonly board = new Board(300, 560, 0.06);
+  private key = "";
+  draw(ratio: number): void {
+    const v = Math.log2(Math.max(1e-6, ratio));
+    const key = `${ratioText(ratio)}|${v.toFixed(2)}`;
+    if (key === this.key) return;
+    this.key = key;
+    const g = this.board.clear();
+    g.fillStyle = GLASS;
+    g.beginPath();
+    g.roundRect(4, 4, 292, 552, 48);
+    g.fill();
+    g.strokeStyle = LINE;
+    g.lineWidth = 3;
+    g.stroke();
+    // The number now.
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillStyle = "#fff";
+    g.font = `600 64px ${FONT}`;
+    g.fillText(ratioText(ratio), 150, 72);
+    g.fillStyle = "rgba(235,235,245,0.55)";
+    g.font = `500 26px ${FONT}`;
+    g.fillText(Math.abs(v) < 0.005 ? "real size" : v > 0 ? "bigger" : "smaller", 150, 122);
+    // The tape: one mark a doubling, 80 px apart, the pointer in the middle of the window.
+    const top = 156;
+    const bottom = 540;
+    const mid = (top + bottom) / 2;
+    const step = 80;
+    g.save();
+    g.beginPath();
+    g.rect(0, top, 300, bottom - top);
+    g.clip();
+    for (let k = Math.floor(v) - 3; k <= Math.ceil(v) + 3; k++)
+      for (const half of [0, 0.5]) {
+        const y = mid - (k + half - v) * step;
+        if (y < top - 20 || y > bottom + 20) continue;
+        const zero = k === 0 && !half;
+        g.strokeStyle = zero ? ACCENT : half ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.6)";
+        g.lineWidth = zero ? 5 : 3;
+        g.beginPath();
+        g.moveTo(40, y);
+        g.lineTo(half ? 72 : 96, y);
+        g.stroke();
+        if (half) continue;
+        g.textAlign = "left";
+        g.fillStyle = zero ? ACCENT : "rgba(235,235,245,0.8)";
+        g.font = `${zero ? 700 : 500} 34px ${FONT}`;
+        g.fillText(k >= 0 ? `${2 ** k}:1` : `1:${2 ** -k}`, 116, y);
+      }
+    g.restore();
+    // The pointer: where the model is now.
+    g.fillStyle = "#fff";
+    g.beginPath();
+    g.moveTo(12, mid - 14);
+    g.lineTo(34, mid);
+    g.lineTo(12, mid + 14);
+    g.fill();
+    g.strokeStyle = "#fff";
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(34, mid);
+    g.lineTo(104, mid);
+    g.stroke();
+    this.board.show();
+  }
+  reset(): void {
+    this.key = "";
+  }
+}
+
+/** A scale as people write it: 1:1, 2:1, 1:4, 1:2.5 (a tenth when it's not whole, under ten). */
+function ratioText(r: number): string {
+  const one = (n: number) => (n >= 10 || Math.abs(n - Math.round(n)) < 0.05 ? String(Math.round(n)) : n.toFixed(1));
+  return r >= 1 ? `${one(r)}:1` : `1:${one(1 / r)}`;
+}
+
 // --------------------------------------------------------------- the mode
 
 /** One millimetre, in the room's metres: real size. */
@@ -237,6 +320,10 @@ export class VRMode {
   private shadow = new Mesh(new PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false }));
   /** The card above the right hand: a short message. */
   private card = new Board(640, 200, 0.15);
+  /** The scale above the left hand: 1:1 in the middle, bigger up, smaller down. */
+  private tape = new Tape();
+  /** The right stick stopped at real size: it sizes again once let go. */
+  private stickHeld = false;
   private toast: { text: string; until: number } | null = null;
   private cardKey = "";
   /** The model's bottom middle, in the holder's own (y up, millimetres) coordinates. */
@@ -261,7 +348,7 @@ export class VRMode {
   }
 
   /** Pictures of the wheel (the stick on button `hot`) and of the card saying `text`, as the headset shows them (to check their look). */
-  snapshot(hot = -1, text = "Real size"): { wheel: string; card: string } {
+  snapshot(hot = -1, text = "X-Ray", ratio = 1): { wheel: string; card: string; tape: string } {
     const w = new Wheel();
     w.items = this.items();
     w.title = "View";
@@ -272,7 +359,9 @@ export class VRMode {
     this.drawCard();
     this.toast = null;
     this.cardKey = "";
-    return { wheel: w.board.g.canvas.toDataURL(), card: this.card.g.canvas.toDataURL() };
+    const t = new Tape();
+    t.draw(ratio);
+    return { wheel: w.board.g.canvas.toDataURL(), card: this.card.g.canvas.toDataURL(), tape: t.board.g.canvas.toDataURL() };
   }
 
   async enter(): Promise<void> {
@@ -336,8 +425,8 @@ export class VRMode {
   private items(): VRItem[] {
     const looks = this.host.looks();
     return [
-      { label: "Real size", icon: "ruler", disabled: this.real, run: () => this.resize(REAL, "Real size") },
-      { label: "Hand size", icon: "scale", run: () => this.resize(0.25 / this.size, "Hand size") },
+      { label: "Real size", icon: "ruler", disabled: this.real, run: () => this.resize(REAL) },
+      { label: "Hand size", icon: "scale", run: () => this.resize(0.25 / this.size) },
       { label: "Bring here", icon: "fit", run: () => this.bringHere() },
       { label: looks.xray, icon: "display", run: () => this.say(this.host.xray()) },
       { label: looks.edges, icon: looks.edges.startsWith("Hide") ? "eyeOff" : "eye", run: () => this.say(this.host.edges()) },
@@ -410,11 +499,17 @@ export class VRMode {
     ray.add(wheel.board.mesh);
     this.room.add(ray);
     const hand: Hand = { side: i === 0 ? "right" : "left", ray, line, wheel, squeezing: false, grabFrom: null, was: [false, false], heldSince: 0, hits: null, asked: null };
+    // The card rides above the right hand, the scale above the left (which hand is which comes with the controller).
     const placeCard = () => {
-      if (hand.side !== "right") return;
-      ray.add(this.card.mesh);
-      this.card.mesh.position.set(0, 0.06, -0.1);
-      this.card.mesh.rotation.x = -0.6;
+      if (hand.side === "right") {
+        ray.add(this.card.mesh);
+        this.card.mesh.position.set(0, 0.06, -0.1);
+        this.card.mesh.rotation.x = -0.6;
+      } else {
+        ray.add(this.tape.board.mesh);
+        this.tape.board.mesh.position.set(0, 0.06, -0.07);
+        this.tape.board.mesh.rotation.x = -0.6;
+      }
     };
     ray.addEventListener("connected", (e) => {
       const src = (e as unknown as { data?: XRInputSource }).data;
@@ -535,10 +630,7 @@ export class VRMode {
       // Real size holds for a moment on the way (a little click in the hands).
       const near = Math.abs(s / REAL - 1) < 0.07;
       if (near) s = REAL;
-      if (near && !this.pinch.snapped) {
-        for (const h of held) this.buzz(h, 0.5, 30);
-        this.say("Real size");
-      }
+      if (near && !this.pinch.snapped) for (const h of held) this.buzz(h, 0.5, 30);
       this.pinch.snapped = near;
       if (s !== this.holder.scale.x) this.resize(s);
     }
@@ -551,6 +643,7 @@ export class VRMode {
     this.aim(frame);
     this.shadow.visible = this.placed && !held.length;
     this.drawCard();
+    this.tape.draw(this.holder.scale.x / REAL);
     this.host.beforeFrame();
     this.host.renderer.render(this.room, this.host.renderer.xr.getCamera());
   }
@@ -582,6 +675,7 @@ export class VRMode {
         hand.wheel.title = "View";
         hand.wheel.hot = -1;
         hand.wheel.board.mesh.visible = true;
+        this.tape.board.mesh.visible = false;
         hand.wheel.draw();
       }
       if (hand.wheel.open && ax) {
@@ -595,6 +689,7 @@ export class VRMode {
       if (!ax && hand.was[0]) {
         const item = hand.wheel.open ? hand.wheel.items[hand.wheel.hot] : undefined;
         hand.wheel.board.mesh.visible = false;
+        this.tape.board.mesh.visible = true;
         if (item) this.run(item);
         else if (t - hand.heldSince < 300) this.bringHere();
       }
@@ -608,8 +703,7 @@ export class VRMode {
     } else {
       // A: real size or hand size. B: back in front of you.
       if (ax && !hand.was[0]) {
-        if (this.real) this.resize(0.25 / this.size, "Hand size");
-        else this.resize(REAL, "Real size");
+        this.resize(this.real ? 0.25 / this.size : REAL);
       }
       if (by && !hand.was[1]) this.bringHere();
       // Stick: left / right turns it about its middle, up / down sizes it.
@@ -618,7 +712,17 @@ export class VRMode {
         const keep = this.baseInRoom();
         this.holder.quaternion.premultiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -sx * 1.6 * dt));
         this.holder.position.add(keep.sub(this.baseInRoom()));
-      } else if (Math.abs(sy) > 0.2) this.resize(this.holder.scale.x * Math.pow(2, -sy * dt));
+      } else if (Math.abs(sy) > 0.2 && !this.stickHeld) {
+        // Up: bigger, down: smaller; it stops at real size on the way (let go and push again to go on).
+        const s = this.holder.scale.x;
+        let next = s * Math.pow(2, -sy * dt);
+        if (!this.real && (s - REAL) * (next - REAL) <= 0) {
+          next = REAL;
+          this.stickHeld = true;
+          this.buzz(hand, 0.5, 30);
+        }
+        this.resize(next);
+      } else if (Math.abs(sy) < 0.15) this.stickHeld = false;
     }
     hand.was = [ax, by];
   }
@@ -691,6 +795,9 @@ export class VRMode {
     this.toast = null;
     this.cardKey = "";
     this.card.mesh.removeFromParent();
+    this.tape.board.mesh.removeFromParent();
+    this.tape.reset();
+    this.stickHeld = false;
     this.shadow.removeFromParent();
     scene.removeFromParent();
     scene.rotation.set(0, 0, 0);
