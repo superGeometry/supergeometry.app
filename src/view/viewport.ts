@@ -1148,75 +1148,24 @@ export class Viewport {
     return box.isEmpty() ? null : { min: box.min.toArray() as Vec3, max: box.max.toArray() as Vec3 };
   }
 
-  /**
-   * What a ray hits (the scene's own coordinates: a headset controller's ray).
-   * A corner or an edge within `tol` of the ray (and not behind the face it
-   * meets) wins over the face, as on the screen; `kinds` leaves some out.
-   */
-  rayPick(origin: Vec3, dir: Vec3, tol = 0, kinds: { faces?: boolean; edges?: boolean; vertices?: boolean } = {}): PickHit | null {
-    const { faces = true, edges = true, vertices = true } = kinds;
-    this.scene.updateMatrixWorld();
-    const m = this.scene.matrixWorld;
-    const back = m.clone().invert();
-    const o = new Vector3(...origin);
-    const d = new Vector3(...dir).normalize();
-    // The bodies' meshes sit in the scene (their matrices are the identity): cast in world space, compare in the scene's.
-    const wo = o.clone().applyMatrix4(m);
-    const wd = o.clone().add(d).applyMatrix4(m).sub(wo).normalize();
-    this.raycaster.set(wo, wd);
-    const local = (p: Vector3) => p.clone().applyMatrix4(back);
-    const shown = this.visibleBodies();
-    const faceHit = this.raycaster.intersectObjects(shown.map((b) => b.mesh), false).find((h) => !this.clip || this.clip.distanceToPoint(local(h.point)) >= 0);
-    const faceT = faceHit ? local(faceHit.point).sub(o).dot(d) : Infinity;
-    // A little in front of the face counts as on it (an edge of that face).
-    const slack = Math.max(tol, 1e-6);
-    const visible = (t: number) => t > 0 && t <= faceT + slack;
-    if (tol > 0 && (vertices || edges)) {
-      let best: { d: number; hit: PickHit } | null = null;
-      const w = new Vector3();
-      for (const [id, b] of this.bodies) {
-        if (!shown.includes(b)) continue;
-        if (vertices)
-          b.vertices.forEach((v, i) => {
-            if (this.clip && this.clip.distanceToPoint(v) < 0) return;
-            const t = w.copy(v).sub(o).dot(d);
-            if (!visible(t)) return;
-            const dist = w.copy(o).addScaledVector(d, t).distanceTo(v);
-            // Corners get a little more reach than edges (they're what you aim at).
-            if (dist < tol * 1.4 && (!best || dist * 0.7 < best.d)) best = { d: dist * 0.7, hit: { kind: "vertex", body: id, vertex: i, point: v.toArray() as Vec3 } };
-          });
-        if (edges) {
-          const p = b.data.edgePositions;
-          const a = new Vector3();
-          const c = new Vector3();
-          for (const g of b.data.edgeGroups)
-            for (let i = g.start; i < g.start + g.count; i += 2) {
-              a.set(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
-              c.set(p[i * 3 + 3], p[i * 3 + 4], p[i * 3 + 5]);
-              const near = rayToSegment(o, d, a, c);
-              if (!near || near.dist >= tol || !visible(near.t)) continue;
-              if (this.clip && this.clip.distanceToPoint(near.point) < 0) continue;
-              if (!best || near.dist < best.d) best = { d: near.dist, hit: { kind: "edge", body: id, edge: g.edge, point: near.point.toArray() as Vec3 } };
-            }
-        }
-      }
-      if (best) return (best as { hit: PickHit }).hit;
-    }
-    if (!faces || !faceHit || faceHit.faceIndex == null) return null;
-    const body = faceHit.object.userData.body as string;
-    const tri = faceHit.faceIndex * 3;
-    const g = this.bodies.get(body)!.data.faceGroups.find((g) => tri >= g.start && tri < g.start + g.count);
-    return g ? { kind: "face", body, face: g.face, point: local(faceHit.point).toArray() as Vec3 } : null;
-  }
-
   /** The per-frame work a headset frame needs too (handles kept their size, and so on). */
   xrFrame(): void {
     this.frameHooks.forEach((f) => f());
   }
 
-  /** In the headset the grid is left out (it sizes itself to the page's camera); back on the page, as set. */
+  /** What the headset leaves out (and the page had shown), to put back after. */
+  private xrHidden: Object3D[] = [];
+
+  /** In the headset only the bodies show (no grid, axes, sketches, planes or highlights); back on the page, as it was. */
   xrMode(on: boolean): void {
-    this.grid.mesh.visible = !on && settings.value.showGrid;
+    if (on) {
+      this.xrHidden = [this.grid.mesh, this.axesGroup, this.imageGroup, this.constructionGroup, this.sketchGroup, this.highlightGroup, this.overlay].filter((o) => o.visible);
+      for (const o of this.xrHidden) o.visible = false;
+    } else {
+      for (const o of this.xrHidden) o.visible = true;
+      this.xrHidden = [];
+      this.grid.mesh.visible = settings.value.showGrid;
+    }
     this.dirty = true;
   }
 
@@ -1702,21 +1651,4 @@ function watermarkLogo(): Promise<HTMLImageElement | null> {
     img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   });
   return logoImage;
-}
-
-/** The closest approach of a ray (o, unit d) to the segment a-b: how far apart, how far along the ray, and the point on the segment. */
-function rayToSegment(o: Vector3, d: Vector3, a: Vector3, b: Vector3): { dist: number; t: number; point: Vector3 } | null {
-  const u = b.clone().sub(a);
-  const w0 = o.clone().sub(a);
-  const B = d.dot(u);
-  const C = u.dot(u);
-  const D = d.dot(w0);
-  const E = u.dot(w0);
-  const den = C - B * B;
-  let s = C < 1e-18 ? 0 : den > 1e-12 * C ? (E - B * D) / den : E / C;
-  s = Math.max(0, Math.min(1, s));
-  const q = a.clone().addScaledVector(u, s);
-  const t = q.clone().sub(o).dot(d);
-  const dist = o.clone().addScaledVector(d, t).distanceTo(q);
-  return { dist, t, point: q };
 }
