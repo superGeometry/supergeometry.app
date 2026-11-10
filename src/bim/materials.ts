@@ -11,6 +11,7 @@
 // own data sheet comes first wherever it differs.
 
 import type { MaterialDef, ProjectDoc } from "../doc/types";
+import { trim, UNIT_LABEL, UNIT_MM, units } from "../units";
 
 export const MATERIAL_CLASSES = ["Metal", "Plastic", "Concrete & masonry", "Wood", "Glass & stone", "Insulation & boards"] as const;
 
@@ -92,6 +93,23 @@ export function materialRows(m: MaterialDef): { group: string; rows: [string, st
 /** Mass in kg of `volumeMM3` cubic millimetres of it. */
 export function massOf(m: MaterialDef, volumeMM3: number): number {
   return volumeMM3 * 1e-9 * m.density;
+}
+
+/** A mass for people: g under a kilo, kg up to a tonne, t above. */
+export function fmtMass(kg: number): string {
+  if (kg < 1) return `${trim(kg * 1000, 1)} g`;
+  if (kg < 1000) return `${trim(kg, 3)} kg`;
+  return `${trim(kg / 1000, 3)} t`;
+}
+
+export function fmtVolume(mm3: number): string {
+  const k = UNIT_MM[units()];
+  return `${trim(mm3 / (k * k * k), 3)} ${UNIT_LABEL[units()]}³`;
+}
+
+export function fmtArea(mm2: number): string {
+  const k = UNIT_MM[units()];
+  return `${trim(mm2 / (k * k), 3)} ${UNIT_LABEL[units()]}²`;
 }
 
 /** Give bodies a material (its colour, and see-through for glass, come with it); null takes it away. */

@@ -1,5 +1,5 @@
 import type { Feature } from "../doc/types";
-import type { BodyMesh, BodyProps, Envelope, ExportFormat, RegenResult, Request, Response } from "./protocol";
+import type { BodyMesh, BodyProps, ProjectedView, ViewSpec, Envelope, ExportFormat, RegenResult, Request, Response } from "./protocol";
 
 /** Promise-based wrapper around the kernel worker. */
 export class KernelClient {
@@ -206,6 +206,14 @@ export class KernelClient {
     });
     this.meshes = new Map(bodies.map((b) => [b.key, b]));
     return { ...result, bodies };
+  }
+
+  /** The bodies drawn in views, hidden lines found (for BIM drawings). */
+  async drawing(features: Feature[], views: ViewSpec[], bodies?: string[]): Promise<ProjectedView[]> {
+    await this.ready;
+    const r = await this.call({ type: "drawing", features, views, bodies });
+    if (r.type === "drawing") return r.views;
+    throw new Error(r.type === "error" ? r.message : "Could not draw the views");
   }
 
   /** Each body's volume, area, centre of mass and box (for BIM). */

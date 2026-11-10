@@ -528,6 +528,17 @@ export interface ProjectDoc {
   customMaterials?: MaterialDef[];
   /** BIM: what the title block of the technical sheet and the drawings says. */
   info?: ProjectInfo;
+  /** BIM: how the drawing sheet is set out. */
+  drawing?: DrawingOptions;
+}
+
+/** The drawing sheet: paper size, projection method, scale (missing: the largest that fits), what it shows. */
+export interface DrawingOptions {
+  size?: "A4" | "A3" | "A2" | "A1";
+  angle?: "first" | "third";
+  scale?: number;
+  hidden?: boolean;
+  iso?: boolean;
 }
 
 /** The title block: who made it, for whom, which revision. */

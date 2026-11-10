@@ -8,11 +8,13 @@
 import type { MaterialDef } from "../doc/types";
 import type { BodyProps } from "../kernel/protocol";
 import { el } from "../ui/ui";
-import { trim, UNIT_LABEL, UNIT_MM, units } from "../units";
 import type { ToolPointer } from "../view/input";
 import { hitToSel, type AppContext, type Sel, type Tool } from "../tools/tool";
-import { allMaterials, assignMaterial, massOf, MATERIAL_CLASSES, materialOf, materialRows } from "./materials";
+import { allMaterials, assignMaterial, fmtMass, fmtVolume, massOf, MATERIAL_CLASSES, materialOf, materialRows } from "./materials";
+
+export { fmtArea, fmtMass, fmtVolume } from "./materials";
 import { openSheet } from "./sheet";
+import { openDrawing } from "./drawing";
 
 /** Each body's properties, measured on the solids (kept until the project changes). */
 export async function measureBodies(app: AppContext): Promise<Map<string, BodyProps>> {
@@ -20,22 +22,6 @@ export async function measureBodies(app: AppContext): Promise<Map<string, BodyPr
   return new Map(props.map((p) => [p.id, p]));
 }
 
-/** A mass for people: g under a kilo, kg up to a tonne, t above. */
-export function fmtMass(kg: number): string {
-  if (kg < 1) return `${trim(kg * 1000, 1)} g`;
-  if (kg < 1000) return `${trim(kg, 3)} kg`;
-  return `${trim(kg / 1000, 3)} t`;
-}
-
-export function fmtVolume(mm3: number): string {
-  const k = UNIT_MM[units()];
-  return `${trim(mm3 / (k * k * k), 3)} ${UNIT_LABEL[units()]}³`;
-}
-
-export function fmtArea(mm2: number): string {
-  const k = UNIT_MM[units()];
-  return `${trim(mm2 / (k * k), 3)} ${UNIT_LABEL[units()]}²`;
-}
 
 export class BimTool implements Tool {
   readonly id = "bim";
@@ -59,7 +45,7 @@ export class BimTool implements Tool {
       { id: "exit", label: "Exit BIM", icon: "exit", shortcut: "Esc", run: () => this.app.setTool(null) },
       { id: "bimMaterials", label: "Materials", icon: "bim", active: true, sub: "a material for each body" },
       { id: "bimSheet", label: "Technical Sheet", icon: "sheet", sub: "parts, masses, data", run: () => openSheet(this.app) },
-      { id: "bimDrawings", label: "Drawings", icon: "drawing", disabled: true, why: soon },
+      { id: "bimDrawings", label: "Drawings", icon: "drawing", sub: "views, dimensions, balloons", run: () => openDrawing(this.app) },
       { id: "bimAssemblies", label: "Assemblies", icon: "assembly", disabled: true, why: soon },
     ]);
     this.app.ui.setBottom(this.app.bottomTools());

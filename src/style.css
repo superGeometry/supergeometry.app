@@ -4630,3 +4630,76 @@ input.bim-tb-value:focus {
     padding: 0;
   }
 }
+
+/* ---- BIM drawing sheet */
+.bim-drawing .bim-sheet-bar {
+  flex-wrap: wrap;
+}
+.bim-select {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--chrome-solid);
+  color: inherit;
+}
+.bim-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.bim-drawing-info {
+  display: flex;
+  flex-wrap: wrap;
+  background: #fff;
+  color: #1c1d20;
+  border-bottom: 1px solid var(--line);
+}
+.bim-drawing-info[hidden] {
+  display: none;
+}
+.bim-drawing-info .bim-tb-field {
+  flex: 1 1 140px;
+}
+.bim-drawing-paper {
+  flex: 1;
+  overflow: auto;
+  padding: 14px;
+  display: flex;
+  justify-content: safe center;
+  align-items: flex-start;
+}
+.bim-drawing-paper > .bim-sub {
+  color: #e3e4e8;
+}
+.bim-drawing-svg {
+  flex: none;
+  width: min(100%, 1400px);
+  height: auto;
+  background: #fff;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.35);
+  cursor: zoom-in;
+}
+.bim-drawing-svg.zoomed {
+  width: max(250%, 1400px);
+  max-width: none;
+  cursor: zoom-out;
+}
+@media print {
+  body.printing-drawing .bim-drawing-info {
+    display: none;
+  }
+  body.printing-drawing .bim-drawing-paper {
+    padding: 0;
+    overflow: visible;
+    display: block;
+  }
+  body.printing-drawing .bim-drawing-svg,
+  body.printing-drawing .bim-drawing-svg.zoomed {
+    box-shadow: none;
+    max-width: none;
+  }
+}

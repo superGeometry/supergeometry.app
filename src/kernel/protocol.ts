@@ -101,6 +101,33 @@ export interface BodyProps {
   box: [Vec3, Vec3];
 }
 
+/** A view to draw: the model seen from `dir` (towards the viewer), `xAxis` to the right on the paper. */
+export interface ViewSpec {
+  id: string;
+  dir: Vec3;
+  xAxis: Vec3;
+}
+
+/** One body in a drawn view: SVG path data (mm on the paper at 1:1, y down). */
+export interface ViewBody {
+  id: string;
+  /** Edges seen. */
+  visible: string;
+  /** Where two faces meet smoothly (drawn thin). */
+  tangent: string;
+  /** Edges behind (drawn dashed). */
+  hidden: string;
+  /** A point on one of its seen edges, near its middle: where a balloon's leader ends. */
+  anchor?: [number, number];
+}
+
+/** A drawn view: each body, and the box around them all (2D, y down). */
+export interface ProjectedView {
+  id: string;
+  bodies: ViewBody[];
+  box: [[number, number], [number, number]] | null;
+}
+
 /** "mesh": each body as triangles, as finely as an STL (for a 3MF), JSON: { id, positions, indices }[]. */
 export type ExportFormat = "stl" | "step" | "mesh";
 
@@ -108,13 +135,15 @@ export type Request =
   | { type: "init" }
   | { type: "regenerate"; features: Feature[]; saved?: boolean }
   | { type: "export"; features: Feature[]; format: ExportFormat; bodies?: string[] }
-  | { type: "properties"; features: Feature[] };
+  | { type: "properties"; features: Feature[] }
+  | { type: "drawing"; features: Feature[]; views: ViewSpec[]; bodies?: string[] };
 
 export type Response =
   | { type: "ready" }
   | { type: "regenerated"; result: RegenResult }
   | { type: "exported"; blob: Blob }
   | { type: "properties"; bodies: BodyProps[] }
+  | { type: "drawing"; views: ProjectedView[] }
   | { type: "error"; message: string };
 
 export interface Envelope<T> {

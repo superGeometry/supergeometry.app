@@ -28,6 +28,7 @@ import {
   measureShapeVolumeProperties,
   measureDistanceBetween,
   measureVolume,
+  ProjectionCamera,
   revolution,
   Solid,
   Vector,
@@ -70,7 +71,7 @@ import { cylinderOf, deleteFace,
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
-import type { BodyMesh, BodyProps, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
+import type { BodyMesh, BodyProps, ProjectedView, ViewBody, ViewSpec, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
 type Bodies = Map<string, Shape3D>;
 type SketchState = SketchFeature & { boundary: SketchEntity[] };
@@ -344,6 +345,117 @@ export async function bodyProperties(features: Feature[]): Promise<BodyProps[]> 
     const [lo, hi] = s.boundingBox.bounds as [Vec3, Vec3];
     return { id, name: names.get(id) ?? id, volume, area, center, box: [lo, hi] };
   });
+}
+
+/**
+ * Drawings: the bodies seen along each view's direction, with hidden line
+ * removal (OpenCascade's exact HLR), each body's edges kept apart so a balloon
+ * can point at it. Edges come out as SVG path data in mm, y down.
+ */
+export async function projectViews(features: Feature[], views: ViewSpec[], only?: string[]): Promise<ProjectedView[]> {
+  const { ctx } = await run(features);
+  const bodies = [...ctx.bodies.entries()].filter(([id]) => !only || only.includes(id));
+  const oc = getOC();
+  return views.map((v) => {
+    const cam = new ProjectionCamera([0, 0, 0], v.dir, v.xAxis);
+    const algo = new oc.HLRBRep_Algo();
+    for (const [, s] of bodies) algo.Add(s.wrapped, 0);
+    const projector = new oc.HLRAlgo_Projector(cam.wrapped);
+    algo.Projector(projector);
+    algo.Update();
+    algo.Hide();
+    const out = new oc.HLRBRep_HLRToShape(algo);
+    let lo: [number, number] = [Infinity, Infinity];
+    let hi: [number, number] = [-Infinity, -Infinity];
+    // Hidden edges lying exactly under seen ones (the back of a box, seen
+    // straight on) are left out: they would only be drawn over.
+    const drawn = new Set<string>();
+    const key = (a: [number, number], b: [number, number]) => {
+      const [p, q] = [`${r3(a[0])} ${r3(a[1])}`, `${r3(b[0])} ${r3(b[1])}`].sort();
+      return `${p}|${q}`;
+    };
+    const result: ViewBody[] = bodies.map(([id, s]) => {
+      const seen: [number, number][][] = [];
+      const paths = (parts: unknown[], keep: boolean) => {
+        let d = "";
+        for (const part of parts) {
+          const shape = part as { IsNull(): boolean };
+          if (shape.IsNull()) continue;
+          for (const e of (cast(shape as never) as AnyShape).edges) {
+            oc.BRepLib.BuildCurves3d(e.wrapped as never);
+            const pts = edgePoints(e);
+            const k = key(pts[0], pts[pts.length - 1]);
+            if (keep) drawn.add(k);
+            else if (pts.length === 2 && drawn.has(k)) continue;
+            for (const p of pts) {
+              lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])];
+              hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])];
+            }
+            if (keep) seen.push(pts);
+            d += pts.map((p, i) => `${i ? "L" : "M"}${r3(p[0])} ${r3(p[1])}`).join("");
+          }
+        }
+        return d;
+      };
+      const w = s.wrapped;
+      const visible = paths([out.VCompound(w), out.OutLineVCompound(w)], true);
+      const tangent = paths([out.Rg1LineVCompound(w)], true);
+      return { id, visible, tangent, hidden: "", anchor: anchorOf(seen) };
+    });
+    // Hidden edges once every body's seen ones are known.
+    bodies.forEach(([, s], i) => {
+      let d = "";
+      for (const part of [out.HCompound(s.wrapped), out.OutLineHCompound(s.wrapped)]) {
+        if (part.IsNull()) continue;
+        for (const e of (cast(part) as AnyShape).edges) {
+          oc.BRepLib.BuildCurves3d(e.wrapped as never);
+          const pts = edgePoints(e);
+          if (pts.length === 2 && drawn.has(key(pts[0], pts[1]))) continue;
+          d += pts.map((p, j) => `${j ? "L" : "M"}${r3(p[0])} ${r3(p[1])}`).join("");
+        }
+      }
+      result[i].hidden = d;
+    });
+    out.delete();
+    projector.delete();
+    algo.delete();
+    cam.delete();
+    return { id: v.id, bodies: result, box: lo[0] <= hi[0] ? [lo, hi] : null };
+  });
+}
+
+const r3 = (n: number) => String(Math.round(n * 1000) / 1000);
+
+/** Points along a projected edge (y flipped, for the paper): a line's two ends, a curve sampled finely enough to print. */
+function edgePoints(e: Edge): [number, number][] {
+  const at = (t: number): [number, number] => {
+    const p = e.pointAt(t);
+    return [p.x, -p.y];
+  };
+  if (e.geomType === "LINE") return [at(0), at(1)];
+  const n = Math.max(8, Math.min(96, Math.ceil(e.length / 0.5)));
+  return Array.from({ length: n + 1 }, (_, i) => at(i / n));
+}
+
+/** On the body's seen edges, the point nearest the middle of them (where a balloon's leader ends). */
+function anchorOf(lines: [number, number][][]): [number, number] | undefined {
+  if (!lines.length) return undefined;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const l of lines) for (const [x, y] of l) (x0 = Math.min(x0, x)), (x1 = Math.max(x1, x)), (y0 = Math.min(y0, y)), (y1 = Math.max(y1, y));
+  const c: [number, number] = [(x0 + x1) / 2, (y0 + y1) / 2];
+  let best = lines[0][0];
+  let bd = Infinity;
+  for (const l of lines)
+    for (let i = 1; i < l.length; i++) {
+      const [a, b] = [l[i - 1], l[i]];
+      const ab = [b[0] - a[0], b[1] - a[1]];
+      const n = ab[0] * ab[0] + ab[1] * ab[1];
+      const t = n ? Math.max(0, Math.min(1, ((c[0] - a[0]) * ab[0] + (c[1] - a[1]) * ab[1]) / n)) : 0;
+      const p: [number, number] = [a[0] + t * ab[0], a[1] + t * ab[1]];
+      const d = (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2;
+      if (d < bd) (bd = d), (best = p);
+    }
+  return [Math.round(best[0] * 1000) / 1000, Math.round(best[1] * 1000) / 1000];
 }
 
 export async function exportBodies(features: Feature[], format: ExportFormat, only?: string[]): Promise<Blob> {

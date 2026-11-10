@@ -21,6 +21,7 @@ import { PinLayer } from "./tools/annotate";
 import { MeasureTool } from "./tools/measure";
 import { BimTool } from "./bim/bimTool";
 import { openSheet } from "./bim/sheet";
+import { openDrawing } from "./bim/drawing";
 import { ItemsPanel } from "./ui/items";
 import { OffsetEdgeOp } from "./tools/offsetEdge";
 import { faceFreeformTool } from "./tools/faceFreeform";
@@ -858,7 +859,7 @@ export class App implements AppContext {
         children: [
           { id: "bimMaterials", label: "Materials", icon: "bim", sub: "a real material for each body", run: () => this.setTool(new BimTool(this)) },
           { id: "bimSheet", label: "Technical Sheet", icon: "sheet", sub: "parts list, masses, data", run: () => void openSheet(this) },
-          { id: "bimDrawings", label: "Drawings", icon: "drawing", sub: "views with dimensions", run: () => this.ui.toast("Drawings are being built - next") },
+          { id: "bimDrawings", label: "Drawings", icon: "drawing", sub: "views with dimensions", run: () => void openDrawing(this) },
           { id: "bimAssemblies", label: "Assemblies", icon: "assembly", sub: "parts placed and joined", run: () => this.ui.toast("Assemblies are being built - after Drawings") },
         ],
       },
