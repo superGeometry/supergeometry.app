@@ -104,7 +104,8 @@ export async function openDrawing(app: AppContext): Promise<void> {
   // ---- Kernel: the views of the bodies drawn.
   const load = async () => {
     paper.innerHTML = "";
-    paper.append(el("div", "bim-sub", "Drawing the views…"));
+    const status = el("div", "bim-sub", "Measuring the bodies…");
+    paper.append(status);
     try {
       allParts = partsList(app, await measureBodies(app));
       const want = drawingOptions(store.doc).bodies?.filter((id) => allParts.some((p) => p.id === id));
@@ -114,7 +115,16 @@ export async function openDrawing(app: AppContext): Promise<void> {
         paper.append(el("div", "bim-sub", "No bodies to draw: make one first (hidden bodies are left off the drawing)."));
         return;
       }
-      const got = await app.kernel.drawing(store.doc.features as never, VIEW_SPECS, parts.map((p) => p.id));
+      views = new Map();
+      failed.clear();
+      // One view at a time, saying how far it got (a big assembly takes seconds a view).
+      const first = wanted();
+      const list = first.length ? first : VIEW_SPECS.slice(0, 1);
+      const got: ProjectedView[] = [];
+      for (const [i, v] of list.entries()) {
+        status.textContent = `Drawing the views: ${i + 1} of ${list.length}…`;
+        got.push(...(await app.kernel.drawing(store.doc.features as never, [v], parts.map((p) => p.id))));
+      }
       views = new Map(got.map((v) => [v.id, v]));
     } catch (err) {
       paper.innerHTML = "";
@@ -124,9 +134,38 @@ export async function openDrawing(app: AppContext): Promise<void> {
     render();
   };
 
+  // ---- Only the views the sheet shows are drawn (a big assembly takes seconds
+  // a view); one switched on later, or the other side view, is drawn then.
+  const failed = new Set<string>();
+  let fetching = false;
+  const wanted = () => {
+    const o = opts();
+    const side = o.angle === "first" ? "left" : "right";
+    return VIEW_SPECS.filter((v) => (v.id === "front" || v.id === "top" || v.id === "iso" ? o.views[v.id] : o.views.side && v.id === side));
+  };
+  const fetchMissing = async () => {
+    const miss = wanted().filter((v) => !views.has(v.id) && !failed.has(v.id));
+    if (!miss.length || fetching) return;
+    fetching = true;
+    const of = views;
+    name.textContent = `Drawing · ${opts().title} · drawing the views…`;
+    try {
+      const got = await app.kernel.drawing(store.doc.features as never, miss, parts.map((p) => p.id));
+      if (of !== views) return;
+      for (const v of got) views.set(v.id, v);
+    } catch {
+      for (const v of miss) failed.add(v.id);
+    } finally {
+      fetching = false;
+    }
+    if (of === views) render();
+    else void fetchMissing();
+  };
+
   // ---- The sheet
   const render = () => {
     if (!views.size) return;
+    void fetchMissing();
     const doc = docNow();
     const made = drawingSVG({ doc, views, parts, date, interactive: true, selected });
     layout = made.layout;
@@ -140,7 +179,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
       s.classList.add("bim-drawing-svg");
       s.classList.toggle("zoomed", zoomed);
     }
-    name.textContent = `Drawing · ${drawingOptions(doc).title}`;
+    if (!fetching) name.textContent = `Drawing · ${drawingOptions(doc).title}`;
     if (!draft) (renderTools(), renderProps());
   };
   const off = store.onChange(() => {
@@ -179,7 +218,11 @@ export async function openDrawing(app: AppContext): Promise<void> {
     e.preventDefault();
     selected = target;
     drag = { id: e.pointerId, x: q[0], y: q[1], target, moved: false, start: structuredClone(store.doc.drawing ?? {}) };
-    paper.setPointerCapture(e.pointerId);
+    try {
+      paper.setPointerCapture(e.pointerId);
+    } catch {
+      // Already let go.
+    }
     render();
   });
   paper.addEventListener("pointermove", (e) => {
@@ -260,7 +303,23 @@ export async function openDrawing(app: AppContext): Promise<void> {
     done.addEventListener("click", () => startTool(null));
     hint.append(el("span", "", msg), done);
   };
-  const addDim = (d: DrawingDim) => set({ dims: [...opts().dims, d] });
+  const addDim = (d: DrawingDim) => {
+    // The same edge (or circle) dimensioned again: the one it has is picked instead.
+    const straight = (k: string) => k === "length" || k === "distance";
+    const near = (p?: [number, number], q?: [number, number]) => (!p && !q) || (!!p && !!q && Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-3);
+    const same = opts().dims.find(
+      (x) =>
+        x.view === d.view &&
+        (x.kind === d.kind || (straight(x.kind) && straight(d.kind))) &&
+        (d.kind === "radius" || d.kind === "diameter" ? near(x.c, d.c) && Math.abs((x.r ?? 0) - (d.r ?? 0)) < 1e-3 : (near(x.a, d.a) && near(x.b, d.b)) || (near(x.a, d.b) && near(x.b, d.a))),
+    );
+    if (same) {
+      selected = same.id;
+      render();
+      return app.ui.toast("That one is dimensioned already");
+    }
+    set({ dims: [...opts().dims, d] });
+  };
   const useTool = (q: [number, number], e: PointerEvent) => {
     if (!layout) return;
     const tol = tolerance();

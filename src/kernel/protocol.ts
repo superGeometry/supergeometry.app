@@ -119,6 +119,8 @@ export interface ViewBody {
   hidden: string;
   /** A point on one of its seen edges, near its middle: where a balloon's leader ends. */
   anchor?: [number, number];
+  /** For a body hidden whole in this view (inside a housing): a spot on its hidden edges. */
+  under?: [number, number];
   /** Its seen straight edges and circles (arcs), to dimension by tapping them. */
   edges: ViewEdge[];
 }

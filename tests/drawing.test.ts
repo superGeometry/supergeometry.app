@@ -93,6 +93,27 @@ const dv = new Map((await holed(disc, VIEW_SPECS)).map((v) => [v.id, v]));
 const topEdges = dv.get("top")!.bodies[0].edges;
 const circle = topEdges.find((e) => "c" in e) as { c: [number, number]; r: number } | undefined;
 check("a plate with a hole, from the top: its 4 sides and the hole as a circle", topEdges.filter((e) => !("c" in e)).length >= 4 && !!circle && Math.abs(circle.r - 8) < 1e-3, JSON.stringify(circle));
+// ---- The same, worked out on the meshes (as for freeform or very big models).
+{
+  const mv = new Map((await projectViews(features, VIEW_SPECS, undefined, "mesh")).map((v) => [v.id, v]));
+  const mf = mv.get("front")!;
+  check("meshes: front view still exactly 200 wide, 80 high", Math.abs(mf.box![1][0] - mf.box![0][0] - 200) < 1e-6 && Math.abs(mf.box![1][1] - mf.box![0][1] - 80) < 1e-6, JSON.stringify(mf.box));
+  check("meshes: seen from the top nothing is hidden", mv.get("top")!.bodies.every((b) => !b.hidden), mv.get("top")!.bodies.map((b) => b.hidden.slice(0, 60)).join(" | "));
+  const mw = (await projectViews(wall, [VIEW_SPECS[0]], undefined, "mesh"))[0];
+  check("meshes: the wall's edges behind the post are hidden", !!mw.bodies.find((b) => b.id === "W")?.hidden);
+  const md = (await projectViews(disc, VIEW_SPECS, undefined, "mesh")).find((v) => v.id === "top")!.bodies[0].edges;
+  const mc = md.find((e) => "c" in e) as { c: [number, number]; r: number } | undefined;
+  check("meshes: the hole from the top is a circle, r 8", !!mc && Math.abs(mc.r - 8) < 1e-3 && md.some((e) => !("c" in e) && Math.abs(Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) - 60) < 1e-6), JSON.stringify(mc));
+  // A round rod seen from the side: its outlines are exact straight lines 10 apart.
+  const rodEs = [{ id: "c", kind: "circle", center: [0, 0], radius: 5 }];
+  const rod: Feature[] = [
+    { id: "rs", name: "rs", type: "sketch", plane: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, entities: rodEs } as Feature,
+    { id: "R", name: "R", type: "extrude", source: { kind: "profile", sketch: "rs", regions: arrangement(rodEs as any).regions.map(regionRef) }, distance: 30, mode: "new" } as Feature,
+  ];
+  const rf = (await projectViews(rod, [VIEW_SPECS[0]], undefined, "mesh"))[0].bodies[0].edges.filter((e) => !("c" in e) && Math.abs(e.a[0] - e.b[0]) < 1e-6 && Math.abs(Math.abs(e.b[1] - e.a[1]) - 30) < 1e-3);
+  const xs = rf.map((e) => e.a[0]).sort((a, b) => a - b);
+  check("meshes: a rod's outlines from the side, 30 long and exactly 10 apart", xs.length === 2 && Math.abs(xs[1] - xs[0] - 10) < 1e-6, JSON.stringify(rf));
+}
 const ddoc = emptyDoc();
 const dL = layoutSheet(dv, drawingOptions(ddoc), 0);
 const tp2 = dL.views.find((v) => v.id === "top")!;

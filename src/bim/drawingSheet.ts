@@ -154,7 +154,7 @@ export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: n
   const R = W - FRAME;
   const B = H - FRAME;
   const T = FRAME;
-  const blockH = o.titleBlock === "table" ? TB_H + (parts ? ROW * (parts + 1) : 0) + 2 : o.titleBlock === "simple" ? TB_H + 2 : 0;
+  const blockH = o.titleBlock === "table" ? TB_H + (parts ? ROW * (listRows(parts, H) + 1) : 0) + 2 : o.titleBlock === "simple" ? TB_H + 2 : 0;
   const corner = { x0: R - TB_W, y0: B - blockH };
   const side = o.angle === "first" ? "left" : "right";
   const first = o.angle === "first";
@@ -219,8 +219,13 @@ export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: n
   let scale = o.scale;
   if (!scale) {
     // The largest scale the views fit at, with the isometric one no smaller than a fifth of it if it can be.
+    // A standard one, unless the next standard one down is far smaller than one
+    // in between (1:5 where 1:3 fits leaves most of the sheet empty).
     const ok = (s: number) => (front || top || sideBox ? orthoFits(s) : !!isoFor(s, 1));
-    scale = AUTO_SCALES.find((s) => ok(s) && (!iso || isoFor(s, 1 / 5))) ?? AUTO_SCALES.find(ok) ?? AUTO_SCALES[AUTO_SCALES.length - 1];
+    const best = (list: number[]) => list.find((s) => ok(s) && (!iso || isoFor(s, 1 / 5)));
+    const std = best(AUTO_SCALES);
+    const any = best(SCALES);
+    scale = (std && (!any || std >= any * 0.7) ? std : any) ?? AUTO_SCALES.find(ok) ?? AUTO_SCALES[AUTO_SCALES.length - 1];
   }
   const s = scale;
   const placed: Placed[] = ortho(s).map((v) => ({ id: v.id, x: v.x, y: v.y, s, box: v.box }));
@@ -238,6 +243,16 @@ export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: n
     p.y += gy + oy;
   }
   return { W, H, scale: s, isoScale: isoAt?.si, views: placed, side };
+}
+
+/**
+ * How many rows the parts list on the sheet has: all the parts, or - when
+ * they would take more than half the sheet's height - as many as fit, the
+ * last one saying how many more there are (the technical sheet lists them all).
+ */
+export function listRows(parts: number, H: number): number {
+  const most = Math.max(2, Math.floor(((H - 2 * FRAME) * 0.5 - TB_H) / ROW) - 1);
+  return Math.min(parts, most);
 }
 
 /** The key a view's hand move is kept under. */
@@ -435,17 +450,56 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     out.push(data.interactive ? `<g data-ann="${n.id}">${svg}</g>` : svg);
   }
 
-  // ---- Balloons: on the isometric view (or the front one), item numbers of the parts list.
-  const host = placed.get("iso") ?? front;
-  if (o.balloons && host && parts.length) {
-    const v = views.get(host.id)!;
-    const items = new Map(parts.map((r) => [r.id, r.item]));
-    const rect = { x0: host.x - 9, y0: host.y - 9, x1: host.x + bw(host.box) * host.s + 9, y1: host.y + bh(host.box) * host.s + 9 };
-    const balloons = balloonSpots(
-      rect,
-      v.bodies.filter((b) => b.anchor && items.has(b.id)).map((b) => ({ item: items.get(b.id)!, at: toPaper(host, b.anchor!) })),
-    );
-    for (const b of balloons) {
+  // ---- Balloons: item numbers of the parts list, each on the isometric view - or,
+  // for a part hidden there, the first view it shows in. A part inside a
+  // housing, seen in no view, points at its hidden lines.
+  const hosts = ["iso", "front", L.side, "top"].map((id) => placed.get(id)).filter((p): p is Placed => !!p);
+  const byHost = new Map<Placed, { item: number; at: [number, number] }[]>();
+  const spot = (r: PartRow) => {
+    for (const p of hosts) {
+      const b = views.get(p.id)?.bodies.find((x) => x.id === r.id);
+      if (b?.anchor) return { p, at: b.anchor };
+    }
+    if (o.hidden)
+      for (const p of hosts) {
+        const b = views.get(p.id)?.bodies.find((x) => x.id === r.id);
+        if (p.id !== "iso" && b?.under) return { p, at: b.under };
+      }
+    return null;
+  };
+  if (o.balloons)
+    for (const r of parts) {
+      const s = spot(r);
+      if (s) byHost.set(s.p, [...(byHost.get(s.p) ?? []), { item: r.item, at: toPaper(s.p, s.at) }]);
+    }
+  // Where balloons can't go: off the frame, on the title block, on another view or balloon.
+  const taken: [number, number][] = [];
+  const block = o.titleBlock === "table" ? TB_H + (parts.length ? ROW * (listRows(parts.length, L.H) + 1) : 0) : o.titleBlock === "simple" ? TB_H : 0;
+  const freeFor = (host: Placed) => (x: number, y: number) => {
+    if (x < FRAME_L + 4.5 || y < FRAME + 4.5 || x > L.W - FRAME - 4.5 || y > L.H - FRAME - 4.5) return false;
+    if (block && x > L.W - FRAME - TB_W - 4.5 && y > L.H - FRAME - block - 4.5) return false;
+    for (const p of L.views) {
+      if (p === host) continue;
+      if (x > p.x - 4.5 && x < p.x + bw(p.box) * p.s + 4.5 && y > p.y - 4.5 && y < p.y + bh(p.box) * p.s + 4.5) return false;
+    }
+    return taken.every(([tx, ty]) => Math.hypot(x - tx, y - ty) >= 8.5);
+  };
+  for (const [host, items] of byHost) {
+    // The sides the overall dimensions are on.
+    const first = o.angle === "first";
+    const avoid: ("top" | "right" | "bottom" | "left")[] = !o.overall ? [] : host.id === "front" ? ["left", first ? "top" : "bottom"] : host.id === L.side ? [first ? "top" : "bottom"] : [];
+    // Round the view, 9 mm out - those with no room there, further out.
+    const spots: ReturnType<typeof balloonSpots> = [];
+    let left = items;
+    for (let ring = 0; left.length; ring++) {
+      const m = 9 + ring * 10;
+      const rect = { x0: host.x - m, y0: host.y - m, x1: host.x + bw(host.box) * host.s + m, y1: host.y + bh(host.box) * host.s + m };
+      const got = balloonSpots(rect, left, ring ? [] : avoid, freeFor(host));
+      const last = ring === 4;
+      for (const b of got) if (b.clear || last) (spots.push(b), taken.push([b.x, b.y]));
+      left = last ? [] : left.filter((it) => !got.find((b) => b.item === it.item && b.clear));
+    }
+    for (const b of spots) {
       const dx = b.at[0] - b.x;
       const dy = b.at[1] - b.y;
       const d = Math.hypot(dx, dy) || 1;
@@ -491,15 +545,19 @@ function titleBlock(o: Opts, info: ProjectInfo, date: Date, L: Layout, parts: Pa
       ["Material", 68, "start"],
       ["Mass", 30, "end"],
     ];
-    const rowsOf = [...parts].reverse();
-    const top = tby - ROW * (parts.length + 1);
-    out.push(`<rect x="${f(tbx)}" y="${f(top)}" width="${TB_W}" height="${ROW * (parts.length + 1)}" fill="#fff" stroke="#000" stroke-width="0.35"/>`);
+    const n = listRows(parts.length, H);
+    const more = parts.length - (n - 1);
+    const shown: (PartRow | null)[] = n < parts.length ? [...parts.slice(0, n - 1), null] : parts;
+    const rowsOf = [...shown].reverse();
+    const top = tby - ROW * (n + 1);
+    out.push(`<rect x="${f(tbx)}" y="${f(top)}" width="${TB_W}" height="${ROW * (n + 1)}" fill="#fff" stroke="#000" stroke-width="0.35"/>`);
     const cellText = (x: number, w: number, a: string, y: number, t: string, size: number, weight?: string) =>
       text(a === "middle" ? x + w / 2 : a === "end" ? x + w - 1.5 : x + 1.5, y + ROW - 1.8, fit(t, w - 3, size), size, { anchor: a, weight });
     rowsOf.forEach((r, i) => {
       const y = top + i * ROW;
       out.push(`<path d="M${f(tbx)} ${f(y + ROW)}L${f(tbx + TB_W)} ${f(y + ROW)}" stroke="#000" stroke-width="0.18"/>`);
       let x = tbx;
+      if (!r) return void out.push(text(tbx + 1.5, y + ROW - 1.8, `+ ${more} more parts: see the technical sheet`, 2.6));
       const values = [String(r.item), "1", r.name, r.material || "-", r.mass === undefined ? "-" : fmtMass(r.mass)];
       cols.forEach(([, w, a], c) => {
         out.push(cellText(x, w, a, y, values[c], 2.6));
@@ -511,7 +569,7 @@ function titleBlock(o: Opts, info: ProjectInfo, date: Date, L: Layout, parts: Pa
     for (const [label, w, a] of cols) {
       out.push(cellText(x, w, a, hy, label, 2.6, "bold"));
       x += w;
-      if (x < tbx + TB_W - 0.01) out.push(`<path d="M${f(x)} ${f(top)}L${f(x)} ${f(tby)}" stroke="#000" stroke-width="0.18"/>`);
+      if (x < tbx + TB_W - 0.01) out.push(`<path d="M${f(x)} ${f(top + (more > 0 && n < parts.length ? ROW : 0))}L${f(x)} ${f(tby)}" stroke="#000" stroke-width="0.18"/>`);
     }
     out.push(`<path d="M${f(tbx)} ${f(hy)}L${f(tbx + TB_W)} ${f(hy)}" ${line}/>`);
   }
@@ -550,52 +608,91 @@ function fit(t: string, w: number, size: number): string {
 }
 
 /**
- * Where the balloons go: out from the middle of the view through each part's
- * anchor to the rectangle around the view, then spread along it so no two
- * touch.
+ * Balloons around a view: each on the rectangle around it, where a line from
+ * the view's middle through the part it names meets it, spread at least 10 mm
+ * apart - on the sides left free (a side with the overall dimensions on it is
+ * left to them).
  */
 export function balloonSpots(
   rect: { x0: number; y0: number; x1: number; y1: number },
   items: { item: number; at: [number, number] }[],
-): { item: number; at: [number, number]; x: number; y: number }[] {
-  const w = rect.x1 - rect.x0;
-  const h = rect.y1 - rect.y0;
-  const per = 2 * (w + h);
-  const cx = (rect.x0 + rect.x1) / 2;
-  const cy = (rect.y0 + rect.y1) / 2;
-  // Position along the rectangle, clockwise from the top left corner.
-  const along = (x: number, y: number) => {
-    if (Math.abs(y - rect.y0) < 1e-6) return x - rect.x0;
-    if (Math.abs(x - rect.x1) < 1e-6) return w + (y - rect.y0);
-    if (Math.abs(y - rect.y1) < 1e-6) return w + h + (rect.x1 - x);
-    return 2 * w + h + (rect.y1 - y);
-  };
+  avoid: ("top" | "right" | "bottom" | "left")[] = [],
+  free: (x: number, y: number) => boolean = () => true,
+): { item: number; at: [number, number]; x: number; y: number; clear: boolean }[] {
+  const { x0, y0, x1, y1 } = rect;
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  // The free sides, clockwise from the top left corner, one after another.
+  const all = [
+    { side: "top", a: [x0, y0], b: [x1, y0] },
+    { side: "right", a: [x1, y0], b: [x1, y1] },
+    { side: "bottom", a: [x1, y1], b: [x0, y1] },
+    { side: "left", a: [x0, y1], b: [x0, y0] },
+  ] as const;
+  const open = all.filter((s) => !avoid.includes(s.side));
+  const sides = open.length ? open : all;
+  const lens = sides.map((s) => Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]));
+  const per = lens.reduce((a, b) => a + b, 0);
+  const round = sides.length === 4;
   const pointAt = (t: number): [number, number] => {
-    t = ((t % per) + per) % per;
-    if (t < w) return [rect.x0 + t, rect.y0];
-    if (t < w + h) return [rect.x1, rect.y0 + t - w];
-    if (t < 2 * w + h) return [rect.x1 - (t - w - h), rect.y1];
-    return [rect.x0, rect.y1 - (t - 2 * w - h)];
+    t = round ? ((t % per) + per) % per : Math.max(0, Math.min(per, t));
+    for (let i = 0; i < sides.length; i++) {
+      if (t <= lens[i] || i === sides.length - 1) {
+        const f = lens[i] ? Math.min(1, t / lens[i]) : 0;
+        const { a, b } = sides[i];
+        return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+      }
+      t -= lens[i];
+    }
+    return [x0, y0];
   };
   const spots = items.map((it) => {
     let dx = it.at[0] - cx;
     let dy = it.at[1] - cy;
     if (Math.hypot(dx, dy) < 1e-6) (dx = 1), (dy = -1);
-    const k = Math.min(dx ? Math.abs(w / 2 / dx) : Infinity, dy ? Math.abs(h / 2 / dy) : Infinity);
-    const x = Math.min(rect.x1, Math.max(rect.x0, cx + dx * k));
-    const y = Math.min(rect.y1, Math.max(rect.y0, cy + dy * k));
-    return { ...it, t: along(x, y) };
+    const k = Math.min(dx ? Math.abs((x1 - x0) / 2 / dx) : Infinity, dy ? Math.abs((y1 - y0) / 2 / dy) : Infinity);
+    const p = [Math.min(x1, Math.max(x0, cx + dx * k)), Math.min(y1, Math.max(y0, cy + dy * k))];
+    // The nearest place on a free side.
+    let best = { t: 0, d: Infinity };
+    let off = 0;
+    sides.forEach((s, i) => {
+      const ab = [s.b[0] - s.a[0], s.b[1] - s.a[1]];
+      const f = lens[i] ? Math.max(0, Math.min(1, ((p[0] - s.a[0]) * ab[0] + (p[1] - s.a[1]) * ab[1]) / (lens[i] * lens[i]))) : 0;
+      const d = Math.hypot(s.a[0] + ab[0] * f - p[0], s.a[1] + ab[1] * f - p[1]);
+      if (d < best.d) best = { t: off + f * lens[i], d };
+      off += lens[i];
+    });
+    return { ...it, t: best.t };
   });
   spots.sort((a, b) => a.t - b.t);
   // Spread: each at least 10 mm along from the one before (a few passes both ways).
   const gap = Math.min(10, per / Math.max(1, spots.length));
   for (let pass = 0; pass < 4; pass++) {
     for (let i = 1; i < spots.length; i++) if (spots[i].t - spots[i - 1].t < gap) spots[i].t = spots[i - 1].t + gap;
+    if (!round && spots.length && spots[spots.length - 1].t > per) spots[spots.length - 1].t = per;
     for (let i = spots.length - 2; i >= 0; i--) if (spots[i + 1].t - spots[i].t < gap) spots[i].t = spots[i + 1].t - gap;
+    if (!round && spots.length && spots[0].t < 0) spots[0].t = 0;
   }
+  // Each where nothing else is (another view, another balloon, the title
+  // block): moved along until it is, the nearest way.
+  const put: [number, number][] = [];
+  const clear = (x: number, y: number) => free(x, y) && put.every(([px, py]) => Math.hypot(x - px, y - py) >= 8.5);
   return spots.map((s) => {
-    const [x, y] = pointAt(s.t);
-    return { item: s.item, at: s.at, x, y };
+    let [x, y] = pointAt(s.t);
+    let ok = clear(x, y);
+    if (!ok)
+      for (let d = 1; d <= per; d += 1) {
+        const tries = [s.t + d, s.t - d].filter((t) => round || (t >= 0 && t <= per));
+        const at = tries.map(pointAt).find(([a, b]) => clear(a, b));
+        if (at) {
+          [x, y] = at;
+          ok = true;
+          break;
+        }
+        if (!tries.length) break;
+      }
+    if (ok) put.push([x, y]);
+    return { item: s.item, at: s.at, x, y, clear: ok };
   });
 }
 

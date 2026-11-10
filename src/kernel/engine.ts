@@ -69,6 +69,7 @@ import { closestOnEntity } from "../sketch/regions";
 import { cylinderOf, deleteFace,
  deleteFaces as deleteBodyFaces, editNotes, freeformFace, sameSizesAgain, sheetFace, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
+import { anchorOf, freeformFaces, meshViews, viewEdge } from "./viewLines";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
 import type { BodyMesh, BodyProps, ProjectedView, ViewBody, ViewEdge, ViewSpec, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
@@ -214,6 +215,10 @@ let cache: CacheEntry[] = [];
  * every step after the one that was open.
  */
 let savedCache: CacheEntry[] = [];
+/** The project with its threads left plain, as drawings draw it (kept apart from `cache`). */
+let drawingCache: CacheEntry[] = [];
+/** While drawings rebuild into `drawingCache`: the model's own steps, for the ones before its first thread. */
+let alsoCache: CacheEntry[] = [];
 
 /**
  * The engine itself broke down on a step (out of memory, a fault inside
@@ -254,6 +259,7 @@ export function isFault(err: unknown): boolean {
 export function resetKernel(): void {
   cache = [];
   savedCache = [];
+  drawingCache = [];
   lastBodies = new Map();
   importCache.clear();
   sketchWas.clear();
@@ -352,11 +358,49 @@ export async function bodyProperties(features: Feature[]): Promise<BodyProps[]> 
  * removal (OpenCascade's exact HLR), each body's edges kept apart so a balloon
  * can point at it. Edges come out as SVG path data in mm, y down.
  */
-export async function projectViews(features: Feature[], views: ViewSpec[], only?: string[]): Promise<ProjectedView[]> {
-  const { ctx } = await run(features);
+export async function projectViews(features: Feature[], views: ViewSpec[], only?: string[], method: "auto" | "exact" | "mesh" = "auto"): Promise<ProjectedView[]> {
+  // Threads are drawn the way drawings show them (ISO 6410): the plain round
+  // face, and a thin line at the thread's depth. Modelled, a valve's six
+  // threads took the hidden line removal minutes.
+  const threads = features.filter((f): f is Extract<Feature, { type: "thread" }> => f.type === "thread" && !f.suppressed);
+  let ctx: Ctx;
+  if (!threads.length) ctx = (await run(features)).ctx;
+  else {
+    const keep = cache;
+    cache = drawingCache;
+    alsoCache = keep;
+    try {
+      ctx = (await run(features.map((f) => (f.type === "thread" && !f.suppressed ? { ...f, suppressed: true } : f)))).ctx;
+    } finally {
+      drawingCache = cache;
+      cache = keep;
+      alsoCache = [];
+    }
+  }
   const bodies = [...ctx.bodies.entries()].filter(([id]) => !only || only.includes(id));
+  const marks = threadMarks(threads, ctx);
+  const withMarks = (out: ProjectedView[]) => {
+    out.forEach((pv, k) =>
+      pv.bodies.forEach((vb) => {
+        for (const m of marks.filter((m) => m.body === vb.id)) {
+          const line = threadLines(m, views[k], vb.edges);
+          if (!line) continue;
+          if (line.seen) vb.tangent += line.d;
+          else vb.hidden += line.d;
+        }
+      }),
+    );
+    return out;
+  };
+  // Freeform faces (or a great many faces) take the exact hidden line removal
+  // seconds to minutes a view: those models are drawn from their meshes.
+  const meshes = bodies.map(([id, s]) => ({ id, shape: s, mesh: meshBody(id, id, s) }));
+  const faces = meshes.reduce((n, m) => n + m.mesh.faces.length, 0);
+  const free = meshes.reduce((n, m) => n + freeformFaces(m.mesh), 0);
+  const how = method === "auto" ? (free > 0 || faces > 600 ? "mesh" : "exact") : method;
+  if (how === "mesh") return withMarks(meshViews(meshes, views));
   const oc = getOC();
-  return views.map((v) => {
+  return withMarks(views.map((v) => {
     const cam = new ProjectionCamera([0, 0, 0], v.dir, v.xAxis);
     const algo = new oc.HLRBRep_Algo();
     for (const [, s] of bodies) algo.Add(s.wrapped, 0);
@@ -384,7 +428,7 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
           if (shape.IsNull()) continue;
           for (const e of (cast(shape as never) as AnyShape).edges) {
             oc.BRepLib.BuildCurves3d(e.wrapped as never);
-            const pts = edgePoints(e);
+            const { pts, kind } = edgeSamples(e);
             const k = key(pts[0], pts[pts.length - 1]);
             if (keep) drawn.add(k);
             else if (pts.length === 2 && drawn.has(k)) continue;
@@ -394,7 +438,7 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
             }
             if (keep) {
               seen.push(pts);
-              const edge = viewEdge(e, pts);
+              const edge = viewEdge(kind, pts);
               if (edge) edges.push(edge);
             }
             d += pts.map((p, i) => `${i ? "L" : "M"}${r3(p[0])} ${r3(p[1])}`).join("");
@@ -407,83 +451,138 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
       const tangent = paths([out.Rg1LineVCompound(w)], true);
       return { id, visible, tangent, hidden: "", anchor: anchorOf(seen), edges };
     });
-    // Hidden edges once every body's seen ones are known.
+    // Hidden edges once every body's seen ones are known. A body hidden
+    // whole (inside a housing) still gets a spot a balloon can point at.
     bodies.forEach(([, s], i) => {
       let d = "";
+      const under: [number, number][][] = [];
       for (const part of [out.HCompound(s.wrapped), out.OutLineHCompound(s.wrapped)]) {
         if (part.IsNull()) continue;
         for (const e of (cast(part) as AnyShape).edges) {
           oc.BRepLib.BuildCurves3d(e.wrapped as never);
-          const pts = edgePoints(e);
+          const { pts } = edgeSamples(e);
           if (pts.length === 2 && drawn.has(key(pts[0], pts[1]))) continue;
+          if (!result[i].anchor) under.push(pts);
           d += pts.map((p, j) => `${j ? "L" : "M"}${r3(p[0])} ${r3(p[1])}`).join("");
         }
       }
       result[i].hidden = d;
+      if (!result[i].anchor && under.length) result[i].under = anchorOf(under);
     });
     out.delete();
     projector.delete();
     algo.delete();
     cam.delete();
     return { id: v.id, bodies: result, box: lo[0] <= hi[0] ? [lo, hi] : null };
-  });
+  }));
 }
 
 const r3 = (n: number) => String(Math.round(n * 1000) / 1000);
 
-/** Points along a projected edge (y flipped, for the paper): a line's two ends, a curve sampled finely enough to print. */
-function edgePoints(e: Edge): [number, number][] {
-  const at = (t: number): [number, number] => {
-    const p = e.pointAt(t);
-    return [p.x, -p.y];
-  };
-  if (e.geomType === "LINE") return [at(0), at(1)];
-  const n = Math.max(8, Math.min(96, Math.ceil(e.length / 0.5)));
-  return Array.from({ length: n + 1 }, (_, i) => at(i / n));
-}
+/** A thread as a drawing marks it: its round face's axis and length, and the radius of its thin line. */
+type ThreadMark = { body: string; c: Vec3; a: Vec3; r: number; rc: number; t0: number; t1: number };
 
-/** A seen edge as something to dimension: a line, or a circle (its centre from three of its points). */
-function viewEdge(e: Edge, pts: [number, number][]): ViewEdge | undefined {
-  const rr = (p: [number, number]): [number, number] => [Math.round(p[0] * 1000) / 1000, Math.round(p[1] * 1000) / 1000];
-  if (e.geomType === "LINE") return { a: rr(pts[0]), b: rr(pts[1]) };
-  if (e.geomType !== "CIRCLE") return undefined;
-  const a = pts[0];
-  const b = pts[pts.length - 1];
-  const closed = Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6;
-  const p1 = pts[Math.round(pts.length / 3)];
-  const p2 = pts[Math.round((2 * pts.length) / 3)];
-  const m = pts[Math.round(pts.length / 2)];
-  // The circle through a, p1, p2.
-  const [ax, ay] = a;
-  const [bx, by] = p1;
-  const [cx, cy] = p2;
-  const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
-  if (Math.abs(d) < 1e-12) return undefined;
-  const ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d;
-  const uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d;
-  const r = Math.hypot(ax - ux, ay - uy);
-  return { a: rr(a), m: rr(m), b: closed ? rr(a) : rr(b), c: rr([ux, uy]), r: Math.round(r * 1000) / 1000 };
-}
-
-/** On the body's seen edges, the point nearest the middle of them (where a balloon's leader ends). */
-function anchorOf(lines: [number, number][][]): [number, number] | undefined {
-  if (!lines.length) return undefined;
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-  for (const l of lines) for (const [x, y] of l) (x0 = Math.min(x0, x)), (x1 = Math.max(x1, x)), (y0 = Math.min(y0, y)), (y1 = Math.max(y1, y));
-  const c: [number, number] = [(x0 + x1) / 2, (y0 + y1) / 2];
-  let best = lines[0][0];
-  let bd = Infinity;
-  for (const l of lines)
-    for (let i = 1; i < l.length; i++) {
-      const [a, b] = [l[i - 1], l[i]];
-      const ab = [b[0] - a[0], b[1] - a[1]];
-      const n = ab[0] * ab[0] + ab[1] * ab[1];
-      const t = n ? Math.max(0, Math.min(1, ((c[0] - a[0]) * ab[0] + (c[1] - a[1]) * ab[1]) / n)) : 0;
-      const p: [number, number] = [a[0] + t * ab[0], a[1] + t * ab[1]];
-      const d = (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2;
-      if (d < bd) (bd = d), (best = p);
+/** Where the threads are, on the plain bodies (a face that moved since its thread step is left unmarked). */
+function threadMarks(threads: Extract<Feature, { type: "thread" }>[], ctx: Ctx): ThreadMark[] {
+  const out: ThreadMark[] = [];
+  for (const f of threads) {
+    const body = ctx.bodies.get(f.face.body);
+    if (!body) continue;
+    try {
+      const face = threadTarget(body, f);
+      const cy = cylinderOf(face);
+      if (!cy) continue;
+      const a = norm(cy.a);
+      const ts: number[] = [];
+      for (const e of face.edges) for (const k of [0, 0.5, 1]) ts.push(dot(sub(e.pointAt(k).toTuple() as Vec3, cy.c), a));
+      const inside = cy.s < 0;
+      const depth = threadDepth(f.pitch, inside);
+      out.push({ body: f.face.body, c: cy.c, a, r: cy.r, rc: inside ? cy.r + depth : cy.r - depth, t0: Math.min(...ts), t1: Math.max(...ts) });
+    } catch {
+      // Not found: no mark.
     }
-  return [Math.round(best[0] * 1000) / 1000, Math.round(best[1] * 1000) / 1000];
+  }
+  return out;
+}
+
+/**
+ * A thread's thin line in a view, as path data: along its axis, two lines at
+ * the thread's depth (seen where the round face's outline is); looking down
+ * it, three quarters of a circle (seen where its edge circle is).
+ */
+function threadLines(m: ThreadMark, v: ViewSpec, edges: ViewEdge[]): { d: string; seen: boolean } | null {
+  const d = norm(v.dir);
+  const X = norm(v.xAxis);
+  const Y = cross(d, X);
+  const to2 = (p: Vec3): [number, number] => [dot(p, X), -dot(p, Y)];
+  const along = Math.abs(dot(m.a, d));
+  const tol = Math.max(0.02, m.r * 0.02);
+  if (along < 1e-6) {
+    const p0 = to2(add(m.c, scale(m.a, m.t0)));
+    const p1 = to2(add(m.c, scale(m.a, m.t1)));
+    const u = norm([p1[0] - p0[0], p1[1] - p0[1], 0]);
+    const n: [number, number] = [-u[1], u[0]];
+    let path = "";
+    let seen = false;
+    for (const sgn of [1, -1]) {
+      const off = (p: [number, number], r: number): [number, number] => [p[0] + n[0] * r * sgn, p[1] + n[1] * r * sgn];
+      // The round face's outline on this side, among the seen straight edges.
+      const o0 = off(p0, m.r);
+      const across = (q: [number, number]) => Math.abs((q[0] - o0[0]) * n[0] + (q[1] - o0[1]) * n[1]);
+      if (edges.some((e) => !("m" in e) && across(e.a) < tol && across(e.b) < tol)) seen = true;
+      const [a, b] = [off(p0, m.rc), off(p1, m.rc)];
+      path += `M${r3(a[0])} ${r3(a[1])}L${r3(b[0])} ${r3(b[1])}`;
+    }
+    return { d: path, seen };
+  }
+  if (along > 1 - 1e-6) {
+    // The end the view looks at.
+    const near = dot(m.a, d) > 0 ? m.t0 : m.t1;
+    const c = to2(add(m.c, scale(m.a, near)));
+    const seen = edges.some((e) => "m" in e && Math.abs(e.r - m.r) < tol && Math.hypot(e.c[0] - c[0], e.c[1] - c[1]) < tol);
+    const n = 48;
+    const pts = Array.from({ length: n + 1 }, (_, i) => {
+      const t = (i / n) * 1.5 * Math.PI;
+      return [c[0] + m.rc * Math.cos(t), c[1] - m.rc * Math.sin(t)];
+    });
+    return { d: pts.map((p, i) => `${i ? "L" : "M"}${r3(p[0])} ${r3(p[1])}`).join(""), seen };
+  }
+  return null;
+}
+
+/**
+ * Points along a projected edge (y flipped, for the paper): a line's two
+ * ends, a curve sampled finely enough to print - read from one curve adaptor
+ * (a drawing of a big assembly has thousands of edges).
+ */
+function edgeSamples(e: Edge): { pts: [number, number][]; kind: "line" | "circle" | "other" } {
+  const oc = getOC();
+  const ad = new oc.BRepAdaptor_Curve(e.wrapped as never);
+  try {
+    const T = oc.GeomAbs_CurveType;
+    const type = ad.GetType();
+    const u0 = ad.FirstParameter();
+    const u1 = ad.LastParameter();
+    const at = (u: number): [number, number] => {
+      const p = ad.Value(u);
+      const r: [number, number] = [p.X(), -p.Y()];
+      p.delete();
+      return r;
+    };
+    if (type === T.GeomAbs_Line) return { pts: [at(u0), at(u1)], kind: "line" };
+    // As many points as its length asks for (one every half millimetre, 8 to 96).
+    let len = 0;
+    let prev = at(u0);
+    for (let i = 1; i <= 8; i++) {
+      const q = at(u0 + ((u1 - u0) * i) / 8);
+      len += Math.hypot(q[0] - prev[0], q[1] - prev[1]);
+      prev = q;
+    }
+    const n = Math.max(8, Math.min(96, Math.ceil(len / 0.5)));
+    return { pts: Array.from({ length: n + 1 }, (_, i) => at(u0 + ((u1 - u0) * i) / n)), kind: type === T.GeomAbs_Circle ? "circle" : "other" };
+  } finally {
+    ad.delete();
+  }
 }
 
 export async function exportBodies(features: Feature[], format: ExportFormat, only?: string[]): Promise<Blob> {
@@ -564,7 +663,7 @@ async function run(features: Feature[], saved = false) {
   const off = [...switchedOff].sort().join();
   // The steps as last rebuilt (by step, wherever in the list they are now).
   const before = new Map<string, CacheEntry>();
-  for (const e of [...cache, ...savedCache]) if (e.id && !before.has(e.id)) before.set(e.id, e);
+  for (const e of [...cache, ...savedCache, ...alsoCache]) if (e.id && !before.has(e.id)) before.set(e.id, e);
   rebuildStats.ran = rebuildStats.kept = rebuildStats.reused = 0;
   smoothSteps = new Set(features.filter((f) => f.type === "faceFreeform").map((f) => f.id));
   let key = "";
@@ -582,7 +681,7 @@ async function run(features: Feature[], saved = false) {
     const text = JSON.stringify(f);
     const json = `${hash53(text, 3)}.${text.length}`;
     key = chainKey(key, text);
-    const cached: CacheEntry | undefined = !hit ? undefined : cache[i]?.key === key ? cache[i] : savedCache[i]?.key === key ? savedCache[i] : undefined;
+    const cached: CacheEntry | undefined = !hit ? undefined : cache[i]?.key === key ? cache[i] : savedCache[i]?.key === key ? savedCache[i] : alsoCache[i]?.key === key ? alsoCache[i] : undefined;
     hit = !!cached;
     let entry: CacheEntry;
     const was = before.get(f.id);
@@ -1189,24 +1288,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "thread": {
       const body = need(bodies, f.face.body);
-      // Only a round face of the kind picked (a hole stays a hole): with the
-      // boss its hole was in switched off, the nearest face was the box's
-      // rounded corner - threaded, 60 turns of it, for over a minute. And
-      // about its size: a shelled box's inside corner is a "hole" too.
-      const round = (g: Face) => {
-        if (g.geomType !== "CYLINDRE") return false;
-        const cy = cylinderOf(g);
-        return !!cy && (!f.round || ((cy.s < 0) === f.round.hole && cy.r < f.round.r * 2 && cy.r > f.round.r / 2));
-      };
-      let face: Face;
-      try {
-        face = resolveFace(body, f.face, round);
-      } catch {
-        // Never a round face (a flat one picked): threadFace says threads go on round faces.
-        if (!f.round) face = resolveFace(body, f.face);
-        else throw new Error(f.round.hole ? "The hole it was cut in is gone" : "The round face it was cut on is gone");
-      }
-      bodies.set(f.face.body, threadFace(body, face, f.pitch, !!f.left));
+      bodies.set(f.face.body, threadFace(body, threadTarget(body, f), f.pitch, !!f.left));
       return;
     }
 
@@ -1844,6 +1926,26 @@ function pipeAlong(profile: Wire, path: Wire, up: Vec3): Shape3D {
 
 /** Turns of a thread's groove made in one piece (see threadFace). */
 const MAX_THREAD_TURNS = 8;
+
+/** The round face a thread step threads. */
+function threadTarget(body: Shape3D, f: Extract<Feature, { type: "thread" }>): Face {
+  // Only a round face of the kind picked (a hole stays a hole): with the
+  // boss its hole was in switched off, the nearest face was the box's
+  // rounded corner - threaded, 60 turns of it, for over a minute. And
+  // about its size: a shelled box's inside corner is a "hole" too.
+  const round = (g: Face) => {
+    if (g.geomType !== "CYLINDRE") return false;
+    const cy = cylinderOf(g);
+    return !!cy && (!f.round || ((cy.s < 0) === f.round.hole && cy.r < f.round.r * 2 && cy.r > f.round.r / 2));
+  };
+  try {
+    return resolveFace(body, f.face, round);
+  } catch {
+    // Never a round face (a flat one picked): threadFace says threads go on round faces.
+    if (!f.round) return resolveFace(body, f.face);
+    throw new Error(f.round.hole ? "The hole it was cut in is gone" : "The round face it was cut on is gone");
+  }
+}
 
 /**
  * Cut an ISO 60° thread into a round face: a V groove swept along a helix
