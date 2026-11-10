@@ -272,9 +272,21 @@ const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 const FONT = `font-family="Arial, Helvetica, sans-serif"`;
 const SEL = "#1a73e8";
 
-/** A path from the kernel (mm, at 1:1) moved to its place on the paper. */
+/**
+ * A path from the kernel (mm, at 1:1) moved to its place on the paper. Kept
+ * for the place it was last put at: dragging a note or a dimension redraws
+ * the sheet each move, with the views where they were.
+ */
+const placedPaths = new Map<string, { at: string; d: string }>();
 function placePath(d: string, p: Placed): string {
-  return d.replace(/([ML])(-?[\d.]+) (-?[\d.]+)/g, (_, c: string, x: string, y: string) => `${c}${f(p.x + (Number(x) - p.box[0][0]) * p.s)} ${f(p.y + (Number(y) - p.box[0][1]) * p.s)}`);
+  const at = `${p.x} ${p.y} ${p.s} ${p.box[0][0]} ${p.box[0][1]}`;
+  const had = placedPaths.get(d);
+  if (had?.at === at) return had.d;
+  const out = d.replace(/([ML])(-?[\d.]+) (-?[\d.]+)/g, (_, c: string, x: string, y: string) => `${c}${f(p.x + (Number(x) - p.box[0][0]) * p.s)} ${f(p.y + (Number(y) - p.box[0][1]) * p.s)}`);
+  // (A few hundred paths at most on a sheet: dropped all at once past that.)
+  if (placedPaths.size > 2000) placedPaths.clear();
+  placedPaths.set(d, { at, d: out });
+  return out;
 }
 
 function text(x: number, y: number, t: string, size: number, opts: { anchor?: string; angle?: number; weight?: string; fill?: string } = {}): string {

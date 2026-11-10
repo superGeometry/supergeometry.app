@@ -83,7 +83,8 @@ export async function openDrawing(app: AppContext): Promise<void> {
   /** While dragging: the drawing as it would be (committed when let go). */
   let draft: DrawingOptions | null = null;
   const date = new Date();
-  let svg = "";
+  /** The sheet as printed or saved (made then: each redraw needn't). */
+  const sheetOut = () => drawingSVG({ doc: docNow(), views, parts, date }).svg;
 
   const docNow = (): ProjectDoc => (draft ? { ...store.doc, drawing: draft } : store.doc);
   const opts = (): Opts => drawingOptions(docNow());
@@ -169,7 +170,6 @@ export async function openDrawing(app: AppContext): Promise<void> {
     const doc = docNow();
     const made = drawingSVG({ doc, views, parts, date, interactive: true, selected });
     layout = made.layout;
-    if (!draft) svg = drawingSVG({ doc, views, parts, date }).svg;
     const zoomed = paper.querySelector("svg")?.classList.contains("zoomed") ?? false;
     paper.innerHTML = made.svg;
     const s = paper.querySelector("svg");
@@ -202,6 +202,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
   };
 
   // ---- Tapping and dragging on the sheet
+  let frame = 0;
   let drag: { id: number; x: number; y: number; target: string; moved: boolean; start: DrawingOptions } | null = null;
   paper.addEventListener("pointerdown", (e) => {
     const q = sheetPoint(e);
@@ -250,7 +251,12 @@ export async function openDrawing(app: AppContext): Promise<void> {
       }
     }
     draft = next;
-    render();
+    // Once a frame at most (a mouse moves more often than the screen shows).
+    if (!frame)
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (draft) render();
+      });
   });
   const endDrag = (e: PointerEvent) => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -629,7 +635,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
     page.textContent = `@page { size: ${W}mm ${H}mm; margin: 0; } body.printing-drawing .bim-drawing-print svg { width: ${W}mm; height: ${H}mm; display: block; }`;
     document.head.append(page);
     const holder = el("div", "bim-drawing-print");
-    holder.innerHTML = svg;
+    holder.innerHTML = sheetOut();
     document.body.append(holder);
     document.body.classList.add("printing-drawing");
     window.print();
@@ -639,7 +645,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
   });
   svgBtn.addEventListener("click", () => {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n${svg}`], { type: "image/svg+xml" }));
+    a.href = URL.createObjectURL(new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n${sheetOut()}`], { type: "image/svg+xml" }));
     a.download = `${opts().title} - drawing.svg`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);

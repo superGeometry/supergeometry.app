@@ -461,33 +461,56 @@ function meshView(bodies: { id: string; shape: Shape3D; mesh: BodyMesh }[], kind
 function exactBox(bodies: { shape: Shape3D }[], X: V3, Y: V3): [P2, P2] | null {
   const axial = (v: V3) => v.filter((c) => Math.abs(c) > 1e-9).length === 1;
   if (!axial(X) || !axial(Y)) return null;
+  const lo3: V3 = [Infinity, Infinity, Infinity];
+  const hi3: V3 = [-Infinity, -Infinity, -Infinity];
+  for (const b of bodies) {
+    const bb = boxOf(b.shape);
+    if (!bb) return null;
+    for (let c = 0; c < 3; c++) {
+      lo3[c] = Math.min(lo3[c], bb[0][c]);
+      hi3[c] = Math.max(hi3[c], bb[1][c]);
+    }
+  }
+  if (!(lo3[0] <= hi3[0])) return null;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const i of [0, 1])
+    for (const j of [0, 1])
+      for (const k of [0, 1]) {
+        const c: V3 = [i ? hi3[0] : lo3[0], j ? hi3[1] : lo3[1], k ? hi3[2] : lo3[2]];
+        xs.push(c[0] * X[0] + c[1] * X[1] + c[2] * X[2]);
+        ys.push(-(c[0] * Y[0] + c[1] * Y[1] + c[2] * Y[2]));
+      }
+  return [
+    [Math.min(...xs), Math.min(...ys)],
+    [Math.max(...xs), Math.max(...ys)],
+  ];
+}
+
+/** A body's exact box, worked out once (it's slow on a big body, and every view wants it). */
+const boxes = new WeakMap<Shape3D, [V3, V3] | null>();
+function boxOf(shape: Shape3D): [V3, V3] | null {
+  if (boxes.has(shape)) return boxes.get(shape)!;
   const oc = getOC();
   const box = new oc.Bnd_Box();
+  let out: [V3, V3] | null = null;
   try {
-    for (const b of bodies) oc.BRepBndLib.AddOptimal(b.shape.wrapped as never, box, false, false);
-    if (box.IsVoid()) return null;
-    const p = box.CornerMin();
-    const q = box.CornerMax();
-    const lo3: V3 = [p.X(), p.Y(), p.Z()];
-    const hi3: V3 = [q.X(), q.Y(), q.Z()];
-    p.delete();
-    q.delete();
-    const xs: number[] = [];
-    const ys: number[] = [];
-    for (const i of [0, 1])
-      for (const j of [0, 1])
-        for (const k of [0, 1]) {
-          const c: V3 = [i ? hi3[0] : lo3[0], j ? hi3[1] : lo3[1], k ? hi3[2] : lo3[2]];
-          xs.push(c[0] * X[0] + c[1] * X[1] + c[2] * X[2]);
-          ys.push(-(c[0] * Y[0] + c[1] * Y[1] + c[2] * Y[2]));
-        }
-    return [
-      [Math.min(...xs), Math.min(...ys)],
-      [Math.max(...xs), Math.max(...ys)],
-    ];
+    oc.BRepBndLib.AddOptimal(shape.wrapped as never, box, false, false);
+    if (!box.IsVoid()) {
+      const p = box.CornerMin();
+      const q = box.CornerMax();
+      out = [
+        [p.X(), p.Y(), p.Z()],
+        [q.X(), q.Y(), q.Z()],
+      ];
+      p.delete();
+      q.delete();
+    }
   } catch {
-    return null;
+    out = null;
   } finally {
     box.delete();
   }
+  boxes.set(shape, out);
+  return out;
 }

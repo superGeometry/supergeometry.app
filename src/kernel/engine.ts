@@ -394,7 +394,7 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
   };
   // Freeform faces (or a great many faces) take the exact hidden line removal
   // seconds to minutes a view: those models are drawn from their meshes.
-  const meshes = bodies.map(([id, s]) => ({ id, shape: s, mesh: meshBody(id, id, s) }));
+  const meshes = bodies.map(([id, s]) => ({ id, shape: s, mesh: drawingMesh(id, s) }));
   const faces = meshes.reduce((n, m) => n + m.mesh.faces.length, 0);
   const free = meshes.reduce((n, m) => n + freeformFaces(m.mesh), 0);
   const how = method === "auto" ? (free > 0 || faces > 600 ? "mesh" : "exact") : method;
@@ -3109,9 +3109,8 @@ function resolveEdge(body: Shape3D, ref: EdgeRef, rounding = false): Edge {
 
 // ------------------------------------------------------------------- meshing
 
-function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
-  const cached = meshCache.get(shape);
-  if (cached) return { ...cached, id, name };
+/** The triangles and edge lines of a body, as the view shows them. */
+function meshLines(shape: Shape3D) {
   const bb = shape.boundingBox;
   const diag = Math.hypot(bb.width, bb.height, bb.depth) || 1;
   // (Never finer than 1/50 000 of its size: a 100 m arc at 0.1 mm is millions of triangles.)
@@ -3129,6 +3128,41 @@ function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
       for (let k = 1; k < g.count; k++) for (let c = 0; c < 3; c++) e.lines[(g.start + k) * 3 + c] = e.lines[g.start * 3 + c];
     });
   }
+  return { m, e };
+}
+
+/**
+ * For a drawing: the mesh with only what the drawing reads (the faces' and
+ * edges' kinds) - the view's own when it has it. The model drawn without its
+ * threads is bodies the view never showed: its full mesh took seconds more.
+ */
+const drawMeshes = new WeakMap<Shape3D, BodyMesh>();
+function drawingMesh(id: string, shape: Shape3D): BodyMesh {
+  const have = meshCache.get(shape) ?? drawMeshes.get(shape);
+  if (have) return { ...have, id, name: id };
+  const { m, e } = meshLines(shape);
+  const mesh: BodyMesh = {
+    id,
+    name: id,
+    key: meshKey++,
+    positions: new Float32Array(m.vertices),
+    normals: new Float32Array(m.normals),
+    indices: new Uint32Array(m.triangles),
+    faceGroups: m.faceGroups.map((g, i) => ({ start: g.start, count: g.count, face: i })),
+    edgePositions: new Float32Array(e.lines),
+    edgeGroups: e.edgeGroups.map((g, i) => ({ start: g.start, count: g.count, edge: i })),
+    faces: shape.faces.map((f) => ({ type: f.geomType }) as FaceInfo),
+    edges: shape.edges.map((x) => ({ type: x.geomType }) as EdgeInfo),
+    openEdges: [],
+  };
+  drawMeshes.set(shape, mesh);
+  return mesh;
+}
+
+function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
+  const cached = meshCache.get(shape);
+  if (cached) return { ...cached, id, name };
+  const { m, e } = meshLines(shape);
   // Group order matches shape.faces / shape.edges order (verified); ids are hashes.
   const mesh: BodyMesh = {
     id,
