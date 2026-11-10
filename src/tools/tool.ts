@@ -6,14 +6,39 @@ import { arrangement, materialRegions, pointInRegion, regionRef, type Region } f
 import { pointInPoly } from "../sketch/curves";
 import type { MenuRow, ToolItem, UI } from "../ui/ui";
 import { settings } from "../settings";
-import type { PointerHandler } from "../view/input";
+import type { PointerHandler, ToolPointer } from "../view/input";
+import type { IconName } from "../ui/icons";
 import type { Highlight, PickHit, Viewport } from "../view/viewport";
 
 /** Something selected in the viewport. Same shape as a highlight. */
 export type Sel = Highlight;
 
+/** A number a tool can be set to from the headset (its card's fields). */
+export interface VRField {
+  label: string;
+  value: number;
+  kind: "length" | "angle" | "number" | "int";
+  min?: number;
+  set(v: number): void;
+}
+
+/** A button on a headset wheel. */
+export interface VRItem {
+  label: string;
+  icon?: IconName;
+  disabled?: boolean;
+  run(): void;
+}
+
+/** A pointer for taps made in the headset: far off the screen, so only the pick handed over counts. */
+export const VR_POINTER: ToolPointer = { x: -1e5, y: -1e5, type: "mouse", shift: false, tol: 0 };
+
 export interface Tool extends PointerHandler {
   readonly id: string;
+  /** In the headset: the trigger picked this (null: nothing), as a tap on it would. */
+  vrTap?(hit: PickHit | null): void;
+  /** In the headset: what the ray may pick now. */
+  vrKinds?(): { faces?: boolean; edges?: boolean; vertices?: boolean };
   /** Sketch being edited, so the viewport can draw it as active. */
   readonly activeSketch?: string;
   /** Feature being created/edited (highlighted in History). */

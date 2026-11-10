@@ -34,7 +34,7 @@ import { SelectTool } from "./tools/select";
 import { BooleanOp } from "./tools/booleanOp";
 import { sketchesUsed } from "./tools/featureOp";
 import { SketchTool } from "./tools/sketch";
-import { bodiesOf, edgeRefOf, faceRefOf, sameSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tools/tool";
+import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, sameSel, sourcesOf, type AppContext, type Sel, type Tool, type VRField, type VRItem } from "./tools/tool";
 import { setupRightColumn } from "./ui/panels";
 import type { ToolItem } from "./ui/ui";
 import { UI } from "./ui/ui";
@@ -51,7 +51,7 @@ import { exportThreeMF } from "./io/threemf";
 import { sketchToDXF } from "./io/dxf";
 import { isHeadset, screenClass } from "./device";
 import { Viewport } from "./view/viewport";
-import { VRMode, vrSupported } from "./view/xr";
+import { VRMode, vrSupported, type VRTool } from "./view/xr";
 
 /** The page's own title, from index.html (it names the app for search results). */
 const PAGE_TITLE = document.title;
@@ -73,6 +73,8 @@ export class App implements AppContext {
   private varTags!: VariableTags;
   private hover: Sel | null = null;
   private selectTool: SelectTool;
+  /** The headset mode (its pictures can be checked on the page: vr.snapshot). */
+  vr: VRMode | null = null;
   private tool: Tool;
   private shownErrors = "";
   private pinLayer: PinLayer;
@@ -112,16 +114,66 @@ export class App implements AppContext {
       });
     setupRightColumn(this.ui, this.view, this.store, (u) => this.setUnits(u), isolatedNames);
     // VR: only where a headset can open it (its own browser, or a PC with one connected).
-    const vr = new VRMode({
+    // The running tool as the headset sees it (asked for every frame: worked out a few times a second).
+    type VRCapable = Tool & { vrFields?(): VRField[]; vrTitle?: string; vrError?: string | null; vrDone?(): void; vrCancel?(): void };
+    let vrTool: { tool: Tool; at: number; info: VRTool | null } | null = null;
+    const toolForVR = (): VRTool | null => {
+      const t = this.tool as VRCapable;
+      if (t === this.selectTool) return null;
+      const now = performance.now();
+      if (vrTool && vrTool.tool === t && now - vrTool.at < 200) return vrTool.info;
+      const info: VRTool | null = t.vrFields
+        ? { title: t.vrTitle ?? t.id, fields: t.vrFields(), error: t.vrError ?? null, done: () => t.vrDone?.(), cancel: () => t.vrCancel?.() }
+        : { title: t.id.charAt(0).toUpperCase() + t.id.slice(1), fields: [], error: null, done: () => this.setTool(null), cancel: () => this.setTool(null) };
+      vrTool = { tool: t, at: now, info };
+      return info;
+    };
+    const kindName = (k: string) => ({ vertex: "Corner", edge: "Edge", face: "Face", body: "Body" })[k] ?? "It";
+    const vr: VRMode = (this.vr = new VRMode({
       renderer: this.view.renderer,
       scene: this.view.scene,
       bounds: () => this.view.modelBounds(),
-      rayPick: (o, d) => this.view.rayPick(o, d),
-      onPick: (hit) => this.setSelection(hit ? [{ kind: "face", body: hit.body, face: hit.face }] : []),
+      rayPick: (o, d, tol, kinds) => this.view.rayPick(o, d, tol, kinds),
+      kinds: () => this.tool.vrKinds?.() ?? {},
+      onHover: (hit) => this.setHover(hitToSel(hit)),
+      onTrigger: (hit) => {
+        const t = this.tool;
+        // A miss while a tool runs does nothing (on the screen a tap on nothing ends it; in the air that's too easy).
+        if (!hit && t !== this.selectTool) return "Nothing there";
+        if (t.vrTap) t.vrTap(hit);
+        else this.setSelection(hit ? [hitToSel(hit)!] : []);
+        vrTool = null;
+        if (!hit) return this.tool === this.selectTool && !this.selection.length ? "Nothing there" : "";
+        if (this.tool !== this.selectTool || t !== this.selectTool) return `${kindName(hit.kind)} picked`;
+        const s = hitToSel(hit);
+        const on = this.selection.some((x) => s && sameSel(x, s)) || this.selection.some((x) => x.kind === "body" && "body" in hit && x.body === hit.body);
+        return `${kindName(on && this.selection[0]?.kind === "body" ? "body" : hit.kind)} ${on ? "selected" : "deselected"}`;
+      },
+      wheel: (hand) => {
+        if (hand === "left") {
+          const s = settings.value;
+          const items: VRItem[] = [
+            { label: "Undo", icon: "undo", disabled: !this.store.canUndo, run: () => this.undo() },
+            { label: "Redo", icon: "redo", disabled: !this.store.canRedo, run: () => this.redo() },
+            { label: "Recenter", icon: "fit", run: () => vr.recenter() },
+            { label: s.shader === "xray" ? "Shaded" : "X-Ray", icon: "display", run: () => settings.set("shader", s.shader === "xray" ? "shaded" : "xray") },
+            { label: s.showEdges ? "Hide Edges" : "Show Edges", icon: s.showEdges ? "eyeOff" : "eye", run: () => settings.set("showEdges", !s.showEdges) },
+            { label: "Deselect All", icon: "deselect", disabled: !this.selection.length, run: () => this.setSelection([]) },
+            { label: "Exit VR", icon: "exit", run: () => vr.exit() },
+          ];
+          return items;
+        }
+        const running = toolForVR();
+        if (running) return [{ label: "Done", icon: "check", run: () => running.done() }, { label: "Cancel", icon: "close", run: () => running.cancel() }];
+        return this.selectTool.vrActions().slice(0, 10);
+      },
+      tool: toolForVR,
+      undo: () => this.undo(),
+      redo: () => this.redo(),
       beforeFrame: () => this.view.xrFrame(),
       onEnter: () => this.view.xrMode(true),
       onExit: () => this.view.xrMode(false),
-    });
+    }));
     // In the top bar, where it's seen: on a headset always, elsewhere when a headset can be used.
     const vrBtn = document.getElementById("vr-btn")!;
     const checkVR = () => void vrSupported().then((ok) => (vrBtn.hidden = !ok && !isHeadset));

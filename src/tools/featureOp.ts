@@ -5,7 +5,7 @@ import type { FieldKind, PanelItem, ToolItem } from "../ui/ui";
 import { isExpression } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import type { PickHit, PickOptions } from "../view/viewport";
-import { hitToSel, sourcesOf, viewMenu, type AppContext, type Sel, type Tool } from "./tool";
+import { hitToSel, sourcesOf, viewMenu, VR_POINTER, type AppContext, type Sel, type Tool, type VRField } from "./tool";
 import { DragTyping } from "./dragTyping";
 import { screenClass } from "../device";
 import { arrangement, materialRegions, pointInRegion, resolveRegion, type Region } from "../sketch/regions";
@@ -104,6 +104,46 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     const hit = this.app.view.pick(p.x, p.y, { edgeTolPx: p.tol, ...slot.pick });
     this.lastHover = { x: p.x, y: p.y, hit };
     this.app.setHover(hitToSel(hit));
+  }
+
+  /** In the headset: the trigger picked `hit` - as a tap there. */
+  vrTap(hit: PickHit | null): void {
+    this.lastHover = { x: VR_POINTER.x, y: VR_POINTER.y, hit };
+    this.tap(VR_POINTER);
+  }
+
+  /** In the headset: what the ray may pick for the slot being filled (nothing when none is). */
+  vrKinds(): { faces?: boolean; edges?: boolean; vertices?: boolean } {
+    const pick = this.slots[this.active]?.pick as (PickOptions & { faces?: boolean }) | undefined;
+    if (!pick) return { faces: false, edges: false, vertices: false };
+    return { faces: pick.bodies !== false, edges: pick.edges !== false, vertices: pick.vertices ?? pick.edges !== false };
+  }
+
+  /** The step's name for the headset's card. */
+  get vrTitle(): string {
+    return (this.feature as Feature).name;
+  }
+
+  /** The card's numbers, to set from the headset. */
+  vrFields(): VRField[] {
+    return this.items().flatMap((it) =>
+      it.type === "number"
+        ? [{ label: it.label, value: it.value, kind: it.kind ?? "number", min: it.min, set: (v: number) => (it.onInput(v), this.render()) } as VRField]
+        : [],
+    );
+  }
+
+  /** The problem with the current values, if any (the card's red line). */
+  get vrError(): string | null {
+    return this.error;
+  }
+
+  vrDone(): void {
+    this.done();
+  }
+
+  vrCancel(): void {
+    this.cancel();
   }
 
   /** What hover highlighted: a tap at the same spot takes exactly that. */

@@ -25,7 +25,8 @@ import { BooleanOp } from "./booleanOp";
 import { pickColor } from "../ui/colorPicker";
 import { BimTool } from "../bim/bimTool";
 import { materialOf } from "../bim/materials";
-import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, viewMenu, type AppContext, type Sel, type Tool } from "./tool";
+import type { PickHit } from "../view/viewport";
+import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, viewMenu, VR_POINTER, type AppContext, type Sel, type Tool, type VRItem } from "./tool";
 
 const SOON = "Coming soon";
 
@@ -216,6 +217,23 @@ export class SelectTool implements Tool {
    * (as in the column, groups apart) and Deselect All; always the view's
    * switches. A tool waiting for a pick lets go of it, as before.
    */
+  /** In the headset: the trigger picked `hit` - as a tap there. */
+  vrTap(hit: PickHit | null): void {
+    this.lastHover = { x: VR_POINTER.x, y: VR_POINTER.y, hit: hit as ReturnType<SelectTool["pickAt"]> };
+    this.tap(VR_POINTER, 1);
+  }
+
+  /** In the headset's right wheel: what the right-click menu offers for the selection. */
+  vrActions(): VRItem[] {
+    const out: VRItem[] = [];
+    for (const it of this.actions()) {
+      if (it.id.startsWith("---") || it.id === "deselect") continue;
+      const run = it.run ?? it.children?.find((c) => c.run && !c.disabled)?.run;
+      if (run) out.push({ label: it.label, icon: it.icon, disabled: it.disabled, run: () => run() });
+    }
+    return out;
+  }
+
   context(p: ToolPointer): void {
     if (this.pending) {
       this.pending = null;
