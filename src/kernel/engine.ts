@@ -15,6 +15,9 @@ import {
   makeCompound,
   iterTopo,
   makeBSplineApproximation,
+  makeBezierCurve,
+  makeVertex,
+  makeSphere,
   makeCircle,
   makeLine,
   makeCylinder,
@@ -961,7 +964,19 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // jumped sideways there - a profile off the path's centre most of all.
       const k = f.scale ?? 1;
       if (!(k > 0)) throw new Error("The end size must be more than 0");
-      const parts = sourceWires(f.source, ctx).map((w) => flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: "round", law: Math.abs(k - 1) > 1e-9 ? scaleLaw(spine, k) : null }) as Shape3D));
+      const twist = f.twist ?? 0;
+      const parts = sourceWires(f.source, ctx).map((w) => {
+        const law = Math.abs(k - 1) > 1e-9 ? scaleLaw(spine, k) : null;
+        if (Math.abs(twist) < 1e-9) return flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: "round", law }) as Shape3D);
+        // Twisted: the profile's sideways direction follows a curve wound round the path.
+        const reach = Math.max(1, len(sub(...(w.boundingBox.bounds as [Vec3, Vec3]))));
+        try {
+          return flatFaces(genericSweep(w, spine, { auxiliarySpine: twistGuide(spine, twist, reach), transitionMode: "right", law }) as Shape3D);
+        } catch (err) {
+          if (err instanceof Error && /Could not sweep/.test(err.message)) throw new Error("The twist didn't build along this path - try a smoother path (no sharp corners) or less twist");
+          throw err;
+        }
+      });
       combine(f.id, f.mode, f.target, fuseAll(parts), false, ctx);
       ctx.sweeps.set(f.id, spine);
       return;
@@ -975,7 +990,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const n0 = frames[0].normal;
       // Parallel sections go in their order along the normal, whatever order they were picked in
       // (a loft that doubles back on itself isn't a solid).
-      if (frames.every((fr) => Math.abs(dot(fr.normal, n0)) > 0.999)) {
+      if (!f.closed && !f.guide && frames.every((fr) => Math.abs(dot(fr.normal, n0)) > 0.999)) {
         const h = (i: number) => dot(sub(frames[i].origin, frames[0].origin), n0);
         order.sort((a, b) => h(a) - h(b));
         for (let k = 1; k < order.length; k++) if (Math.abs(h(order[k]) - h(order[k - 1])) < 1e-6) throw new Error("Two profiles lie on the same plane: loft needs them one above another");
@@ -985,11 +1000,15 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       if (order.length < 2) throw new Error("Pick at least two different profiles");
       const wires = order.map((i) => sourceWires(f.sections[i], ctx)[0]);
       let shape: Shape3D;
-      try {
-        shape = loft(wires, { ruled: f.ruled });
-      } catch {
-        throw new Error("These profiles can't be lofted together");
-      }
+      if (f.guide || f.closed) {
+        if (f.closed && wires.length < 3 && !f.guide) throw new Error("A closed loop needs at least three profiles");
+        shape = loftAlong(wires, f.guide ? pathWire(f.guide, ctx) : null, !!f.closed);
+      } else
+        try {
+          shape = loft(wires, { ruled: f.ruled });
+        } catch {
+          throw new Error("These profiles can't be lofted together");
+        }
       combine(f.id, f.mode, f.target, shape, false, ctx);
       return;
     }
@@ -1023,7 +1042,9 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
             const ends: [number, number] = [r, (r2! * r) / f.radius];
             return f.flip ? [ends[1], ends[0]] : ends;
           });
-        const edge = (r: number) => (f.type === "fillet" ? (r2 ? variable(r) : body.fillet(r, (finder) => finder.inList(edges))) : d2 ? twoDistance(r) : body.chamfer(r, (finder) => finder.inList(edges)));
+        if (f.type === "fillet" && f.g2 && (r2 || f.chord)) throw new Error("Smooth (G2) takes one radius - set Type to Constant and Size to Radius");
+        const edge = (r: number) =>
+          f.type === "fillet" && f.g2 ? g2Fillet(body, edges, r) : f.type === "fillet" ? (f.chord ? chordFillet(body, edges, r, r2 ? (r2 * r) / f.radius : r, !!f.flip) : r2 ? variable(r) : body.fillet(r, (finder) => finder.inList(edges))) : d2 ? twoDistance(r) : body.chamfer(r, (finder) => finder.inList(edges));
         try {
           result = edge(f.radius);
         } catch (err) {
@@ -1041,6 +1062,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
             }
           }
         }
+        if (result && f.type === "fillet" && !f.g2 && (f.setback ?? 0) > 0) result = setbackCorners(result, edges, f.setback!, f.radius * Math.max(1, r2 ? r2 / f.radius : 1));
         if (!result) {
           const what = f.type === "fillet" ? "radius" : "distance";
           throw new Error(`That ${f.type} doesn't fit here - the ${what} is too big for the faces around ${edges.length > 1 ? "those edges" : "that edge"}. Try a smaller ${what}.`);
@@ -3669,4 +3691,297 @@ function scaleLaw(spine: Wire, k: number) {
   const law = new oc.Law_Linear();
   law.Set(t0, 1, t1, k);
   return law;
+}
+
+/**
+ * A fillet sized by its chord: the straight width across the round, from one
+ * face to the other. Where the faces' outward normals are θ apart, a round of
+ * radius r is 2·r·sin(θ/2) across, so r = width / (2·sin(θ/2)), worked out
+ * along each edge (faces that meet at a changing angle get a changing radius).
+ */
+function chordFillet(body: Shape3D, edges: Edge[], c1: number, c2: number, flip: boolean): Shape3D {
+  const oc = getOC();
+  const builder = new oc.BRepFilletAPI_MakeFillet(body.wrapped, oc.ChFi3d_FilletShape.ChFi3d_Rational);
+  try {
+    for (const e of edges) {
+      const two = body.faces.filter((fc) => fc.edges.some((x) => x.isSame(e)));
+      if (two.length < 2) throw new Error("That edge has a face on one side only: there's nothing to round across");
+      const N = 9;
+      const radii: number[] = [];
+      for (let i = 0; i < N; i++) {
+        const u = i / (N - 1);
+        const p = e.pointAt(u);
+        const n1 = norm(two[0].normalAt(p).toTuple() as Vec3);
+        const n2 = norm(two[1].normalAt(p).toTuple() as Vec3);
+        const half = len(sub(n1, n2)) / 2; // sin(θ/2)
+        if (half < 1e-3) throw new Error("The faces meet almost flat there, so a chord width can't size the round - switch Size to Radius");
+        const c = flip ? c2 + (c1 - c2) * u : c1 + (c2 - c1) * u;
+        radii.push(c / (2 * half));
+      }
+      const even = radii.every((r, i) => Math.abs(r - (radii[0] + ((radii[N - 1] - radii[0]) * i) / (N - 1))) < 1e-7 * Math.max(1, radii[0]));
+      if (even && Math.abs(radii[0] - radii[N - 1]) < 1e-9) builder.Add(radii[0], e.wrapped);
+      else if (even) builder.Add(radii[0], radii[N - 1], e.wrapped);
+      else {
+        const table = new oc.NCollection_Array1_gp_Pnt2d(1, N);
+        radii.forEach((r, i) => {
+          const q = new oc.gp_Pnt2d(i / (N - 1), r);
+          table.SetValue(i + 1, q);
+          q.delete();
+        });
+        builder.Add(table, e.wrapped);
+        table.delete();
+      }
+    }
+    return cast(builder.Shape()) as Shape3D;
+  } finally {
+    builder.delete();
+  }
+}
+
+/**
+ * A curve wound round a sweep's path that turns `deg` degrees from start to
+ * end, evenly by length, `reach` out from the path: a sweep that keeps the
+ * profile pointing at it twists. It starts from the path's own frame that
+ * doesn't spin (rotation minimizing, by double reflection), so a twist of 0
+ * would be the plain sweep.
+ */
+function twistGuide(spine: Wire, deg: number, reach: number): Wire {
+  const oc = getOC();
+  const ad = new oc.BRepAdaptor_CompCurve(spine.wrapped, true);
+  const u0 = ad.FirstParameter();
+  const u1 = ad.LastParameter();
+  const n = Math.min(600, 64 + Math.ceil((Math.abs(deg) / 360) * 32));
+  const pts: Vec3[] = [];
+  for (let i = 0; i <= n; i++) {
+    const p = ad.Value(u0 + ((u1 - u0) * i) / n);
+    pts.push([p.X(), p.Y(), p.Z()]);
+    p.delete();
+  }
+  ad.delete();
+  const tan = pts.map((_, i) => norm(sub(pts[Math.min(n, i + 1)], pts[Math.max(0, i - 1)])));
+  // Any square-on direction to start with.
+  const t0 = tan[0];
+  let r = norm(cross(t0, Math.abs(t0[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
+  const along = [0];
+  for (let i = 1; i <= n; i++) along.push(along[i - 1] + len(sub(pts[i], pts[i - 1])));
+  const total = along[n] || 1;
+  const out: Vec3[] = [];
+  for (let i = 0; i <= n; i++) {
+    if (i > 0) {
+      const v1 = sub(pts[i], pts[i - 1]);
+      const c1 = dot(v1, v1);
+      if (c1 > 1e-18) {
+        const rL = sub(r, scale(v1, (2 / c1) * dot(v1, r)));
+        const tL = sub(tan[i - 1], scale(v1, (2 / c1) * dot(v1, tan[i - 1])));
+        const v2 = sub(tan[i], tL);
+        const c2 = dot(v2, v2);
+        r = norm(c2 > 1e-18 ? sub(rL, scale(v2, (2 / c2) * dot(v2, rL))) : rL);
+      }
+    }
+    const a = ((deg * Math.PI) / 180) * (along[i] / total);
+    const b = cross(tan[i], r);
+    out.push(add(pts[i], scale(add(scale(r, Math.cos(a)), scale(b, Math.sin(a))), reach)));
+  }
+  return assembleWire([makeBSplineApproximation(out, { tolerance: reach * 1e-5, degMax: 5, degMin: 3 })]);
+}
+
+/**
+ * A loft carried along a spine: the guide curve, or (a closed loop with no
+ * guide) a smooth closed curve through the profiles' middles in the order
+ * they were picked. Each profile sits where it is drawn; the body passes
+ * through them in their order along the spine.
+ */
+function loftAlong(wires: Wire[], guide: Wire | null, closed: boolean): Shape3D {
+  const oc = getOC();
+  const mid = (w: Wire): Vec3 => {
+    const [lo, hi] = w.boundingBox.bounds as [Vec3, Vec3];
+    return scale(add(lo, hi), 0.5);
+  };
+  let spine = guide;
+  let order = wires;
+  if (!spine) {
+    // A closed curve through the middles (Catmull-Rom: through each one, smooth all round).
+    const c = wires.map(mid);
+    const n = c.length;
+    const pts: Vec3[] = [];
+    const steps = 24;
+    for (let i = 0; i < n; i++) {
+      const [p0, p1, p2, p3] = [c[(i - 1 + n) % n], c[i], c[(i + 1) % n], c[(i + 2) % n]];
+      for (let k = 0; k < steps; k++) {
+        const t = k / steps;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const w = [-t3 + 2 * t2 - t, 3 * t3 - 5 * t2 + 2, -3 * t3 + 4 * t2 + t, t3 - t2].map((x) => x / 2);
+        pts.push(add(add(scale(p0, w[0]), scale(p1, w[1])), add(scale(p2, w[2]), scale(p3, w[3]))));
+      }
+    }
+    pts.push(pts[0]);
+    const size = Math.max(...c.map((p) => len(sub(p, c[0]))), 1);
+    spine = assembleWire([makeBSplineApproximation(pts, { tolerance: size * 1e-5, degMax: 5, degMin: 3 })]);
+  } else {
+    // Along a guide: in the order they lie along it.
+    const ad = new oc.BRepAdaptor_CompCurve(spine.wrapped, true);
+    const u0 = ad.FirstParameter();
+    const u1 = ad.LastParameter();
+    const samples: Vec3[] = [];
+    for (let i = 0; i <= 200; i++) {
+      const p = ad.Value(u0 + ((u1 - u0) * i) / 200);
+      samples.push([p.X(), p.Y(), p.Z()]);
+      p.delete();
+    }
+    ad.delete();
+    const at = (w: Wire) => {
+      const m = mid(w);
+      let best = 0;
+      samples.forEach((p, i) => len(sub(p, m)) < len(sub(samples[best], m)) && (best = i));
+      return best;
+    };
+    order = [...wires].sort((a, b) => at(a) - at(b));
+  }
+  const builder = new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped);
+  try {
+    builder.SetMode(false);
+    for (const w of order) builder.Add(w.wrapped, false, false);
+    if (closed && guide) builder.Add(order[0].wrapped, false, false);
+    builder.Build(new oc.Message_ProgressRange());
+    if (!builder.IsDone()) throw new Error("no shape");
+    builder.MakeSolid();
+    const shape = cast(builder.Shape());
+    if (!isShape3D(shape)) throw new Error("no solid");
+    return shape;
+  } catch {
+    throw new Error(guide ? "The profiles can't be carried along that guide - each one needs to sit across it" : "These profiles can't be joined into a closed loop");
+  } finally {
+    builder.delete();
+  }
+}
+
+/**
+ * Smooth (G2) fillets: the blend's bend eases in from nothing at both faces
+ * (no line in reflections where it starts), unlike a circular round whose
+ * bend starts all at once. Its cross-section is a degree-5 Bezier whose first
+ * and last three control points lie in the faces, so it leaves each face flat
+ * (curvature 0) and tangent. It starts where a round of the same radius would.
+ * Made for straight edges between flat faces (a prism of the corner, cut away
+ * or, in an inside corner, added) and full circular edges between a flat face
+ * and a cylinder (the same section spun round the axis).
+ */
+function g2Fillet(body: Shape3D, edges: Edge[], r: number): Shape3D {
+  const P = (v: { toTuple(): number[] }) => v.toTuple() as Vec3;
+  let out = body;
+  for (const e of edges) {
+    const two = body.faces.filter((fc) => fc.edges.some((x) => x.isSame(e)));
+    if (two.length < 2) throw new Error("That edge has a face on one side only: there's nothing to round across");
+    const [fa, fb] = two;
+    const kinds = [fa.geomType, fb.geomType];
+    // A point on the edge, the edge's direction there, and each face's way in from it.
+    let at: Vec3;
+    let t: Vec3;
+    let length = 0;
+    let axis: { c: Vec3; dir: Vec3 } | null = null;
+    if (e.geomType === "LINE" && kinds.every((k) => k === "PLANE")) {
+      const a = P(e.startPoint);
+      const b = P(e.endPoint);
+      length = len(sub(b, a));
+      t = norm(sub(b, a));
+      at = a;
+    } else if (e.geomType === "CIRCLE" && kinds.includes("PLANE") && kinds.includes("CYLINDRE") && len(sub(P(e.startPoint), P(e.endPoint))) < 1e-7) {
+      const [p0, p1, p2] = [0, 1 / 3, 2 / 3].map((u) => P(e.pointAt(u)));
+      const n = norm(cross(sub(p1, p0), sub(p2, p0)));
+      // The circle's centre: equally far from all three points.
+      const ab = sub(p1, p0);
+      const ac = sub(p2, p0);
+      const abXac = cross(ab, ac);
+      const c = add(p0, scale(add(scale(cross(abXac, ab), dot(ac, ac)), scale(cross(ac, abXac), dot(ab, ab))), 1 / (2 * dot(abXac, abXac))));
+      axis = { c, dir: n };
+      at = p0;
+      t = norm(cross(n, sub(p0, c)));
+    } else throw new Error("Smooth (G2) works on straight edges between flat faces and on the round edges of cylinders - set Blend to Round for this edge");
+    const probe = Math.max(1e-4, r * 1e-3);
+    const inward = (face: Face): Vec3 => {
+      const nrm = norm(P(face.normalAt(at)));
+      let u = norm(cross(nrm, t));
+      const q = makeVertex(add(at, scale(u, probe)));
+      if (measureDistanceBetween(face, q) > probe * 0.5) u = scale(u, -1);
+      q.delete();
+      return u;
+    };
+    const u1 = inward(fa);
+    const u2 = inward(fb);
+    const n1 = norm(P(fa.normalAt(at)));
+    const n2 = norm(P(fb.normalAt(at)));
+    const convex = dot(n1, u2) < 0;
+    const cosA = Math.max(-1, Math.min(1, dot(u1, u2)));
+    const phi = Math.acos(cosA);
+    if (phi > Math.PI - 1e-3) throw new Error("The faces meet almost flat there: there's no corner to blend");
+    const d = r / Math.tan(phi / 2);
+    // The corner's section, pushed past the faces on the side away from the blend (no faces lying on faces).
+    const back = convex ? 1 : -1;
+    const ext = axis ? 0 : Math.max(d, length * 0.02);
+    const O = sub(at, scale(t, ext));
+    const A = add(O, scale(u1, d));
+    const B = add(O, scale(u2, d));
+    const curve = makeBezierCurve([A, add(O, scale(u1, 0.7 * d)), add(O, scale(u1, 0.4 * d)), add(O, scale(u2, 0.4 * d)), add(O, scale(u2, 0.7 * d)), B]);
+    const outB = add(B, scale(n2, back * d));
+    const outO = add(O, scale(add(n1, n2), back * d));
+    const outA = add(A, scale(n1, back * d));
+    const wire = assembleWire([curve, makeLine(B, outB), makeLine(outB, outO), makeLine(outO, outA), makeLine(outA, A)]);
+    const section = makeFace(wire);
+    const tool = axis ? revolution(section, axis.c, axis.dir, 360) : basicFaceExtrusion(section, new Vector(scale(t, length + 2 * ext)));
+    out = (convex ? out.cut(tool as Shape3D) : out.fuse(tool as Shape3D)) as Shape3D;
+  }
+  return out;
+}
+
+/**
+ * Setback corners: where three or more of the rounded edges meet, the rounds
+ * stop `s` from the corner and one smooth patch joins them (it meets every
+ * face round it tangentially), instead of the rolling ball's corner. Made by
+ * cutting a ball of radius s out of the rounded corner and filling the hole.
+ */
+function setbackCorners(body: Shape3D, edges: Edge[], s: number, r: number): Shape3D {
+  const oc = getOC();
+  const P = (v: { toTuple(): number[] }) => v.toTuple() as Vec3;
+  // The corners: points where three or more of the edges end.
+  const ends = edges.flatMap((e) => [P(e.startPoint), P(e.endPoint)]);
+  const tol = 1e-6 * (1 + Math.max(...ends.map((p) => len(p))));
+  const corners: Vec3[] = [];
+  for (const p of ends) if (!corners.some((c) => len(sub(c, p)) < tol) && ends.filter((q) => len(sub(q, p)) < tol).length >= 3) corners.push(p);
+  if (!corners.length) throw new Error("Setback joins corners where three or more rounded edges meet - pick all the edges round a corner");
+  if (s < r * 1.8) throw new Error(`The setback needs to be at least ${Math.ceil(r * 1.8 * 100) / 100} for this radius (it must reach past the rounds' own corner)`);
+  for (const e of edges) {
+    const at = corners.filter((c) => len(sub(c, P(e.startPoint))) < tol || len(sub(c, P(e.endPoint))) < tol).length;
+    if (at && len(sub(P(e.endPoint), P(e.startPoint))) < s * at * 1.05) throw new Error("The setback is longer than an edge it runs along - make it smaller");
+  }
+  let out = body;
+  for (const c of corners) {
+    const ball = makeSphere(s).translate(c);
+    const cut = out.cut(ball) as Shape3D;
+    const near = (fc: Face) => fc.geomType === "SPHERE" && Math.abs(len(sub(P(fc.center), c)) - s) < s * 0.5 + tol;
+    const hole = cut.faces.filter(near);
+    const keep = cut.faces.filter((fc) => !near(fc));
+    if (!hole.length) throw new Error("The setback missed the corner");
+    // The hole's rim, edge after edge, each held smooth to the face beside it.
+    const rim = hole.flatMap((fc) => fc.edges).filter((e) => e.geomType !== "LINE" || len(sub(P(e.startPoint), P(e.endPoint))) > tol);
+    const fill = new oc.BRepOffsetAPI_MakeFilling(3, 15, 2, false, 1e-5, 1e-4, 0.01, 0.1, 8, 9);
+    try {
+      for (const e of rim) {
+        const beside = keep.find((fc) => fc.edges.some((x) => x.isSame(e)));
+        if (beside) fill.Add(e.wrapped, beside.wrapped, oc.GeomAbs_Shape.GeomAbs_G1, true);
+        else fill.Add(e.wrapped, oc.GeomAbs_Shape.GeomAbs_C0, true);
+      }
+      fill.Build(new oc.Message_ProgressRange());
+      if (!fill.IsDone()) throw new Error("no patch");
+      const patch = cast(fill.Shape()) as AnyShape;
+      const patchFaces = "faces" in patch ? (patch as unknown as { faces: Face[] }).faces : [patch as unknown as Face];
+      const made = makeSolid([...keep, ...patchFaces]);
+      if (openEdges(made).length > 0 || !shapeValid(made)) throw new Error("leaky");
+      out = made;
+    } catch {
+      throw new Error("The corner patch didn't fit - try a different setback");
+    } finally {
+      fill.delete();
+    }
+  }
+  return out;
 }

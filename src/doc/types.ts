@@ -186,6 +186,12 @@ export interface EdgeFeature extends FeatureBase {
   flip?: boolean;
   /** Fillet, Variable: the radius at each edge's other end (it runs evenly from radius to this); missing: one radius. */
   radius2?: number;
+  /** Fillet: the sizes are chord widths (straight across the round, face to face), not radii. */
+  chord?: boolean;
+  /** Fillet: a smooth (G2) blend, its bend easing in from flat at both faces, not a circular round. */
+  g2?: boolean;
+  /** Fillet: where three or more rounded edges meet, they stop this far from the corner and a smooth patch joins them (0 or missing: the usual corner). */
+  setback?: number;
 }
 
 export interface BooleanFeature extends FeatureBase {
@@ -238,6 +244,8 @@ export interface SweepFeature extends FeatureBase {
   target?: string;
   /** The profile's size at the path's end, as a multiple of its size at the start (1 = same size). */
   scale?: number;
+  /** Degrees the profile turns round the path from start to end, evenly along it (0 or missing: none). */
+  twist?: number;
 }
 
 export interface LoftFeature extends FeatureBase {
@@ -246,6 +254,10 @@ export interface LoftFeature extends FeatureBase {
   ruled: boolean;
   mode: BodyMode;
   target?: string;
+  /** Goes on from the last profile back round to the first (a ring, no ends). */
+  closed?: boolean;
+  /** A curve the body follows from profile to profile (its centre line). */
+  guide?: PathRef;
 }
 
 export interface ShellFeature extends FeatureBase {

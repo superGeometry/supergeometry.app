@@ -51,6 +51,7 @@ import { exportThreeMF } from "./io/threemf";
 import { sketchToDXF } from "./io/dxf";
 import { isHeadset, screenClass } from "./device";
 import { Viewport } from "./view/viewport";
+import { VRMode, vrSupported } from "./view/xr";
 
 /** The page's own title, from index.html (it names the app for search results). */
 const PAGE_TITLE = document.title;
@@ -110,6 +111,23 @@ export class App implements AppContext {
         return b ? [this.store.doc.names?.[id] ?? b.name ?? "Body"] : [];
       });
     setupRightColumn(this.ui, this.view, this.store, (u) => this.setUnits(u), isolatedNames);
+    // VR: only where a headset can open it (its own browser, or a PC with one connected).
+    const vr = new VRMode({
+      renderer: this.view.renderer,
+      scene: this.view.scene,
+      bounds: () => this.view.modelBounds(),
+      rayPick: (o, d) => this.view.rayPick(o, d),
+      onPick: (hit) => this.setSelection(hit ? [{ kind: "face", body: hit.body, face: hit.face }] : []),
+      beforeFrame: () => this.view.xrFrame(),
+      onEnter: () => this.view.xrMode(true),
+      onExit: () => this.view.xrMode(false),
+    });
+    void vrSupported().then((ok) => {
+      if (!ok) return;
+      this.ui.addRight("vr", "vr", "View in VR: trigger picks a face, grip grabs and turns the model, both grips or the stick size it, B / Y comes back", () => {
+        vr.enter().catch((e: unknown) => this.ui.toast(`VR didn't start: ${e instanceof Error ? e.message : e}`));
+      });
+    });
     this.pinLayer = new PinLayer(this.view);
     this.varTags = new VariableTags(this.view, {
       variables: () => this.store.doc.variables,

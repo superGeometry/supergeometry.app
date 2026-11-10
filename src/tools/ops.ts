@@ -440,7 +440,45 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
     // Chamfer: the same distance along both faces, or a different one along each.
     const fillet = f.type === "fillet";
     const two = fillet ? f.radius2 !== undefined : f.distance2 !== undefined;
-    const size = this.num(fillet ? (two ? "Start radius" : "Radius") : two ? "Distance 1" : "Distance", "radius", "length", { min: 0.0001, onInput: (v) => this.setRadius(v), inBox: true });
+    const word = f.chord ? "width" : "radius";
+    const size = this.num(fillet ? (two ? `Start ${word}` : f.chord ? "Width" : "Radius") : two ? "Distance 1" : "Distance", "radius", "length", { min: 0.0001, onInput: (v) => this.setRadius(v), inBox: true });
+    // Fillet size: the radius, or the chord - straight across the round, face to face.
+    // Round (circular) or Smooth (G2: the bend eases in from the faces).
+    const blend: PanelItem = {
+      type: "choice",
+      label: "Blend",
+      options: [
+        { id: "round", label: "Round" },
+        { id: "g2", label: "Smooth (G2)" },
+      ],
+      value: f.g2 ? "g2" : "round",
+      onChange: (id) => {
+        f.g2 = id === "g2" || undefined;
+        if (f.g2) ((f.radius2 = undefined), (f.chord = undefined), (f.flip = undefined));
+        this.render();
+        this.update();
+      },
+    };
+    if (fillet && f.g2) return [blend, size];
+    const sizeBy: PanelItem[] = fillet
+      ? [
+          blend,
+          {
+            type: "choice",
+            label: "Size",
+            options: [
+              { id: "radius", label: "Radius" },
+              { id: "chord", label: "Chord width" },
+            ],
+            value: f.chord ? "chord" : "radius",
+            onChange: (id) => {
+              f.chord = id === "chord" || undefined;
+              this.render();
+              this.update();
+            },
+          },
+        ]
+      : [];
     return [
       {
         type: "choice",
@@ -468,13 +506,15 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
           this.update();
         },
       },
+      ...sizeBy,
       size,
       ...(two
         ? [
-            fillet ? this.num("End radius", "radius2", "length", { min: 0.0001 }) : this.num("Distance 2", "distance2", "length", { min: 0.0001 }),
+            fillet ? this.num(`End ${word}`, "radius2", "length", { min: 0.0001 }) : this.num("Distance 2", "distance2", "length", { min: 0.0001 }),
             { type: "button" as const, label: fillet ? "Flip ends" : "Flip sides", icon: "flip" as const, onClick: () => ((f.flip = !f.flip || undefined), this.update()) },
           ]
         : []),
+      ...(fillet ? [this.num("Corner setback", "setback", "length", { min: 0 })] : []),
     ];
   }
 
@@ -777,6 +817,7 @@ export class SweepOp extends FeatureOp<SweepFeature> {
   protected items(): PanelItem[] {
     return [
       { type: "number", label: "End size", value: this.feature.scale ?? 1, kind: "number", min: 0.01, onInput: (v) => ((this.feature.scale = v > 0 ? v : 1), this.update()) },
+      { type: "number", label: "Twist", value: this.feature.twist ?? 0, kind: "angle", onInput: (v) => ((this.feature.twist = v || undefined), this.update()) },
       modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render()),
     ];
   }
@@ -790,15 +831,42 @@ export class LoftOp extends FeatureOp<LoftFeature> {
   constructor(app: AppContext, sections: ExtrudeSource[], initial: Sel[], existing?: LoftFeature) {
     super(app, { ...app.store.newIdentity("loft"), type: "loft", sections, ruled: false, mode: "new" }, existing);
     this.slots = [sectionsSlot(app, () => this.feature.sections, (s) => (this.feature.sections = s), initial)];
+    if (existing?.guide) this.slots.push(this.guideSlot());
+  }
+
+  /** The optional guide: a curve the body follows from profile to profile. */
+  private guideSlot() {
+    return { ...pathSlot(this.app, () => this.feature.guide ?? null, (p) => (this.feature.guide = p)), label: "Guide" };
   }
 
   protected hint(): string {
+    if (this.feature.guide) return "The body follows the guide through each shape. Tap more curves to make the guide longer.";
     return "Tap the shapes in order: the body passes through each one.";
   }
 
   protected items(): PanelItem[] {
+    const f = this.feature;
+    const guided = this.slots.length > 1;
     return [
-      { type: "toggle", label: "Straight sides", value: this.feature.ruled, onChange: (v) => ((this.feature.ruled = v), this.render(), this.update()) },
+      ...(f.closed || guided ? [] : [{ type: "toggle" as const, label: "Straight sides", value: f.ruled, onChange: (v: boolean) => ((f.ruled = v), this.render(), this.update()) }]),
+      { type: "toggle", label: "Closed loop", value: !!f.closed, onChange: (v) => ((f.closed = v || undefined), this.render(), this.update()) },
+      {
+        type: "button",
+        label: guided ? "Remove guide" : "Add guide",
+        icon: guided ? "close" : "sweep",
+        onClick: () => {
+          if (guided) {
+            this.slots.length = 1;
+            f.guide = undefined;
+            this.active = -1;
+          } else {
+            this.slots.push(this.guideSlot());
+            this.active = 1;
+          }
+          this.render();
+          this.update();
+        },
+      },
       modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render()),
     ];
   }

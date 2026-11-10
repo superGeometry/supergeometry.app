@@ -98,6 +98,8 @@ export const icons = {
   ruler: svg('<path d="M4 20V4"/><path d="M4 7h4M4 11h6M4 15h4M4 19h6"/><path d="M14 4h6M17 4v16M14 20h6"/>'),
   views: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>'),
   display: svg('<path d="M12 3l9 5-9 5-9-5z" fill="currentColor" fill-opacity=".25"/><path d="M3 13l9 5 9-5"/>'),
+  // A headset seen from the front: two lenses joined over the nose.
+  vr: svg('<path d="M3 8h18v8h-5l-2-2.5h-4L8 16H3z"/><circle cx="7.5" cy="12" r="1.6"/><circle cx="16.5" cy="12" r="1.6"/>'),
   camera: svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),
   eye: svg('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
   eyeOff: svg('<path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4"/><path d="M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/>'),

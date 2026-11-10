@@ -241,7 +241,8 @@ export class Viewport {
     const loop = (t: number) => {
       if (this.cam.tick(t)) this.dirty = true;
       if (this.tickPulse(t)) this.dirty = true;
-      if (this.dirty) this.render();
+      // (In a headset the headset's own loop draws: see xr.ts.)
+      if (this.dirty && !this.renderer.xr.isPresenting) this.render();
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -1139,6 +1140,41 @@ export class Viewport {
   }
 
   // --------------------------------------------------------------- picking
+
+  /** The model's box (the bodies shown), or null when there are none. */
+  modelBounds(): { min: Vec3; max: Vec3 } | null {
+    const box = new Box3();
+    for (const b of this.visibleBodies()) box.expandByObject(b.mesh);
+    return box.isEmpty() ? null : { min: box.min.toArray() as Vec3, max: box.max.toArray() as Vec3 };
+  }
+
+  /** The face a ray hits first (the scene's own coordinates: a headset controller's ray). */
+  rayPick(origin: Vec3, dir: Vec3): { kind: "face"; body: string; face: number; point: Vec3 } | null {
+    this.scene.updateMatrixWorld();
+    const m = this.scene.matrixWorld;
+    const o = new Vector3(...origin).applyMatrix4(m);
+    const d = new Vector3(...origin).add(new Vector3(...dir)).applyMatrix4(m).sub(o).normalize();
+    this.raycaster.set(o, d);
+    const back = m.clone().invert();
+    const local = (p: Vector3) => p.clone().applyMatrix4(back);
+    const hit = this.raycaster.intersectObjects(this.visibleBodies().map((b) => b.mesh), false).find((h) => !this.clip || this.clip.distanceToPoint(local(h.point)) >= 0);
+    if (!hit || hit.faceIndex == null) return null;
+    const body = hit.object.userData.body as string;
+    const tri = hit.faceIndex * 3;
+    const g = this.bodies.get(body)!.data.faceGroups.find((g) => tri >= g.start && tri < g.start + g.count);
+    return g ? { kind: "face", body, face: g.face, point: local(hit.point).toArray() as Vec3 } : null;
+  }
+
+  /** The per-frame work a headset frame needs too (handles kept their size, and so on). */
+  xrFrame(): void {
+    this.frameHooks.forEach((f) => f());
+  }
+
+  /** In the headset the grid is left out (it sizes itself to the page's camera); back on the page, as set. */
+  xrMode(on: boolean): void {
+    this.grid.mesh.visible = !on && settings.value.showGrid;
+    this.dirty = true;
+  }
 
   private setRay(x: number, y: number): void {
     const ndc = new Vector2((x / this.width) * 2 - 1, -(y / this.height) * 2 + 1);
