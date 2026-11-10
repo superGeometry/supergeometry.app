@@ -211,6 +211,15 @@ kbd {
   width: 18px;
   height: 18px;
 }
+/* Enter VR: blue, so it's found at once in the headset. */
+.text-btn.vr-btn {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.text-btn.vr-btn[hidden] {
+  display: none;
+}
 .text-btn:hover:not(:disabled),
 .icon-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);

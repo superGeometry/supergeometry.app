@@ -1,8 +1,8 @@
 // Immersive VR (WebXR): the model floats in front of you at arm's length.
 // Trigger: pick a face (it's selected, as a tap would). Grip: grab the model -
 // it moves and turns with the hand; both grips: pull apart / together to size
-// it. Thumbstick up / down: bigger / smaller. B or Y, or the headset's own
-// exit, comes back to the page.
+// it. Left stick up / down: the model goes up / down. Right stick up / down:
+// bigger / smaller. B or Y, or the headset's own exit, comes back to the page.
 import { BufferGeometry, Color, Group, Line, LineBasicMaterial, Matrix4, Mesh, MeshBasicMaterial, Quaternion, Scene, SphereGeometry, Vector3, type Object3D, type WebGLRenderer, type XRTargetRaySpace } from "three";
 
 type Vec3 = [number, number, number];
@@ -44,6 +44,8 @@ export class VRMode {
   private grabStart: Matrix4 | null = null;
   private pinch: { d0: number; s0: number } | null = null;
   private session: XRSession | null = null;
+  /** The last frame's time (ms): the sticks move by time, not by frame. */
+  private last = 0;
   private dot = new Mesh(new SphereGeometry(0.006, 12, 8), new MeshBasicMaterial({ color: 0x4f8cff }));
 
   constructor(private host: XRHost) {
@@ -78,7 +80,8 @@ export class VRMode {
     this.host.onEnter();
     for (const i of [0, 1]) this.addHand(i);
     session.addEventListener("end", () => this.leave());
-    renderer.setAnimationLoop(() => this.frame());
+    this.last = 0;
+    renderer.setAnimationLoop((t: number) => this.frame(t));
   }
 
   exit(): void {
@@ -140,7 +143,9 @@ export class VRMode {
     return { hit, at: new Vector3(...hit.point).applyMatrix4(this.host.scene.matrixWorld) };
   }
 
-  private frame(): void {
+  private frame(t: number): void {
+    const dt = this.last ? Math.min(0.1, (t - this.last) / 1000) : 0;
+    this.last = t;
     const held = this.hands.filter((h) => h.squeezing);
     if (held.length === 1 && this.grabStart && held[0].grabFrom) {
       // One hand: the model follows it (moves and turns).
@@ -151,10 +156,14 @@ export class VRMode {
       const d = held[0].ray.position.distanceTo(held[1].ray.position);
       this.holder.scale.setScalar(this.pinch.s0 * (d / this.pinch.d0));
     }
-    // Thumbsticks: up bigger, down smaller.
+    // Sticks (pushed up reads negative): left moves the model up / down (half a metre a
+    // second at full tilt), right sizes it (about doubles in a second).
     for (const src of this.session?.inputSources ?? []) {
       const y = src.gamepad?.axes[3] ?? 0;
-      if (Math.abs(y) > 0.2) this.holder.scale.multiplyScalar(1 - y * 0.02);
+      if (Math.abs(y) > 0.15) {
+        if (src.handedness === "left") this.holder.position.y -= y * 0.5 * dt;
+        else this.holder.scale.multiplyScalar(Math.pow(2, -y * dt));
+      }
       // B or Y (the upper face button): back to the page.
       if (src.gamepad?.buttons[5]?.pressed) this.exit();
     }

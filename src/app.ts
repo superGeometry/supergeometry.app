@@ -122,11 +122,14 @@ export class App implements AppContext {
       onEnter: () => this.view.xrMode(true),
       onExit: () => this.view.xrMode(false),
     });
-    void vrSupported().then((ok) => {
-      if (!ok) return;
-      this.ui.addRight("vr", "vr", "View in VR: trigger picks a face, grip grabs and turns the model, both grips or the stick size it, B / Y comes back", () => {
-        vr.enter().catch((e: unknown) => this.ui.toast(`VR didn't start: ${e instanceof Error ? e.message : e}`));
-      });
+    // In the top bar, where it's seen: on a headset always, elsewhere when a headset can be used.
+    const vrBtn = document.getElementById("vr-btn")!;
+    const checkVR = () => void vrSupported().then((ok) => (vrBtn.hidden = !ok && !isHeadset));
+    checkVR();
+    (navigator as Navigator & { xr?: EventTarget }).xr?.addEventListener("devicechange", checkVR);
+    vrBtn.addEventListener("click", async () => {
+      if (!(await vrSupported())) return this.ui.toast("This browser can't open VR here - open supergeometry.app in the headset's own browser (not an installed app window)");
+      vr.enter().catch((e: unknown) => this.ui.toast(`VR didn't start: ${e instanceof Error ? e.message : e}`));
     });
     this.pinLayer = new PinLayer(this.view);
     this.varTags = new VariableTags(this.view, {
