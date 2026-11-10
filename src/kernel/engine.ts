@@ -302,12 +302,14 @@ const MAX_REACH = 1e7;
 
 /** A step's vectors, where the file should hold [x, y, z] (or [x, y]). */
 const VECTOR_KEYS = new Set(["origin", "xDir", "normal", "dir", "mid", "center", "translate", "factors"]);
+/** A step's lists (the bodies it works on, its tools, edges, faces...): a list where the file has one at all. */
+const LIST_KEYS = new Set(["tools", "bodies", "edges", "faces", "regions", "sections", "entities"]);
 /**
  * Is a step's saved data broken (a damaged file, or one written by something
  * else): a vector that isn't numbers, a number that is missing from a list of them?
  */
 function damaged(v: unknown, key = "", depth = 0): boolean {
-  if (v === null || typeof v !== "object") return VECTOR_KEYS.has(key) && v !== undefined;
+  if (v === null || typeof v !== "object") return (VECTOR_KEYS.has(key) || LIST_KEYS.has(key)) && v !== undefined;
   if (Array.isArray(v)) {
     const numbers = v.some((x) => typeof x === "number");
     if (numbers && !v.every((x) => typeof x === "number" && Number.isFinite(x))) return true;
@@ -315,7 +317,7 @@ function damaged(v: unknown, key = "", depth = 0): boolean {
     if (numbers) return false;
     return v.some((x) => damaged(x, "", depth + 1));
   }
-  if (VECTOR_KEYS.has(key)) return true;
+  if (VECTOR_KEYS.has(key) || LIST_KEYS.has(key)) return true;
   for (const [k, x] of Object.entries(v)) {
     // (An imported file's bytes, a sketch's history: not values of the step.)
     if (depth === 0 && (k === "data" || k === "log")) continue;

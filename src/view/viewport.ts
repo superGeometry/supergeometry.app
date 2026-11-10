@@ -195,7 +195,10 @@ export class Viewport {
   private hiddenMat: LineDashedMaterial;
 
   constructor(readonly canvas: HTMLCanvasElement) {
-    this.renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true, stencil: true });
+    // (The drawing buffer isn't kept between frames: the browser shows each one the
+    // quick way. The two places that read the canvas - the library's picture and
+    // the screenshot - draw the view right before they do.)
+    this.renderer = new WebGLRenderer({ canvas, antialias: true, stencil: true });
     // Headsets render the page into a big virtual screen already: full ratio costs frames for no gain.
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, isHeadset ? 1.25 : 2));
     this.renderer.localClippingEnabled = true;

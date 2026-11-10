@@ -19,7 +19,11 @@ await regenerate(fs);
 const t2 = performance.now();
 global.gc?.();
 const grew = (process.memoryUsage().heapUsed - m0) / 1e6;
-const ok = grew < 25 && t2 - t1 < 500;
+// (Memory is only told after a collection: run without --expose-gc, what is
+// measured is mostly garbage not yet collected - the speed is still checked.)
+const collected = typeof (globalThis as any).gc === "function";
+if (!collected) console.log("     (run with node --expose-gc --import tsx for the memory check)");
+const ok = (!collected || grew < 25) && t2 - t1 < 500;
 console.log(ok ? "ok  " : "FAIL", "long project with a big sketch first: rebuild cache stays small and quick");
 console.log(`heap +${((process.memoryUsage().heapUsed - m0) / 1e6).toFixed(0)} MB; full rebuild ${(t1 - t0).toFixed(0)} ms; last step changed ${(t2 - t1).toFixed(0)} ms`);
 process.exit(ok ? 0 : 1);
