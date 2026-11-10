@@ -16,6 +16,7 @@ import {
   iterTopo,
   makeBSplineApproximation,
   makeBezierCurve,
+  makeThreePointArc,
   makeVertex,
   makeSphere,
   makeCircle,
@@ -1060,6 +1061,16 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
             } catch {
               // a bit less again
             }
+          }
+        }
+        // Too big for a face beside it (OpenCascade gives up): built as a true round that
+        // cuts on through that face's far edge (overflow: keep surface).
+        if (!result && f.type === "fillet" && !f.g2 && !r2 && !f.chord) {
+          try {
+            result = blendFillet(body, edges, f.radius, false);
+            editNotes.push("The round was too big for a face beside it, so it cuts on through that face's far edge (still exactly round).");
+          } catch {
+            result = null;
           }
         }
         if (result && f.type === "fillet" && !f.g2 && (f.setback ?? 0) > 0) result = setbackCorners(result, edges, f.setback!, f.radius * Math.max(1, r2 ? r2 / f.radius : 1));
@@ -3867,8 +3878,18 @@ function loftAlong(wires: Wire[], guide: Wire | null, closed: boolean): Shape3D 
  * and a cylinder (the same section spun round the axis).
  */
 function g2Fillet(body: Shape3D, edges: Edge[], r: number): Shape3D {
+  return blendFillet(body, edges, r, true);
+}
+
+/**
+ * Rounds built from their own cross-section (see g2Fillet): `smooth`, the G2
+ * Bezier; otherwise a true circular arc. Made with booleans, the round trims
+ * whatever it runs into: a round too big for the face beside it cuts on
+ * through that face's far edge, still exactly round (overflow, keep surface).
+ */
+function blendFillet(body: Shape3D, edges: Edge[], r: number, smooth: boolean): Shape3D {
   const P = (v: { toTuple(): number[] }) => v.toTuple() as Vec3;
-  let out = body;
+  const made: { tool: Shape3D; convex: boolean; along: Vec3 | null }[] = [];
   for (const e of edges) {
     const two = body.faces.filter((fc) => fc.edges.some((x) => x.isSame(e)));
     if (two.length < 2) throw new Error("That edge has a face on one side only: there's nothing to round across");
@@ -3896,7 +3917,7 @@ function g2Fillet(body: Shape3D, edges: Edge[], r: number): Shape3D {
       axis = { c, dir: n };
       at = p0;
       t = norm(cross(n, sub(p0, c)));
-    } else throw new Error("Smooth (G2) works on straight edges between flat faces and on the round edges of cylinders - set Blend to Round for this edge");
+    } else throw new Error(smooth ? "Smooth (G2) works on straight edges between flat faces and on the round edges of cylinders - set Blend to Round for this edge" : "unsupported edge");
     const probe = Math.max(1e-4, r * 1e-3);
     const inward = (face: Face): Vec3 => {
       const nrm = norm(P(face.normalAt(at)));
@@ -3921,15 +3942,31 @@ function g2Fillet(body: Shape3D, edges: Edge[], r: number): Shape3D {
     const O = sub(at, scale(t, ext));
     const A = add(O, scale(u1, d));
     const B = add(O, scale(u2, d));
-    const curve = makeBezierCurve([A, add(O, scale(u1, 0.7 * d)), add(O, scale(u1, 0.4 * d)), add(O, scale(u2, 0.4 * d)), add(O, scale(u2, 0.7 * d)), B]);
+    // The round's middle: on the bisector, a radius short of its centre.
+    const bis = norm(add(u1, u2));
+    const curve = smooth
+      ? makeBezierCurve([A, add(O, scale(u1, 0.7 * d)), add(O, scale(u1, 0.4 * d)), add(O, scale(u2, 0.4 * d)), add(O, scale(u2, 0.7 * d)), B])
+      : makeThreePointArc(A, add(O, scale(bis, r / Math.sin(phi / 2) - r)), B);
     const outB = add(B, scale(n2, back * d));
     const outO = add(O, scale(add(n1, n2), back * d));
     const outA = add(A, scale(n1, back * d));
     const wire = assembleWire([curve, makeLine(B, outB), makeLine(outB, outO), makeLine(outO, outA), makeLine(outA, A)]);
     const section = makeFace(wire);
-    const tool = axis ? revolution(section, axis.c, axis.dir, 360) : basicFaceExtrusion(section, new Vector(scale(t, length + 2 * ext)));
-    out = (convex ? out.cut(tool as Shape3D) : out.fuse(tool as Shape3D)) as Shape3D;
+    const tool = (axis ? revolution(section, axis.c, axis.dir, 360) : basicFaceExtrusion(section, new Vector(scale(t, length + 2 * ext)))) as Shape3D;
+    made.push({ tool, convex, along: axis ? null : t });
   }
+  // Two rounds side by side that run into each other along their length (both
+  // edges of a block narrower than the two of them): that isn't a round that
+  // overflows a face, it doesn't fit. (Rounds meeting at a corner are fine.)
+  for (let i = 0; i < made.length; i++)
+    for (let j = i + 1; j < made.length; j++) {
+      const [a, b] = [made[i], made[j]];
+      if (!a.along || !b.along || Math.abs(dot(a.along, b.along)) < 0.999) continue;
+      const both = a.tool.intersect(b.tool).intersect(body) as Shape3D;
+      if (measureVolume(both) > 1e-6 * Math.pow(r, 3)) throw new Error("Those rounds run into each other - make the radius smaller");
+    }
+  let out = body;
+  for (const m of made) out = (m.convex ? out.cut(m.tool) : out.fuse(m.tool)) as Shape3D;
   return out;
 }
 

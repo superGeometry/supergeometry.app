@@ -124,7 +124,7 @@ function near(v: [number, number], want: [number, number]): boolean {
     const s = await slant(r);
     check("chord 2 is radius 1.414", near(s, [Math.SQRT2, Math.SQRT2]), JSON.stringify(s));
   }
-  // Faces meeting at a changing angle (a loft between a rectangle and the same one turned 30°): still rounds.
+  // Faces meeting at a changing angle (a loft between a rectangle and the same one turned 30Â°): still rounds.
   const top: Feature = { id: "s2", name: "s2", type: "sketch", plane: { origin: [0, 0, 20], xDir: [1, 0, 0], normal: [0, 0, 1] }, entities: [{ id: "r2", kind: "rect", center: [0, 0], w: 40, h: 20, rotation: 30 }] as any };
   const topRegions = arrangement(top.entities as any).regions.map(regionRef);
   const loft = { id: "L", name: "Loft", type: "loft", sections: [{ kind: "profile", sketch: "s1", regions }, { kind: "profile", sketch: "s2", regions: topRegions }], ruled: true, mode: "new" } as Feature;
@@ -256,6 +256,25 @@ function near(v: [number, number], want: [number, number]): boolean {
   const tooSmall = await regenerate([sketch, box(), fil(2)]);
   check("setback too small is refused", tooSmall.errors.length === 1 && /at least/.test(tooSmall.errors[0].message), tooSmall.errors.map((e) => e.message).join());
   void shapeValid;
+}
+
+// Overflow (keep surface): radius 3 on a 2 thick plate's top edge is too big for the side face. It's built as a
+// true round (centre y 7, z -1) that cuts on through the bottom edge: the top ends at y 7, the bottom at 7 + sqrt(8).
+{
+  const plate = box({ distance: 2 } as Partial<Feature>);
+  const r = await regenerate([sketch, plate, { id: "f1", name: "Fillet", type: "fillet", edges: [{ body: "e1", mid: [0, 10, 2], dir: [1, 0, 0], length: 40 }], radius: 3 } as Feature]);
+  check("overflowing round builds", r.errors.length === 0, r.errors.map((e) => e.message).join() || "no errors");
+  check("overflowing round says so", (r.notes ?? []).some((n) => /cuts on through/.test(n.message)), (r.notes ?? []).map((n) => n.message).join() || "no note");
+  if (!r.errors.length) {
+    const p = Array.from(r.bodies[0].positions);
+    let top = -Infinity, bottom = -Infinity, far = -Infinity;
+    for (let i = 0; i < p.length; i += 3) {
+      if (Math.abs(p[i + 2] - 2) < 1e-6) top = Math.max(top, p[i + 1]);
+      if (Math.abs(p[i + 2]) < 1e-6) bottom = Math.max(bottom, p[i + 1]);
+      far = Math.max(far, p[i + 1]);
+    }
+    check("keeps a true round", Math.abs(top - 7) < 1e-3 && Math.abs(bottom - (7 + Math.sqrt(8))) < 1e-3 && far < 10 - 1e-3, `top ${top.toFixed(4)}, bottom ${bottom.toFixed(4)}, furthest ${far.toFixed(4)}`);
+  }
 }
 
 if (failed) {
