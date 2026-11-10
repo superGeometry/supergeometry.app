@@ -25,6 +25,20 @@ export class KernelClient {
    */
   static RECYCLE_MB = 500;
   private last: { features: Feature[]; saved: Feature[] | null } = { features: [], saved: null };
+  /**
+   * Some steps cost the engine tens of MB each time they are rebuilt (memory
+   * it never gets back): dragging one of their sizes, a rebuild per move,
+   * would fill it in seconds. After a rebuild seen to cost a lot, the next
+   * previews wait a moment - fewer of them, the drag's last one always shown.
+   */
+  private memoryMB = 0;
+  /** What the last few rebuilds cost, each (MB; the engine's memory grows in jumps, so one rebuild's own cost says little). */
+  private costMB = 0;
+  private restUntil = 0;
+  /** How long previews rest after a rebuild that cost `mb` of the engine's memory (ms). */
+  static restFor(mb: number): number {
+    return mb < 4 ? 0 : Math.min(400, mb * 8);
+  }
   private spare: { worker: Worker; bodies: BodyMesh[] | null } | null = null;
 
   constructor() {
@@ -158,12 +172,28 @@ export class KernelClient {
     this.running = null;
     resolve(r.type === "regenerated" ? this.withMeshes(r.result) : null);
     if (r.type === "error") console.error(r.message);
+    if (r.type === "regenerated" && r.result.memoryMB !== undefined) {
+      // (A fresh engine starts small again: that isn't a rebuild giving memory back.)
+      const cost = this.memoryMB ? Math.max(0, r.result.memoryMB - this.memoryMB) : 0;
+      if (r.result.memoryMB < this.memoryMB) this.costMB = 0;
+      this.memoryMB = r.result.memoryMB;
+      this.costMB = this.costMB * 0.7 + cost * 0.3;
+      this.restUntil = performance.now() + KernelClient.restFor(this.costMB);
+    }
+    // A preview waiting its turn rests first (whatever is asked meanwhile takes its place).
+    const rest = this.restUntil - performance.now();
+    if (this.regenQueued && !this.regenQueued.saved && rest > 0) {
+      await new Promise((done) => setTimeout(done, rest));
+      if (worker !== this.worker) return;
+    }
     this.regenRunning = false;
+    // A big engine: a spare is got ready (also in the middle of a drag, where
+    // it used to wait for the drag to end), and takes over between two rebuilds.
+    if (r.type === "regenerated" && (r.result.memoryMB ?? 0) > KernelClient.RECYCLE_MB) this.warmSpare();
+    this.swapIfIdle();
     const q = this.regenQueued;
     this.regenQueued = null;
     if (q) this.runRegen(q.features, q.saved, q.resolve);
-    else if (r.type === "regenerated" && (r.result.memoryMB ?? 0) > KernelClient.RECYCLE_MB) this.warmSpare();
-    if (!q) this.swapIfIdle();
   }
 
   /** Meshes sent as their key only (unchanged bodies): the ones the page has. */
