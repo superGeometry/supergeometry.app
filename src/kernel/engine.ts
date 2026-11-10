@@ -63,7 +63,7 @@ import { edgeOrigins, edgeSteps, faceOrigins, faceSteps, inheritTags, sameSteps,
 import { closestOnEntity } from "../sketch/regions";
 
 import { cylinderOf, deleteFace,
- deleteFaces as deleteBodyFaces, editNotes, freeformFace, sheetFace, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
+ deleteFaces as deleteBodyFaces, editNotes, freeformFace, sameSizesAgain, sheetFace, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
@@ -88,9 +88,108 @@ interface Ctx {
   sweeps: Map<string, Wire>;
 }
 
+/**
+ * What a step read of the model before it, as it ran: so that when an
+ * earlier step changes, a step that read nothing of what changed is not
+ * rebuilt - its result is put on the model as it is now.
+ */
+interface Reads {
+  /** Each thing it asked for ("bodies|id") and what it got (undefined: not there). */
+  one: Map<string, unknown>;
+  /** Kinds it looked through all of (any change among them is a change for it). */
+  all: Set<keyof Ctx>;
+  written: Set<string>;
+}
+let reading: Reads | null = null;
+const KINDS = ["bodies", "sketches", "planes", "axes", "freeforms", "sweeps"] as const;
+const rawGet = <V>(m: Map<string, V>, k: string): V | undefined => Map.prototype.get.call(m, k) as V | undefined;
+const rawHas = (m: Map<string, unknown>, k: string): boolean => Map.prototype.has.call(m, k) as boolean;
+const rawEntries = <V>(m: Map<string, V>): [string, V][] => [...(Map.prototype.entries.call(m) as IterableIterator<[string, V]>)];
+
+/** A map of the model (its bodies, sketches…) that notes what a step reads of it. */
+class Noted<V> extends Map<string, V> {
+  private live = false;
+  constructor(readonly kind: keyof Ctx, from?: Map<string, V>) {
+    super();
+    if (from) for (const [k, v] of rawEntries(from)) super.set(k, v);
+    this.live = true;
+  }
+  private saw(k: string, v: unknown): void {
+    const key = `${this.kind}|${k}`;
+    if (reading && !reading.written.has(key) && !reading.one.has(key)) reading.one.set(key, v);
+  }
+  get(k: string): V | undefined {
+    const v = super.get(k);
+    this.saw(k, v);
+    return v;
+  }
+  has(k: string): boolean {
+    this.saw(k, super.get(k));
+    return super.has(k);
+  }
+  set(k: string, v: V): this {
+    if (this.live) reading?.written.add(`${this.kind}|${k}`);
+    return super.set(k, v);
+  }
+  delete(k: string): boolean {
+    reading?.written.add(`${this.kind}|${k}`);
+    return super.delete(k);
+  }
+  clear(): void {
+    reading?.all.add(this.kind);
+    super.clear();
+  }
+  get size(): number {
+    reading?.all.add(this.kind);
+    return super.size;
+  }
+  keys(): MapIterator<string> {
+    reading?.all.add(this.kind);
+    return super.keys();
+  }
+  values(): MapIterator<V> {
+    reading?.all.add(this.kind);
+    return super.values();
+  }
+  entries(): MapIterator<[string, V]> {
+    reading?.all.add(this.kind);
+    return super.entries();
+  }
+  forEach(fn: (value: V, key: string, map: Map<string, V>) => void, thisArg?: unknown): void {
+    reading?.all.add(this.kind);
+    super.forEach(fn, thisArg);
+  }
+  [Symbol.iterator](): MapIterator<[string, V]> {
+    reading?.all.add(this.kind);
+    return super[Symbol.iterator]();
+  }
+}
+/** The model for the next step to work on: a copy to change, the one before it left as it is. */
+function fork(ctx: Ctx): Ctx {
+  return {
+    bodies: new Noted("bodies", ctx.bodies),
+    sketches: new Noted("sketches", ctx.sketches),
+    planes: new Noted("planes", ctx.planes),
+    axes: new Noted("axes", ctx.axes),
+    freeforms: new Noted("freeforms", ctx.freeforms),
+    sweeps: new Noted("sweeps", ctx.sweeps),
+  };
+}
+/** How many steps the last rebuild ran, took as they were (nothing before them changed), or put back (nothing they read changed). */
+export const rebuildStats = { ran: 0, kept: 0, reused: 0 };
+
 interface CacheEntry {
   key: string;
   ctx: Ctx;
+  /** The step, and its values as text (hashed): the same step, unchanged? */
+  id?: string;
+  json?: string;
+  /** What it read of the model before it, that model, and what it changed in it. */
+  reads?: Reads;
+  input?: Ctx;
+  delta?: [keyof Ctx, string, unknown, boolean][];
+  /** The steps switched off when it ran (a failed step's words depend on it). */
+  off?: string;
   error?: string;
   /** Worked, but had to give something up (shown on the step in History). */
   note?: string;
@@ -169,6 +268,22 @@ export async function withFreshKernel<T>(reload: () => Promise<void>, work: () =
       resetKernel();
     }
   }
+}
+
+/** Is a step as it was last rebuilt, and everything it read of the model then still what is there now? */
+function unchangedFor(was: CacheEntry, json: string, ctx: Ctx, off: string): boolean {
+  if (was.json !== json || !was.reads || !was.delta || !was.input) return false;
+  // (What a failed step says can depend on which steps are switched off.)
+  if (was.error && was.off !== off) return false;
+  for (const [key, value] of was.reads.one) {
+    const at = key.indexOf("|");
+    if (rawGet(ctx[key.slice(0, at) as keyof Ctx] as Map<string, unknown>, key.slice(at + 1)) !== value) return false;
+  }
+  for (const kind of was.reads.all) {
+    const [a, b] = [rawEntries(ctx[kind] as Map<string, unknown>), was.input[kind] as Map<string, unknown>];
+    if (a.length !== rawEntries(b).length || a.some(([k, v]) => rawGet(b, k) !== v || !rawHas(b, k))) return false;
+  }
+  return true;
 }
 
 /** The furthest from the origin a body may reach (mm): past it OpenCascade's own tolerances stop meaning anything. */
@@ -269,8 +384,13 @@ async function run(features: Feature[], saved = false) {
   useSafeBooleans();
   const errors: FeatureError[] = [];
   const notes: FeatureError[] = [];
-  let ctx: Ctx = { bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map() };
+  let ctx: Ctx = fork({ bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map() });
   switchedOff = new Set(features.filter((f) => f.suppressed).map((f) => f.id));
+  const off = [...switchedOff].sort().join();
+  // The steps as last rebuilt (by step, wherever in the list they are now).
+  const before = new Map<string, CacheEntry>();
+  for (const e of [...cache, ...savedCache]) if (e.id && !before.has(e.id)) before.set(e.id, e);
+  rebuildStats.ran = rebuildStats.kept = rebuildStats.reused = 0;
   smoothSteps = new Set(features.filter((f) => f.type === "faceFreeform").map((f) => f.id));
   let key = "";
   const next: CacheEntry[] = [];
@@ -284,27 +404,46 @@ async function run(features: Feature[], saved = false) {
     const f = features[i];
     // Chained hashes, not the text itself: a key holding every step's JSON
     // grew with the square of the project (an import's megabytes in each one).
-    key = chainKey(key, JSON.stringify(f));
+    const text = JSON.stringify(f);
+    const json = `${hash53(text, 3)}.${text.length}`;
+    key = chainKey(key, text);
     const cached: CacheEntry | undefined = !hit ? undefined : cache[i]?.key === key ? cache[i] : savedCache[i]?.key === key ? savedCache[i] : undefined;
     hit = !!cached;
     let entry: CacheEntry;
+    const was = before.get(f.id);
     if (cached) {
       entry = cached;
+      rebuildStats.kept++;
+    } else if (was && !f.suppressed && !crashed.has(key) && unchangedFor(was, json, ctx, off)) {
+      // Something before it changed, but nothing it read: its result as it was, on the model as it is now.
+      const out = fork(ctx);
+      for (const [kind, k, v, there] of was.delta!) {
+        if (there) Map.prototype.set.call(out[kind], k, v);
+        else Map.prototype.delete.call(out[kind], k);
+      }
+      entry = { ...was, key, ctx: out, input: ctx };
+      rebuildStats.reused++;
     } else {
-      const out: Ctx = { bodies: new Map(ctx.bodies), sketches: new Map(ctx.sketches), planes: new Map(ctx.planes), axes: new Map(ctx.axes), freeforms: new Map(ctx.freeforms), sweeps: new Map(ctx.sweeps) };
-      entry = { key, ctx: out };
+      const out = fork(ctx);
+      entry = { key, ctx: out, id: f.id, json, off, input: ctx };
+      rebuildStats.ran++;
       if (!f.suppressed) {
+        const reads: Reads = { one: new Map(), all: new Set(), written: new Set() };
+        entry.reads = reads;
         try {
           editNotes.length = 0;
+          sameSizesAgain();
           if (crashed.has(key)) throw new Error(crashed.get(key));
           if (damaged(f)) throw new Error(DAMAGED_TEXT);
+          reading = reads;
+          const touched = touchedBodies(f, ctx);
           // An edit works on copies of the bodies it may touch: OpenCascade is
           // allowed to adjust the shapes it is given, and the earlier steps'
           // results (kept in the cache) must never change - not even when this
           // step fails. Bodies it leaves alone get their originals back.
           const copies = new Map<string, Shape3D>();
           if (GUARDED.has(f.type)) {
-            for (const id of touchedBodies(f, ctx)) {
+            for (const id of touched) {
               const b = out.bodies.get(id);
               if (!b || out.freeforms.has(id)) continue;
               const c = deepCopy(b);
@@ -315,6 +454,7 @@ async function run(features: Feature[], saved = false) {
           }
           await apply(f, out);
           entry.origin = originsOf(f, out);
+          reading = null;
           if (entry.origin) origins.set(f.id, entry.origin);
           for (const [id, c] of copies) if (out.bodies.get(id) === c) out.bodies.set(id, ctx.bodies.get(id)!);
           // Nothing kilometres across, or away: a typo (a size with six noughts
@@ -345,7 +485,7 @@ async function run(features: Feature[], saved = false) {
             }
           }
           // Which step made each face: kept from what it was made from, this step's own otherwise.
-          const from = [...touchedBodies(f, ctx).map((id) => ctx.bodies.get(id)!), ...copies.values()];
+          const from = [...touched.map((id) => ctx.bodies.get(id)!), ...copies.values()];
           for (const [id, body] of out.bodies) {
             const was = ctx.bodies.get(id);
             if (body !== was) tagBody(body, f.id, was ? [was, ...from] : from);
@@ -354,13 +494,27 @@ async function run(features: Feature[], saved = false) {
           // Anything but a move/scale changing a freeform body makes it an ordinary body.
           if (f.type !== "freeform" && f.type !== "transform") for (const id of [...out.freeforms.keys()]) if (out.bodies.get(id) !== ctx.bodies.get(id)) out.freeforms.delete(id);
         } catch (err) {
+          reading = null;
           if (isFault(err)) {
             blame(key);
             console.error(err);
             throw new KernelFault(f.id);
           }
           entry.error = errorText(err);
-          entry.ctx = { ...ctx, sketches: f.type === "sketch" ? new Map(ctx.sketches).set(f.id, { ...f, boundary: [] }) : ctx.sketches };
+          const sketches = f.type === "sketch" ? new Noted("sketches", ctx.sketches) : ctx.sketches;
+          if (f.type === "sketch") Map.prototype.set.call(sketches, f.id, { ...f, boundary: [] });
+          entry.ctx = { ...ctx, sketches };
+        }
+        // What it changed in the model (and each of those as it was is something it went by).
+        entry.delta = [];
+        for (const kind of KINDS) {
+          const [a, b] = [entry.ctx[kind] as Map<string, unknown>, ctx[kind] as Map<string, unknown>];
+          if (a === b) continue;
+          for (const k of new Set([...rawEntries(a).map((x) => x[0]), ...rawEntries(b).map((x) => x[0])])) {
+            if (rawGet(a, k) === rawGet(b, k) && rawHas(a, k) === rawHas(b, k)) continue;
+            entry.delta.push([kind, k, rawGet(a, k), rawHas(a, k)]);
+            if (!reads.one.has(`${kind}|${k}`)) reads.one.set(`${kind}|${k}`, rawGet(b, k));
+          }
         }
       }
     }

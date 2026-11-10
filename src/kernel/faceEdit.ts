@@ -43,6 +43,10 @@ export function sizeOf(body: Shape3D): number {
 // Each helper solid gets a slightly different size: when two of them end on the
 // same far-away plane, the booleans split surfaces and they no longer re-merge.
 let jitter = 0;
+/** Each step starts the sizes over: what a step builds mustn't depend on which steps were rebuilt before it. */
+export function sameSizesAgain(): void {
+  jitter = 0;
+}
 const vary = (L: number) => L * (1 + 0.0137 * (jitter = (jitter + 1) % 37));
 
 /** Solid on the positive side of a plane, big enough for `L`. */
