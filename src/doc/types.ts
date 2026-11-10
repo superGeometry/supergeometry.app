@@ -181,8 +181,11 @@ export interface EdgeFeature extends FeatureBase {
   radius: number;
   /** Chamfer, Two-Distance: the second distance (along the other face); missing: equal distances. */
   distance2?: number;
-  /** Chamfer, Two-Distance: the first distance goes along the other face of each edge. */
+  /** Chamfer, Two-Distance: the first distance goes along the other face of each edge.
+   *  Fillet, Variable: the start and end radii swap ends. */
   flip?: boolean;
+  /** Fillet, Variable: the radius at each edge's other end (it runs evenly from radius to this); missing: one radius. */
+  radius2?: number;
 }
 
 export interface BooleanFeature extends FeatureBase {
@@ -233,6 +236,8 @@ export interface SweepFeature extends FeatureBase {
   path: PathRef;
   mode: BodyMode;
   target?: string;
+  /** The profile's size at the path's end, as a multiple of its size at the start (1 = same size). */
+  scale?: number;
 }
 
 export interface LoftFeature extends FeatureBase {

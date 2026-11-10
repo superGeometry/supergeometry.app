@@ -87,6 +87,9 @@ type Kind =
   | "align"
   | "delete";
 
+/** Polygon variants by side count. */
+const POLYGON_NAMES: Record<number, string> = { 3: "Triangle", 4: "Square", 5: "Pentagon", 6: "Hexagon", 8: "Octagon" };
+
 /** Asked once curves are picked and the turn still needs its centre. */
 const CENTRE_HINT = {
   patternCircular: "Now tap the centre to repeat them around. It snaps to line ends, middles and centres.",
@@ -105,10 +108,10 @@ const HINTS: Record<Kind, string> = {
   text: "Tap where the text should start, then type it in the card.",
   project: "Tap edges of a body, or lines of another sketch, to copy them into this sketch. Double-tap copies a whole sketch.",
   offset: "Tap a line or shape to draw a copy of it a set distance away.",
-  fillet: "Tap two lines that meet to round the corner between them.",
-  move: "Tap what to move, then type how far and tap Apply.",
-  scale: "Tap what to resize, then type how many times bigger (2 = twice) and tap Apply.",
-  patternLinear: "Tap what to repeat, then set how many copies and how far apart.",
+  fillet: "Tap a corner to round it, or two lines that meet. Then drag or type the radius.",
+  move: "Tap what to move, then drag the arrows to move it or the ring to turn it (or type exact values).",
+  scale: "Tap what to resize, then drag the middle square (or an arrow's square end for one way only), or type how many times bigger.",
+  patternLinear: "Tap what to repeat, then drag an arrow to space the copies, and set how many.",
   patternCircular: "Tap what to repeat (double-tap for a whole shape), then tap the centre to repeat it around.",
   rotate: "Tap what to turn (double-tap for a whole shape), then tap the point to turn it around, and set the angle.",
   mirror: "Tap a shape, then tap the line to flip it across. Any line works, even one of its own.",
@@ -1000,6 +1003,8 @@ export class SketchTool implements Tool {
       shortcut,
       active: this.kind === kind,
       run: () => this.pickTool(kind),
+      // Variants: the first tap draws with the one used last; tap again for the list.
+      variantsWhenActive: true,
       ...extra,
     });
     const icons: Partial<Record<Kind, string>> = { rect: "rect", trim: "trim", arc: "arc", circle: "circle", fillet: "sketchFillet" };
@@ -1015,7 +1020,11 @@ export class SketchTool implements Tool {
       t("rect", "Rectangle", "rect", "R", { sub: { diagonal: "Diagonal", center: "Center", "3pt": "3 Points" }[memory.rect], children: variant("rect", "rect", [["center", "Center"], ["diagonal", "Diagonal"], ["3pt", "3 Points"]]) }),
       t("circle", "Circle", "circle", "C", { sub: { center: "Center", "2pt": "2 Points", "3pt": "3 Points" }[memory.circle], children: variant("circle", "circle", [["center", "Center"], ["2pt", "2 Points"], ["3pt", "3 Points"]]) }),
       t("ellipse", "Ellipse", "ellipse"),
-      t("polygon", "Polygon", "polygon", "G", { sub: `${memory.sides} sides` }),
+      t("polygon", "Polygon", "polygon", "G", {
+        sub: POLYGON_NAMES[memory.sides] ?? `${memory.sides} sides`,
+        // The usual ones a tap away (any other count: type it on the drawing).
+        children: [3, 4, 5, 6, 8].map((n) => ({ id: `polygon-${n}`, label: POLYGON_NAMES[n], icon: "polygon" as const, active: memory.sides === n, run: () => ((memory.sides = n), this.setKind("polygon")) })),
+      }),
       t("text", "Text", "text"),
       t("project", "Project", "project", "P"),
       t("offset", "Offset Edge", "offset", "O"),
@@ -1034,6 +1043,7 @@ export class SketchTool implements Tool {
       {
         ...t(memory.pattern, "Pattern", memory.pattern),
         id: "pattern",
+        run: () => this.setKind(memory.pattern),
         active: this.kind === "patternLinear" || this.kind === "patternCircular",
         sub: memory.pattern === "patternLinear" ? "Linear" : "Circular",
         children: (["patternLinear", "patternCircular"] as const).map((k) => ({ id: k, label: k === "patternLinear" ? "Linear" : "Circular", icon: k, active: this.kind === k, run: () => ((memory.pattern = k), this.setKind(k)) })),
@@ -4386,6 +4396,19 @@ export class SketchTool implements Tool {
       return side ? Math.hypot(side.b[0] - side.a[0], side.b[1] - side.a[1]) : 0;
     };
     if (!this.edit.filletFrom) {
+      // A corner tapped (where two lines meet, a rectangle's or polygon's
+      // corner): rounded at once, a tenth of its shorter side.
+      const corner = this.cornerAt(p);
+      if (corner) {
+        const tol = this.app.view.cam.worldPerPixel(this.app.view.height) * 0.5 + 1e-6;
+        const make = (r: number) => (memory.corner === "chamfer" ? chamferCorner(base, corner.at, r, tol) : filletCorner(base, corner.at, r, tol));
+        const r0 = corner.side > 0 ? roundSig(corner.side * 0.1) : memory.fillet;
+        if (make(r0)) {
+          memory.fillet = r0;
+          this.updatePanel();
+          return this.startFillet(make);
+        }
+      }
       const c = this.curveAt(p);
       // (Empty space after a fillet: it's kept, that's all.)
       if (!c) return kept ? undefined : this.tapEmpty();
@@ -4434,6 +4457,39 @@ export class SketchTool implements Tool {
       }
     }
     this.startFillet((r) => (memory.corner === "chamfer" ? chamferEnds(base, { id: first.id, at: at1 }, { id: c.id, at: at2 }, r) : filletEnds(base, { id: first.id, at: at1 }, { id: c.id, at: at2 }, r)));
+  }
+
+  /**
+   * The corner under the pointer (within a finger's reach): an end two lines
+   * share, or a corner of a rectangle / polygon / outline - and the length of
+   * its shorter side there.
+   */
+  private cornerAt(p: ToolPointer): { at: Vec2; side: number } | null {
+    if (!this.plane) return null;
+    const w = this.app.view.rayToPlane(p.x, p.y, this.plane);
+    if (!w) return null;
+    const uv = toPlane(this.plane, w);
+    let reach = this.app.view.cam.worldPerPixel(this.app.view.height) * Math.max(8, p.tol);
+    let best: Vec2 | null = null;
+    const polys = this.entities.filter((e) => e.kind === "line" || e.kind === "rect" || e.kind === "polygon" || e.kind === "polyline").flatMap((e) => entityPolylines(e));
+    for (const poly of polys)
+      for (const q of poly) {
+        const d = Math.hypot(q[0] - uv[0], q[1] - uv[1]);
+        if (d < reach) ((reach = d), (best = q));
+      }
+    if (!best) return null;
+    const at: Vec2 = best;
+    const near = (q: Vec2) => Math.hypot(q[0] - at[0], q[1] - at[1]) < 1e-7;
+    let side = Infinity;
+    let sides = 0;
+    for (const poly of polys)
+      for (let i = 0; i + 1 < poly.length; i++)
+        if (near(poly[i]) || near(poly[i + 1])) {
+          side = Math.min(side, Math.hypot(poly[i + 1][0] - poly[i][0], poly[i + 1][1] - poly[i][1]));
+          sides++;
+        }
+    // A free end of one line is no corner.
+    return sides >= 2 ? { at, side: Number.isFinite(side) ? side : 0 } : null;
   }
 
   private filletEdit: { make: (r: number) => SketchEntity[] | null; widget: DimWidget; base: SketchEntity[]; baseIds: Set<string> } | null = null;

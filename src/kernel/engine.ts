@@ -959,7 +959,9 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // half a turn where a bend changes side (an S curve) and is undefined
       // where the path runs straight, so the tube broke into pieces that
       // jumped sideways there - a profile off the path's centre most of all.
-      const parts = sourceWires(f.source, ctx).map((w) => flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: "round" }) as Shape3D));
+      const k = f.scale ?? 1;
+      if (!(k > 0)) throw new Error("The end size must be more than 0");
+      const parts = sourceWires(f.source, ctx).map((w) => flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: "round", law: Math.abs(k - 1) > 1e-9 ? scaleLaw(spine, k) : null }) as Shape3D));
       combine(f.id, f.mode, f.target, fuseAll(parts), false, ctx);
       ctx.sweeps.set(f.id, spine);
       return;
@@ -1013,7 +1015,15 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         };
         const twoDistance = (r: number) =>
           body.chamfer((e: Edge) => (edges.some((x) => x.isSame(e)) ? { distances: [r, (d2! * r) / f.radius] as [number, number], selectedFace: (finder) => finder.inList([sideOf(e)]) } : null));
-        const edge = (r: number) => (f.type === "fillet" ? body.fillet(r, (finder) => finder.inList(edges)) : d2 ? twoDistance(r) : body.chamfer(r, (finder) => finder.inList(edges)));
+        // Variable fillet: the radius runs evenly from one end of each edge to the other.
+        const r2 = f.type === "fillet" && f.radius2 !== undefined && f.radius2 > 0 && Math.abs(f.radius2 - f.radius) > 1e-9 ? f.radius2 : null;
+        const variable = (r: number) =>
+          body.fillet((e: Edge) => {
+            if (!edges.some((x) => x.isSame(e))) return null;
+            const ends: [number, number] = [r, (r2! * r) / f.radius];
+            return f.flip ? [ends[1], ends[0]] : ends;
+          });
+        const edge = (r: number) => (f.type === "fillet" ? (r2 ? variable(r) : body.fillet(r, (finder) => finder.inList(edges))) : d2 ? twoDistance(r) : body.chamfer(r, (finder) => finder.inList(edges)));
         try {
           result = edge(f.radius);
         } catch (err) {
@@ -3647,4 +3657,16 @@ function fillToPlane(sheet: Shape3D, plane: PlaneDef): Shape3D {
   if (!r) throw new Error("The fill didn't come out as a clean solid (the surface folds back over itself as seen from the plane?)");
   if (r.fixes.length) editNotes.push(`Repaired automatically: ${r.fixes.join(", ")}.`);
   return r.shape;
+}
+
+/** A size that runs evenly from 1 at the path's start to k at its end (a sweep's end scale). */
+function scaleLaw(spine: Wire, k: number) {
+  const oc = getOC();
+  const ad = new oc.BRepAdaptor_CompCurve(spine.wrapped, false);
+  const t0 = ad.FirstParameter();
+  const t1 = ad.LastParameter();
+  ad.delete();
+  const law = new oc.Law_Linear();
+  law.Set(t0, 1, t1, k);
+  return law;
 }

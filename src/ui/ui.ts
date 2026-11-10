@@ -24,6 +24,11 @@ export interface ToolItem {
   why?: string;
   /** Opens a flyout with variants / sub-tools instead of running. */
   children?: ToolItem[];
+  /**
+   * A tool with variants: a tap starts it (the variant used last); a tap on
+   * it while it's the one in use opens the variants.
+   */
+  variantsWhenActive?: boolean;
   /** Show a colour circle instead of the icon (colour choices). */
   swatch?: string;
   /** Small icons after the label (e.g. ⟲ + what a toggle switches to). */
@@ -1627,7 +1632,7 @@ function renderTools(host: HTMLElement, all: ToolItem[], onFlyout: (item: ToolIt
     b.addEventListener("click", (e) => {
       e.stopPropagation();
       if (item.disabled) return;
-      if (item.children?.length) onFlyout(item, b);
+      if (item.children?.length && !(item.variantsWhenActive && !item.active && item.run)) onFlyout(item, b);
       else {
         item.run?.();
         after?.();

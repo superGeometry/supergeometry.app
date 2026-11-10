@@ -4,7 +4,7 @@
 import type { ThreadFeature } from "../doc/types";
 import { defaultPitch, threadLabel } from "../kernel/threads";
 import type { AxisFeature, AxisRef, ConnectFeature, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
-import { FRONT, GROUND, RIGHT, add, cross, dot, len, norm, niceStep, patternSpacing, scale, sub, xDirFor } from "../geom";
+import { FRONT, GROUND, RIGHT, add, cross, dot, len, norm, niceStep, patternSpacing, roundSig, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { evaluate, fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
@@ -436,23 +436,32 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
 
   protected items(): PanelItem[] {
     const f = this.feature;
-    const size = this.num(f.type === "fillet" ? "Radius" : f.distance2 !== undefined ? "Distance 1" : "Distance", "radius", "length", { min: 0.0001, onInput: (v) => this.setRadius(v), inBox: true });
-    if (f.type === "fillet") return [size];
+    // Fillet: one radius, or one that runs from a start radius to an end one.
     // Chamfer: the same distance along both faces, or a different one along each.
-    const two = f.distance2 !== undefined;
+    const fillet = f.type === "fillet";
+    const two = fillet ? f.radius2 !== undefined : f.distance2 !== undefined;
+    const size = this.num(fillet ? (two ? "Start radius" : "Radius") : two ? "Distance 1" : "Distance", "radius", "length", { min: 0.0001, onInput: (v) => this.setRadius(v), inBox: true });
     return [
       {
         type: "choice",
         label: "Type",
-        options: [
-          { id: "equal", label: "Equal distance" },
-          { id: "two", label: "Two distances" },
-        ],
+        options: fillet
+          ? [
+              { id: "equal", label: "Constant" },
+              { id: "two", label: "Variable" },
+            ]
+          : [
+              { id: "equal", label: "Equal distance" },
+              { id: "two", label: "Two distances" },
+            ],
         value: two ? "two" : "equal",
         onChange: (id) => {
-          if (id === "two") f.distance2 = f.distance2 ?? f.radius;
-          else {
+          if (id === "two") {
+            if (fillet) f.radius2 = f.radius2 ?? roundSig(f.radius / 2);
+            else f.distance2 = f.distance2 ?? f.radius;
+          } else {
             f.distance2 = undefined;
+            f.radius2 = undefined;
             f.flip = undefined;
           }
           this.render();
@@ -462,8 +471,8 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
       size,
       ...(two
         ? [
-            this.num("Distance 2", "distance2", "length", { min: 0.0001 }),
-            { type: "button" as const, label: "Flip sides", icon: "flip" as const, onClick: () => ((f.flip = !f.flip || undefined), this.update()) },
+            fillet ? this.num("End radius", "radius2", "length", { min: 0.0001 }) : this.num("Distance 2", "distance2", "length", { min: 0.0001 }),
+            { type: "button" as const, label: fillet ? "Flip ends" : "Flip sides", icon: "flip" as const, onClick: () => ((f.flip = !f.flip || undefined), this.update()) },
           ]
         : []),
     ];
@@ -766,7 +775,10 @@ export class SweepOp extends FeatureOp<SweepFeature> {
   }
 
   protected items(): PanelItem[] {
-    return [modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render())];
+    return [
+      { type: "number", label: "End size", value: this.feature.scale ?? 1, kind: "number", min: 0.01, onInput: (v) => ((this.feature.scale = v > 0 ? v : 1), this.update()) },
+      modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render()),
+    ];
   }
 }
 

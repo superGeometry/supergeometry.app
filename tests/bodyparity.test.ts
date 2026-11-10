@@ -69,6 +69,52 @@ function near(v: [number, number], want: [number, number]): boolean {
   return Math.abs(s[0] - want[0]) < 1e-3 && Math.abs(s[1] - want[1]) < 1e-3;
 }
 
+// Sweep with an end size: a circle of radius 2 along a 50 long line, twice as big at the end.
+{
+  const XZ: PlaneDef = { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, -1, 0] };
+  const prof: Feature = { id: "g", name: "g", type: "sketch", plane: XY, entities: [{ id: "c", kind: "circle", center: [0, 0], radius: 2 }] as any };
+  const path: Feature = { id: "p", name: "p", type: "sketch", plane: XZ, entities: [{ id: "l", kind: "line", a: [0, 0], b: [0, 50] }] as any };
+  const regionsC = arrangement(prof.entities as any).regions.map(regionRef);
+  const sweep = (scale?: number): Feature => ({ id: "w", name: "Sweep", type: "sweep", source: { kind: "profile", sketch: "g", regions: regionsC }, path: { kind: "sketch", sketch: "p", entities: ["l"] }, mode: "new", scale }) as Feature;
+  const radiusAt = (r: Awaited<ReturnType<typeof regenerate>>, zWant: number) => {
+    const p = Array.from(r.bodies[0].positions);
+    let best = 0;
+    for (let i = 0; i < p.length; i += 3) if (Math.abs(p[i + 2] - zWant) < 1e-3) best = Math.max(best, Math.hypot(p[i], p[i + 1]));
+    return Math.round(best * 1e3) / 1e3;
+  };
+  const plain = await regenerate([prof, path, sweep()]);
+  const grown = await regenerate([prof, path, sweep(2)]);
+  const errs = [...plain.errors, ...grown.errors].map((e) => e.message);
+  check("sweeps rebuild", errs.length === 0, errs.join() || "no errors");
+  if (!errs.length) {
+    const ends = [radiusAt(grown, 0), radiusAt(grown, 50)].sort((a, b) => a - b);
+    check("plain sweep keeps its size", radiusAt(plain, 0) === 2 && radiusAt(plain, 50) === 2, `${radiusAt(plain, 0)} / ${radiusAt(plain, 50)}`);
+    check("end size 2 doubles it", ends[0] === 2 && ends[1] === 4, JSON.stringify(ends));
+  }
+}
+
+// Variable fillet: radius 2 at one end of the edge, 5 at the other; Flip ends swaps them.
+{
+  const fillet = (extra: object): Feature => ({ id: "f1", name: "Fillet", type: "fillet", edges: [edge], radius: 2, ...extra }) as Feature;
+  const v = await regenerate([sketch, box(), fillet({ radius2: 5 })]);
+  const vf = await regenerate([sketch, box(), fillet({ radius2: 5, flip: true })]);
+  const errs = [...v.errors, ...vf.errors].map((e) => e.message);
+  check("variable fillets rebuild", errs.length === 0, errs.join() || "no errors");
+  if (!errs.length) {
+    // How far the rounding runs back from the edge along the top face, at each end (x = -20, x = 20).
+    const back = (r: Awaited<ReturnType<typeof regenerate>>, xWant: number) => {
+      const p = Array.from(r.bodies[0].positions);
+      let topY = -Infinity;
+      for (let i = 0; i < p.length; i += 3) if (Math.abs(p[i] - xWant) < 1e-6 && Math.abs(p[i + 2] - 10) < 1e-6) topY = Math.max(topY, p[i + 1]);
+      return Math.round((10 - topY) * 1e3) / 1e3;
+    };
+    const a = [back(v, -20), back(v, 20)];
+    const b = [back(vf, -20), back(vf, 20)];
+    check("variable radii at the ends", near(a as [number, number], [2, 5]), JSON.stringify(a));
+    check("flip ends swaps them", a[0] === b[1] && a[1] === b[0], `${JSON.stringify(a)} vs ${JSON.stringify(b)}`);
+  }
+}
+
 if (failed) {
   console.log(`${failed} failed`);
   process.exit(1);
