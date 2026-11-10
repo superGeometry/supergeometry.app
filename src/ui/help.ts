@@ -13,7 +13,7 @@ interface Entry {
 const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
   {
     title: "Getting around",
-    intro: "Drag with one finger or the left mouse button to turn the view, two fingers or the right button to move it, pinch or scroll to zoom. On touch screens, press and hold a tool to see its name - let go on it to use it, slide off to cancel. Right-click (or Esc) steps back: first what's half done or picked, then the tool, then out of the sketch.",
+    intro: "Drag with one finger or the left mouse button to turn the view, two fingers or the right button to move it, pinch or scroll to zoom. On touch screens, press and hold a tool to see its name - let go on it to use it, slide off to cancel. Esc steps back: first what's half done or picked, then the tool, then out of the sketch. Right-click (on touch screens and headsets: press and hold still) opens a menu by the pointer: a tool's Done and Cancel, what can be done with what's picked, and the view's switches.",
     items: [
       { icon: "fit", name: "Fit", text: "Zooms so everything fits on screen (F)." },
       { icon: "views", name: "View cube", text: "Tap a face of the cube for a straight-on view; ⟲ ⟳ at its top corners turn the view by 90°." },
@@ -49,10 +49,10 @@ const SECTIONS: { title: string; intro?: string; items: Entry[] }[] = [
   },
   {
     title: "With something selected",
-    intro: "Tap a face, edge, corner or body: the left column shows only what can be done with it, in groups apart with a dim line. On touch screens every tap adds to the selection (tap again to drop it). Right-click shows the same list by the pointer.",
+    intro: "Tap a face, edge, corner or body: the left column shows only what can be done with it, in groups apart with a dim line. On touch screens every tap adds to the selection (tap again to drop it). The most likely tool is ready at once: a shape extrudes, a face offsets, an edge rounds, a body moves - drag its handle, or just type the value. Right-click (or press and hold) shows the same list by the pointer.",
     items: [
       { icon: "offsetFace", name: "Face", text: "Drag the arrow to push/pull it (its neighbours follow), Move/Rotate it (every way, and turned about its normal), Scale it, Replace it with another face's plane, sketch on it, or delete it (the neighbours close up as if it was never there - fillets too)." },
-      { icon: "moveEdge", name: "Edge", text: "A straight edge shows its Move/Rotate gimbal (the faces round it tilt); Fillet and Chamfer are in the list - drag the dot outward to round, inward to bevel." },
+      { icon: "moveEdge", name: "Edge", text: "Fillet is ready: drag the dot outward to round, inward to bevel, or type the radius. Chamfer can use two distances (Flip sides swaps them). Move/Rotate Edge (M) tilts the faces round a straight edge." },
       { icon: "move", name: "Body", text: "The gimbal moves (arrows), slides (squares) and turns (rings) it. With Copy on, a drag makes a copy; the panel stays when you let go so you can type exact values. A copy is its own body; switch Link on to keep a freeform copy shaped like its original. A body of a pattern: Whole Pattern picks the rest." },
       { icon: "copy", name: "Sketch → Copy to Plane", text: "Tap a sketch region, then Copy to Plane: drag the blue arrow to a parallel plane (or red/green to slide it), or type the distance. Turn Copy off to move the sketch instead." },
       { icon: "color", name: "Colour / Transparency", text: "Pick a colour for the selected bodies (or Custom… for any colour), and how see-through they are (Solid, 75%, 50%, 25%)." },

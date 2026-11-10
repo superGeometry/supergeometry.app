@@ -1,4 +1,4 @@
-import { pickTolerance } from "../device";
+import { isHeadset, pickTolerance } from "../device";
 // One input model for mouse, touch and pen (see docs/ARCHITECTURE.md §5).
 
 import type { Viewport } from "./viewport";
@@ -36,6 +36,8 @@ export interface PointerHandler {
 }
 
 const TAP_SLOP = { mouse: 4, pen: 6, touch: 10 };
+/** Press and hold this long (ms), still, for the right-click menu. */
+const HOLD_MS = 550;
 const DOUBLE_TAP_MS = 350;
 
 interface Tracked {
@@ -152,7 +154,22 @@ export class InputRouter {
       return;
     }
     this.mode = "pending";
+    // Fingers, pens and a headset's controller have no right button: press
+    // and hold still is the right-click (the same menu). (A headset's browser
+    // may report its controller as a mouse.)
+    if ((type !== "mouse" || isHeadset) && this.handler.context) {
+      clearTimeout(this.holdTimer);
+      this.holdTimer = setTimeout(() => {
+        if (this.mode !== "pending" || this.pointers.get(t.id) !== t || this.pointers.size !== 1) return;
+        if (Math.hypot(t.x - t.x0, t.y - t.y0) >= TAP_SLOP[t.type]) return;
+        this.mode = "ended";
+        navigator.vibrate?.(12);
+        this.handler.context?.(this.tp(t));
+      }, HOLD_MS);
+    }
   }
+
+  private holdTimer: ReturnType<typeof setTimeout> | undefined;
 
   private onMove(e: PointerEvent): void {
     const [x, y] = this.local(e);
@@ -237,6 +254,7 @@ export class InputRouter {
   }
 
   private onUp(e: PointerEvent): void {
+    clearTimeout(this.holdTimer);
     const t = this.pointers.get(e.pointerId);
     if (e.pointerType === "pen") this.penDown = false;
     if (!t) return;
@@ -260,6 +278,7 @@ export class InputRouter {
   }
 
   private onCancel(e: PointerEvent): void {
+    clearTimeout(this.holdTimer);
     if (e.pointerType === "pen") this.penDown = false;
     const t = this.pointers.get(e.pointerId);
     this.pointers.delete(e.pointerId);

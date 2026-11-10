@@ -473,6 +473,72 @@ body.items-open #undo-dock {
 #flyout[hidden] {
   display: none;
 }
+/* Right-click menu (a tool's Done / Cancel, the selection's tools, a History step). */
+.ctx-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.ctx-row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 10px 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.ctx-row:hover:not(:disabled),
+.ctx-row:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+.ctx-row:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: default;
+}
+.ctx-tick {
+  color: var(--accent);
+  font-size: 12px;
+}
+.ctx-key {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+/* Coarse pointers (fingers, a headset's controller ray): taller rows. */
+@media (pointer: coarse) {
+  .ctx-row {
+    min-height: var(--tap);
+    font-size: 14px;
+  }
+}
+body.headset .ctx-row {
+  min-height: 44px;
+  font-size: 15px;
+}
 
 .tool {
   display: flex;
@@ -1249,6 +1315,23 @@ body.sketching .right-btn.sketch-only {
 }
 .panel-title {
   font-weight: 600;
+}
+.panel-title.warned::after {
+  content: " ⚠";
+  color: var(--danger);
+}
+/* The tool's problem, under its title (red, never blocking). */
+.panel-warn {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 107, 94, 0.16);
+  color: #ffb3ab;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.panel-warn[hidden] {
+  display: none;
 }
 .panel-fields,
 .panel-buttons {

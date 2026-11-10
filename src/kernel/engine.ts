@@ -843,6 +843,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // Pushing/pulling a face of its own body offsets it: the neighbouring faces
       // extend along their own surfaces (a round side stays round).
       const tapered = f.taper !== undefined && Math.abs(f.taper - 1) > 1e-9;
+      if (tapered && f.symmetric) throw new Error("Taper works one way only - switch Sides back to One side");
       if (tapered) {
         // Sides leaning in (or out): each shape's outline to a scaled copy at the far end.
         // Pieces that meet are one shape first: a circle drawn on a small face
@@ -871,7 +872,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         combine(f.id, f.mode, f.target, fuseAll(parts), f.distance < 0, ctx);
         return;
       }
-      if (f.source.kind === "face" && f.mode !== "new" && f.target === f.source.face.body) {
+      if (f.source.kind === "face" && f.mode !== "new" && f.target === f.source.face.body && !f.symmetric) {
         const body = need(bodies, f.target);
         const face = resolveFace(body, f.source.face);
         const d = f.mode === "cut" ? -Math.abs(f.distance) : f.mode === "join" ? Math.abs(f.distance) : f.distance;
@@ -894,7 +895,10 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           if (face.geomType !== "PLANE" || hasBlends(body, face)) throw err;
         }
       }
-      const parts = sourceFaces(f.source, ctx).map(({ face, normal }) => basicFaceExtrusion(face, new Vector(normal).multiply(f.distance)));
+      // Symmetric: from `distance` behind the shape to `distance` in front.
+      const parts = sourceFaces(f.source, ctx).map(({ face, normal }) =>
+        f.symmetric ? basicFaceExtrusion(face.clone().translate(scale(normal, -f.distance)), new Vector(normal).multiply(2 * f.distance)) : basicFaceExtrusion(face, new Vector(normal).multiply(f.distance)),
+      );
       const solid = fuseAll(parts);
       // Auto: other bodies the extrusion runs into get cut through. Drawn on
       // its own (no body it belongs to), it then only cuts - no new body.
@@ -999,7 +1003,17 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         const real = refs.filter((r) => r.length > 1e-4);
         const edges = (real.length ? real : refs).map((r) => resolveEdge(body, r, true));
         let result: Shape3D | null = null;
-        const edge = (r: number) => (f.type === "fillet" ? body.fillet(r, (finder) => finder.inList(edges)) : body.chamfer(r, (finder) => finder.inList(edges)));
+        // Two-Distance chamfer: each edge's first distance runs along one of
+        // its two faces (Flip: the other one), the second along the other.
+        const d2 = f.type === "chamfer" && f.distance2 !== undefined && f.distance2 > 0 ? f.distance2 : null;
+        const sideOf = (e: Edge): Face => {
+          const two = body.faces.filter((fc) => fc.edges.some((x) => x.isSame(e)));
+          if (!two.length) throw new Error("That edge has no face beside it to measure the chamfer along");
+          return two[f.flip && two.length > 1 ? 1 : 0];
+        };
+        const twoDistance = (r: number) =>
+          body.chamfer((e: Edge) => (edges.some((x) => x.isSame(e)) ? { distances: [r, (d2! * r) / f.radius] as [number, number], selectedFace: (finder) => finder.inList([sideOf(e)]) } : null));
+        const edge = (r: number) => (f.type === "fillet" ? body.fillet(r, (finder) => finder.inList(edges)) : d2 ? twoDistance(r) : body.chamfer(r, (finder) => finder.inList(edges)));
         try {
           result = edge(f.radius);
         } catch (err) {

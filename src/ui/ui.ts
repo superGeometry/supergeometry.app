@@ -35,6 +35,16 @@ export interface ToolItem {
 
 export type FieldKind = "length" | "angle" | "number" | "int";
 
+/** A row of a right-click menu (UI.menu). */
+export interface MenuRow {
+  label: string;
+  shortcut?: string;
+  /** On/off rows: a tick when on. */
+  checked?: boolean;
+  disabled?: boolean;
+  run(): void;
+}
+
 export type PanelItem =
   | {
       type: "number";
@@ -481,6 +491,82 @@ export class UI {
     this.status.hidden = !text;
   }
 
+  /**
+   * A right-click menu at (x, y) in page pixels: rows of commands (with a
+   * key hint, a tick for on/off ones), "-" for a dim line. Closes on a pick,
+   * Esc, or a press anywhere else. Kept on screen (phones, a corner click).
+   */
+  menu(x: number, y: number, rows: (MenuRow | "-")[]): void {
+    this.closeMenu();
+    const m = el("div", "ctx-menu");
+    m.id = "ctx-menu";
+    m.setAttribute("role", "menu");
+    for (const r of rows) {
+      if (r === "-") {
+        m.append(el("div", "ctx-sep"));
+        continue;
+      }
+      const b = el("button", "ctx-row");
+      b.setAttribute("role", r.checked === undefined ? "menuitem" : "menuitemcheckbox");
+      if (r.checked !== undefined) b.setAttribute("aria-checked", String(r.checked));
+      b.disabled = !!r.disabled;
+      b.append(el("span", "ctx-tick", r.checked ? "✓" : ""), el("span", "ctx-label", r.label), el("span", "ctx-key", r.shortcut ?? ""));
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closeMenu();
+        r.run();
+      });
+      m.append(b);
+    }
+    document.body.append(m);
+    const w = m.offsetWidth;
+    const h = m.offsetHeight;
+    m.style.left = `${Math.max(8, Math.min(x, innerWidth - w - 8))}px`;
+    m.style.top = `${Math.max(8, Math.min(y, innerHeight - h - 8))}px`;
+    const away = (e: Event) => {
+      if (e.type === "keydown" && (e as KeyboardEvent).key !== "Escape") return;
+      if (e.type === "pointerdown" && m.contains(e.target as Node)) return;
+      if (e.type === "keydown") e.stopPropagation();
+      this.closeMenu();
+    };
+    // (Next tick: the right-click that opened it doesn't close it.)
+    setTimeout(() => {
+      if (!m.isConnected) return;
+      addEventListener("pointerdown", away, true);
+      addEventListener("keydown", away, true);
+      addEventListener("wheel", away, true);
+      this.menuOff = () => {
+        removeEventListener("pointerdown", away, true);
+        removeEventListener("keydown", away, true);
+        removeEventListener("wheel", away, true);
+      };
+    });
+    (m.querySelector("button:not(:disabled)") as HTMLButtonElement | null)?.focus({ preventScroll: true });
+  }
+
+  private menuOff: (() => void) | null = null;
+
+  private panelWarning: string | null = null;
+
+  /**
+   * The tool card's problem (null: none): a red line under its title and a
+   * warning mark by the title. Changed in place (typing in the card goes on).
+   */
+  setPanelWarning(text: string | null): void {
+    this.panelWarning = text;
+    const w = this.panel.querySelector<HTMLElement>(".panel-warn");
+    if (!w) return;
+    w.textContent = text ? `⚠ ${text}` : "";
+    w.hidden = !text;
+    this.panel.querySelector(".panel-title")?.classList.toggle("warned", !!text);
+  }
+
+  closeMenu(): void {
+    this.menuOff?.();
+    this.menuOff = null;
+    document.getElementById("ctx-menu")?.remove();
+  }
+
   toast(text: string, kind: "info" | "error" = "info"): void {
     this.toastEl.textContent = text;
     this.toastEl.className = `show ${kind}`;
@@ -666,7 +752,10 @@ export class UI {
     // Closed: next time it's placed afresh (and whole). Folded stays folded
     // (a sketch closes and reopens its card for each thing tapped) until
     // another tool starts: unfoldPanel.
-    if (!spec) return void (this.panelSide = -1);
+    if (!spec) {
+      this.panelWarning = null;
+      return void (this.panelSide = -1);
+    }
     // A short list, like a right-click menu: each value with its box after the
     // name. It hangs under the tool's value box on the model (or by the pointer).
     this.panel.classList.add("as-list");
@@ -687,6 +776,11 @@ export class UI {
     const title = el("div", "panel-title", spec.title);
     if (spec.beta) title.append(betaTag());
     this.panel.append(title);
+    // What stops the tool ("2 profiles needed"): a red line at the top of its card.
+    const warn = el("div", "panel-warn");
+    warn.setAttribute("role", "alert");
+    this.panel.append(warn);
+    this.setPanelWarning(this.panelWarning);
     const unfold = el("button", "text-btn panel-unfold");
     unfold.innerHTML = icons.numpad;
     unfold.append("Values");
@@ -1395,6 +1489,17 @@ export class UI {
         li.append(caret);
       }
       li.append(name, eye, del);
+      // Right-click (or a long press where the browser gives one): the step's commands.
+      li.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        this.menu(e.clientX, e.clientY, [
+          { label: "Edit", run: () => h.edit(f.id) },
+          ...(looks ? [{ label: hid ? "Show" : "Hide", run: () => h.toggleHidden!(f.id) }] : []),
+          { label: f.suppressed ? "Enable" : "Suppress", run: () => h.toggle(f.id) },
+          "-",
+          { label: "Delete", shortcut: "Del", run: () => h.remove(f.id) },
+        ]);
+      });
       if (err) li.append(el("div", "history-error", err.message));
       if (warn && !err && this.openWarns.has(f.id)) li.append(el("div", "history-warning-text", warn));
       this.historyList.append(li);

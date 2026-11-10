@@ -76,6 +76,11 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
       if (k !== null) this.thick = oppositeFace(app, source.face.body, k);
     }
     this.measure = this.thick ? (opts.measure ?? "total") : "offset";
+    // A digit typed on a selected face: the value so far (Total: the wall it leaves).
+    if (opts.typed !== undefined && opts.distance === undefined && !existing) {
+      const v = Number(opts.typed);
+      if (Number.isFinite(v) && v > 0) this.feature.distance = this.measure === "total" && this.thick ? v - this.thick.distance : v;
+    }
     if (opts.expr && !existing) this.feature.exprs = { distance: opts.expr };
     // Typed (on the face, before the tool started) as a formula: kept as one.
     else if (opts.typed && !existing) this.typedInto("distance", opts.typed, (t) => (this.thick && this.measure === "total" ? `${t} - ${Math.round(this.thick.distance * 1e6) / 1e6}mm` : t));
@@ -181,6 +186,21 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     if (this.offsetsFace()) return [distance];
     return [
       distance,
+      // One side, or both ways from the shape (the distance each side).
+      {
+        type: "choice" as const,
+        label: "Sides",
+        options: [
+          { id: "one", label: "One side" },
+          { id: "sym", label: "Symmetric" },
+        ],
+        value: this.feature.symmetric ? "sym" : "one",
+        onChange: (id: string) => {
+          this.feature.symmetric = id === "sym" || undefined;
+          this.render();
+          this.update();
+        },
+      },
       modeChoice(
         () => this.feature.mode,
         (m) => {
@@ -381,11 +401,17 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
   private axis: Vec3;
   private dragging: { from: ToolPointer; r0: number } | null = null;
 
-  constructor(app: AppContext, kind: "fillet" | "chamfer", edges: EdgeRef[], existing?: EdgeFeature, variable?: string) {
+  /** Text typed on the selected edges before the tool took over (restored into the size box). */
+  private typed?: string;
+
+  constructor(app: AppContext, kind: "fillet" | "chamfer", edges: EdgeRef[], existing?: EdgeFeature, variable?: string, typed?: string) {
     // Started from a variable: the size is that variable (and follows it when it changes).
-    const v = variable ? evaluate(variable, "length") : null;
+    // Started by typing: the first digit is the size so far.
+    const t = typed !== undefined && !variable ? Number(typed) : NaN;
+    const v = variable ? evaluate(variable, "length") : t > 0 ? t : null;
     super(app, { ...app.store.newIdentity(kind), type: kind, edges, radius: v ?? 1, ...(variable && v !== null ? { exprs: { radius: variable } } : {}) }, existing);
     this.id = kind;
+    this.typed = typed;
     this.names = { fillet: existing?.type === "fillet" ? existing.name : app.store.newIdentity("fillet").name, chamfer: existing?.type === "chamfer" ? existing.name : app.store.newIdentity("chamfer").name };
     const e = this.feature.edges[0];
     this.origin = e.mid;
@@ -409,7 +435,38 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
   }
 
   protected items(): PanelItem[] {
-    return [this.num(this.feature.type === "fillet" ? "Radius" : "Distance", "radius", "length", { min: 0.0001, onInput: (v) => this.setRadius(v), inBox: true })];
+    const f = this.feature;
+    const size = this.num(f.type === "fillet" ? "Radius" : f.distance2 !== undefined ? "Distance 1" : "Distance", "radius", "length", { min: 0.0001, onInput: (v) => this.setRadius(v), inBox: true });
+    if (f.type === "fillet") return [size];
+    // Chamfer: the same distance along both faces, or a different one along each.
+    const two = f.distance2 !== undefined;
+    return [
+      {
+        type: "choice",
+        label: "Type",
+        options: [
+          { id: "equal", label: "Equal distance" },
+          { id: "two", label: "Two distances" },
+        ],
+        value: two ? "two" : "equal",
+        onChange: (id) => {
+          if (id === "two") f.distance2 = f.distance2 ?? f.radius;
+          else {
+            f.distance2 = undefined;
+            f.flip = undefined;
+          }
+          this.render();
+          this.update();
+        },
+      },
+      size,
+      ...(two
+        ? [
+            this.num("Distance 2", "distance2", "length", { min: 0.0001 }),
+            { type: "button" as const, label: "Flip sides", icon: "flip" as const, onClick: () => ((f.flip = !f.flip || undefined), this.update()) },
+          ]
+        : []),
+    ];
   }
 
   /** The size, typed right at the edge (past the dot). */
@@ -437,6 +494,8 @@ export class EdgeOp extends FeatureOp<EdgeFeature> {
         this.setRadius(v);
       },
       onCommit: () => this.done(),
+      typed: this.typed,
+      focus: this.typed !== undefined,
       variables: this.app.store.doc.variables.map((v) => v.name),
       onVariable: (name) => {
         const v = evaluate(name, "length");

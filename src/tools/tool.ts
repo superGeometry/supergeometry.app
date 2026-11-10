@@ -4,7 +4,8 @@ import type { KernelClient } from "../kernel/client";
 import type { RegenResult } from "../kernel/protocol";
 import { arrangement, materialRegions, pointInRegion, regionRef, type Region } from "../sketch/regions";
 import { pointInPoly } from "../sketch/curves";
-import type { ToolItem, UI } from "../ui/ui";
+import type { MenuRow, ToolItem, UI } from "../ui/ui";
+import { settings } from "../settings";
 import type { PointerHandler } from "../view/input";
 import type { Highlight, PickHit, Viewport } from "../view/viewport";
 
@@ -265,4 +266,24 @@ export function targetOf(app: AppContext, src: ExtrudeSource): string | undefine
 export function bodiesOf(sel: Sel[]): string[] {
   const ids = sel.flatMap((s) => (s.kind === "body" || s.kind === "face" || s.kind === "edge" || s.kind === "vertex" ? [s.body] : []));
   return [...new Set(ids)];
+}
+
+/**
+ * The right-click menu on the model: the caller's rows first (a tool's Done /
+ * Cancel, a selection's tools), then the view's: Zoom to Fit and the
+ * on/off view switches. (x, y): the pointer, in the canvas's pixels.
+ */
+export function viewMenu(app: AppContext, x: number, y: number, head: (MenuRow | "-")[]): void {
+  const r = app.view.canvas.getBoundingClientRect();
+  const s = settings.value;
+  const flip = (k: "showGrid" | "showAxes" | "showEdges" | "showHiddenEdges", label: string): MenuRow => ({ label, checked: s[k], run: () => settings.set(k, !settings.value[k]) });
+  app.ui.menu(r.left + x, r.top + y, [
+    ...head,
+    ...(head.length ? (["-"] as const) : []),
+    { label: "Zoom to Fit", shortcut: "F", run: () => app.view.fitAll() },
+    flip("showGrid", "Show Grid"),
+    flip("showAxes", "Show World Axes"),
+    flip("showEdges", "Show Edges"),
+    flip("showHiddenEdges", "Show Hidden Edges"),
+  ]);
 }

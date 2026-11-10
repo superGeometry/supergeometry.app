@@ -4,7 +4,7 @@ import { BODY_COLORS, BODY_OPACITY, bodyColor } from "../doc/types";
 import type { DeleteGeomFeature, FreeformFeature, EdgeRef, ExtrudeSource, FaceRef, ImageFeature, PlaneDef, PlaneFeature, SketchFeature, Vec3 } from "../doc/types";
 import { arrangement } from "../sketch/regions";
 import { projectPolyline } from "../sketch/edit";
-import type { ToolItem } from "../ui/ui";
+import type { MenuRow, ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import { add, dot, len, originOnPlane, planeY, scale, sub } from "../geom";
 import { evaluate, fmtLen } from "../units";
@@ -25,7 +25,7 @@ import { BooleanOp } from "./booleanOp";
 import { pickColor } from "../ui/colorPicker";
 import { BimTool } from "../bim/bimTool";
 import { materialOf } from "../bim/materials";
-import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
+import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, viewMenu, type AppContext, type Sel, type Tool } from "./tool";
 
 const SOON = "Coming soon";
 
@@ -211,11 +211,32 @@ export class SelectTool implements Tool {
     this.app.setSelection([...base, ...picked.filter((s) => !base.some((x) => sameSel(x, s)))]);
   }
 
-  /** Right-click: let go of what's picked (and of a tool waiting for a pick). */
-  context(): void {
-    if (!this.app.selection.length && !this.pending) return;
-    this.pending = null;
-    this.app.setSelection([]);
+  /**
+   * Right-click: a menu by the pointer. With something picked, its tools
+   * (as in the column, groups apart) and Deselect All; always the view's
+   * switches. A tool waiting for a pick lets go of it, as before.
+   */
+  context(p: ToolPointer): void {
+    if (this.pending) {
+      this.pending = null;
+      this.app.setSelection([]);
+      return;
+    }
+    const rows: (MenuRow | "-")[] = [];
+    if (this.app.selection.length) {
+      for (const it of this.actions()) {
+        if (it.id.startsWith("---")) {
+          if (rows.length && rows[rows.length - 1] !== "-") rows.push("-");
+          continue;
+        }
+        // A tool with variants (Fillet with variables): its first one.
+        const run = it.run ?? it.children?.find((c) => c.run && !c.disabled)?.run;
+        if (!run) continue;
+        rows.push({ label: it.label, shortcut: it.shortcut, disabled: it.disabled, run: () => run() });
+      }
+      if (rows[rows.length - 1] === "-") rows.pop();
+    }
+    viewMenu(this.app, p.x, p.y, rows);
   }
 
   key(e: KeyboardEvent): boolean {
@@ -233,6 +254,25 @@ export class SelectTool implements Tool {
         const v = Number(e.key);
         this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { distance: Number.isFinite(v) ? v : 0, typed: e.key }));
         return true;
+      }
+    }
+    // One flat or round face: the number typed is its offset (Total: the wall
+    // left); edges: the fillet radius. The tool armed on tap takes the value.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9.]$/.test(e.key) && sel.length) {
+      const first = sel[0];
+      if (first.kind === "face" && sel.length === 1 && offsettable(this.app.view.body(first.body)?.faces[first.face]?.type) && !this.freeformOf(first.body)) {
+        const src = sourcesOf(this.app, sel)[0];
+        if (src) {
+          this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { typed: e.key }));
+          return true;
+        }
+      }
+      if (first.kind === "edge" && sel.every((x) => x.kind === "edge") && !this.freeformOf(first.body)) {
+        const refs = this.edgeRefs();
+        if (refs.length) {
+          this.app.setTool(new EdgeOp(this.app, "fillet", refs.map((r) => ({ ...r })), undefined, undefined, e.key));
+          return true;
+        }
       }
     }
     if (e.ctrlKey || e.metaKey) return false;
@@ -260,7 +300,7 @@ export class SelectTool implements Tool {
           ? this.app.store.features.length
             ? "Pick a tool, or tap the model to select part of it."
             : "Tap Sketch to start: draw a shape, then pull it into 3D."
-          : `${sel.length} ${label(sel[0], sel.length)} selected. Pick a tool for ${sel.length > 1 ? "them" : "it"}, or tap more to add.`,
+          : this.armedHint(),
     );
     const first = sel[0];
     if (!first) return;
@@ -308,14 +348,32 @@ export class SelectTool implements Tool {
       }
     } else if (first.kind === "edge") {
       const e = this.edgeRefs()[0];
-      const straight = this.app.view.body(first.body)?.edges[first.edge]?.type === "LINE";
-      // One straight edge: its Move/Rotate gimbal is ready to drag (fillet and
-      // chamfer are in the list); a round one: the fillet's dot.
-      if (e && straight && sel.length === 1 && !this.freeformOf(first.body)) {
-        this.gimbal = new Gimbal(this.app.view, { axes: MoveFaceOp.edgeAxes(e.dir), parts: MoveFaceOp.edgeParts });
-        this.gimbal.setCenter(e.mid);
-      } else if (e) this.showHandle({ base: e.mid, normal: e.dir }, "dot", () => new EdgeOp(this.app, "fillet", this.edgeRefs()).grabFromEdge());
+      // An edge's most likely next step is rounding it: the fillet's dot is
+      // ready to drag, and a number typed is the radius. Moving a straight
+      // edge (its faces tilt to follow) is Move/Rotate Edge (M) in the list.
+      // (A freeform's edges get neither: its shape comes from the cage.)
+      if (e && !this.freeformOf(first.body)) this.showHandle({ base: e.mid, normal: e.dir }, "dot", () => new EdgeOp(this.app, "fillet", this.edgeRefs()).grabFromEdge());
     }
+  }
+
+  /**
+   * What the tool armed by this selection does, and how to use it right
+   * away (drag its handle, or just type the value). Other tools: the list.
+   */
+  private armedHint(): string {
+    const sel = this.app.selection;
+    const first = sel[0];
+    const n = sel.length;
+    const touch = isTouchDevice;
+    const more = touch ? "tap" : "click";
+    if (first.kind === "profile") return `Extrude: drag the arrow or type a height. ${cap(more)} more shapes to add them, or pick another tool.`;
+    if (first.kind === "face" && n === 1 && offsettable(this.app.view.body(first.body)?.faces[first.face]?.type) && !this.freeformOf(first.body)) {
+      return "Offset Face: drag the arrow or type a size to move the face in or out. Or pick another tool.";
+    }
+    if (first.kind === "face" && n === 2 && sel[1].kind === "face") return "The distance between the two faces is shown. Pick a tool for them.";
+    if (first.kind === "edge" && !this.freeformOf(first.body)) return `Fillet: drag the dot or type a radius to round ${n > 1 ? "the edges" : "the edge"}. ${cap(more)} more edges to add them.`;
+    if (first.kind === "body") return `Move/Rotate: drag the arrows or the arcs. ${cap(more)} another body to add it.`;
+    return `${n} ${label(first, n)} selected. Pick a tool for ${n > 1 ? "them" : "it"}, or ${more} more to add.`;
   }
 
   /** Called by the app when a top-level tool needs a selection first. */

@@ -5,7 +5,7 @@ import type { FieldKind, PanelItem, ToolItem } from "../ui/ui";
 import { isExpression } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import type { PickHit, PickOptions } from "../view/viewport";
-import { hitToSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
+import { hitToSel, sourcesOf, viewMenu, type AppContext, type Sel, type Tool } from "./tool";
 import { DragTyping } from "./dragTyping";
 import { screenClass } from "../device";
 import { arrangement, materialRegions, pointInRegion, resolveRegion, type Region } from "../sketch/regions";
@@ -185,9 +185,15 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     this.done();
   }
 
-  /** Right-click: back out of the tool (like Esc). */
-  context(): void {
-    this.cancel();
+  /**
+   * Right-click: Done and Cancel (and the view's switches) by the pointer -
+   * a stray right-click no longer throws the tool's work away.
+   */
+  context(p: ToolPointer): void {
+    viewMenu(this.app, p.x, p.y, [
+      { label: "Done", shortcut: "Enter", disabled: !this.ready() || !!this.error, run: () => this.done() },
+      { label: "Cancel", shortcut: "Esc", run: () => this.cancel() },
+    ]);
   }
 
   key(e: KeyboardEvent): boolean {
@@ -231,6 +237,7 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     const slot = this.slots[this.active];
     const text = this.error ? `⚠ ${this.error}` : slot && !slot.filled() ? `${slot.label}: ${slot.describe()}` : this.hint();
     this.app.ui.setHint(text);
+    this.app.ui.setPanelWarning(this.error);
   }
 
   /**

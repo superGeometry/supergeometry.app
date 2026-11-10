@@ -171,12 +171,18 @@ export interface ExtrudeFeature extends FeatureBase {
    * sides; 0.5: half size; near 0: to a point - a spire, a pyramid, a cone).
    */
   taper?: number;
+  /** Both ways from the shape: `distance` each side (a boss through its middle plane). */
+  symmetric?: boolean;
 }
 
 export interface EdgeFeature extends FeatureBase {
   type: "fillet" | "chamfer";
   edges: EdgeRef[];
   radius: number;
+  /** Chamfer, Two-Distance: the second distance (along the other face); missing: equal distances. */
+  distance2?: number;
+  /** Chamfer, Two-Distance: the first distance goes along the other face of each edge. */
+  flip?: boolean;
 }
 
 export interface BooleanFeature extends FeatureBase {
