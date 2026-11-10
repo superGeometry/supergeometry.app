@@ -77,6 +77,8 @@ export interface RegenResult {
   sketchPlanes: Record<string, PlaneDef>;
   /** Outline of the face each face-attached sketch sits on (takes part in its regions). */
   sketchBoundaries: Record<string, SketchEntity[]>;
+  /** Sketches whose curves the engine moved (they follow a body's edge that changed): their curves as they are now. */
+  sketchEntities?: Record<string, SketchEntity[]>;
   planes: ConstructionInfo[];
   axes: ConstructionInfo[];
   errors: FeatureError[];

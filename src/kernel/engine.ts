@@ -51,6 +51,8 @@ import type {
 } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "../geom";
 import { outlineOffsetCurves, projectPolyline } from "../sketch/edit";
+import { solveFine } from "../sketch/constraints";
+import { carried } from "../sketch/follow";
 
 import { cageToShape } from "./freeform";
 import { evenly, gentle, guideCurve, oriented, plainSpine, smoothed } from "../freeform/connect";
@@ -252,6 +254,7 @@ export function resetKernel(): void {
   savedCache = [];
   lastBodies = new Map();
   importCache.clear();
+  sketchWas.clear();
 }
 
 /**
@@ -363,11 +366,16 @@ export async function regenerate(features: Feature[], saved = false): Promise<Re
   }
   const sketchPlanes: Record<string, PlaneDef> = {};
   const sketchBoundaries: Record<string, SketchEntity[]> = {};
+  // Sketches that follow a body: their curves where the engine put them (the page takes them as the sketch's own).
+  let sketchEntities: Record<string, SketchEntity[]> | undefined;
+  const asGiven = new Map(features.map((f) => [f.id, f]));
   for (const [id, s] of ctx.sketches) {
     sketchPlanes[id] = s.plane;
     if (s.boundary.length) sketchBoundaries[id] = s.boundary;
+    const f = asGiven.get(id);
+    if (f?.type === "sketch" && f.links?.length && s.entities !== f.entities && JSON.stringify(s.entities) !== JSON.stringify(f.entities)) (sketchEntities ??= {})[id] = s.entities;
   }
-  return { bodies: meshes, errors, notes, sketchPlanes, sketchBoundaries, planes: [...ctx.planes.values()], axes: [...ctx.axes.values()], ms: performance.now() - t0 };
+  return { bodies: meshes, errors, notes, sketchPlanes, sketchBoundaries, ...(sketchEntities ? { sketchEntities } : {}), planes: [...ctx.planes.values()], axes: [...ctx.axes.values()], ms: performance.now() - t0 };
 }
 
 /**
@@ -543,7 +551,19 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const outline = f.attachedTo ? faceBoundary(f.attachedTo, plane, bodies) : [];
       // Offsets of the outline, made from it as it is now (they follow the face).
       const boundary = [...outline, ...outlineOffsetCurves(outline, f.outlineOffsets)];
-      ctx.sketches.set(f.id, { ...f, plane, boundary });
+      // Curves that follow a body's edge go where it is now, the rest by its dimensions to them.
+      const entities = f.links?.length ? followEdges(f, plane, bodies) : f.entities;
+      const state: SketchState = { ...f, entities, plane, boundary };
+      // The same sketch as last time, to the last digit (the page took the
+      // curves the engine moved as the sketch's own): it is that one, and
+      // the steps made from it have nothing new to read.
+      const text = JSON.stringify(state);
+      const was = sketchWas.get(f.id);
+      if (was?.text === text) ctx.sketches.set(f.id, was.state);
+      else {
+        sketchWas.set(f.id, { text, state });
+        ctx.sketches.set(f.id, state);
+      }
       return;
     }
 
@@ -2363,6 +2383,64 @@ function halfSpace(plane: PlaneDef, body: Shape3D): Shape3D {
   const corner = (u: number, v: number): Vec3 => add(o, add(scale(x, u * L), scale(y, v * L)));
   const face = makePolygon([corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]);
   return basicFaceExtrusion(face, new Vector(plane.normal).multiply(L));
+}
+
+/** Each sketch as it was last made (see the sketch step). */
+const sketchWas = new Map<string, { text: string; state: SketchState }>();
+
+/** The same thing, every number within `tol` of the other's. */
+function sameNumbers(a: unknown, b: unknown, tol: number): boolean {
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) <= tol;
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => sameNumbers(x, b[i], tol));
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    const ka = Object.keys(a as object);
+    return ka.length === Object.keys(b as object).length && ka.every((k) => sameNumbers((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], tol));
+  }
+  return a === b;
+}
+
+/**
+ * A sketch's curves with those that follow a body's edge put where the edge
+ * is now (seen straight onto the sketch's plane), and the rest moved by the
+ * sketch's dimensions and constraints to them.
+ */
+function followEdges(f: SketchFeature, plane: PlaneDef, bodies: Bodies): SketchEntity[] {
+  const links = new Map(f.links!.map((l) => [l.id, l]));
+  let lost = 0;
+  let moved = false;
+  const entities = f.entities.map((e) => {
+    const link = links.get(e.id);
+    if (!link) return e;
+    let made: SketchEntity | null = null;
+    try {
+      const edge = resolveEdge(need(bodies, link.edge.body), link.edge);
+      made = projectPolyline(Array.from({ length: 25 }, (_, k) => edge.pointAt(k / 24).toTuple() as Vec3), plane, edge.geomType);
+    } catch (err) {
+      if (isFault(err)) throw err;
+    }
+    // Gone, or seen end-on from here (a point): the curve stays where it was.
+    if (!made) {
+      lost++;
+      return e;
+    }
+    // Its ends the way round they were (what is tied to one end stays on that end).
+    if ((made.kind === "line" || made.kind === "arc") && e.kind === made.kind) {
+      const far = (p: number[], q: number[]) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+      if (far(made.a, e.b) + far(made.b, e.a) < far(made.a, e.a) + far(made.b, e.b)) made = { ...made, a: made.b, b: made.a };
+    }
+    const now = { ...made, id: e.id, ...(e.construction ? { construction: true } : {}) } as SketchEntity;
+    if (sameNumbers(e, now, 1e-9)) return e;
+    moved = true;
+    return now;
+  });
+  if (lost) editNotes.push(lost === 1 ? "An edge this sketch follows is gone: that curve stays where it was." : `${lost} edges this sketch follows are gone: those curves stay where they were.`);
+  if (!moved) return f.entities;
+  if (!f.constraints?.length) return entities;
+  // What is dimensioned to them goes with them first (a distance doesn't say which side).
+  const r = solveFine(carried(f.entities, entities, f.constraints, new Set(links.keys())), f.constraints);
+  if (r.ok) return r.entities;
+  editNotes.push("The edge this sketch follows moved to where the sketch's dimensions can't all be kept: its other curves stay where they were.");
+  return entities;
 }
 
 /** The outline of the face a sketch sits on, as sketch curves (ids "bnd-…"). */

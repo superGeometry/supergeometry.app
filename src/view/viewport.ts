@@ -136,6 +136,7 @@ const COLORS = {
   sketch: 0xe8e8e8,
   sketchActive: 0xffc23d,
   construction: 0x9aa3b5,
+  linked: 0xc79bff,
   profile: 0x4d8dff,
   plane: 0x8fb4ff,
   cap: 0xff8fb8,
@@ -694,11 +695,13 @@ export class Viewport {
       // Clean 2px lines; the sketch being edited is brighter and on top.
       const solid: number[] = [];
       const dashed: number[] = [];
+      // Curves that follow a body's edge: in their own colour (they aren't the sketch's to move).
+      const linked: number[] = [];
       // Offsets of the face's edge (linked to it): drawn and tapped like the sketch's own curves.
       for (const e of [...s.entities, ...(s.boundary ?? []).filter((b) => b.id.startsWith("lnk-"))]) {
         for (const poly of entityPolylines(e)) {
           const pts = poly.map((p) => new Vector3(p[0], p[1], 0).applyMatrix4(m));
-          const into = e.construction ? dashed : solid;
+          const into = e.construction ? dashed : e.id.startsWith("ref-") ? linked : solid;
           for (let i = 0; i < pts.length - 1; i++) into.push(...pts[i].toArray(), ...pts[i + 1].toArray());
           this.curveLines.push({ sketch: s.id, entity: e.id, pts });
         }
@@ -708,6 +711,13 @@ export class Viewport {
         const mat = this.lineMaterial(active ? 0xffffff : COLORS.sketch, active ? 2.2 : 1.6, !onTop);
         this.sketchMats.push(mat);
         const l = new LineSegments2(new LineSegmentsGeometry().setPositions(solid), mat);
+        l.renderOrder = 2;
+        this.sketchGroup.add(l);
+      }
+      if (linked.length) {
+        const mat = this.lineMaterial(COLORS.linked, active ? 2.2 : 1.6, !onTop);
+        this.sketchMats.push(mat);
+        const l = new LineSegments2(new LineSegmentsGeometry().setPositions(linked), mat);
         l.renderOrder = 2;
         this.sketchGroup.add(l);
       }

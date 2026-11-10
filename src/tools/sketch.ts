@@ -1,9 +1,9 @@
 import { isTouchDevice } from "../device";
 import { simplifyStroke } from "../sketch/freehand";
 import { Box3, BufferGeometry, Line, LineBasicMaterial, LineDashedMaterial, Points, PointsMaterial, Vector3 } from "three";
-import type { FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
+import type { EdgeLink, FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, Vec2, Vec3 } from "../doc/types";
 import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, patternSpacing, planeY, roundSig, scale as scale3, sub as sub3, toPlane } from "../geom";
-import { addForUser, addStrict, constraintError, constraintName, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
+import { addForUser, addStrict, constraintError, constraintName, LINKED, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { nearestSnap } from "../sketch/snapPick";
 import { arrangement } from "../sketch/regions";
@@ -59,7 +59,7 @@ import type { PanelItem, ToolItem } from "../ui/ui";
 import { evaluate, fmtLen, trim as trimNum } from "../units";
 import type { ToolPointer } from "../view/input";
 import { dotMaterial, sketchToWorld } from "../view/viewport";
-import { hitToSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
+import { edgeRefOf, hitToSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
 
 export type SketchKind = Kind;
 type Kind =
@@ -3609,10 +3609,39 @@ export class SketchTool implements Tool {
     this.commit(entities, carryConstraints(this.entities, entities, this.constraints));
   }
 
-  private commit(entities: SketchEntity[], constraints: SketchConstraint[] = this.constraints): void {
+  private commit(entities: SketchEntity[], constraints: SketchConstraint[] = this.constraints, follow: EdgeLink[] = []): void {
     // The shapes change: a picked region's arrow would point at the old one.
     this.hideRegionArrow();
     const store = this.app.store;
+    // Curves that follow a body's edge: one moved, cut or copied here is a
+    // curve of the sketch like any other from now on (it would jump back to the edge).
+    const follows = new Map([...(this.sketch?.links ?? []), ...follow].map((l) => [l.id, l]));
+    if (follows.size || entities.some((e) => e.id.startsWith(LINKED))) {
+      const was = new Map(this.entities.map((e) => [e.id, e]));
+      const plain = (e: SketchEntity) => JSON.stringify({ ...e, construction: undefined });
+      const seen = new Set<string>();
+      const renamed = new Map<string, string>();
+      let freed = 0;
+      entities = entities.map((e) => {
+        if (!e.id.startsWith(LINKED)) return e;
+        const old = was.get(e.id);
+        if (follows.has(e.id) && !seen.has(e.id) && (!old || old === e || plain(old) === plain(e))) {
+          seen.add(e.id);
+          return e;
+        }
+        const id = uid();
+        if (!seen.has(e.id) && !renamed.has(e.id)) renamed.set(e.id, id);
+        if (old && follows.has(e.id)) freed++;
+        return { ...e, id };
+      });
+      if (renamed.size) {
+        const re = (id: string) => (seen.has(id) ? id : (renamed.get(id) ?? id));
+        constraints = constraints.map((c) => ({ ...c, ...(c.pts ? { pts: c.pts.map((p) => ({ ...p, e: re(p.e) })) } : {}), ...(c.curves ? { curves: c.curves.map(re) } : {}) }));
+        this.selected = new Set([...this.selected].map(re));
+      }
+      if (freed) this.app.ui.toast("Changed here, it no longer follows the body's edge");
+    }
+    const links = [...follows.values()].filter((l) => entities.some((e) => e.id === l.id));
     const ids = new Set(entities.map((e) => e.id));
     const cs = constraints.filter((c) => refsOf(c).every((id) => ids.has(id)));
     // One line per step in History (repeats of the same step are counted).
@@ -3630,7 +3659,7 @@ export class SketchTool implements Tool {
       log.push({ op, n: 1 });
       this.lastMade = made;
     }
-    const patch = cs.length ? { entities, constraints: cs, log } : { entities, constraints: undefined, log };
+    const patch = { entities, constraints: cs.length ? cs : undefined, log, links: links.length ? links : undefined };
     if (this.sketchId && this.sketch) {
       store.update(this.sketchId, patch);
     } else {
@@ -4577,7 +4606,17 @@ export class SketchTool implements Tool {
       if ((i - g.start) % 2 === 0 || i === g.start + g.count - 1) pts.push([b.edgePositions[i * 3], b.edgePositions[i * 3 + 1], b.edgePositions[i * 3 + 2]]);
     }
     const e = projectPolyline(pts, this.plane!, b.edges[hit.edge].type);
-    if (e) this.commitAdd([e]);
+    if (!e) return;
+    // It follows that edge from now on, if the edge is there when this sketch
+    // is made (the steps that made it come before the sketch).
+    const ref = edgeRefOf(this.app, hit);
+    const order = this.app.store.features.map((f) => f.id);
+    const at = this.sketchId ? order.indexOf(this.sketchId) : order.length;
+    const before = (step: string) => order.indexOf(step) >= 0 && order.indexOf(step) < at;
+    if (!ref?.steps?.length || !ref.steps.every(before)) return this.commitAdd([e]);
+    const id = `${LINKED}${uid()}`;
+    this.commit([...this.entities, { ...e, id, ...(this.construction ? { construction: true } : {}) }], this.constraints, [{ id, edge: ref }]);
+    this.app.ui.toast("It follows that edge when the body changes");
   }
 
   // ------------------------------------------------- single-entity sizes
@@ -4616,9 +4655,27 @@ export class SketchTool implements Tool {
     this.setHint("It follows the face's edge when the face changes size. Negative: inside the edge.");
   }
 
+  /** A curve that follows a body's edge: letting it go (it becomes a curve of the sketch), or deleting it. */
+  private showFollowPanel(id: string): void {
+    const gone = (keep: boolean) => {
+      this.commit(this.entities.flatMap((x) => (x.id !== id ? [x] : keep ? [{ ...x, id: uid() }] : [])));
+      this.clearSelection();
+    };
+    this.app.ui.showPanel({
+      title: "Follows a body's edge",
+      items: [
+        { type: "button", label: "Unlink", icon: "line", onClick: () => gone(true) },
+        { type: "button", label: "Delete", icon: "trash", onClick: () => gone(false) },
+      ],
+      onDone: () => this.clearSelection(),
+    });
+    this.setHint("It stays on that edge when the body changes. Dimension the sketch to it and the sketch follows too.");
+  }
+
   private showSizePanel(): void {
     const id = [...this.selected][0];
     if (id?.startsWith("lnk-")) return this.showLinkPanel(id);
+    if (id?.startsWith(LINKED) && this.sketch?.links?.some((l) => l.id === id)) return this.showFollowPanel(id);
 
     let e = this.entities.find((x) => x.id === id);
     if (!e) return;

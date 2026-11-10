@@ -433,8 +433,23 @@ export class App implements AppContext {
     if (r) this.apply(r, features);
   }
 
+  /** Sketches the engine moved the curves of (they follow a body): those curves, by the sketch as it was sent. */
+  private solved = new WeakMap<Feature, SketchEntity[]>();
+
   private apply(r: RegenResult, features: readonly Feature[]): void {
     this.result = r;
+    this.solved = new WeakMap();
+    if (r.sketchEntities) {
+      const moved = r.sketchEntities;
+      for (const f of features) if (moved[f.id]) this.solved.set(f, moved[f.id]);
+      // The project as it is (not a preview of a change): they are the sketch's curves from now on.
+      if (features === this.store.doc.features) {
+        this.store.adopt((d) => {
+          for (const f of d.features) if (f.type === "sketch" && moved[f.id]) f.entities = moved[f.id];
+        });
+        features = this.store.doc.features;
+      }
+    }
     const now = new Set([...r.bodies.map((b) => b.id), ...features.map((f) => f.id)]);
     if (this.isolated) {
       // Made while isolating (a copy, a new sketch or plane): it belongs with what's shown.
@@ -496,7 +511,7 @@ export class App implements AppContext {
     const iso = this.isolatedWithSketches();
     const sketches = features
       .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && ((!hidden.has(f.id) && (!iso || iso.includes(f.id))) || f.id === this.tool.activeSketch))
-      .map((s) => ({ ...s, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }));
+      .map((s) => ({ ...s, entities: this.solved.get(s) ?? s.entities, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }));
     // Drawn but not made into anything yet: shown through bodies, and a tap on it finds it there
     // (a pocket sketched on a plane through the middle of a body is inside it).
     const used = new Set(features.filter((f) => !f.suppressed).flatMap(sketchesUsed));

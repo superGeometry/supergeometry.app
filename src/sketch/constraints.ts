@@ -298,6 +298,9 @@ function distToEntity(p: Vec2, e: SketchEntity): number {
 
 // ------------------------------------------------------------------ solver
 
+/** How the id of a curve that follows a body's edge begins: it is where that edge is, and nothing in the sketch moves it. */
+export const LINKED = "ref-";
+
 export interface SolveOptions {
   /** Points to pull towards a target (dragging), with a strong weight. */
   drag?: { ref: PointRef; to: Vec2 }[];
@@ -321,6 +324,8 @@ export interface SolveResult {
  * whose constraints are already met, with nothing dragged in it, isn't touched.
  */
 export function solve(entities: SketchEntity[], constraints: SketchConstraint[], opts: SolveOptions = {}): SolveResult {
+  const held = entities.filter((e) => e.id.startsWith(LINKED));
+  if (held.length) opts = { ...opts, fixed: new Set([...(opts.fixed ?? []), ...held.map((e) => e.id)]) };
   const ids = new Set(entities.map((e) => e.id));
   const live = constraints.filter((c) => refsOf(c).every((id) => ids.has(id)));
   const drags = opts.drag ?? [];

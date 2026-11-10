@@ -147,6 +147,13 @@ export interface SketchFeature extends FeatureBase {
    * they follow it when it changes size. Their curves are "lnk-<id>-<n>".
    */
   outlineOffsets?: OutlineOffset[];
+  /**
+   * Curves of the sketch that follow an edge of a body (projected from it):
+   * put where that edge is on every rebuild, the sketch's dimensions to them
+   * kept - a hole 10 mm from the wall of another part stays 10 mm from it.
+   * Their ids begin "ref-".
+   */
+  links?: EdgeLink[];
 
   /** What was done in the sketch, in order (shown under it in History); repeats are counted. */
   log?: { op: string; n: number }[];
@@ -576,6 +583,13 @@ export interface ItemFolder {
 
 export function emptyDoc(): ProjectDoc {
   return { format: "super", version: 2, name: "Untitled", features: [], variables: [], views: [], units: "mm", hidden: [], pins: [], names: {} };
+}
+
+/** A sketch curve that follows a body's edge (see SketchFeature.links). */
+export interface EdgeLink {
+  /** The curve. */
+  id: string;
+  edge: EdgeRef;
 }
 
 /** An offset of a face outline in a sketch on that face (see SketchFeature.outlineOffsets). */

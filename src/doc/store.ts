@@ -223,6 +223,18 @@ export class DocStore {
     this.listeners.forEach((fn) => fn());
   }
 
+  /**
+   * What the engine worked out for the project as it is (a sketch's curves
+   * where the edges they follow are now): taken in as it stands - not a step
+   * to undo, and nothing for the engine to do again.
+   */
+  adopt(mutate: (doc: ProjectDoc) => void): void {
+    const next = unpack(pack(this.doc));
+    mutate(next);
+    this.doc = next;
+    this.changed(false);
+  }
+
   add(feature: Feature): void {
     this.commit((d) => d.features.push(feature));
   }
@@ -328,10 +340,10 @@ export class DocStore {
     if (v === this.edits) this.setSaved(true);
   }
 
-  private changed(): void {
+  private changed(tell = true): void {
     this.edits++;
     this.setSaved(false);
-    this.listeners.forEach((fn) => fn());
+    if (tell) this.listeners.forEach((fn) => fn());
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => {
       const v = this.edits;
