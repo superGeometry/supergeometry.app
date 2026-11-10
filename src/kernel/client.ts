@@ -1,6 +1,16 @@
 import type { Feature } from "../doc/types";
 import type { BodyMesh, BodyProps, ProjectedView, ViewSpec, Envelope, ExportFormat, RegenResult, Request, Response } from "./protocol";
 
+/**
+ * The steps as the engine needs them: a reference image without its picture
+ * (megabytes the engine never reads, copied across and hashed on every rebuild
+ * - every step of a drag). The same for every kind of call, so the engine sees
+ * the same steps each time.
+ */
+function lean(features: Feature[]): Feature[] {
+  return features.some((f) => f.type === "image" && f.src) ? features.map((f) => (f.type === "image" ? { ...f, src: "" } : f)) : features;
+}
+
 /** Promise-based wrapper around the kernel worker. */
 export class KernelClient {
   private worker!: Worker;
@@ -80,7 +90,7 @@ export class KernelClient {
       if ((await ask({ type: "init" })).type !== "ready") throw new Error("init");
       const got = new Map<number, BodyMesh>();
       const regen = async (fs: Feature[], asSaved: boolean) => {
-        const r = await ask({ type: "regenerate", features: fs, saved: asSaved });
+        const r = await ask({ type: "regenerate", features: lean(fs), saved: asSaved });
         if (r.type !== "regenerated") throw new Error("regenerate");
         const bodies = r.result.bodies.map((b) => ((b as { same?: boolean }).same ? got.get(b.key)! : b));
         for (const b of bodies) got.set(b.key, b);
@@ -166,7 +176,7 @@ export class KernelClient {
     this.running = features;
     this.last = { features, saved: saved ? features : this.last.saved };
     const worker = this.worker;
-    const r = await this.call({ type: "regenerate", features, saved });
+    const r = await this.call({ type: "regenerate", features: lean(features), saved });
     // Stopped meanwhile: the fresh worker has its own queue.
     if (worker !== this.worker) return resolve(null);
     this.running = null;
@@ -211,7 +221,7 @@ export class KernelClient {
   /** The bodies drawn in views, hidden lines found (for BIM drawings). */
   async drawing(features: Feature[], views: ViewSpec[], bodies?: string[]): Promise<ProjectedView[]> {
     await this.ready;
-    const r = await this.call({ type: "drawing", features, views, bodies });
+    const r = await this.call({ type: "drawing", features: lean(features), views, bodies });
     if (r.type === "drawing") return r.views;
     throw new Error(r.type === "error" ? r.message : "Could not draw the views");
   }
@@ -219,14 +229,14 @@ export class KernelClient {
   /** Each body's volume, area, centre of mass and box (for BIM). */
   async properties(features: Feature[]): Promise<BodyProps[]> {
     await this.ready;
-    const r = await this.call({ type: "properties", features });
+    const r = await this.call({ type: "properties", features: lean(features) });
     if (r.type === "properties") return r.bodies;
     throw new Error(r.type === "error" ? r.message : "Could not measure the bodies");
   }
 
   async export(features: Feature[], format: ExportFormat, bodies?: string[]): Promise<Blob> {
     await this.ready;
-    const r = await this.call({ type: "export", features, format, bodies });
+    const r = await this.call({ type: "export", features: lean(features), format, bodies });
     if (r.type === "exported") return r.blob;
     throw new Error(r.type === "error" ? r.message : "Export failed");
   }

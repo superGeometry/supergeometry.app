@@ -678,7 +678,7 @@ async function run(features: Feature[], saved = false) {
     const f = features[i];
     // Chained hashes, not the text itself: a key holding every step's JSON
     // grew with the square of the project (an import's megabytes in each one).
-    const text = JSON.stringify(f);
+    const text = JSON.stringify(f, shortBig);
     const json = `${hash53(text, 3)}.${text.length}`;
     key = chainKey(key, text);
     const cached: CacheEntry | undefined = !hit ? undefined : cache[i]?.key === key ? cache[i] : savedCache[i]?.key === key ? savedCache[i] : alsoCache[i]?.key === key ? alsoCache[i] : undefined;
@@ -3481,6 +3481,24 @@ function whatsWrong(h: ReturnType<typeof healthOf>): string {
   if (!h.valid) out.push("faces that don't meet up");
   if (h.thin) out.push(`${h.thin} hair-thin face${h.thin > 1 ? "s" : ""}`);
   return out.join(", ") || "it doesn't enclose a volume";
+}
+
+/**
+ * A step's big values (an imported model's megabytes) as a short fingerprint
+ * in the text its key is made from, worked out once per value: hashing them
+ * character by character on every rebuild cost 15 ms per 5 MB, every step of
+ * a drag.
+ */
+const bigPrints = new Map<string, string>();
+function shortBig(_k: string, v: unknown): unknown {
+  if (typeof v !== "string" || v.length < 20_000) return v;
+  let p = bigPrints.get(v);
+  if (!p) {
+    p = `\u0000big:${hash53(v, 11)}.${hash53(v, 13)}.${v.length}`;
+    if (bigPrints.size > 64) bigPrints.clear();
+    bigPrints.set(v, p);
+  }
+  return p;
 }
 
 /** Key of the steps so far: the previous key and this step's JSON, hashed (two 53-bit hashes, no collisions in practice). */

@@ -233,14 +233,38 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     this.app.ui.setHint(text);
   }
 
+  /**
+   * What the last preview asked for was: a drag snaps its value to steps and
+   * asks again on every pointer move - the same draft on the same project is
+   * on screen already (or on its way), not rebuilt and shown again.
+   */
+  private asked: { key: string; base: readonly Feature[]; pending: boolean; result: unknown } | null = null;
+
   /** Re-run the preview with the current draft. */
   protected update(): void {
     this.onDraftChanged();
-    if (!this.ready()) {
-      this.app.preview([...this.app.store.features]);
+    const ready = this.ready();
+    const base = this.app.store.features;
+    // (The steps that aren't the project's own: the draft, or what a tool puts in its place.)
+    const list = ready ? this.featuresWith() : null;
+    const own = new Set(base);
+    const key = list ? JSON.stringify(list.filter((f) => !own.has(f))) : "";
+    const was = this.asked;
+    if (was && was.key === key && was.base === base && (was.pending || was.result === this.app.result)) return;
+    const mine = { key, base, pending: true, result: null as unknown };
+    this.asked = mine;
+    const shown = (r: unknown) => {
+      mine.pending = false;
+      mine.result = r;
+      // Overtaken by something else's rebuild: asked again next time.
+      if (!r && this.asked === mine) this.asked = null;
+    };
+    if (!ready) {
+      void this.app.preview([...base]).then(shown);
       return;
     }
-    this.app.preview(this.featuresWith()).then((r) => {
+    this.app.preview(list!).then((r) => {
+      shown(r);
       this.error = r?.errors.find((e) => e.featureId === this.feature.id)?.message ?? null;
       this.setHint();
     });

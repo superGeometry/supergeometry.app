@@ -177,10 +177,23 @@ function compute(entities: SketchEntity[]): Arrangement {
 
   // ---- pieces
   const nodes: Vec2[] = [];
+  // (Looked up by the cell they're in, and the cells around it: a sketch of
+  // hundreds of curves compared every end with every node.)
+  const cells = new Map<string, number[]>();
   const nodeOf = (pt: Vec2): number => {
     const tol = eps * 50;
-    for (let k = 0; k < nodes.length; k++) if (Math.abs(nodes[k][0] - pt[0]) < tol && Math.abs(nodes[k][1] - pt[1]) < tol) return k;
+    const cx = Math.floor(pt[0] / tol);
+    const cy = Math.floor(pt[1] / tol);
+    let best = -1;
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        for (const k of cells.get(`${cx + dx},${cy + dy}`) ?? []) if (Math.abs(nodes[k][0] - pt[0]) < tol && Math.abs(nodes[k][1] - pt[1]) < tol && (best < 0 || k < best)) best = k;
+    if (best >= 0) return best;
     nodes.push(pt);
+    const key = `${cx},${cy}`;
+    const list = cells.get(key);
+    if (list) list.push(nodes.length - 1);
+    else cells.set(key, [nodes.length - 1]);
     return nodes.length - 1;
   };
   let pieces: Piece[] = [];
@@ -214,13 +227,16 @@ function compute(entities: SketchEntity[]): Arrangement {
 
   // ---- the same stretch drawn twice counts once
   {
-    const seen = new Map<string, Vec2>();
+    // (Kept by their two ends: only pieces between the same two nodes are compared.)
+    const seen = new Map<string, Vec2[]>();
     pieces = pieces.filter((pc) => {
       const key = pc.n0 < pc.n1 ? `${pc.n0}:${pc.n1}` : `${pc.n1}:${pc.n0}`;
       const mid = pc.poly[Math.floor(pc.poly.length / 2)];
       const m = pc.poly.length > 2 ? mid : [(pc.poly[0][0] + pc.poly[1][0]) / 2, (pc.poly[0][1] + pc.poly[1][1]) / 2] as Vec2;
-      for (const [k, q] of seen) if (k.split("#")[0] === key && Math.hypot(q[0] - m[0], q[1] - m[1]) < eps * 1e3) return false;
-      seen.set(`${key}#${seen.size}`, m);
+      const had = seen.get(key);
+      if (had?.some((q) => Math.hypot(q[0] - m[0], q[1] - m[1]) < eps * 1e3)) return false;
+      if (had) had.push(m);
+      else seen.set(key, [m]);
       return true;
     });
   }
@@ -290,15 +306,36 @@ function compute(entities: SketchEntity[]): Arrangement {
   const faces = cycles.filter((c) => c.area > minArea);
   const outers = cycles.filter((c) => c.area <= minArea);
   const holes = new Map<(typeof faces)[number], typeof outers>();
+  // (Each face's box first: a plate with hundreds of holes tested every hole's
+  // outline against every other hole's, point by point.)
+  const boxes = faces.map((f) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of f.poly) {
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    return [x0, y0, x1, y1];
+  });
+  const compOf = faces.map(comp);
   for (const o of outers) {
     const p = o.poly[0];
+    const co = comp(o);
     let best: (typeof faces)[number] | null = null;
-    for (const f of faces) {
-      if (comp(f) === comp(o)) continue;
+    for (let k = 0; k < faces.length; k++) {
+      const f = faces[k];
+      const b = boxes[k];
+      if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) continue;
+      if (best && f.area >= best.area) continue;
+      if (compOf[k] === co) continue;
       if (!pointInPoly(p, f.poly)) continue;
-      if (!best || f.area < best.area) best = f;
+      best = f;
     }
-    if (best) holes.set(best, [...(holes.get(best) ?? []), o]);
+    if (!best) continue;
+    const list = holes.get(best);
+    if (list) list.push(o);
+    else holes.set(best, [o]);
   }
 
   const toLoop = (c: { hs: number[]; poly: Vec2[] }): Loop => ({

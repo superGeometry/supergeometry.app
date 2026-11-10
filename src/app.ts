@@ -479,8 +479,8 @@ export class App implements AppContext {
       return true;
     });
     this.refreshHighlights();
+    // (Once: the selection tool's own refresh was run a second time after this.)
     this.tool.refresh?.();
-    if (this.tool === this.selectTool) this.selectTool.refresh();
     this.renderHistory();
     this.items.render(r);
     this.showVariableTags();
@@ -541,12 +541,28 @@ export class App implements AppContext {
     });
   }
 
+  /** What the History rows were last made from (everything a row shows). */
+  private historyShown = "";
+
   private renderHistory(): void {
-    // The rows are rebuilt: a hover on an old row is over.
-    this.view.setStepHover(null);
     const warnings = new Map<string, string>();
     for (const b of this.openBodies(this.result)) warnings.set(b.id.split(":")[0], `${b.name}: not closed - ${b.openEdges.length} open edge(s)`);
     for (const n of this.result?.notes ?? []) warnings.set(n.featureId, warnings.has(n.featureId) ? `${warnings.get(n.featureId)} ${n.message}` : n.message);
+    // The same rows as are there: left as they are (every step of a drag's
+    // preview rebuilt the whole list - 5 ms for 200 steps, far more on a phone).
+    const doc = this.store.doc;
+    const shown = JSON.stringify([
+      doc.features.map((f) => [f.id, f.name, f.type, f.suppressed ? 1 : 0, f.type === "sketch" ? (f.log ?? 0) : 0]),
+      this.result?.errors ?? [],
+      this.tool.editingId ?? this.tool.activeSketch ?? null,
+      [...warnings],
+      doc.hidden,
+      doc.historyGroups ?? [],
+    ]);
+    if (shown === this.historyShown) return;
+    this.historyShown = shown;
+    // The rows are rebuilt: a hover on an old row is over.
+    this.view.setStepHover(null);
     this.ui.renderHistory(this.store.doc.features, this.result?.errors ?? [], this.tool.editingId ?? this.tool.activeSketch ?? null, {
       edit: (id) => this.editFeature(id),
       hover: (id) => this.view.setStepHover(id ? this.stepTargets(id) : null),
