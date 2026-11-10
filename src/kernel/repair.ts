@@ -6,7 +6,7 @@
 // open edges, hair-thin faces dropped and their slot closed, faces split on
 // one surface merged, skins made solid, inside-out solids turned round.
 
-import { assembleWire, cast, getOC, makeCompound, makeFace, measureArea, measureVolume, type Shape3D } from "replicad";
+import { assembleWire, cast, getOC, makeCompound, makeFace, makeLine, makeThreePointArc, measureArea, measureVolume, type Shape3D, type Wire } from "replicad";
 import { unify } from "./faceEdit";
 import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from "./health";
 
@@ -67,6 +67,78 @@ function sizeOf(s: Shape3D): number {
 type Fix = { label: string; run: (s: Shape3D, size: number) => Shape3D | null };
 
 /** Faces → shell(s) by sewing at `tol`; every closed shell → a solid (turned outward). */
+/**
+ * Flat faces with an edge next to nothing in length (the end of a sliver
+ * that was closed: two roundings that meet, 4 mm each side of an 8 mm
+ * block) made again without it, their outline's two neighbours brought
+ * together. Left in, that speck is an edge to pick, and one the engine
+ * stumbles on in every later cut and fillet there. Null: none to drop.
+ */
+function withoutSpecks(s: Shape3D, tol: number): Shape3D | null {
+  type P = [number, number, number];
+  const far = (p: P, q: P) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+  const remade = (w: Wire): Wire => {
+    const all = w.edges.map((e) => ({ e, a: e.startPoint.toTuple() as P, b: e.endPoint.toTuple() as P, m: e.pointAt(0.5).toTuple() as P, type: e.geomType as string, speck: e.length < tol, moved: false }));
+    const specks = all.filter((x) => x.speck);
+    if (!specks.length) return w;
+    // The ends that were on a speck: both at its middle now.
+    const snap = (p: P): P | null => {
+      for (const k of specks) if (far(p, k.a) < tol || far(p, k.b) < tol) return [(k.a[0] + k.b[0]) / 2, (k.a[1] + k.b[1]) / 2, (k.a[2] + k.b[2]) / 2];
+      return null;
+    };
+    const rest = all.filter((x) => !x.speck);
+    for (const x of rest) {
+      const [a, b] = [snap(x.a), snap(x.b)];
+      if (!a && !b) continue;
+      if (x.type !== "LINE" && x.type !== "CIRCLE") throw new Error("not a line or an arc");
+      x.a = a ?? x.a;
+      x.b = b ?? x.b;
+      x.moved = true;
+    }
+    // In order round the outline (each begins where the one before ends).
+    const chain = [rest.shift()!];
+    while (rest.length) {
+      const end = chain[chain.length - 1].b;
+      let i = rest.findIndex((x) => far(x.a, end) < tol);
+      if (i < 0) {
+        i = rest.findIndex((x) => far(x.b, end) < tol);
+        if (i < 0) throw new Error("the outline doesn't close");
+        [rest[i].a, rest[i].b] = [rest[i].b, rest[i].a];
+      }
+      chain.push(rest.splice(i, 1)[0]);
+    }
+    return assembleWire(chain.map((x) => (!x.moved ? x.e : x.type === "LINE" ? makeLine(x.a, x.b) : makeThreePointArc(x.a, x.m, x.b))));
+  };
+  let any = false;
+  const faces = s.faces.map((f) => {
+    if (f.geomType !== "PLANE" || !f.edges.some((e) => e.length < tol)) return f.wrapped;
+    try {
+      const made = makeFace(remade(f.clone().outerWire()), f.clone().innerWires().map(remade));
+      any = true;
+      return made.wrapped;
+    } catch {
+      return f.wrapped;
+    }
+  });
+  return any ? sewToSolid(faces, tol) : null;
+}
+
+/** Faces on the same surface to within `tol` made one (null: it can't be done). */
+function merged(s: Shape3D, tol: number): Shape3D | null {
+  const oc = getOC();
+  const u = new oc.ShapeUpgrade_UnifySameDomain(s.wrapped, true, true, false);
+  try {
+    u.SetLinearTolerance(tol);
+    u.SetAngularTolerance(1e-5);
+    u.Build();
+    return cast(u.Shape()) as Shape3D;
+  } catch {
+    return null;
+  } finally {
+    u.delete();
+  }
+}
+
 function sewToSolid(faces: unknown[], tol: number): Shape3D | null {
   const oc = getOC();
   const sw = new oc.BRepBuilderAPI_Sewing(tol, true, true, true, false);
@@ -195,7 +267,26 @@ const FIXES: Fix[] = [
         return Math.min(...[b.width, b.height, b.depth].filter((x) => x > 0), size * 1e-3);
       }));
       const kept = s.faces.filter((_, i) => !thin[i]).map((f) => f.wrapped);
-      return sewToSolid(kept, Math.min(size * 1e-3, Math.max(size * 1e-6, width * 2)));
+      const tol = Math.min(size * 1e-3, Math.max(size * 1e-6, width * 2));
+      const closed = sewToSolid(kept, tol);
+      if (!closed) return null;
+      // The sliver's ends are still there, as edges next to nothing in length on the faces it ended at.
+      try {
+        const clean = withoutSpecks(closed, tol);
+        if (clean && !clean.edges.some((e) => e.length < tol)) {
+          // What the sliver lay between is one surface but for its width (the two
+          // roundings of a full round: one half cylinder): one face, with no line down it.
+          const joined = merged(clean, tol);
+          const one = joined && FIXES[0].run(joined, size);
+          const v = measureVolume(closed);
+          const good = (x: Shape3D) => shapeValid(x) && !openEdges(x).length && Math.abs(measureVolume(x) - v) < Math.abs(v) * 1e-4;
+          if (one && one.faces.length < clean.faces.length && good(one)) return one;
+          if (good(clean)) return clean;
+        }
+      } catch {
+        // as it is, then
+      }
+      return closed;
     },
   },
   {

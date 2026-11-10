@@ -22,10 +22,16 @@ interface Tagged {
   keys: (string | null)[];
   /** Faces by hash, for faces a step left as they were. */
   byHash: Map<number, { face: Face; i: number }[]>;
+  /**
+   * The step a face used to be put down to, where that was another body's
+   * (see tagBody): what projects saved before then name it by.
+   */
+  alias?: (string | undefined)[];
 }
 
 const tags = new WeakMap<Shape3D, Tagged>();
 const edgeTags = new WeakMap<Shape3D, string[][]>();
+const oldEdgeTags = new WeakMap<Shape3D, string[][] | null>();
 
 const r4 = (v: number) => {
   const x = Math.round(v * 1e4) / 1e4;
@@ -88,23 +94,36 @@ function surfaceKey(face: Face): string | null {
 /**
  * Tag the faces of a body a step made or changed. `from`: the bodies it was
  * made from (the same body before the step, and those the step worked on).
+ *
+ * `others`: bodies that were there but had no part in it. A new face on the
+ * same plane as a face of one of them (every body standing on the ground, a
+ * block as tall as the one beside it) used to be put down to that body's
+ * step: change that body and steps on this one lost their faces. It is this
+ * step's now; the old answer is kept beside it, for projects saved with it.
  */
-export function tagBody(shape: Shape3D, step: string, from: Shape3D[]): void {
+export function tagBody(shape: Shape3D, step: string, from: Shape3D[], others: Shape3D[] = []): void {
   if (tags.has(shape)) return;
-  const hashes = new Map<number, { face: Face; step: string; key: string | null }[]>();
-  const byKey = new Map<string, string>();
+  const hashes = new Map<number, { face: Face; step: string; key: string | null; alias?: string }[]>();
+  const byKey = new Map<string, { step: string; alias?: string }>();
   for (const s of from) {
     const t = tags.get(s);
     if (!t || s === shape) continue;
     for (const list of t.byHash.values())
       for (const { face, i } of list) {
         const h = face.hashCode;
-        hashes.set(h, [...(hashes.get(h) ?? []), { face, step: t.steps[i], key: t.keys[i] }]);
+        hashes.set(h, [...(hashes.get(h) ?? []), { face, step: t.steps[i], key: t.keys[i], alias: t.alias?.[i] }]);
       }
-    t.keys.forEach((k, i) => k && !byKey.has(k) && byKey.set(k, t.steps[i]));
+    t.keys.forEach((k, i) => k && !byKey.has(k) && byKey.set(k, { step: t.steps[i], alias: t.alias?.[i] }));
+  }
+  const oldKey = new Map<string, string>();
+  for (const s of others) {
+    const t = tags.get(s);
+    if (!t || s === shape || from.includes(s)) continue;
+    t.keys.forEach((k, i) => k && !oldKey.has(k) && oldKey.set(k, t.alias?.[i] ?? t.steps[i]));
   }
   const faces = shape.faces;
   const out: Tagged = { steps: [], keys: [], byHash: new Map() };
+  const alias: (string | undefined)[] = [];
   faces.forEach((face, i) => {
     const h = face.hashCode;
     out.byHash.set(h, [...(out.byHash.get(h) ?? []), { face, i }]);
@@ -112,18 +131,37 @@ export function tagBody(shape: Shape3D, step: string, from: Shape3D[]): void {
     if (same) {
       out.steps.push(same.step);
       out.keys.push(same.key);
+      alias.push(same.alias);
       return;
     }
     const key = surfaceKey(face);
     out.keys.push(key);
-    out.steps.push((key && byKey.get(key)) ?? step);
+    const kept = key ? byKey.get(key) : undefined;
+    out.steps.push(kept?.step ?? step);
+    alias.push(kept ? kept.alias : key ? oldKey.get(key) : undefined);
   });
+  if (alias.some((a) => a !== undefined)) out.alias = alias;
   tags.set(shape, out);
+}
+
+/** The step each face used to be put down to, where that differs (see tagBody); undefined: none does. */
+export function faceAliases(shape: Shape3D): (string | undefined)[] | undefined {
+  return tags.get(shape)?.alias;
 }
 
 /** The step that made each face of a body (undefined: not tagged). */
 export function faceSteps(shape: Shape3D): string[] | undefined {
   return tags.get(shape)?.steps;
+}
+
+/** Edge steps as projects saved before faces were told apart from other bodies' name them (undefined: the same as edgeSteps). */
+export function oldEdgeSteps(shape: Shape3D): string[][] | undefined {
+  const known = oldEdgeTags.get(shape);
+  if (known !== undefined) return known ?? undefined;
+  const t = tags.get(shape);
+  const out = t?.alias ? stepsOfEdges(shape, t.steps.map((s, i) => t.alias![i] ?? s)) : null;
+  oldEdgeTags.set(shape, out);
+  return out ?? undefined;
 }
 
 /** For each edge of a body, the steps of the faces it lies between (sorted; one for a seam). */
@@ -132,6 +170,12 @@ export function edgeSteps(shape: Shape3D): string[][] | undefined {
   if (known) return known;
   const steps = faceSteps(shape);
   if (!steps) return undefined;
+  const out = stepsOfEdges(shape, steps);
+  edgeTags.set(shape, out);
+  return out;
+}
+
+function stepsOfEdges(shape: Shape3D, steps: string[]): string[][] {
   const edges = shape.edges;
   const buckets = new Map<number, { i: number; s: Set<string> }[]>();
   edges.forEach((e, i) => buckets.set(e.hashCode, [...(buckets.get(e.hashCode) ?? []), { i, s: new Set<string>() }]));
@@ -144,7 +188,6 @@ export function edgeSteps(shape: Shape3D): string[][] | undefined {
   });
   const out: string[][] = new Array(edges.length).fill(null).map(() => []);
   for (const list of buckets.values()) for (const { i, s } of list) out[i] = [...s].sort();
-  edgeTags.set(shape, out);
   return out;
 }
 
@@ -246,5 +289,5 @@ export function inheritTags(from: Shape3D, copy: Shape3D): void {
   if (faces.length !== t.steps.length) return;
   const byHash = new Map<number, { face: Face; i: number }[]>();
   faces.forEach((face, i) => byHash.set(face.hashCode, [...(byHash.get(face.hashCode) ?? []), { face, i }]));
-  tags.set(copy, { steps: t.steps, keys: t.keys, byHash });
+  tags.set(copy, { steps: t.steps, keys: t.keys, byHash, alias: t.alias });
 }

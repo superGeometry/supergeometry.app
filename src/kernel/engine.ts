@@ -61,7 +61,7 @@ import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
-import { edgeOrigins, edgeSteps, faceOrigins, faceSteps, inheritTags, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
+import { edgeOrigins, edgeSteps, faceAliases, faceOrigins, faceSteps, inheritTags, oldEdgeSteps, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
 import { closestOnEntity } from "../sketch/regions";
 
 import { cylinderOf, deleteFace,
@@ -493,10 +493,13 @@ async function run(features: Feature[], saved = false) {
             }
           }
           // Which step made each face: kept from what it was made from, this step's own otherwise.
-          const from = [...touched.map((id) => ctx.bodies.get(id)!), ...copies.values()];
+          // (Bodies the step names; the others were only there - see tagBody.)
+          const named = touchedBodies(f, ctx, false);
+          const from = [...named.map((id) => ctx.bodies.get(id)!), ...named.flatMap((id) => (copies.has(id) ? [copies.get(id)!] : []))];
+          const others = touched.filter((id) => !named.includes(id)).map((id) => ctx.bodies.get(id)!);
           for (const [id, body] of out.bodies) {
             const was = ctx.bodies.get(id);
-            if (body !== was) tagBody(body, f.id, was ? [was, ...from] : from);
+            if (body !== was) tagBody(body, f.id, was ? [was, ...from] : from, was ? others.filter((o) => o !== was) : others);
           }
           if (editNotes.length) entry.note = [...new Set(editNotes)].join(" ");
           // Anything but a move/scale changing a freeform body makes it an ordinary body.
@@ -723,7 +726,10 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       for (const e of f.edges) byBody.set(e.body, [...(byBody.get(e.body) ?? []), e]);
       for (const [bodyId, refs] of byBody) {
         const body = need(bodies, bodyId);
-        const edges = refs.map((r) => resolveEdge(body, r, true));
+        // (An edge next to nothing in length - the end of a sliver, picked with the
+        // rest of a face's outline before such ends were cleared away - isn't one to round.)
+        const real = refs.filter((r) => r.length > 1e-4);
+        const edges = (real.length ? real : refs).map((r) => resolveEdge(body, r, true));
         let result: Shape3D | null = null;
         const edge = (r: number) => (f.type === "fillet" ? body.fillet(r, (finder) => finder.inList(edges)) : body.chamfer(r, (finder) => finder.inList(edges)));
         try {
@@ -2765,16 +2771,19 @@ function resolveFace(body: Shape3D, ref: FaceRef, only?: (f: Face) => boolean): 
   const size = Math.sqrt(ref.area) || 1;
   let best: { face: Face; score: number } | null = null;
   // Only faces made by the step that made the one picked (see provenance.ts).
-  const steps = ref.step ? faceSteps(body) : undefined;
+  let steps = ref.step ? faceSteps(body) : undefined;
   const faces = body.faces;
-  if (steps && !faces.some((_, i) => steps[i] === ref.step)) throw new Error(FACE_GONE);
+  // (Saved when a face on another body's plane was put down to that body's step: found by that.)
+  const old = steps && !steps.includes(ref.step!) ? faceAliases(body) : undefined;
+  if (old) steps = steps!.map((s, i) => old[i] ?? s);
+  if (steps && !faces.some((_, i) => steps![i] === ref.step)) throw new Error(FACE_GONE);
   // The one made from the same sketch curve, if that can be told: wherever it
   // is now. (Cut in two since: the nearer piece, below.)
   const origins = steps && ref.curve ? faceOrigins(body) : undefined;
   const same = origins ? faces.filter((face, i) => steps![i] === ref.step && origins[i] === ref.curve && (!only || only(face))) : [];
   if (same.length === 1) return same[0];
   for (const [i, face] of faces.entries()) {
-    if (steps && steps[i] !== ref.step) continue;
+    if (steps && steps![i] !== ref.step) continue;
     if (same.length && origins![i] !== ref.curve) continue;
     if (only && !only(face)) continue;
     const fi = faceInfo(face);
@@ -2796,9 +2805,11 @@ function resolveEdge(body: Shape3D, ref: EdgeRef, rounding = false): Edge {
   const size = ref.length || 1;
   let best: { edge: Edge; score: number } | null = null;
   // Only edges between faces made by the same steps as the one picked.
-  const steps = ref.steps ? edgeSteps(body) : undefined;
+  let steps = ref.steps ? edgeSteps(body) : undefined;
   const seams = rounding && steps ? seamEdges(body) : undefined;
   const all = body.edges;
+  // (Saved with a face put down to another body's step: found by that.)
+  if (steps && !steps.some((s, i) => sameSteps(s, ref.steps!) && !seams?.[i])) steps = oldEdgeSteps(body) ?? steps;
   if (steps && !all.some((_, i) => sameSteps(steps[i], ref.steps!) && !seams?.[i])) throw new Error(EDGE_GONE);
   // The one between the same two faces (by the sketch curves they came from), wherever it is now.
   const origins = steps && ref.curves ? edgeOrigins(body) : undefined;
@@ -2891,7 +2902,7 @@ function slivers(s: Shape3D): number {
  * The bodies an edit may change: the ones it names - and, for a solid made
  * from a sketch or face that joins/cuts whatever it runs into, all of them.
  */
-function touchedBodies(f: Feature, ctx: Ctx): string[] {
+function touchedBodies(f: Feature, ctx: Ctx, all = true): string[] {
   const named = new Set<string>();
   const walk = (v: unknown, key = ""): void => {
     if (Array.isArray(v)) return v.forEach((x) => walk(x, key));
@@ -2903,7 +2914,7 @@ function touchedBodies(f: Feature, ctx: Ctx): string[] {
   };
   walk(f);
   const mode = (f as { mode?: string }).mode;
-  if ((f.type === "extrude" || f.type === "revolve" || f.type === "sweep" || f.type === "loft") && mode && mode !== "new") for (const id of ctx.bodies.keys()) named.add(id);
+  if (all && (f.type === "extrude" || f.type === "revolve" || f.type === "sweep" || f.type === "loft") && mode && mode !== "new") for (const id of ctx.bodies.keys()) named.add(id);
   return [...named].filter((id) => ctx.bodies.has(id));
 }
 
