@@ -25,6 +25,7 @@ import {
   makePolygon,
   makeSolid,
   measureArea,
+  measureShapeVolumeProperties,
   measureDistanceBetween,
   measureVolume,
   revolution,
@@ -69,7 +70,7 @@ import { cylinderOf, deleteFace,
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
-import type { BodyMesh, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
+import type { BodyMesh, BodyProps, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
 type Bodies = Map<string, Shape3D>;
 type SketchState = SketchFeature & { boundary: SketchEntity[] };
@@ -318,6 +319,32 @@ function damaged(v: unknown, key = "", depth = 0): boolean {
 const DAMAGED_TEXT = "This step's saved values are damaged or incomplete - open it and set them again, or delete it";
 
 // ------------------------------------------------------------------ public API
+
+/** Each body's volume, area, centre of mass and box, measured on the solid (for its mass, in BIM). */
+export async function bodyProperties(features: Feature[]): Promise<BodyProps[]> {
+  const { ctx, numbers } = await run(features);
+  const names = bodyNames(features, [...ctx.bodies.keys()], numbers);
+  return [...ctx.bodies.entries()].map(([id, s]) => {
+    let volume = 0;
+    let center: Vec3 = [0, 0, 0];
+    try {
+      const p = measureShapeVolumeProperties(s);
+      volume = Math.abs(p.volume);
+      center = p.centerOfMass;
+      p.delete();
+    } catch {
+      // an open surface: no volume
+    }
+    let area = 0;
+    try {
+      area = measureArea(s);
+    } catch {
+      area = 0;
+    }
+    const [lo, hi] = s.boundingBox.bounds as [Vec3, Vec3];
+    return { id, name: names.get(id) ?? id, volume, area, center, box: [lo, hi] };
+  });
+}
 
 export async function exportBodies(features: Feature[], format: ExportFormat, only?: string[]): Promise<Blob> {
   const { ctx, numbers } = await run(features);

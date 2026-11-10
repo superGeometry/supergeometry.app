@@ -4308,3 +4308,325 @@ input.scrubbing {
   white-space: nowrap;
   border: 0;
 }
+
+/* ---------------------------------------------------------------- BIM */
+.bim-card {
+  position: fixed;
+  right: calc(60px + var(--safe-r));
+  bottom: calc(10px + var(--safe-b));
+  width: 330px;
+  max-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+  z-index: 15;
+}
+/* Phones: above Undo and the tool bar (the card says what the hint would). */
+html[data-screen="phone"] .bim-card {
+  left: calc(8px + var(--safe-l));
+  right: calc(8px + var(--safe-r));
+  bottom: calc(118px + var(--safe-b));
+  width: auto;
+  max-height: 40vh;
+}
+html[data-screen="phone"] body.bim-open .hint {
+  display: none;
+}
+.bim-bodies {
+  max-height: 30%;
+  min-height: 44px;
+  overflow-y: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bim-body,
+.bim-material-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.bim-body:hover,
+.bim-material-pick:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.bim-body.on,
+.bim-material.on .bim-material-pick {
+  background: var(--accent-soft);
+}
+.bim-swatch {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.bim-body-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.bim-body-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bim-sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+.bim-mass {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.bim-picked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 6px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin: 6px 0;
+}
+.bim-search {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font: inherit;
+  margin-bottom: 6px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.bim-materials {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 80px;
+}
+.bim-class {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 8px 6px 2px;
+}
+.bim-material {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.bim-info {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--muted);
+  font-style: italic;
+  font-family: Georgia, serif;
+  cursor: pointer;
+}
+.bim-info.on {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.bim-data {
+  margin: 2px 6px 8px 30px;
+  font-size: 12px;
+}
+.bim-data-group {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 6px;
+}
+.bim-data-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The technical sheet: a document on paper. */
+.bim-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: #3a3c41;
+  display: flex;
+  flex-direction: column;
+}
+.bim-sheet-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: calc(6px + var(--safe-t)) calc(10px + var(--safe-r)) 6px calc(10px + var(--safe-l));
+  background: var(--chrome-solid);
+  border-bottom: 1px solid var(--line);
+}
+.bim-sheet-name {
+  flex: 1;
+  font-weight: 600;
+}
+.bim-paper {
+  flex: 1;
+  overflow: auto;
+  margin: 14px auto;
+  width: min(1050px, calc(100% - 20px));
+  background: #fff;
+  color: #1c1d20;
+  padding: 22px 26px 30px;
+  border-radius: 4px;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.35);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.bim-paper .bim-sub,
+.bim-paper .bim-data-group {
+  color: #6b6f78;
+}
+.bim-paper .bim-data-row {
+  border-bottom-color: #e3e4e8;
+}
+.bim-title-block {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1.5px solid #1c1d20;
+}
+.bim-tb-field {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px;
+  border-right: 1px solid #1c1d20;
+  border-bottom: 1px solid #1c1d20;
+  min-width: 0;
+}
+.bim-tb-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b6f78;
+}
+.bim-tb-value {
+  font-weight: 600;
+  min-height: 20px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  width: 100%;
+}
+input.bim-tb-value:focus {
+  outline: 1px solid var(--accent);
+}
+.bim-h {
+  font-size: 15px;
+  margin: 22px 0 8px;
+}
+.bim-warn {
+  background: #fff4dc;
+  border: 1px solid #e8c77a;
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+}
+.bim-table-wrap {
+  overflow-x: auto;
+}
+.bim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.bim-table th,
+.bim-table td {
+  border: 1px solid #c9cbd1;
+  padding: 4px 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+.bim-table th {
+  background: #eef0f3;
+  font-weight: 600;
+}
+.bim-total td {
+  font-weight: 600;
+  border-top: 1.5px solid #1c1d20;
+}
+.bim-material-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.bim-material-card {
+  border: 1px solid #c9cbd1;
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.bim-material-card .bim-data {
+  margin: 4px 0 0;
+}
+.bim-material-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bim-paper .bim-swatch {
+  border-color: #9a9ea6;
+}
+.bim-foot {
+  margin-top: 22px;
+  font-size: 11px;
+  color: #6b6f78;
+}
+@media print {
+  body.printing-sheet > *:not(.bim-sheet) {
+    display: none !important;
+  }
+  body.printing-sheet {
+    overflow: visible;
+    height: auto;
+    background: #fff;
+  }
+  body.printing-sheet .bim-sheet {
+    position: static;
+    background: #fff;
+  }
+  body.printing-sheet .bim-sheet-bar {
+    display: none;
+  }
+  body.printing-sheet .bim-paper {
+    overflow: visible;
+    box-shadow: none;
+    margin: 0;
+    width: auto;
+    padding: 0;
+  }
+}

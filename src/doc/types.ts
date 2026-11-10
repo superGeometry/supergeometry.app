@@ -522,6 +522,47 @@ export interface ProjectDoc {
   colors?: Record<string, string>;
   /** See-through bodies: opacity 0–1 by body id (missing: solid). */
   opacity?: Record<string, number>;
+  /** BIM: the material of each body (a material id, by body id). */
+  materials?: Record<string, string>;
+  /** BIM: the project's own materials (beside the library's). */
+  customMaterials?: MaterialDef[];
+  /** BIM: what the title block of the technical sheet and the drawings says. */
+  info?: ProjectInfo;
+}
+
+/** The title block: who made it, for whom, which revision. */
+export interface ProjectInfo {
+  author?: string;
+  company?: string;
+  number?: string;
+  revision?: string;
+}
+
+/**
+ * A real material (see src/bim/materials.ts). Strengths in MPa, stiffness in
+ * GPa, density in kg/m³, conductivity in W/(m·K), specific heat in J/(kg·K),
+ * expansion in µm/(m·K). What isn't known is left out.
+ */
+export interface MaterialDef {
+  id: string;
+  name: string;
+  category: string;
+  /** The standard the grade is defined in (or the data comes from). */
+  standard?: string;
+  note?: string;
+  /** How a body of it shows: "#rrggbb", and how see-through (glass). */
+  color: string;
+  opacity?: number;
+  density: number;
+  youngs?: number;
+  poisson?: number;
+  yield?: number;
+  tensile?: number;
+  compressive?: number;
+  bending?: number;
+  expansion?: number;
+  conductivity?: number;
+  specificHeat?: number;
 }
 
 /** The body colours offered by the Color tool (first = default). */

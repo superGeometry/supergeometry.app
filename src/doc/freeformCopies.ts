@@ -145,6 +145,7 @@ export function detachFreeformCopy(doc: ProjectDoc, bodyId: string, newId: strin
     names: Object.fromEntries(Object.entries(doc.names ?? {}).map(([k, v]) => [renameIn(`"${k}"`, bodyId, newId).slice(1, -1), v])),
   };
   if (doc.colors) out.colors = Object.fromEntries(Object.entries(doc.colors).map(([k, v]) => [renameIn(`"${k}"`, bodyId, newId).slice(1, -1), v]));
+  if (doc.materials) out.materials = Object.fromEntries(Object.entries(doc.materials).map(([k, v]) => [renameIn(`"${k}"`, bodyId, newId).slice(1, -1), v]));
   // The copy's name in Items stays what it was.
   if (!out.names?.[newId] && doc.names?.[bodyId]) out.names = { ...out.names, [newId]: doc.names[bodyId] };
   return { doc: out, id: newId };

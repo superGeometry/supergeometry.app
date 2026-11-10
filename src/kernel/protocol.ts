@@ -89,18 +89,32 @@ export interface RegenResult {
   memoryMB?: number;
 }
 
+/** A body's physical properties, measured on the solid itself (mm, mm², mm³). */
+export interface BodyProps {
+  id: string;
+  name: string;
+  volume: number;
+  area: number;
+  /** Centre of mass (of the shape, as if all of one material). */
+  center: Vec3;
+  /** Its box: lowest corner, highest corner. */
+  box: [Vec3, Vec3];
+}
+
 /** "mesh": each body as triangles, as finely as an STL (for a 3MF), JSON: { id, positions, indices }[]. */
 export type ExportFormat = "stl" | "step" | "mesh";
 
 export type Request =
   | { type: "init" }
   | { type: "regenerate"; features: Feature[]; saved?: boolean }
-  | { type: "export"; features: Feature[]; format: ExportFormat; bodies?: string[] };
+  | { type: "export"; features: Feature[]; format: ExportFormat; bodies?: string[] }
+  | { type: "properties"; features: Feature[] };
 
 export type Response =
   | { type: "ready" }
   | { type: "regenerated"; result: RegenResult }
   | { type: "exported"; blob: Blob }
+  | { type: "properties"; bodies: BodyProps[] }
   | { type: "error"; message: string };
 
 export interface Envelope<T> {

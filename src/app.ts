@@ -19,6 +19,8 @@ import type { ExportFormat, RegenResult } from "./kernel/protocol";
 import { settings } from "./settings";
 import { PinLayer } from "./tools/annotate";
 import { MeasureTool } from "./tools/measure";
+import { BimTool } from "./bim/bimTool";
+import { openSheet } from "./bim/sheet";
 import { ItemsPanel } from "./ui/items";
 import { OffsetEdgeOp } from "./tools/offsetEdge";
 import { faceFreeformTool } from "./tools/faceFreeform";
@@ -845,6 +847,19 @@ export class App implements AppContext {
           { id: "replace", label: "Replace Face", icon: "replaceFace", disabled: true, why: SOON },
           { id: "proje", label: "Project as Edge", icon: "projectEdge", disabled: true, why: SOON },
           { id: "wrap", label: "Wrap & Emboss", icon: "wrap", disabled: true, why: SOON },
+        ],
+      },
+      {
+        // The project as a building information model: real materials, and
+        // from them the technical sheet and the drawings.
+        id: "bim",
+        label: "BIM",
+        icon: "bim",
+        children: [
+          { id: "bimMaterials", label: "Materials", icon: "bim", sub: "a real material for each body", run: () => this.setTool(new BimTool(this)) },
+          { id: "bimSheet", label: "Technical Sheet", icon: "sheet", sub: "parts list, masses, data", run: () => void openSheet(this) },
+          { id: "bimDrawings", label: "Drawings", icon: "drawing", sub: "views with dimensions", run: () => this.ui.toast("Drawings are being built - next") },
+          { id: "bimAssemblies", label: "Assemblies", icon: "assembly", sub: "parts placed and joined", run: () => this.ui.toast("Assemblies are being built - after Drawings") },
         ],
       },
     ];

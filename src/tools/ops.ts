@@ -933,6 +933,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       d.names = doc.names;
       d.hidden = doc.hidden;
       if (doc.colors) d.colors = doc.colors;
+      if (doc.materials) d.materials = doc.materials;
     });
     this.app.setTool(null);
     this.app.setSelection(f.bodies.map((b) => ({ kind: "body" as const, body: ids.get(`${f.id}:${b}:0`) ?? `${f.id}:${b}:0` })));

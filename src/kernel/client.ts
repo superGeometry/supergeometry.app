@@ -1,5 +1,5 @@
 import type { Feature } from "../doc/types";
-import type { BodyMesh, Envelope, ExportFormat, RegenResult, Request, Response } from "./protocol";
+import type { BodyMesh, BodyProps, Envelope, ExportFormat, RegenResult, Request, Response } from "./protocol";
 
 /** Promise-based wrapper around the kernel worker. */
 export class KernelClient {
@@ -206,6 +206,14 @@ export class KernelClient {
     });
     this.meshes = new Map(bodies.map((b) => [b.key, b]));
     return { ...result, bodies };
+  }
+
+  /** Each body's volume, area, centre of mass and box (for BIM). */
+  async properties(features: Feature[]): Promise<BodyProps[]> {
+    await this.ready;
+    const r = await this.call({ type: "properties", features });
+    if (r.type === "properties") return r.bodies;
+    throw new Error(r.type === "error" ? r.message : "Could not measure the bodies");
   }
 
   async export(features: Feature[], format: ExportFormat, bodies?: string[]): Promise<Blob> {

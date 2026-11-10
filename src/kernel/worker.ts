@@ -4,7 +4,7 @@
 import opencascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { setOC } from "replicad";
-import { errorText, exportBodies, regenerate, resetKernel, withFreshKernel } from "./engine";
+import { bodyProperties, errorText, exportBodies, regenerate, resetKernel, withFreshKernel } from "./engine";
 import type { BodyMesh, Envelope, Request, Response } from "./protocol";
 
 /**
@@ -25,7 +25,17 @@ async function load(): Promise<void> {
   sent = new Set();
 }
 
-self.onmessage = async (e: MessageEvent<Envelope<Request>>) => {
+/**
+ * One message at a time: a rebuild waits at points (it awaits), and another
+ * message taken then (an export, the bodies' properties) ran the same steps
+ * at once, on the same cache.
+ */
+let queue: Promise<void> = Promise.resolve();
+self.onmessage = (e: MessageEvent<Envelope<Request>>) => {
+  queue = queue.then(() => handle(e));
+};
+
+async function handle(e: MessageEvent<Envelope<Request>>): Promise<void> {
   const { id, msg } = e.data;
   const reply = (r: Response) => (self as DedicatedWorkerGlobalScope).postMessage({ id, msg: r } satisfies Envelope<Response>);
   try {
@@ -52,9 +62,12 @@ self.onmessage = async (e: MessageEvent<Envelope<Request>>) => {
       case "export":
         reply({ type: "exported", blob: await withFreshKernel(load, () => exportBodies(msg.features, msg.format, msg.bodies)) });
         break;
+      case "properties":
+        reply({ type: "properties", bodies: await withFreshKernel(load, () => bodyProperties(msg.features)) });
+        break;
     }
   } catch (err) {
     console.error(err);
     reply({ type: "error", message: errorText(err) });
   }
-};
+}

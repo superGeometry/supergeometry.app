@@ -23,6 +23,8 @@ import { AxisOp, bodyCenter as centerOf, ConnectOp, EdgeOp, ExtrudeOp, FillToPla
 import { SketchTool, type SketchKind } from "./sketch";
 import { BooleanOp } from "./booleanOp";
 import { pickColor } from "../ui/colorPicker";
+import { BimTool } from "../bim/bimTool";
+import { materialOf } from "../bim/materials";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, type AppContext, type Sel, type Tool } from "./tool";
 
 const SOON = "Coming soon";
@@ -684,6 +686,8 @@ export class SelectTool implements Tool {
         })(),
         ],
       },
+      // BIM: what it is made of (its colour, mass and technical data come with it).
+      { id: "material", label: "Material", icon: "bim", sub: materialOf(app.store.doc, bodies[0])?.name ?? "None", run: () => app.setTool(new BimTool(app)) },
       {
         // Next to Color: how see-through the body is.
         id: "opacity",
@@ -959,6 +963,7 @@ export class SelectTool implements Tool {
       d.hidden = out.doc.hidden;
       d.names = out.doc.names;
       if (out.doc.colors) d.colors = out.doc.colors;
+      if (out.doc.materials) d.materials = out.doc.materials;
     });
     return this.app.store.find<FreeformFeature>(id);
   }
