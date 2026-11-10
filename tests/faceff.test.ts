@@ -192,4 +192,23 @@ check("points moved sideways as well as up", !r.errors && !r.bad, `${r.errors}${
   }
 }
 
+// The shaped face is the cage's own smooth surface (a patch per cell of the
+// cage, like a freeform body's), not one surface fitted through points: the
+// same every time, and its border exactly on the face's edges.
+{
+  const patches = (id: string) => (debugBodies().get(id) as Shape3D).faces.filter((f) => f.geomType === "BSPLINE_SURFACE").length;
+  r = await build([...box, ff(ref, cage, up(6))]);
+  check("a raised box top: one patch for each cell of its cage", !r.errors && !r.bad && patches("A") === cage.faces.length, `${r.errors}${r.bad} ${patches("A")} patches, ${cage.faces.length} cells`);
+  const round = body("C", [{ id: "c", kind: "circle", center: [0, 0], radius: 15 }], 10);
+  const c = faceOf((await build(round)).r, "C", [0, 0, 1]);
+  r = await build([...round, ff(c.ref, c.cage, up(6))]);
+  const rim = (debugBodies().get("C") as Shape3D).edges.filter((e) => Math.abs(e.pointAt(0.3).z - 10) < 1e-6 && Math.abs(Math.hypot(e.pointAt(0.3).x, e.pointAt(0.3).y) - 15) < 0.03).length;
+  check("a round top: patches too, meeting the round wall at its rim", !r.errors && !r.bad && patches("C") === c.cage.faces.length && rim > 0, `${r.errors}${r.bad} ${patches("C")} patches, ${c.cage.faces.length} cells`);
+  const L = body("L", [{ id: "p", kind: "polyline", points: [[0, 0], [40, 0], [40, 15], [15, 15], [15, 40], [0, 40]], closed: true }], 10);
+  const l = faceOf((await build(L)).r, "L", [0, 0, 1], 7);
+  const corner = l.cage.verts.some((p) => Math.abs(p[0] + l.ref.center[0] - 15) < 1e-6 && Math.abs(p[1] + l.ref.center[1] - 15) < 1e-6);
+  r = await build([...L, ff(l.ref, l.cage, () => [0, 0, 3])]);
+  check("an L's cage has a point on its inward corner; raised, the surface keeps to the L", corner && !r.errors && !r.bad && patches("L") === l.cage.faces.length, `${r.errors}${r.bad} corner ${corner}, ${patches("L")} patches`);
+}
+
 process.exit(failed ? 1 : 0);

@@ -10,6 +10,8 @@ import { assembleWire, basicFaceExtrusion, getOC, loft, makeFace, makeBSplineApp
 import type { PlaneDef, Vec3 } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, xDirFor } from "../geom";
 import { subShapes } from "./health";
+import { borderPieces, borderThrough, boundaryEdges, limitPoints, subdivide, type Cage } from "../freeform/cage";
+import { cageToShape } from "./freeform";
 
 interface Cyl {
   c: Vec3;
@@ -283,6 +285,155 @@ export function freeformFace(body: Shape3D, F: Face, points: Vec3[]): Shape3D {
     }
   }
   throw new Error("This face can't be shaped like that (it would fold over itself) - move the points less, or not past each other");
+}
+
+/**
+ * The face made the cage's own smooth surface (the same patches a freeform
+ * body is made of), its border on the face's edges: no fitting through
+ * points, so it comes out the same every time and on any outline the cage
+ * follows. Throws when the cage's border isn't on the face's edge (a cage
+ * from before its border followed the face's corners) or the body doesn't
+ * close round the new surface - the fitted way is tried then.
+ */
+export function sheetFace(body: Shape3D, F: Face, cage: Cage): Shape3D {
+  const oc = getOC();
+  const ex = new oc.TopExp_Explorer(F.wrapped, oc.TopAbs_ShapeEnum.TopAbs_WIRE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+  let wires = 0;
+  for (; ex.More(); ex.Next()) wires++;
+  ex.delete();
+  if (wires !== 1) throw new Error("Faces with holes in them can't be made freeform yet");
+  const size = Math.sqrt(measureArea(F));
+  const tol = Math.max(5e-3, size * 1e-3);
+  // The face's edge, finely (a round edge as short straight pieces).
+  const edge: [Vec3, Vec3][] = F.edges.flatMap((e) => {
+    const pts = Array.from({ length: 257 }, (_, i) => e.pointAt(i / 256).toTuple() as Vec3);
+    return pts.slice(1).map((q, i) => [pts[i], q] as [Vec3, Vec3]);
+  });
+  const onPiece = (p: Vec3, [a, b]: [Vec3, Vec3]): Vec3 => {
+    const d = sub(b, a);
+    const l = dot(d, d);
+    return add(a, scale(d, l > 0 ? Math.max(0, Math.min(1, dot(sub(p, a), d) / l)) : 0));
+  };
+  const nearest = (p: Vec3, pieces: [Vec3, Vec3][]) => {
+    let best: Vec3 = p;
+    let d = Infinity;
+    for (const q of pieces) {
+      const at = onPiece(p, q);
+      const e = dist(p, at);
+      if (e < d) ((d = e), (best = at));
+    }
+    return { at: best, d };
+  };
+  // The cage's border points onto the edge itself (they were laid on the
+  // face as drawn on screen: a round edge's are a hair inside it).
+  const borderVerts = new Set(boundaryEdges(cage).flat());
+  const verts = cage.verts.map((v, i) => {
+    if (!borderVerts.has(i)) return v;
+    const hit = nearest(v, edge);
+    if (hit.d > Math.max(0.2, size * 0.02)) throw new Error("border off the edge");
+    return hit.at;
+  });
+  const through = borderThrough({ verts, faces: cage.faces });
+  const s = subdivide(through.cage, 3, through.sharp);
+  s.points = limitPoints(s, through.sharp);
+  // Its border against the face's edge, both ways round.
+  const pieces = borderPieces(s);
+  for (const [a, b] of edge) if (nearest(a, pieces).d > tol || nearest(b, pieces).d > tol) throw new Error("border off the edge");
+  for (const [a] of pieces) if (nearest(a, edge).d > tol) throw new Error("border off the edge");
+  // Seen along the face's normal, all of it over the face. By an inward
+  // corner of the outline a smooth surface swells a little past the edge (a
+  // lip over it; pushed in, a cut through the wall): those points are drawn
+  // back onto the edge, at their height. Far past it (a coarse cage whose
+  // cells reach across the corner): not this way.
+  const n = norm(F.normalAt().toTuple() as Vec3);
+  const u = xDirFor(n);
+  const v = norm(cross(n, u));
+  const flat = edge.map(([a, b]) => [dot(a, u), dot(a, v), dot(b, u), dot(b, v)]);
+  const onBorder = new Set<Vec3>(pieces.flat());
+  for (const [k, q] of s.points.entries()) {
+    // (The border is on the edge already.)
+    if (onBorder.has(q)) continue;
+    const x = dot(q, u);
+    const y = dot(q, v);
+    let inside = false;
+    for (const [ax, ay, bx, by] of flat) if (ay > y !== by > y && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) inside = !inside;
+    if (inside) continue;
+    // (Counted along the other axis too: a ray through a corner of the outline, or along a piece of it, can miscount.)
+    let also = false;
+    for (const [ax, ay, bx, by] of flat) if (ax > x !== bx > x && y < ((by - ay) * (x - ax)) / (bx - ax) + ay) also = !also;
+    if (also) continue;
+    const h = dot(sub(q, edge[0][0]), n);
+    const hit = nearest(sub(q, scale(n, h)), edge);
+    if (hit.d > Math.max(0.5, size * 0.04)) throw new Error("spills over the edge");
+    // (A little inside the edge, not on it: the surface between the points mustn't touch the wall below.)
+    if (hit.d > tol / 4) s.points[k] = add(add(hit.at, scale(norm(sub(hit.at, sub(q, scale(n, h)))), Math.max(0.05, size * 0.004))), scale(n, h));
+  }
+  const rim = edge;
+  const sheet = cageToShape(through.cage, 3, undefined, s);
+  const progress = new oc.Message_ProgressRange();
+  const sew = new oc.BRepBuilderAPI_Sewing(tol, true, true, true, false);
+  try {
+    const others = body.faces.filter((f) => !f.isSame(F));
+    meetsOnlyAt(sheet.wrapped, others, rim, size);
+    for (const f of others) sew.Add(f.wrapped);
+    for (const f of sheet.faces) sew.Add(f.wrapped);
+    sew.Perform(progress);
+    const shells = subShapes(cast(sew.SewedShape()) as Shape3D, "SHELL");
+    if (shells.length !== 1) throw new Error("sew");
+    const fix = new oc.ShapeFix_Solid();
+    const made = fix.SolidFromShell(shells[0]);
+    fix.delete();
+    oc.BRepLib.OrientClosedSolid(oc.TopoDS.Solid(made));
+    const solid = cast(made) as Shape3D;
+    if (!(measureVolume(solid) > 0)) throw new Error("volume");
+    const check = new oc.BRepCheck_Analyzer(solid.wrapped, true, false);
+    const ok = check.IsValid();
+    check.delete();
+    if (!ok) throw new Error("invalid");
+    return solid;
+  } finally {
+    sew.delete();
+    progress.delete();
+  }
+}
+
+/**
+ * A new surface may meet the rest of the body only along the old face's
+ * edges (`rim`): a point pushed through the far side passes the body's
+ * checks, but crosses itself. Throws when it meets it anywhere else.
+ */
+function meetsOnlyAt(surface: unknown, others: Face[], rim: [Vec3, Vec3][], size: number): void {
+  const away = (p: Vec3) => {
+    let d = Infinity;
+    for (const [a, b] of rim) {
+      const v = sub(b, a);
+      const l = dot(v, v);
+      d = Math.min(d, dist(p, add(a, scale(v, l > 0 ? Math.max(0, Math.min(1, dot(sub(p, a), v) / l)) : 0))));
+    }
+    return d;
+  };
+  const oc = getOC();
+  const progress = new oc.Message_ProgressRange();
+  try {
+    for (const other of others) {
+      const sec = new oc.BRepAlgoAPI_Section();
+      try {
+        sec.Init1(surface as never);
+        sec.Init2(other.wrapped);
+        sec.Build(progress);
+        const cut = cast(sec.Shape());
+        for (const e of "edges" in cut ? cut.edges : [])
+          for (const t of [0.25, 0.5, 0.75]) {
+            const p = e.pointAt(t).toTuple() as Vec3;
+            if (away(p) > Math.max(0.05, size * 0.01)) throw new Error("crosses");
+          }
+      } finally {
+        sec.delete();
+      }
+    }
+  } finally {
+    progress.delete();
+  }
 }
 
 function filledFace(body: Shape3D, F: Face, points: Vec3[], degree: number): Shape3D {

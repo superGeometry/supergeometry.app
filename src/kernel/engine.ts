@@ -63,7 +63,7 @@ import { edgeOrigins, edgeSteps, faceOrigins, faceSteps, inheritTags, sameSteps,
 import { closestOnEntity } from "../sketch/regions";
 
 import { cylinderOf, deleteFace,
- deleteFaces as deleteBodyFaces, editNotes, freeformFace, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
+ deleteFaces as deleteBodyFaces, editNotes, freeformFace, sheetFace, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
@@ -99,6 +99,8 @@ interface CacheEntry {
 }
 
 const meshCache = new WeakMap<Shape3D, BodyMesh>();
+/** The Freeform Face steps of the project being rebuilt (their faces are patches of one smooth surface). */
+let smoothSteps = new Set<string>();
 /** The next mesh's key (see BodyMesh.key). */
 let meshKey = 1;
 const importCache = new Map<string, Shape3D>();
@@ -269,6 +271,7 @@ async function run(features: Feature[], saved = false) {
   const notes: FeatureError[] = [];
   let ctx: Ctx = { bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map() };
   switchedOff = new Set(features.filter((f) => f.suppressed).map((f) => f.id));
+  smoothSteps = new Set(features.filter((f) => f.type === "faceFreeform").map((f) => f.id));
   let key = "";
   const next: CacheEntry[] = [];
   let hit = true;
@@ -789,6 +792,16 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // Through the cage's surface twice as fine as the cage; if the face
       // can't be filled through that many points (a fine cage on an outline
       // with inward corners), through the cage's own.
+      if (!faceCagePoints(cage, n, false)) return;
+      // The cage's own smooth surface, its border on the face's edges. (A cage
+      // whose border doesn't follow the edges - laid before it did - or a
+      // body that won't close round it: fitted through its points instead.)
+      try {
+        bodies.set(f.face.body, staysClosed(body, sheetFace(body, face, cage)));
+        return;
+      } catch (err) {
+        if (isFault(err) || (err instanceof Error && /holes in them/.test(err.message))) throw err;
+      }
       let last: unknown;
       for (const fine of [true, false]) {
         const pts = faceCagePoints(cage, n, fine);
@@ -2594,6 +2607,16 @@ function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
   const angularTolerance = 0.25;
   const m = shape.mesh({ tolerance, angularTolerance });
   const e = shape.meshEdges({ tolerance, angularTolerance });
+  // A face made freeform is many patches, smooth across the lines between
+  // them: those lines aren't edges to show or pick (drawn as nothing).
+  const made = edgeSteps(shape);
+  if (made && smoothSteps.size && e.edgeGroups.reduce((n, g) => n + g.count, 0) * 3 === e.lines.length) {
+    const seams = seamEdges(shape);
+    e.edgeGroups.forEach((g, i) => {
+      if (made[i]?.length !== 1 || !smoothSteps.has(made[i][0]) || seams[i]) return;
+      for (let k = 1; k < g.count; k++) for (let c = 0; c < 3; c++) e.lines[(g.start + k) * 3 + c] = e.lines[g.start * 3 + c];
+    });
+  }
   // Group order matches shape.faces / shape.edges order (verified); ids are hashes.
   const mesh: BodyMesh = {
     id,

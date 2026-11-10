@@ -59,8 +59,34 @@ function outline(tris: [Vec3, Vec3, Vec3][], uv: (p: Vec3) => P2): P2[] {
   return signed(outer) < 0 ? outer.reverse() : outer;
 }
 
-/** `n` + 1 points evenly along a polyline (by length), both ends included. */
+/**
+ * `n` + 1 points along a polyline, both ends included: evenly by length, then
+ * the one nearest each corner on the way moved onto it - the grid's border
+ * goes through the face's corners (an L's inward one too), so the smooth
+ * surface laid on the grid can have its border on the face's edges.
+ */
 function resample(pts: P2[], n: number): P2[] {
+  const out = evenly(pts, n);
+  const acc = [0];
+  for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const total = acc[acc.length - 1];
+  const used = new Set<number>();
+  for (let i = 1; i < pts.length - 1 && total > 0; i++) {
+    const d1 = [pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]];
+    const d2 = [pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]];
+    const turn = Math.abs(Math.atan2(d1[0] * d2[1] - d1[1] * d2[0], d1[0] * d2[0] + d1[1] * d2[1]));
+    if (turn < (25 * Math.PI) / 180) continue;
+    // (The sample whose place along the side is nearest: the order of the points stays.)
+    const k = Math.round((acc[i] / total) * n);
+    if (k < 1 || k > n - 1 || used.has(k)) continue;
+    used.add(k);
+    out[k] = [pts[i][0], pts[i][1]];
+  }
+  return out;
+}
+
+/** `n` + 1 points evenly along a polyline (by length), both ends included. */
+function evenly(pts: P2[], n: number): P2[] {
   const acc = [0];
   for (let i = 1; i < pts.length; i++) acc.push(acc[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
   const total = acc[acc.length - 1];

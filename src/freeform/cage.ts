@@ -157,8 +157,12 @@ export interface Subdivided {
 const add3 = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const mul3 = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k];
 
-/** Catmull–Clark, `levels` times. Boundary edges (open sheets) stay sharp B-spline curves. */
-export function subdivide(cage: Cage, levels = 3): Subdivided {
+/**
+ * Catmull–Clark, `levels` times. Boundary edges (open sheets) stay sharp
+ * B-spline curves. `sharp`: border points the border passes through as a
+ * corner (a sheet laid over a face: the face's own corners).
+ */
+export function subdivide(cage: Cage, levels = 3, sharp?: Set<number>): Subdivided {
   let points = cage.verts.map((p) => [...p] as Vec3);
   let grids = cage.faces.map((f) => [
     [f[0], f[3]],
@@ -203,7 +207,8 @@ export function subdivide(cage: Cage, levels = 3): Subdivided {
       const boundary = es.filter((k) => edgeFaces.get(k)!.length === 1);
       if (boundary.length >= 2) {
         // Boundary: a cubic B-spline along the border; a corner (two faces meet at an angle) stays put.
-        if (fs.length === 1) return p;
+        // (Told which points are corners: only those - a sheet's own corner on a round edge isn't one.)
+        if (sharp ? sharp.has(v) : fs.length === 1) return p;
         const others = boundary.slice(0, 2).map((k) => {
           const [a, b] = k.split(",").map(Number);
           return points[a === v ? b : a];
@@ -247,7 +252,7 @@ export function subdivide(cage: Cage, levels = 3): Subdivided {
  * Inside: (n²·p + 4·Σ edge neighbours + Σ diagonal neighbours) / (n(n+5)).
  * Along an open border: (prev + 4·p + next) / 6. Corners of a sheet stay.
  */
-export function limitPoints(s: Subdivided): Vec3[] {
+export function limitPoints(s: Subdivided, sharp?: Set<number>): Vec3[] {
   const P = s.points;
   const quads: number[][] = [];
   for (const g of s.grids) for (let i = 0; i < s.n; i++) for (let j = 0; j < s.n; j++) quads.push([g[i][j], g[i + 1][j], g[i + 1][j + 1], g[i][j + 1]]);
@@ -274,7 +279,7 @@ export function limitPoints(s: Subdivided): Vec3[] {
     const bd = [...new Set(border[v])];
     if (bd.length) {
       // On an open border: a corner (one face) stays; otherwise the border curve's point.
-      if (faces[v] === 1 || bd.length !== 2) return p;
+      if ((sharp ? sharp.has(v) : faces[v] === 1) || bd.length !== 2) return p;
       return [0, 1, 2].map((k) => (P[bd[0]][k] + 4 * p[k] + P[bd[1]][k]) / 6) as Vec3;
     }
     const n = nbE[v].size;
@@ -285,6 +290,62 @@ export function limitPoints(s: Subdivided): Vec3[] {
     const d = n * (n + 5);
     return [out[0] / d, out[1] / d, out[2] / d];
   });
+}
+
+/**
+ * A sheet whose smooth border runs THROUGH the cage's border points (as
+ * drawn, a smooth surface's border only comes near them) and turns a corner
+ * where they do: the cage with its border points moved to where they pull the
+ * border onto the old ones, and the corners. For a sheet laid over a face,
+ * whose border points lie on the face's edge - so does the surface's then.
+ */
+export function borderThrough(cage: Cage): { cage: Cage; sharp: Set<number> } {
+  const next = new Map<number, number>();
+  for (const [a, b] of boundaryEdges(cage)) next.set(a, b);
+  const prev = new Map<number, number>();
+  for (const [a, b] of next) prev.set(b, a);
+  const P = cage.verts;
+  const sharp = new Set<number>();
+  for (const [v, n] of next) {
+    const p = prev.get(v);
+    if (p === undefined) continue;
+    const d1 = [0, 1, 2].map((k) => P[v][k] - P[p][k]);
+    const d2 = [0, 1, 2].map((k) => P[n][k] - P[v][k]);
+    const l = Math.hypot(...d1) * Math.hypot(...d2);
+    const cos = l > 0 ? (d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2]) / l : 1;
+    if (cos < Math.cos((25 * Math.PI) / 180)) sharp.add(v);
+  }
+  // The border's point at a control point is (before + 4·it + after) / 6:
+  // solved for the control points that put it on the old point (it settles in
+  // a few rounds: each point depends mostly on itself).
+  const C = P.map((p) => [...p] as Vec3);
+  const free = [...next.keys()].filter((v) => !sharp.has(v) && prev.has(v));
+  for (let round = 0; round < 60; round++)
+    for (const v of free) {
+      const a = C[prev.get(v)!];
+      const b = C[next.get(v)!];
+      C[v] = [0, 1, 2].map((k) => (6 * P[v][k] - a[k] - b[k]) / 4) as Vec3;
+    }
+  return { cage: { verts: C, faces: cage.faces }, sharp };
+}
+
+/** The points along a subdivided sheet's open border, as pieces [from, to]. */
+export function borderPieces(s: Subdivided): [Vec3, Vec3][] {
+  const count = new Map<string, [number, number]>();
+  const seen = new Map<string, number>();
+  for (const g of s.grids)
+    for (let i = 0; i < s.n; i++)
+      for (let j = 0; j < s.n; j++) {
+        const q = [g[i][j], g[i + 1][j], g[i + 1][j + 1], g[i][j + 1]];
+        for (let k = 0; k < 4; k++) {
+          const a = q[k];
+          const b = q[(k + 1) % 4];
+          const key = a < b ? `${a},${b}` : `${b},${a}`;
+          seen.set(key, (seen.get(key) ?? 0) + 1);
+          count.set(key, [a, b]);
+        }
+      }
+  return [...count].filter(([k]) => seen.get(k) === 1).map(([, [a, b]]) => [s.points[a], s.points[b]]);
 }
 
 // ------------------------------------------------------- subdivision plan
