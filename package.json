@@ -9,7 +9,10 @@
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "tsx scripts/check.ts",
+    "render": "tsx scripts/render.ts",
+    "live": "tsx scripts/live.ts"
   },
   "dependencies": {
     "@fontsource/bebas-neue": "^5.3.0",

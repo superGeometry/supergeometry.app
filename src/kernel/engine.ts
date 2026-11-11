@@ -61,7 +61,7 @@ import { carried } from "../sketch/follow";
 import { cageToShape } from "./freeform";
 import { evenly, gentle, guideCurve, oriented, plainSpine, smoothed } from "../freeform/connect";
 import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from "./health";
-import { healthOf, repairShape } from "./repair";
+import { healthOf, isHealthy, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
@@ -77,7 +77,7 @@ import { anchorOf, freeformFaces, meshViews, viewEdge } from "./viewLines";
 import { entitiesWire, regionFaces, regionHoleWires, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
 import { imprint, onFace as linesOnFace, seenFrom, wrapOnto } from "./wrap";
-import type { BodyMesh, BodyProps, ProjectedView, ViewBody, ViewEdge, ViewSpec, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
+import type { BodyHealth, BodyMesh, BodyProps, ProjectedView, ViewBody, ViewEdge, ViewSpec, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
 type Bodies = Map<string, Shape3D>;
 type SketchState = SketchFeature & { boundary: SketchEntity[] };
@@ -357,6 +357,27 @@ export async function bodyProperties(features: Feature[]): Promise<BodyProps[]> 
     const [lo, hi] = s.boundingBox.bounds as [Vec3, Vec3];
     return { id, name: names.get(id) ?? id, volume, area, center, box: [lo, hi] };
   });
+}
+
+/** Each body's health: valid, closed, solids, faces, volume (for checking a model from the console or the command line). */
+export async function bodyHealth(features: Feature[]): Promise<BodyHealth[]> {
+  const { ctx, numbers } = await run(features);
+  const names = bodyNames(features, [...ctx.bodies.keys()], numbers);
+  return [...ctx.bodies.entries()].map(([id, s]) => healthReport(id, names.get(id) ?? id, s));
+}
+
+/** One body's health (also for tests and scripts that hold the solid). */
+export function healthReport(id: string, name: string, s: Shape3D): BodyHealth {
+  const h = healthOf(s);
+  let edges = 0;
+  let box: [Vec3, Vec3] = [[0, 0, 0], [0, 0, 0]];
+  try {
+    edges = s.edges.length;
+    box = s.boundingBox.bounds as [Vec3, Vec3];
+  } catch {
+    // a broken shape: what healthOf found is the news
+  }
+  return { id, name, ...h, edges, box, healthy: isHealthy(h) };
 }
 
 /**

@@ -572,7 +572,12 @@ export class UI {
     document.getElementById("ctx-menu")?.remove();
   }
 
+  /** The last few toasts (the console's sg.state() shows them: they fade before you can read them). */
+  readonly recentToasts: string[] = [];
+
   toast(text: string, kind: "info" | "error" = "info"): void {
+    this.recentToasts.push(text);
+    if (this.recentToasts.length > 20) this.recentToasts.shift();
     this.toastEl.textContent = text;
     this.toastEl.className = `show ${kind}`;
     // Never over what's being typed into (a value box, the numpad, the tool panel): then it shows up top.

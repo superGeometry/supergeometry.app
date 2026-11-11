@@ -1,5 +1,5 @@
 import type { Feature } from "../doc/types";
-import type { BodyMesh, BodyProps, ProjectedView, ViewSpec, Envelope, ExportFormat, RegenResult, Request, Response } from "./protocol";
+import type { BodyHealth, BodyMesh, BodyProps, ProjectedView, ViewSpec, Envelope, ExportFormat, RegenResult, Request, Response } from "./protocol";
 
 /**
  * The steps as the engine needs them: a reference image without its picture
@@ -232,6 +232,14 @@ export class KernelClient {
     const r = await this.call({ type: "properties", features: lean(features) });
     if (r.type === "properties") return r.bodies;
     throw new Error(r.type === "error" ? r.message : "Could not measure the bodies");
+  }
+
+  /** Each body's health: valid, closed, solids, faces, volume (the console's sg.health()). */
+  async health(features: Feature[]): Promise<BodyHealth[]> {
+    await this.ready;
+    const r = await this.call({ type: "health", features: lean(features) });
+    if (r.type === "health") return r.bodies;
+    throw new Error(r.type === "error" ? r.message : "Could not check the bodies");
   }
 
   async export(features: Feature[], format: ExportFormat, bodies?: string[]): Promise<Blob> {

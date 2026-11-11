@@ -103,6 +103,28 @@ export interface BodyProps {
   box: [Vec3, Vec3];
 }
 
+/**
+ * A body's health, measured on the solid (for checking a model from the
+ * console or the command line): valid, closed, how many solids and faces.
+ */
+export interface BodyHealth {
+  id: string;
+  name: string;
+  valid: boolean;
+  solids: number;
+  shells: number;
+  openEdges: number;
+  /** Hair-thin faces. */
+  thin: number;
+  volume: number;
+  faces: number;
+  edges: number;
+  /** Its box: lowest corner, highest corner. */
+  box: [Vec3, Vec3];
+  /** Valid, closed, no hair-thin faces, a real volume. */
+  healthy: boolean;
+}
+
 /** A view to draw: the model seen from `dir` (towards the viewer), `xAxis` to the right on the paper. */
 export interface ViewSpec {
   id: string;
@@ -149,6 +171,7 @@ export type Request =
   | { type: "regenerate"; features: Feature[]; saved?: boolean }
   | { type: "export"; features: Feature[]; format: ExportFormat; bodies?: string[] }
   | { type: "properties"; features: Feature[] }
+  | { type: "health"; features: Feature[] }
   | { type: "drawing"; features: Feature[]; views: ViewSpec[]; bodies?: string[] };
 
 export type Response =
@@ -156,6 +179,7 @@ export type Response =
   | { type: "regenerated"; result: RegenResult }
   | { type: "exported"; blob: Blob }
   | { type: "properties"; bodies: BodyProps[] }
+  | { type: "health"; bodies: BodyHealth[] }
   | { type: "drawing"; views: ProjectedView[] }
   | { type: "error"; message: string };
 

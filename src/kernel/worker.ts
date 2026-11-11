@@ -4,7 +4,7 @@
 import opencascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { setOC } from "replicad";
-import { bodyProperties, projectViews, errorText, exportBodies, regenerate, resetKernel, withFreshKernel } from "./engine";
+import { bodyHealth, bodyProperties, projectViews, errorText, exportBodies, regenerate, resetKernel, withFreshKernel } from "./engine";
 import type { BodyMesh, Envelope, Request, Response } from "./protocol";
 
 /**
@@ -67,6 +67,9 @@ async function handle(e: MessageEvent<Envelope<Request>>): Promise<void> {
         break;
       case "properties":
         reply({ type: "properties", bodies: await withFreshKernel(load, () => bodyProperties(msg.features)) });
+        break;
+      case "health":
+        reply({ type: "health", bodies: await withFreshKernel(load, () => bodyHealth(msg.features)) });
         break;
     }
   } catch (err) {

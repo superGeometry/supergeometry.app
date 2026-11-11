@@ -1,6 +1,7 @@
 import "./style.css";
 import { App } from "./app";
 import { outerScrollbars } from "./ui/scrollbars";
+import { installDebug } from "./debug";
 
 // Update reloads with ?v=<time> so no stored copy is used; once loaded, the
 // address is plain again (it's what people copy to share the app).
@@ -18,3 +19,5 @@ outerScrollbars();
 const app = new App(document.getElementById("view") as HTMLCanvasElement);
 // Handy for debugging from the console.
 (window as unknown as { supergeometry: App }).supergeometry = app;
+// And sg: read and work the app from the console (sg.help()).
+installDebug(app);

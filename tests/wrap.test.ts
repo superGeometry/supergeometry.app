@@ -1,26 +1,13 @@
 // Run: npx tsx tests/wrap.test.ts - Project as Edge (a sketch drawn onto the
 // faces seen from it, or edges onto a face: the faces split along them) and
 // Wrap & Emboss (a sketch wrapped round a round face, raised or sunk).
-import opencascade from "replicad-opencascadejs";
-import { measureVolume, setOC } from "replicad";
+import { after, check, done, profile, rect, sketch, XY } from "./kit";
+import { measureVolume } from "replicad";
 import { debugBodies, regenerate } from "../src/kernel/engine";
 import { healthOf, isHealthy } from "../src/kernel/repair";
 import { arrangement, regionRef } from "../src/sketch/regions";
 import { projectRegions } from "../src/sketch/edit";
 import type { Feature, PlaneDef } from "../src/doc/types";
-
-setOC(await (opencascade as unknown as () => Promise<any>)());
-
-let failed = 0;
-const check = (name: string, ok: boolean, info = "") => {
-  if (!ok) failed++;
-  console.log(ok ? "ok  " : "FAIL", name, info);
-};
-
-const sketch = (id: string, plane: PlaneDef, es: any[]): Feature => ({ id, name: id, type: "sketch", plane, entities: es }) as Feature;
-const profile = (sk: string, es: any[]) => ({ kind: "profile" as const, sketch: sk, regions: arrangement(es).regions.map(regionRef) });
-const rect = (id: string, x0: number, y0: number, x1: number, y1: number) => ({ id, kind: "polyline", points: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], closed: true });
-const XY = (z: number): PlaneDef => ({ origin: [0, 0, z], xDir: [1, 0, 0], normal: [0, 0, 1] });
 
 // A 100 x 60 x 20 box.
 const boxEs = [rect("b", 0, 0, 100, 60)];
@@ -28,9 +15,8 @@ const box: Feature[] = [sketch("bs", XY(0), boxEs), { id: "B", name: "Box", type
 const circle = [{ id: "c", kind: "circle", center: [50, 30], radius: 10 }];
 
 async function bodyAfter(fs: Feature[], id: string): Promise<{ s: any; err?: string }> {
-  const r: any = await regenerate(fs);
-  const s = [...debugBodies()].find(([k]) => k === id)?.[1];
-  return { s, err: r.errors[0]?.message };
+  const { body, err } = await after(fs, id);
+  return { s: body, err };
 }
 const v0 = 100 * 60 * 20;
 
@@ -119,5 +105,4 @@ check("a plane across the axis: asked for one along it", /along the round face's
   check("two shapes side by side: the side they share drawn once (7 lines)", both.length === 7 && both.every((e) => e.kind === "line"), String(both.length));
 }
 
-console.log(failed ? `${failed} failed` : "all passed");
-process.exit(failed ? 1 : 0);
+done();
