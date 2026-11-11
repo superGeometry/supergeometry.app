@@ -166,12 +166,17 @@ export class EdgeAnglePlaneOp extends PlaneFromPicks {
   private c: CurvePick | null = null;
   private ref: PlaneDef | null = null;
   private angle = 45;
-  constructor(app: AppContext) {
+  /** `edge`: the straight edge picked before (Plane – Through Edge on an edge). */
+  constructor(app: AppContext, edge?: { body: string; edge: number; point: Vec3 }) {
     super(app, "Plane at Angle", "angle");
     this.slots = [
       curveSlot(app, "Edge (the plane turns about it)", () => this.c, (c) => ((this.c = c), this.sync()), true),
       planeSlot(app, "From face or plane (0°)", () => this.ref, (p) => ((this.ref = p), this.sync())),
     ];
+    if (edge) {
+      const c = curvePick(app, { kind: "edge", ...edge });
+      if (c?.line) (this.c = c), this.sync();
+    }
   }
   protected make(): PlaneDef | null {
     if (!this.c?.line) return null;

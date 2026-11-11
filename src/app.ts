@@ -1,6 +1,7 @@
 import { isTouchDevice } from "./device";
 import { circleAxis } from "./tools/slots";
 import { CurvePointPlaneOp, EdgeAnglePlaneOp, FacePointPlaneOp, ThreePointPlaneOp } from "./tools/planeOps";
+import { ImprintOp, WrapOp } from "./tools/wrapOps";
 import { DocStore, parseProject } from "./doc/store";
 import { SUPPORT, openSupport } from "./ui/support";
 import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, renameProject, setCurrentProject } from "./doc/library";
@@ -724,6 +725,10 @@ export class App implements AppContext {
         return this.setTool(new SplitOp(this, f.body, f as SplitFeature));
       case "fillToPlane":
         return this.setTool(new FillToPlaneOp(this, f.body, f as FillToPlaneFeature));
+      case "imprint":
+        return this.setTool(new ImprintOp(this, f.source ? { source: f.source } : { edges: f.edges ?? [] }, f));
+      case "wrap":
+        return this.setTool(new WrapOp(this, f.source, f));
       case "thread":
         return this.setTool(new ThreadOp(this, f.face, f.round ?? { r: 5, hole: false }, f));
       case "plane":
@@ -921,8 +926,8 @@ export class App implements AppContext {
             }),
           },
           { id: "replace", label: "Replace Face", icon: "replaceFace", disabled: true, why: SOON },
-          { id: "proje", label: "Project as Edge", icon: "projectEdge", disabled: true, why: SOON },
-          { id: "wrap", label: "Wrap & Emboss", icon: "wrap", disabled: true, why: SOON },
+          { id: "proje", label: "Project as Edge", icon: "projectEdge", beta: true, run: wait("Project as Edge (tap a sketch's shape)", ["profile"], () => src() && this.setTool(new ImprintOp(this, { source: src()! }))) },
+          { id: "wrap", label: "Wrap & Emboss", icon: "wrap", beta: true, run: wait("Wrap & Emboss (tap a sketch's shape)", ["profile"], () => src() && this.setTool(new WrapOp(this, src()!))) },
         ],
       },
       {

@@ -57,10 +57,12 @@ const LABELS: Record<FeatureType, string> = {
   connect: "Connect",
   faceFreeform: "Freeform Face",
   thread: "Thread",
+  imprint: "Project as Edge",
+  wrap: "Wrap & Emboss",
 };
 
 /** Steps still being tried out: shown with a BETA tag wherever they appear. */
-export const BETA_TYPES: ReadonlySet<string> = new Set(["connect", "faceFreeform"]);
+export const BETA_TYPES: ReadonlySet<string> = new Set(["connect", "faceFreeform", "imprint", "wrap"]);
 
 /**
  * Holds the document and its undo/redo history. Every change goes through

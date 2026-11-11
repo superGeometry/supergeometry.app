@@ -11,7 +11,7 @@
 //
 // This file makes the sheet (SVG, mm); drawing.ts shows it and edits it.
 
-import type { DrawingDetail, DrawingDim, DrawingMark, DrawingNote, DrawingOptions, DrawingSection, ProjectDoc, ProjectInfo } from "../doc/types";
+import type { DrawingDetail, DrawingDim, DrawingImage, DrawingMark, DrawingNote, DrawingOptions, DrawingSection, DrawingView, ProjectDoc, ProjectInfo, ViewOrient } from "../doc/types";
 import type { ProjectedView, ViewSpec } from "../kernel/protocol";
 import { trim, UNIT_MM, units } from "../units";
 import { fmtMass } from "./materials";
@@ -83,6 +83,9 @@ export function drawingOptions(doc: ProjectDoc) {
     sections: o.sections ?? [],
     details: o.details ?? [],
     marks: o.marks ?? [],
+    extra: o.extra ?? [],
+    isoScale: o.isoScale,
+    images: o.images ?? [],
   };
 }
 export type Opts = ReturnType<typeof drawingOptions>;
@@ -125,12 +128,78 @@ const v3 = {
 /** The way a section view sits from its view, on the paper: where its arrows point (first angle), the other way (third angle). */
 export const placeDir = (sec: DrawingSection, o: Opts): [number, number] => (o.angle === "first" ? sec.look : [-sec.look[0], -sec.look[1]]);
 
-/** What a view is (a base view, a section of one); null for one it can't say. */
+/** What a view is (a base view, a section of one, a view added by hand); null for one it can't say, or an isometric one (nothing is cut or projected square from those). */
 export function specOf(id: string, o: Opts, depth = 0): ViewSpec | null {
   const base = VIEW_SPECS.find((v) => v.id === id);
   if (base) return id === "iso" ? null : base;
+  if (depth >= 8) return null;
   const sec = o.sections.find((x) => x.id === id);
-  return sec && depth < 8 ? sectionSpec(sec, o, depth + 1) : null;
+  if (sec) return sectionSpec(sec, o, depth + 1);
+  const ex = o.extra.find((x) => x.id === id);
+  return ex && !isIsoView(ex) ? extraSpec(ex, o, depth + 1) : null;
+}
+
+/** The ways a base view can look: towards the eye from the model (Z up), and the paper's x. */
+export const ORIENTS: Record<ViewOrient, { dir: V3; xAxis: V3; name: string }> = {
+  front: { dir: [0, -1, 0], xAxis: [1, 0, 0], name: "Front" },
+  back: { dir: [0, 1, 0], xAxis: [-1, 0, 0], name: "Back" },
+  top: { dir: [0, 0, 1], xAxis: [1, 0, 0], name: "Top" },
+  bottom: { dir: [0, 0, -1], xAxis: [1, 0, 0], name: "Bottom" },
+  left: { dir: [-1, 0, 0], xAxis: [0, -1, 0], name: "Left" },
+  right: { dir: [1, 0, 0], xAxis: [0, 1, 0], name: "Right" },
+  "iso-fr": { dir: [1, -1, 1], xAxis: [1, 1, 0], name: "Isometric – Front Right" },
+  "iso-fl": { dir: [-1, -1, 1], xAxis: [1, -1, 0], name: "Isometric – Front Left" },
+  "iso-br": { dir: [1, 1, 1], xAxis: [-1, 1, 0], name: "Isometric – Back Right" },
+  "iso-bl": { dir: [-1, 1, 1], xAxis: [-1, -1, 0], name: "Isometric – Back Left" },
+};
+
+/** An added view seen from a corner: a base view of an isometric corner, or one projected to a corner of its view. */
+export const isIsoView = (v: DrawingView) => (v.orient ? v.orient.startsWith("iso") : !!(v.dir && v.dir[0] && v.dir[1]));
+
+/**
+ * An added view's direction. A base view: its own. A projection square on (a
+ * side of its view): first angle puts the view from the other side there,
+ * third angle the view from that side, lined up with its view the way the
+ * standard views are. A projection to a corner: the isometric view from that
+ * corner of its view (front view, up and right: from the front, right, top).
+ */
+export function extraSpec(v: DrawingView, o: Opts, depth = 0): ViewSpec | null {
+  if (v.orient) {
+    const r = ORIENTS[v.orient];
+    return r ? { id: v.id, dir: r.dir, xAxis: r.xAxis } : null;
+  }
+  if (!v.view || !v.dir || (!v.dir[0] && !v.dir[1])) return null;
+  const parent = specOf(v.view, o, depth);
+  if (!parent) return null;
+  const d = v3.unit(parent.dir as V3);
+  const X = v3.unit(parent.xAxis as V3);
+  const Y = v3.cross(d, X);
+  const [p0, p1] = [Math.sign(v.dir[0]), Math.sign(v.dir[1])];
+  const P3 = v3.sub(v3.mul(X, p0), v3.mul(Y, p1));
+  if (p0 && p1) {
+    const dir = v3.unit([d[0] + P3[0], d[1] + P3[1], d[2] + P3[2]]);
+    return { id: v.id, dir, xAxis: v3.unit(v3.cross(Y, dir)) };
+  }
+  const dir = o.angle === "first" ? v3.mul(P3, -1) : P3;
+  return { id: v.id, dir, xAxis: p1 ? X : v3.cross(Y, dir) };
+}
+
+/** What an added view is called on the sheet: the side it shows ("Back view"), or isometric. */
+export function extraName(v: DrawingView, o: Opts): string {
+  if (isIsoView(v)) return "Isometric view";
+  const sp = extraSpec(v, o);
+  if (!sp) return "View";
+  const d = v3.unit(sp.dir as V3);
+  for (const k of ["front", "back", "top", "bottom", "left", "right"] as ViewOrient[]) {
+    const r = ORIENTS[k].dir;
+    if (d[0] * r[0] + d[1] * r[1] + d[2] * r[2] > 0.9999) return `${ORIENTS[k].name} view`;
+  }
+  return "View";
+}
+
+/** Every view the sheet asks the kernel for, past the standard ones: sections, then the added views. */
+export function extraSpecs(o: Opts): ViewSpec[] {
+  return [...o.sections.map((s) => sectionSpec(s, o)), ...o.extra.map((v) => extraSpec(v, o))].filter((v): v is ViewSpec => !!v);
 }
 
 /**
@@ -192,6 +261,8 @@ const bh = (b: Box | null) => (b ? b[1][1] - b[0][1] : 0);
 
 export interface Placed {
   id: string;
+  /** An isometric view (no hidden lines, nothing measured on it). */
+  iso?: boolean;
   /** The drawn view its lines come from (a detail's: its view's), if not its own. */
   src?: string;
   /** A detail: the circle it is cut to, on the paper. */
@@ -300,17 +371,22 @@ export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: n
     // A standard one, unless the next standard one down is far smaller than one
     // in between (1:5 where 1:3 fits leaves most of the sheet empty).
     const ok = (s: number) => (front || top || sideBox ? orthoFits(s) : !!isoFor(s, 1));
-    const best = (list: number[]) => list.find((s) => ok(s) && (!iso || isoFor(s, 1 / 5)));
+    const best = (list: number[]) => list.find((s) => ok(s) && (!iso || o.isoScale || isoFor(s, 1 / 5)));
     const std = best(AUTO_SCALES);
     const any = best(SCALES);
     scale = (std && (!any || std >= any * 0.7) ? std : any) ?? AUTO_SCALES.find(ok) ?? AUTO_SCALES[AUTO_SCALES.length - 1];
   }
   const s = scale;
   const placed: Placed[] = ortho(s).map((v) => ({ id: v.id, x: v.x, y: v.y, s, box: v.box }));
-  const isoAt = isoFor(s, 1 / 20) ?? (iso ? { si: s, room: { x0: FRAME_L, y0: T, x1: R, y1: B } } : undefined);
+  // The isometric view at the scale it was given (where it fits, if it does), or the largest that fits.
+  const given = o.isoScale;
+  const isoAt =
+    iso && given
+      ? { si: given, room: isoRooms(s).find((r) => bw(iso) * given + 2 * ISO_PAD <= r.x1 - r.x0 && bh(iso) * given + 2 * ISO_PAD + 5 <= r.y1 - r.y0) ?? isoRooms(s)[0] ?? { x0: FRAME_L, y0: T, x1: R, y1: B } }
+      : (isoFor(s, 1 / 20) ?? (iso ? { si: s, room: { x0: FRAME_L, y0: T, x1: R, y1: B } } : undefined));
   if (iso && isoAt) {
     const { si, room } = isoAt;
-    placed.push({ id: "iso", x: (room.x0 + room.x1 - bw(iso) * si) / 2, y: (room.y0 + room.y1 - bh(iso) * si - 5) / 2, s: si, box: iso });
+    placed.push({ id: "iso", iso: true, x: (room.x0 + room.x1 - bw(iso) * si) / 2, y: (room.y0 + room.y1 - bh(iso) * si - 5) / 2, s: si, box: iso });
   }
   // Moved by hand: the front view takes the projected ones along; they move only along their line with it.
   const m = (k: string) => o.moved[k] ?? [0, 0];
@@ -320,34 +396,56 @@ export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: n
     p.x += gx + ox;
     p.y += gy + oy;
   }
-  // Sections, each lined up with its view, as far off it as it was put.
-  const waiting = o.sections.slice();
+  // Base views added by hand: where they were put, at their own scale.
+  const centred = (id: string, box: Box, at: [number, number], sc: number, isoView: boolean): Placed => ({ id, iso: isoView || undefined, x: at[0] - (bw(box) * sc) / 2, y: at[1] - (bh(box) * sc) / 2, s: sc, box });
+  for (const v of o.extra) {
+    const box = views.get(v.id)?.box;
+    if (v.orient && box) placed.push(centred(v.id, box, v.at ?? [(FRAME_L + R) / 2, (T + B) / 2], v.scale ?? s, isIsoView(v)));
+  }
+  // Sections and projections, each lined up with its view, as far off it as it
+  // was put (`gap`: from its view's edge to its middle - never so little that it
+  // would lie on its view, or a section on its arrows); a projection to a
+  // corner where it was put.
+  const aligned = (p: Placed, box: Box, pl: [number, number], gap: number, least: number): [number, number] => {
+    const w = bw(box) * p.s;
+    const h = bh(box) * p.s;
+    const pr = extent(p);
+    if (Math.abs(pl[1]) >= Math.abs(pl[0])) {
+      const g = Math.max(gap, h / 2 + least);
+      return [p.x + (box[0][0] - p.box[0][0]) * p.s, pl[1] > 0 ? pr.y1 + g - h / 2 : pr.y0 - g - h / 2];
+    }
+    const g = Math.max(gap, w / 2 + least);
+    return [pl[0] > 0 ? pr.x1 + g - w / 2 : pr.x0 - g - w / 2, p.y + (box[0][1] - p.box[0][1]) * p.s];
+  };
+  type Waiting = { id: string; view: string; place: (p: Placed, box: Box) => Placed };
+  const waiting: Waiting[] = [
+    ...o.sections.map((sec) => ({ id: sec.id, view: sec.view, place: (p: Placed, box: Box) => ({ id: sec.id, ...xy(aligned(p, box, placeDir(sec, o), sec.gap, 16)), s: p.s, box }) })),
+    ...o.extra
+      .filter((v) => !v.orient && v.view && v.dir)
+      .map((v) => ({
+        id: v.id,
+        view: v.view!,
+        place: (p: Placed, box: Box): Placed => {
+          if (isIsoView(v)) {
+            const pr = extent(p);
+            const sc = v.scale ?? p.s;
+            const at = v.at ?? [(pr.x0 + pr.x1) / 2 + Math.sign(v.dir![0]) * ((pr.x1 - pr.x0) / 2 + (bw(box) * sc) / 2 + 20), (pr.y0 + pr.y1) / 2 + Math.sign(v.dir![1]) * ((pr.y1 - pr.y0) / 2 + (bh(box) * sc) / 2 + 20)];
+            return centred(v.id, box, at, sc, true);
+          }
+          return { id: v.id, ...xy(aligned(p, box, v.dir!, v.gap ?? 0, 8)), s: p.s, box };
+        },
+      })),
+  ];
   for (let grew = true; grew; ) {
     grew = false;
     for (let i = 0; i < waiting.length; i++) {
-      const sec = waiting[i];
-      const p = placed.find((x) => x.id === sec.view);
-      const box = views.get(sec.id)?.box;
-      if (!p || !box) continue;
+      const w = waiting[i];
+      const p = placed.find((x) => x.id === w.view);
+      const box = views.get(w.id)?.box;
+      if (!p || !box || p.clip) continue;
       waiting.splice(i--, 1);
       grew = true;
-      const pl = placeDir(sec, o);
-      const w = bw(box) * p.s;
-      const h = bh(box) * p.s;
-      const pr = extent(p);
-      let x: number;
-      let y: number;
-      // `gap`: from its view's edge to its middle - never so little that it would lie on its view or its arrows.
-      if (Math.abs(pl[1]) >= Math.abs(pl[0])) {
-        x = p.x + (box[0][0] - p.box[0][0]) * p.s;
-        const g = Math.max(sec.gap, h / 2 + 16);
-        y = pl[1] > 0 ? pr.y1 + g - h / 2 : pr.y0 - g - h / 2;
-      } else {
-        y = p.y + (box[0][1] - p.box[0][1]) * p.s;
-        const g = Math.max(sec.gap, w / 2 + 16);
-        x = pl[0] > 0 ? pr.x1 + g - w / 2 : pr.x0 - g - w / 2;
-      }
-      placed.push({ id: sec.id, x, y, s: p.s, box });
+      placed.push(w.place(p, box));
     }
   }
   // Details: a circle of their view, bigger, where they were put.
@@ -364,6 +462,8 @@ export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: n
   });
   return { W, H, scale: s, isoScale: isoAt?.si, views: placed, side, fits };
 }
+
+const xy = (q: [number, number]) => ({ x: q[0], y: q[1] });
 
 /**
  * How many rows the parts list on the sheet has: all the parts, or - when
@@ -481,16 +581,16 @@ export function linearDim(A: [number, number], B: [number, number], offset: numb
  * out, arrows at its ends, the value outside its middle; the rays drawn on
  * (thin) when the arc lies beyond the edges.
  */
-export function angleDim(C: [number, number], A: [number, number], B: [number, number], R: number, label: string | DimLabel, width: number, color = "#000"): string {
+export function angleDim(C: [number, number], A: [number, number], B: [number, number], R: number, label: string | DimLabel, width: number, color = "#000", sweep?: number): string {
   const a1 = Math.atan2(A[1] - C[1], A[0] - C[0]);
-  const t = angleBetween(C, A, B);
+  const t = sweep ?? angleBetween(C, A, B);
   if (Math.abs(t) < 1e-6 || R < 1) return "";
   const a2 = a1 + t;
   const at = (a: number, r: number): [number, number] => [C[0] + Math.cos(a) * r, C[1] + Math.sin(a) * r];
   const thin = `stroke="${color}" stroke-width="${width}" fill="none"`;
   const P1 = at(a1, R);
   const P2 = at(a2, R);
-  let out = `<path d="M${f(P1[0])} ${f(P1[1])}A${f(R)} ${f(R)} 0 0 ${t > 0 ? 1 : 0} ${f(P2[0])} ${f(P2[1])}" ${thin}/>`;
+  let out = `<path d="M${f(P1[0])} ${f(P1[1])}A${f(R)} ${f(R)} 0 ${Math.abs(t) > Math.PI ? 1 : 0} ${t > 0 ? 1 : 0} ${f(P2[0])} ${f(P2[1])}" ${thin}/>`;
   for (const [a, Q] of [
     [a1, A],
     [a2, B],
@@ -612,10 +712,17 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
       : `M${FRAME_L} ${FRAME}H${R}V${B}H${FRAME_L}Z`;
     out.push(`<clipPath id="sheet-area"><path d="${area}"/></clipPath><g clip-path="url(#sheet-area)">`);
   }
+  // ---- Pictures (under the views).
+  for (const im of o.images) {
+    const sel = data.interactive && data.selected === im.id;
+    const svg = `<image href="${esc(im.src)}" x="${f(im.x)}" y="${f(im.y)}" width="${f(im.w)}" height="${f(im.h)}" preserveAspectRatio="none"/>${sel ? `<rect x="${f(im.x)}" y="${f(im.y)}" width="${f(im.w)}" height="${f(im.h)}" fill="none" stroke="${SEL}" stroke-width="0.4" stroke-dasharray="2 1"/>` : ""}`;
+    out.push(data.interactive ? `<g data-ann="${im.id}">${svg}</g>` : svg);
+  }
   for (const p of L.views) {
     const v = views.get(p.src ?? p.id);
     if (!v) continue;
-    const iso = p.id === "iso";
+    const iso = !!p.iso;
+    const ex = o.extra.find((x) => x.id === p.id);
     const c = color(`view:${p.id}`);
     const sec = o.sections.find((x) => x.id === p.id);
     const det = o.details.find((x) => x.id === p.id);
@@ -641,9 +748,9 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
       g.push(`<clipPath id="${cid}"><circle cx="${f(p.clip.c[0])}" cy="${f(p.clip.c[1])}" r="${f(p.clip.r)}"/></clipPath><g clip-path="url(#${cid})">${lines.join("")}</g>`);
       g.push(`<circle cx="${f(p.clip.c[0])}" cy="${f(p.clip.c[1])}" r="${f(p.clip.r)}" stroke="${c}" stroke-width="${lw.dims}" fill="none"/>`);
     } else g.push(...lines);
-    if (iso) {
-      const label = `Isometric view${L.isoScale !== L.scale ? ` (${scaleLabel(p.s)})` : ""}`;
-      g.push(text(p.x + (bw(p.box) * p.s) / 2, p.y + bh(p.box) * p.s + ISO_PAD + 2, label, 3, { anchor: "middle", fill: c }));
+    if (iso || ex) {
+      const label = `${ex ? extraName(ex, o) : "Isometric view"}${p.s !== L.scale ? ` (${scaleLabel(p.s)})` : ""}`;
+      g.push(text(p.x + (bw(p.box) * p.s) / 2, p.y + bh(p.box) * p.s + (iso ? ISO_PAD + 2 : 7), label, 3, { anchor: "middle", fill: c }));
     }
     if (sec) g.push(text((r.x0 + r.x1) / 2, r.y1 + 8, `${sec.letter}-${sec.letter}`, 5, { anchor: "middle", fill: c }));
     if (det) g.push(text((r.x0 + r.x1) / 2, r.y1 + 8, `${det.letter} (${scaleLabel(p.s)})`, 5, { anchor: "middle", fill: c }));
@@ -716,7 +823,7 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
   // ---- Balloons: item numbers of the parts list, each on the isometric view - or,
   // for a part hidden there, the first view it shows in. A part inside a
   // housing, seen in no view, points at its hidden lines.
-  const hosts = ["iso", "front", L.side, "top"].map((id) => placed.get(id)).filter((p): p is Placed => !!p);
+  const hosts = ["iso", "front", L.side, "top", ...o.extra.map((v) => v.id)].map((id) => placed.get(id)).filter((p): p is Placed => !!p);
   const byHost = new Map<Placed, { item: number; at: [number, number] }[]>();
   const spot = (r: PartRow) => {
     for (const p of hosts) {
@@ -726,7 +833,7 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     if (o.hidden)
       for (const p of hosts) {
         const b = views.get(p.id)?.bodies.find((x) => x.id === r.id);
-        if (p.id !== "iso" && b?.under) return { p, at: b.under };
+        if (!p.iso && b?.under) return { p, at: b.under };
       }
     return null;
   };
@@ -816,9 +923,82 @@ export function dimSVG(d: DrawingDim, p: Placed, o: Opts, color = "#000"): strin
     const C = toPaper(p, d.c);
     const A = toPaper(p, d.a);
     const B = toPaper(p, d.b);
-    return angleDim(C, A, B, d.offset, dimLabel(d, angleBetween(d.c, d.a, d.b), o), o.lines.dims, color);
+    const t = arcSweep(d.c, d.a, d.b, d.through);
+    return angleDim(C, A, B, d.offset, dimLabel(d, t, o), o.lines.dims, color, t);
   }
   return "";
+}
+
+/**
+ * The angle at c from a to b the way an arc goes from a through `through` to b
+ * (past 180° when it is the long way round); without `through`, the smaller
+ * way. Signed: positive turning clockwise on the paper.
+ */
+export function arcSweep(c: [number, number], a: [number, number], b: [number, number], through?: [number, number]): number {
+  const t = angleBetween(c, a, b);
+  if (!through) return t;
+  const m = angleBetween(c, a, through);
+  // `through` lies on the short way when it turns the same way, and less far.
+  const onShort = Math.sign(m) === Math.sign(t) && Math.abs(m) <= Math.abs(t);
+  if (onShort) return t;
+  return t > 0 ? t - 2 * Math.PI : t + 2 * Math.PI;
+}
+
+/** Something a min-max distance is measured between, in its view's mm: a point, a straight edge, a circle or an arc (from a through m to b). */
+export type Ent =
+  | { kind: "point"; p: [number, number] }
+  | { kind: "line"; a: [number, number]; b: [number, number] }
+  | { kind: "circle"; c: [number, number]; r: number; a: [number, number]; m: [number, number]; b: [number, number] };
+
+/** A point along an entity, t from 0 to 1. */
+function entAt(e: Ent): (t: number) => [number, number] {
+  if (e.kind === "point") return () => e.p;
+  if (e.kind === "line") return (t) => [e.a[0] + (e.b[0] - e.a[0]) * t, e.a[1] + (e.b[1] - e.a[1]) * t];
+  const a0 = Math.atan2(e.a[1] - e.c[1], e.a[0] - e.c[0]);
+  const whole = Math.hypot(e.a[0] - e.b[0], e.a[1] - e.b[1]) < 1e-9 * Math.max(1, e.r);
+  const sw = whole ? 2 * Math.PI : arcSweep(e.c, e.a, e.b, e.m);
+  return (t) => [e.c[0] + e.r * Math.cos(a0 + sw * t), e.c[1] + e.r * Math.sin(a0 + sw * t)];
+}
+
+/**
+ * The nearest and the farthest two points of two entities (a point, an edge,
+ * a circle or an arc): searched over both on a grid, then closed in on to far
+ * below a thousandth of a millimetre.
+ */
+export function minMax(e1: Ent, e2: Ent): { min: [[number, number], [number, number]]; max: [[number, number], [number, number]] } {
+  const f1 = entAt(e1);
+  const f2 = entAt(e2);
+  const n1 = e1.kind === "point" ? 0 : 120;
+  const n2 = e2.kind === "point" ? 0 : 120;
+  const dist = (s: number, t: number) => {
+    const p = f1(s);
+    const q = f2(t);
+    return Math.hypot(p[0] - q[0], p[1] - q[1]);
+  };
+  const solve = (sign: 1 | -1): [[number, number], [number, number]] => {
+    // Every grid cell's best, then each of the few best closed in on (a min or max may sit anywhere along a straight pair).
+    const cand: [number, number, number][] = [];
+    for (let i = 0; i <= n1; i++) for (let j = 0; j <= n2; j++) cand.push([n1 ? i / n1 : 0, n2 ? j / n2 : 0, sign * dist(n1 ? i / n1 : 0, n2 ? j / n2 : 0)]);
+    cand.sort((x, y) => x[2] - y[2]);
+    let best = cand[0];
+    for (const c0 of cand.slice(0, 6)) {
+      let [s, t, v] = c0;
+      for (let h = 1 / Math.max(n1, n2, 1); h > 1e-13; h /= 2) {
+        for (let moved = true; moved; ) {
+          moved = false;
+          for (const [ds, dt] of [[h, 0], [-h, 0], [0, h], [0, -h], [h, h], [-h, -h], [h, -h], [-h, h]]) {
+            const s2 = n1 ? Math.min(1, Math.max(0, s + ds)) : 0;
+            const t2 = n2 ? Math.min(1, Math.max(0, t + dt)) : 0;
+            const v2 = sign * dist(s2, t2);
+            if (v2 < v - 1e-15) [s, t, v, moved] = [s2, t2, v2, true];
+          }
+        }
+      }
+      if (v < best[2]) best = [s, t, v];
+    }
+    return [f1(best[0]), f2(best[1])];
+  };
+  return { min: solve(1), max: solve(-1) };
 }
 
 /** The angle at c from a to b (radians, the smaller way round, signed: positive turning clockwise on the paper). */
@@ -1084,6 +1264,8 @@ export interface EdgeHit {
   b: [number, number];
   c?: [number, number];
   r?: number;
+  /** A circle or arc: a point on it between a and b. */
+  m?: [number, number];
   /** How far from the pointer, mm on the paper. */
   d: number;
 }
@@ -1092,7 +1274,7 @@ export interface EdgeHit {
 export function edgeAt(views: Map<string, ProjectedView>, L: Layout, q: [number, number], tol: number, want?: "line" | "circle"): EdgeHit | null {
   let best: EdgeHit | null = null;
   for (const p of L.views) {
-    if (p.id === "iso" || (p.clip && Math.hypot(q[0] - p.clip.c[0], q[1] - p.clip.c[1]) > p.clip.r)) continue;
+    if (p.iso || (p.clip && Math.hypot(q[0] - p.clip.c[0], q[1] - p.clip.c[1]) > p.clip.r)) continue;
     const v = views.get(p.src ?? p.id);
     if (!v) continue;
     for (const b of v.bodies)
@@ -1103,7 +1285,7 @@ export function edgeAt(views: Map<string, ProjectedView>, L: Layout, q: [number,
           const r = e.r * p.s;
           const dc = Math.hypot(q[0] - c[0], q[1] - c[1]);
           const d = Math.abs(dc - r);
-          if (d <= tol && (!best || d < best.d) && onArc(e, fromPaper(p, q))) best = { view: p.id, kind: "circle", a: e.a, b: e.b, c: e.c, r: e.r, d };
+          if (d <= tol && (!best || d < best.d) && onArc(e, fromPaper(p, q))) best = { view: p.id, kind: "circle", a: e.a, b: e.b, c: e.c, r: e.r, m: e.m, d };
         } else {
           if (want === "circle") continue;
           const A = toPaper(p, e.a);
@@ -1120,7 +1302,7 @@ export function edgeAt(views: Map<string, ProjectedView>, L: Layout, q: [number,
 export function pointAt(views: Map<string, ProjectedView>, L: Layout, q: [number, number], tol: number, view?: string): { view: string; p: [number, number] } | null {
   let best: { view: string; p: [number, number]; d: number } | null = null;
   for (const pl of L.views) {
-    if (pl.id === "iso" || (view && pl.id !== view)) continue;
+    if (pl.iso || (view && pl.id !== view)) continue;
     if (pl.clip && Math.hypot(q[0] - pl.clip.c[0], q[1] - pl.clip.c[1]) > pl.clip.r) continue;
     const v = views.get(pl.src ?? pl.id);
     if (!v) continue;
@@ -1174,4 +1356,4 @@ export function outward(p: Placed, a: [number, number], b: [number, number]): nu
   return n[0] * m[0] + n[1] * m[1] >= 0 ? 8 : -8;
 }
 
-export type { DrawingDetail, DrawingDim, DrawingMark, DrawingNote, DrawingSection };
+export type { DrawingDetail, DrawingDim, DrawingImage, DrawingMark, DrawingNote, DrawingSection, DrawingView };

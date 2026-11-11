@@ -25,6 +25,8 @@ import { BooleanOp } from "./booleanOp";
 import { pickColor } from "../ui/colorPicker";
 import { BimTool } from "../bim/bimTool";
 import { openDrawing } from "../bim/drawing";
+import { EdgeAnglePlaneOp } from "./planeOps";
+import { ImprintOp, WrapOp } from "./wrapOps";
 import { materialOf } from "../bim/materials";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, viewMenu, type AppContext, type Sel, type Tool } from "./tool";
 
@@ -529,8 +531,9 @@ export class SelectTool implements Tool {
       { id: "sweep", label: "Sweep", icon: "sweep", shortcut: "W", run: () => src && app.setTool(new SweepOp(app, src)) },
       { id: "offset", label: "Offset Edge", icon: "offset", shortcut: "O", run: inSketch("offset") },
       { id: "projs", label: "Project as Sketch", icon: "project", disabled: true, why: SOON },
-      { id: "proje", label: "Project as Edge", icon: "projectEdge", disabled: true, why: SOON },
-      { id: "wrap", label: "Wrap & Emboss", icon: "wrap", disabled: true, why: SOON },
+      // Drawn onto the body's faces seen from the sketch; wrapped round a round face.
+      { id: "proje", label: "Project as Edge", icon: "projectEdge", beta: true, run: () => src && app.setTool(new ImprintOp(app, { source: src })) },
+      { id: "wrap", label: "Wrap & Emboss", icon: "wrap", beta: true, run: () => src && app.setTool(new WrapOp(app, src)) },
       { id: "delete", label: "Delete", icon: "trash", shortcut: "Del", run: () => this.deleteProfiles() },
     ];
   }
@@ -648,7 +651,12 @@ export class SelectTool implements Tool {
       { id: "planePerp", label: "Plane – Perp. to Edge", icon: "plane", run: () => info && app.setTool(new PlaneOp(app, { origin: info.mid, normal: info.dir, xDir: perpTo(info.dir) }, undefined)) },
       { id: "translate", label: "Translate", icon: "translate", shortcut: "N", run: () => app.setTool(new TransformOp(app, "translate", bodies)) },
       { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: () => app.setTool(new TransformOp(app, "rotate", bodies)) },
-      { id: "proje", label: "Project as Edge", icon: "projectEdge", disabled: true, why: SOON },
+      // Through a straight edge, turned about it from a face by an angle.
+      { id: "planeEdge", label: "Plane – Through Edge", icon: "planeAngle", disabled: !straight || sel.length !== 1, why: "Needs one straight edge", run: () => info && app.setTool(new EdgeAnglePlaneOp(app, { body: s.body, edge: s.edge, point: info.mid })) },
+      // The edges drawn onto a face picked next (split along them).
+      { id: "proje", label: "Project as Edge", icon: "projectEdge", beta: true, run: () => app.setTool(new ImprintOp(app, { edges: refs() })) },
+      // The edges in a new sketch, on the plane they lie on.
+      { id: "projs", label: "Project as Sketch", icon: "project", run: () => this.projectEdges() },
       { id: "delete", label: "Delete Edge", icon: "trash", shortcut: "Del", run: () => this.deleteGeom(s.body, { edges: this.edgeRefs().filter((e) => e.body === s.body) }) },
     ];
   }
@@ -937,6 +945,44 @@ export class SelectTool implements Tool {
   }
 
   /** Project the face outline into a new sketch on that face. */
+  /** The picked edges in a new sketch: on a flat face they all lie on, or else on the plane through them. */
+  private projectEdges(): void {
+    const app = this.app;
+    const picked = app.selection.filter((x): x is Extract<Sel, { kind: "edge" }> => x.kind === "edge");
+    const infos = picked.map((x) => ({ s: x, b: app.view.body(x.body), e: app.view.body(x.body)?.edges[x.edge] })).filter((x) => x.b && x.e);
+    if (!infos.length) return;
+    const pts = infos.flatMap((x) => [x.e!.start, x.e!.mid, x.e!.end]);
+    const size = Math.max(1, ...pts.map((p) => len(sub(p, pts[0]))));
+    const onPlane = (o: Vec3, n: Vec3) => pts.every((p) => Math.abs(dot(sub(p, o), n)) < 1e-6 * size);
+    // A flat face of the first edge's body holding them all (its sketch stays on it).
+    const b0 = infos[0].b!;
+    const fi = b0.faces.findIndex((f) => !!f.plane && onPlane(f.center, f.normal));
+    let plane: PlaneDef | null = fi >= 0 ? b0.faces[fi].plane! : null;
+    if (!plane) {
+      // The plane through them: the two points furthest apart, and the one furthest off their line.
+      const a = pts[0];
+      const b = pts.reduce((m, p) => (len(sub(p, a)) > len(sub(m, a)) ? p : m), a);
+      const u = norm(sub(b, a));
+      const c = pts.reduce((m, p) => (len(cross(sub(p, a), u)) > len(cross(sub(m, a), u)) ? p : m), a);
+      const n = cross(u, sub(c, a));
+      if (len(n) < 1e-6 * size) return app.ui.toast("One straight edge alone gives no plane: pick one more, or a face");
+      if (!onPlane(a, norm(n))) return app.ui.toast("Those edges aren't on one plane");
+      plane = { origin: a, normal: norm(n), xDir: u };
+    }
+    const entities = infos.flatMap(({ b, e, s }) => {
+      const g = b!.edgeGroups.find((x) => x.edge === s.edge);
+      if (!g) return [];
+      const ps: Vec3[] = [];
+      for (let k = g.start; k < g.start + g.count; k++) if ((k - g.start) % 2 === 0 || k === g.start + g.count - 1) ps.push([b!.edgePositions[k * 3], b!.edgePositions[k * 3 + 1], b!.edgePositions[k * 3 + 2]]);
+      const ent = projectPolyline(ps, plane!, e!.type);
+      return ent ? [ent] : [];
+    });
+    const attachedTo = fi >= 0 ? faceRefOf(app, { body: infos[0].s.body, face: fi }) : undefined;
+    const sk: SketchFeature = { ...app.store.newIdentity("sketch"), type: "sketch", plane, ...(attachedTo ? { attachedTo } : {}), entities };
+    app.store.add(sk);
+    this.openSketch(sk.id, "select");
+  }
+
   private projectFace(then: string): void {
     const s = this.app.selection[0] as Extract<Sel, { kind: "face" }>;
     const b = this.app.view.body(s.body);

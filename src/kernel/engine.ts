@@ -76,6 +76,7 @@ import { threadDepth } from "./threads";
 import { anchorOf, freeformFaces, meshViews, viewEdge } from "./viewLines";
 import { entitiesWire, regionFaces, regionHoleWires, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
+import { imprint, onFace as linesOnFace, seenFrom, wrapOnto } from "./wrap";
 import type { BodyMesh, BodyProps, ProjectedView, ViewBody, ViewEdge, ViewSpec, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
 type Bodies = Map<string, Shape3D>;
@@ -1499,6 +1500,29 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     case "thread": {
       const body = need(bodies, f.face.body);
       bodies.set(f.face.body, threadFace(body, threadTarget(body, f), f.pitch, !!f.left));
+      return;
+    }
+
+    case "imprint": {
+      const body = need(bodies, f.body);
+      if (f.source) {
+        const src = sourceFaces(f.source, ctx);
+        if (!src.length) throw new Error("Nothing to project");
+        const n = src[0].normal;
+        bodies.set(f.body, imprint(body, src.flatMap((s) => s.face.edges), n, seenFrom(body, src[0].face.center.toTuple() as Vec3, n)));
+        return;
+      }
+      if (!f.edges?.length || !f.face) throw new Error("Pick the edges, then the face to project them onto");
+      const F = resolveFace(body, f.face);
+      const curves = f.edges.map((r) => resolveEdge(need(bodies, r.body), r));
+      bodies.set(f.body, imprint(body, curves, F.normalAt(F.center).toTuple() as Vec3, linesOnFace(body, F)));
+      return;
+    }
+
+    case "wrap": {
+      const body = need(bodies, f.face.body);
+      const round = resolveFace(body, f.face, (g) => g.geomType === "CYLINDRE");
+      bodies.set(f.face.body, wrapOnto(body, round, sourceFaces(f.source, ctx), f.height));
       return;
     }
 

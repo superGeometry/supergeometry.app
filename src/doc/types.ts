@@ -483,7 +483,34 @@ export interface RepairFeature extends FeatureBase {
   bodies: string[];
 }
 
+/**
+ * Project as Edge: curves drawn onto a body's faces, the faces split along
+ * them - a sketch's shapes along its normal (onto the faces seen from it), or
+ * edges along a face's normal (onto that face).
+ */
+export interface ImprintFeature extends FeatureBase {
+  type: "imprint";
+  body: string;
+  source?: ExtrudeSource;
+  edges?: EdgeRef[];
+  /** With edges: the face they are projected onto. */
+  face?: FaceRef;
+}
+
+/**
+ * Wrap & Emboss: a sketch's shapes wrapped round a round face (lengths kept),
+ * raised from it (height > 0) or sunk into it (height < 0).
+ */
+export interface WrapFeature extends FeatureBase {
+  type: "wrap";
+  source: ExtrudeSource;
+  face: FaceRef;
+  height: number;
+}
+
 export type Feature =
+  | ImprintFeature
+  | WrapFeature
   | ConnectFeature
   | FaceFreeformFeature
   | FillToPlaneFeature
@@ -599,6 +626,12 @@ export interface DrawingOptions {
   moved?: Record<string, [number, number]>;
   dims?: DrawingDim[];
   notes?: DrawingNote[];
+  /** Views added by hand: base views and projections. */
+  extra?: DrawingView[];
+  /** The isometric view's own scale (missing: picked to fit). */
+  isoScale?: number;
+  /** Pictures put on the sheet (a logo, a photo). */
+  images?: DrawingImage[];
   sections?: DrawingSection[];
   details?: DrawingDetail[];
   /** Centre marks and centrelines. */
@@ -620,6 +653,39 @@ export interface DrawingSection {
   look: [number, number];
   /** How far its middle is from its view's edge (mm on the paper). */
   gap: number;
+}
+
+/** Which way a base view looks at the model: a side, or an isometric corner (front/back, right/left). */
+export type ViewOrient = "front" | "back" | "top" | "bottom" | "left" | "right" | "iso-fr" | "iso-fl" | "iso-br" | "iso-bl";
+
+/**
+ * A view added by hand: a base view (seen from any side or corner, put
+ * anywhere), or one projected from another view - square on, lined up with
+ * it, or from a corner (an isometric one).
+ */
+export interface DrawingView {
+  id: string;
+  /** A base view: the way it looks. */
+  orient?: ViewOrient;
+  /** A projection: the view it is projected from, and the way it goes from it on the paper (one of eight). */
+  view?: string;
+  dir?: [number, number];
+  /** Projected square on: how far its middle is from its view's edge (mm on the paper). */
+  gap?: number;
+  /** A base view or an isometric projection: where its middle is on the paper. */
+  at?: [number, number];
+  /** Its own scale (missing: the sheet's; a lined-up projection always has its view's). */
+  scale?: number;
+}
+
+/** A picture on the sheet (mm on the paper), kept as a data URL. */
+export interface DrawingImage {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  src: string;
 }
 
 /** A detail view (B): a circle of another view drawn bigger. */
@@ -673,6 +739,12 @@ export interface DrawingDim extends DimText {
   offset: number;
   /** Circle: the leader's direction (radians). */
   angle?: number;
+  /** An arc's angle: a point on the arc, so the angle goes round the way the arc does (past 180° too). */
+  through?: [number, number];
+  /** A min-max distance: the nearest and the farthest points of the two things it was measured between (a and b are one pair). */
+  minmax?: { min: [[number, number], [number, number]]; max: [[number, number], [number, number]] };
+  /** A min-max distance showing the farthest. */
+  max?: boolean;
 }
 
 /** A note on the sheet (mm on the paper). */
