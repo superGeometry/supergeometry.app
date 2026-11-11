@@ -9,6 +9,10 @@
 // let go, or point the right hand at it and pull the trigger. A tap on X:
 // bring it here. Left stick up / down: raise / lower it. Right stick: turn
 // it (left / right), size it (up / down).
+//
+// On a phone or tablet (AR through its camera): point it at the floor or a
+// table and tap to put the model there (tap again to move it); two fingers
+// pinch to size it and twist to turn it. The scale sits at the left edge.
 import { BufferGeometry, CanvasTexture, Color, DoubleSide, Euler, Group, Line, LineBasicMaterial, Matrix4, Mesh, MeshBasicMaterial, PlaneGeometry, Quaternion, RingGeometry, Scene, SRGBColorSpace, Vector3, type WebGLRenderer, type XRTargetRaySpace } from "three";
 import { icons, type IconName } from "../ui/icons";
 
@@ -23,6 +27,8 @@ export interface VRItem {
 
 export interface XRHost {
   renderer: WebGLRenderer;
+  /** A phone or tablet (AR through its camera, the screen as the hands) rather than a headset. */
+  handheld: boolean;
   /** The page's scene (z up, millimetres): carried into the headset's room as it is. */
   scene: Scene;
   /** The model's box, in the scene's own units. */
@@ -43,10 +49,11 @@ type XRSystemLike = { isSessionSupported(mode: string): Promise<boolean>; reques
 const xrSystem = (): XRSystemLike | undefined => (navigator as Navigator & { xr?: XRSystemLike }).xr;
 
 /** Whether this browser can open the headset view (a headset's browser, or a PC with a headset). */
-export async function vrSupported(): Promise<boolean> {
+export async function vrSupported(handheld = false): Promise<boolean> {
   const xr = xrSystem();
   if (!xr) return false;
-  for (const mode of ["immersive-ar", "immersive-vr"])
+  // A phone's "VR" is a cardboard viewer: only its AR counts.
+  for (const mode of handheld ? ["immersive-ar"] : ["immersive-ar", "immersive-vr"])
     try {
       if (await xr.isSessionSupported(mode)) return true;
     } catch {
@@ -333,6 +340,18 @@ export class VRMode {
   private glide: { from: Vector3; to: Vector3; qFrom: Quaternion; qTo: Quaternion; t0: number } | null = null;
   private placed = false;
   private needsFirstPlace = true;
+  /** A phone or tablet: taps and pinches on the screen, no controllers. */
+  private handheld = false;
+  /** Where real surfaces are straight ahead of the phone (the middle of its screen). */
+  private viewerHits: XRHitTestSource | null = null;
+  /** On the phone: the page's own layer over the camera (Exit, the hint, the scale). */
+  private overlay: HTMLDivElement | null = null;
+  private hint: HTMLDivElement | null = null;
+  /** Two fingers down: where they started (to size and turn from). */
+  private two: { d0: number; a0: number; s0: number; q0: Quaternion; base: Vector3 } | null = null;
+  /** Two fingers were down during this touch: lifting them doesn't move the model. */
+  private pinchUsed = false;
+  private onTap = (e: Event) => this.phoneTap(e as XRInputSourceEvent);
   private last = 0;
 
   constructor(private host: XRHost) {
@@ -370,13 +389,22 @@ export class VRMode {
     // Passthrough first (the model in your real room), else a plain dark room.
     let session: XRSession | null = null;
     this.passthrough = false;
+    this.handheld = this.host.handheld;
+    if (this.handheld) this.makeOverlay();
     try {
       if (await xr.isSessionSupported("immersive-ar")) {
-        session = await xr.requestSession("immersive-ar", { optionalFeatures: ["local-floor", "hit-test"] });
+        session = await xr.requestSession(
+          "immersive-ar",
+          this.handheld ? { optionalFeatures: ["local-floor", "hit-test", "dom-overlay"], domOverlay: { root: this.overlay } } : { optionalFeatures: ["local-floor", "hit-test"] },
+        );
         this.passthrough = true;
       }
     } catch {
       session = null;
+    }
+    if (!session && this.handheld) {
+      this.dropOverlay();
+      throw new Error("this browser can't show AR");
     }
     if (!session) session = await xr.requestSession("immersive-vr", { optionalFeatures: ["local-floor"] });
     const { renderer, scene } = this.host;
@@ -386,6 +414,7 @@ export class VRMode {
       await renderer.xr.setSession(session);
     } catch (err) {
       renderer.xr.enabled = false;
+      this.dropOverlay();
       void session.end().catch(() => {});
       throw err;
     }
@@ -405,9 +434,12 @@ export class VRMode {
     this.holder.quaternion.identity();
     this.holder.position.set(0, -100, 0);
     this.placed = false;
-    this.needsFirstPlace = true;
+    // A headset: the model waits in front of you. A phone: it shows once you tap where it goes.
+    this.needsFirstPlace = !this.handheld;
+    this.holder.visible = !this.handheld;
     this.host.onEnter();
-    for (const i of [0, 1]) this.addHand(i);
+    if (this.handheld) this.startPhone(session);
+    else for (const i of [0, 1]) this.addHand(i);
     session.addEventListener("end", () => this.leave());
     this.last = 0;
     renderer.setAnimationLoop((t: number, frame?: XRFrame) => this.frame(t, frame));
@@ -640,6 +672,7 @@ export class VRMode {
       if (hand.asked !== src) this.askScan(hand, src);
       if (src.gamepad) this.buttons(hand, src.gamepad, t, dt);
     }
+    if (this.handheld && frame) this.touch(frame);
     this.aim(frame);
     this.shadow.visible = this.placed && !held.length;
     this.drawCard();
@@ -727,15 +760,25 @@ export class VRMode {
     hand.was = [ax, by];
   }
 
-  /** The ring where the right hand points: a table or the floor (only things that face up). */
+  /** The ring where the right hand points (a phone: the middle of its screen): a table or the floor (only things that face up). */
   private aim(frame?: XRFrame): void {
-    const hand = this.hands.find((h) => h.side === "right");
-    if (!hand) return;
-    const { o, d } = this.rayOf(hand);
+    let hand: Hand | undefined;
+    let ray: { o: Vector3; d: Vector3 } | null;
+    let hits: XRHitTestSource | null;
+    if (this.handheld) {
+      ray = this.viewerRay(frame);
+      hits = this.viewerHits;
+    } else {
+      hand = this.hands.find((h) => h.side === "right");
+      ray = hand ? this.rayOf(hand) : null;
+      hits = hand?.hits ?? null;
+    }
+    if (!ray) return;
+    const { o, d } = ray;
     let at: Vector3 | null = null;
     const space = this.host.renderer.xr.getReferenceSpace();
-    if (frame && hand.hits && space) {
-      for (const r of frame.getHitTestResults(hand.hits)) {
+    if (frame && hits && space) {
+      for (const r of frame.getHitTestResults(hits)) {
         const pose = r.getPose(space);
         if (!pose) continue;
         const q = pose.transform.orientation;
@@ -749,9 +792,125 @@ export class VRMode {
     // No room scan (or none there yet): the floor.
     if (!at && d.y < -0.05) at = o.clone().addScaledVector(d, -o.y / d.y);
     if (at && at.distanceTo(o) > 8) at = null;
-    this.reticle.visible = !!at && !this.hands.some((h) => h.wheel.open || h.squeezing);
+    this.reticle.visible = !!at && !this.two && !this.hands.some((h) => h.wheel.open || h.squeezing);
     if (at) this.reticle.position.set(at.x, at.y + 0.002, at.z);
-    hand.line.scale.z = at ? Math.max(0.02, at.distanceTo(o)) : 2;
+    if (hand) hand.line.scale.z = at ? Math.max(0.02, at.distanceTo(o)) : 2;
+  }
+
+  // ------------------------------------------------------------ phone, tablet
+
+  private startPhone(session: XRSession): void {
+    session.addEventListener("select", this.onTap);
+    const s = session as XRSession & { requestHitTestSource?(o: { space: XRSpace }): Promise<XRHitTestSource> | undefined };
+    session
+      .requestReferenceSpace("viewer")
+      .then((space) => s.requestHitTestSource?.({ space }))
+      .then((h) => {
+        if (!h) return;
+        if (this.session !== session) h.cancel();
+        else this.viewerHits = h;
+      })
+      .catch(() => {});
+    // Without the page's layer over the camera, the scale floats at the lower left instead.
+    if (!(session as XRSession & { domOverlayState?: unknown }).domOverlayState) this.room.add(this.tape.board.mesh);
+    this.setHint("Point at the floor or a table, then tap");
+  }
+
+  /** Where the phone looks: its position and straight ahead. */
+  private viewerRay(frame?: XRFrame): { o: Vector3; d: Vector3; q: Quaternion } | null {
+    const space = this.host.renderer.xr.getReferenceSpace();
+    const pose = frame && space ? frame.getViewerPose(space) : null;
+    if (!pose) return null;
+    const p = pose.transform.position;
+    const r = pose.transform.orientation;
+    const q = new Quaternion(r.x, r.y, r.z, r.w);
+    return { o: new Vector3(p.x, p.y, p.z), d: new Vector3(0, 0, -1).applyQuaternion(q), q };
+  }
+
+  /** A tap on the screen: the model goes where the ring is (not after a pinch). */
+  private phoneTap(e: XRInputSourceEvent): void {
+    if (e.inputSource.targetRayMode !== "screen" || this.pinchUsed || !this.reticle.visible) return;
+    const head = new Vector3().setFromMatrixPosition(this.host.renderer.xr.getCamera().matrixWorld);
+    this.putAt(this.reticle.position.clone(), head, this.holder.visible);
+    this.holder.visible = true;
+    this.placed = true;
+    this.setHint("Pinch to size it, twist to turn it, tap to move it");
+  }
+
+  /** Fingers on the screen: two of them size the model (pinch) and turn it (twist) about its foot. */
+  private touch(frame: XRFrame): void {
+    const space = this.host.renderer.xr.getReferenceSpace();
+    const view = this.viewerRay(frame);
+    if (!space || !view) return;
+    // The 3D scale (no page layer): low on the left, facing you.
+    if (this.tape.board.mesh.parent === this.room) {
+      this.tape.board.mesh.position.copy(view.o).add(new Vector3(-0.07, -0.1, -0.35).applyQuaternion(view.q));
+      this.tape.board.mesh.quaternion.copy(view.q);
+    }
+    const back = view.q.clone().invert();
+    const pts: [number, number][] = [];
+    for (const src of this.session?.inputSources ?? []) {
+      if (src.targetRayMode !== "screen") continue;
+      const pose = frame.getPose(src.targetRaySpace, space);
+      if (!pose) continue;
+      const r = pose.transform.orientation;
+      const d = new Vector3(0, 0, -1).applyQuaternion(new Quaternion(r.x, r.y, r.z, r.w)).applyQuaternion(back);
+      if (d.z < -1e-3) pts.push([d.x / -d.z, d.y / -d.z]);
+    }
+    if (!pts.length) this.pinchUsed = false;
+    if (pts.length < 2 || !this.holder.visible) {
+      this.two = null;
+      return;
+    }
+    const [a, b] = pts;
+    const dist = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    if (!this.two) {
+      this.glide = null;
+      this.two = { d0: Math.max(1e-4, dist), a0: ang, s0: this.holder.scale.x, q0: this.holder.quaternion.clone(), base: this.baseInRoom() };
+      this.pinchUsed = true;
+      return;
+    }
+    let s = (this.two.s0 * dist) / this.two.d0;
+    // Real size holds for a moment on the way.
+    if (Math.abs(s / REAL - 1) < 0.07) s = REAL;
+    let da = ang - this.two.a0;
+    da = Math.atan2(Math.sin(da), Math.cos(da));
+    this.holder.scale.setScalar(s);
+    this.holder.quaternion.setFromAxisAngle(new Vector3(0, 1, 0), da).multiply(this.two.q0);
+    this.holder.position.add(this.two.base.clone().sub(this.baseInRoom()));
+  }
+
+  /** The phone's layer over the camera: Exit at the top, the hint at the bottom, the scale at the left. */
+  private makeOverlay(): void {
+    this.dropOverlay();
+    const glass = "background:rgba(28,28,30,0.72);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.14);color:#fff;border-radius:999px";
+    const root = document.createElement("div");
+    root.style.cssText = `position:fixed;inset:0;pointer-events:none;font:500 15px ${FONT};z-index:1000`;
+    const exit = document.createElement("button");
+    exit.textContent = "Exit AR";
+    exit.style.cssText = `position:absolute;top:calc(env(safe-area-inset-top, 0px) + 16px);right:16px;pointer-events:auto;${glass};font:600 15px ${FONT};padding:10px 18px`;
+    // A tap on Exit isn't a tap in the room.
+    exit.addEventListener("beforexrselect", (e) => e.preventDefault());
+    exit.addEventListener("click", () => this.exit());
+    const hint = document.createElement("div");
+    hint.style.cssText = `position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 24px);transform:translateX(-50%);${glass};padding:10px 18px;white-space:nowrap`;
+    const tape = this.tape.board.g.canvas;
+    tape.style.cssText = "position:absolute;left:16px;top:50%;transform:translateY(-50%);width:84px;height:auto";
+    root.append(exit, hint, tape);
+    document.body.append(root);
+    this.overlay = root;
+    this.hint = hint;
+  }
+
+  private dropOverlay(): void {
+    this.overlay?.remove();
+    this.overlay = null;
+    this.hint = null;
+  }
+
+  private setHint(text: string): void {
+    if (this.hint && this.hint.textContent !== text) this.hint.textContent = text;
   }
 
   /** The card: a short message for a moment. */
@@ -797,6 +956,13 @@ export class VRMode {
     this.card.mesh.removeFromParent();
     this.tape.board.mesh.removeFromParent();
     this.tape.reset();
+    this.session?.removeEventListener("select", this.onTap);
+    this.viewerHits?.cancel();
+    this.viewerHits = null;
+    this.two = null;
+    this.pinchUsed = false;
+    this.holder.visible = true;
+    this.dropOverlay();
     this.stickHeld = false;
     this.shadow.removeFromParent();
     scene.removeFromParent();

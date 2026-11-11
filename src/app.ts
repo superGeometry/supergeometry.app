@@ -114,8 +114,11 @@ export class App implements AppContext {
       });
     setupRightColumn(this.ui, this.view, this.store, (u) => this.setUnits(u), isolatedNames);
     // VR: only where a headset can open it (its own browser, or a PC with one connected). A viewer: the model as a real thing in your room.
+    // On a phone or tablet it's AR: the model in the room through the camera.
+    const handheld = isTouchDevice && !isHeadset;
     const vr: VRMode = (this.vr = new VRMode({
       renderer: this.view.renderer,
+      handheld,
       scene: this.view.scene,
       bounds: () => this.view.modelBounds(),
       xray: () => {
@@ -139,12 +142,16 @@ export class App implements AppContext {
     }));
     // In the top bar, where it's seen: on a headset always, elsewhere when a headset can be used.
     const vrBtn = document.getElementById("vr-btn")!;
-    const checkVR = () => void vrSupported().then((ok) => (vrBtn.hidden = !ok && !isHeadset));
+    if (handheld) {
+      vrBtn.textContent = "Enter AR";
+      vrBtn.title = "See the model in your room through the camera";
+    }
+    const checkVR = () => void vrSupported(handheld).then((ok) => (vrBtn.hidden = !ok && !isHeadset));
     checkVR();
     (navigator as Navigator & { xr?: EventTarget }).xr?.addEventListener("devicechange", checkVR);
     vrBtn.addEventListener("click", async () => {
-      if (!(await vrSupported())) return this.ui.toast("This browser can't open VR here - open supergeometry.app in the headset's own browser (not an installed app window)");
-      vr.enter().catch((e: unknown) => this.ui.toast(`VR didn't start: ${e instanceof Error ? e.message : e}`));
+      if (!(await vrSupported(handheld))) return this.ui.toast(handheld ? "This browser can't show AR - try Chrome" : "This browser can't open VR here - open supergeometry.app in the headset's own browser (not an installed app window)");
+      vr.enter().catch((e: unknown) => this.ui.toast(`${handheld ? "AR" : "VR"} didn't start: ${e instanceof Error ? e.message : e}`));
     });
     this.pinLayer = new PinLayer(this.view);
     this.varTags = new VariableTags(this.view, {
