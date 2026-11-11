@@ -1178,6 +1178,28 @@ export class Viewport {
   hovering = false;
 
   /** Pick what's under the pointer. Edges and curves win within the tolerance. */
+  /**
+   * The face of every body under the point at the nearest depth: more than one
+   * where bodies share a face's place (a bolt flush with the flange it's to
+   * cut). The nearest first, one per body.
+   */
+  facesAt(x: number, y: number): PickHit[] {
+    if (settings.value.shader === "wireframe") return [];
+    this.setRay(x, y);
+    const hits = this.raycaster.intersectObjects(this.visibleBodies().map((b) => b.mesh), false).filter((h) => !this.clip || this.clip.distanceToPoint(h.point) >= 0);
+    const near = this.cam.distance * 1e-3;
+    const out: PickHit[] = [];
+    for (const h of hits) {
+      if (h.distance - hits[0].distance > near) break;
+      const body = h.object.userData.body as string;
+      if (h.faceIndex == null || out.some((o) => o.kind === "face" && o.body === body)) continue;
+      const tri = h.faceIndex * 3;
+      const g = this.bodies.get(body)?.data.faceGroups.find((g) => tri >= g.start && tri < g.start + g.count);
+      if (g) out.push({ kind: "face", body, face: g.face, point: h.point.toArray() as Vec3 });
+    }
+    return out;
+  }
+
   pick(x: number, y: number, opts: PickOptions = {}): PickHit | null {
     const { edgeTolPx = 8, profiles = true, bodies = true, edges = true, curves = false, planes = true, axes = true, vertices = edges, planesFirst = false } = opts;
     this.setRay(x, y);

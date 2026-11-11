@@ -6,6 +6,7 @@ import type { Shape3D } from "replicad";
 import { getOC } from "replicad";
 import type { BodyMesh, ViewBody, ViewEdge, ViewSpec } from "./protocol";
 import { cylinderOf } from "./faceEdit";
+import { normalOnEdge } from "./ocFree";
 
 type V3 = [number, number, number];
 type P2 = [number, number];
@@ -83,12 +84,11 @@ function edgeKinds(shape: Shape3D): EdgeKind[] {
           // One face: the seam of a round one - or the open rim of a sheet.
           if (oc.BRep_Tool.IsClosed(edges[i].wrapped as never, faces[fs[0]].wrapped as never)) out[i] = "seam";
         } else if (fs.length === 2) {
-          const p = edges[i].pointAt(0.5);
-          const n1 = faces[fs[0]].normalAt(p);
-          const n2 = faces[fs[1]].normalAt(p);
-          const c = (n1.x * n2.x + n1.y * n2.y + n1.z * n2.z) / (n1.Length * n2.Length || 1);
-          if (c > 0.9995) out[i] = "smooth";
-          for (const x of [p, n1, n2]) x.delete();
+          // Read through the edge's curve on each face (a point projected onto
+          // a face per edge kept the engine's memory: a gear's ran it out).
+          const n1 = normalOnEdge(faces[fs[0]], edges[i], 0.5);
+          const n2 = normalOnEdge(faces[fs[1]], edges[i], 0.5);
+          if (n1 && n2 && n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2] > 0.9995) out[i] = "smooth";
         }
       } catch {
         // Kept sharp.

@@ -6,7 +6,8 @@
 // the body is on (planes → half-spaces, cylinders → infinite cylinders). Changing
 // F then only means adding/removing the right slab of E.
 
-import { assembleWire, basicFaceExtrusion, getOC, loft, makeFace, makeBSplineApproximation, makeCylinder, makeLine, makePolygon, makeSphere, measureArea, measureVolume, cast, Vector, type Face, type Shape3D } from "replicad";
+import { assembleWire, basicFaceExtrusion, getOC, loft, makeFace, makeBSplineApproximation, makeCylinder, makeLine, makePolygon, makeSphere, measureArea, cast, Vector, type Face, type Shape3D } from "replicad";
+import { measureVolume } from "./ocFree";
 import type { PlaneDef, Vec3 } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, xDirFor } from "../geom";
 import { subShapes } from "./health";

@@ -29,9 +29,7 @@ import {
   makePolygon,
   makeSolid,
   measureArea,
-  measureShapeVolumeProperties,
   measureDistanceBetween,
-  measureVolume,
   ProjectionCamera,
   revolution,
   Solid,
@@ -67,6 +65,8 @@ import { healthOf, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
+import { measureArea as trueArea, measureVolume, normalOnEdge, surfaceAt, volumeProperties } from "./ocFree";
+import { loftInLine } from "./loftAlign";
 import { edgeOrigins, edgeSteps, faceAliases, faceOrigins, faceSteps, inheritTags, oldEdgeSteps, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
 import { closestOnEntity } from "../sketch/regions";
 
@@ -74,7 +74,7 @@ import { cylinderOf, deleteFace,
  deleteFaces as deleteBodyFaces, editNotes, freeformFace, sameSizesAgain, sheetFace, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { anchorOf, freeformFaces, meshViews, viewEdge } from "./viewLines";
-import { entitiesWire, regionFaces, regionWire, withFittedSplines } from "./sketchGeom";
+import { entitiesWire, regionFaces, regionHoleWires, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
 import type { BodyMesh, BodyProps, ProjectedView, ViewBody, ViewEdge, ViewSpec, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
@@ -341,16 +341,15 @@ export async function bodyProperties(features: Feature[]): Promise<BodyProps[]> 
     let volume = 0;
     let center: Vec3 = [0, 0, 0];
     try {
-      const p = measureShapeVolumeProperties(s);
+      const p = volumeProperties(s);
       volume = Math.abs(p.volume);
       center = p.centerOfMass;
-      p.delete();
     } catch {
       // an open surface: no volume
     }
     let area = 0;
     try {
-      area = measureArea(s);
+      area = trueArea(s);
     } catch {
       area = 0;
     }
@@ -925,7 +924,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const axis = resolveAxis(f.axis, ctx);
       if (f.travel && Math.abs(f.travel) > 1e-9) {
         // Moving along the axis while turning: a helical sweep (threads, springs).
-        const parts = sourceWires(f.source, ctx).map((w) => helicalSweep(w, axis.origin, norm(axis.dir), f.angle, f.travel!));
+        const parts = withHoles(f.source, ctx, (w) => helicalSweep(w, axis.origin, norm(axis.dir), f.angle, f.travel!));
         combine(f.id, f.mode, f.target, fuseAll(parts), false, ctx);
         return;
       }
@@ -966,11 +965,37 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const k = f.scale ?? 1;
       if (!(k > 0)) throw new Error("The end size must be more than 0");
       const twist = f.twist ?? 0;
-      const parts = sourceWires(f.source, ctx).map((w) => {
+      // Along a straight line square to the profiles, from one of its ends,
+      // unturned and the same size all the way: an extrusion, made as one (the
+      // sweep's faces looked the same but wouldn't take a chamfer round a
+      // gear's teeth that the extrusion's took).
+      const ends = Math.abs(k - 1) < 1e-9 && Math.abs(twist) < 1e-9 ? straightRun(spine) : null;
+      if (ends) {
+        const faces = sourceFaces(f.source, ctx);
+        const [a, b] = ends;
+        const L = dist(a, b);
+        const runs = faces.map(({ face, normal }) => {
+          const n = norm(normal);
+          if (len(cross(norm(sub(b, a)), n)) > 1e-9) return null;
+          const o = face.center.toTuple() as Vec3;
+          if (Math.abs(dot(sub(a, o), n)) < L * 1e-9) return sub(b, a);
+          if (Math.abs(dot(sub(b, o), n)) < L * 1e-9) return sub(a, b);
+          return null;
+        });
+        if (runs.every((r) => r)) {
+          const parts = faces.map(({ face }, i) => basicFaceExtrusion(face, new Vector(runs[i]!)) as Shape3D);
+          combine(f.id, f.mode, f.target, fuseAll(parts), false, ctx);
+          ctx.sweeps.set(f.id, spine);
+          return;
+        }
+      }
+      const parts = withHoles(f.source, ctx, (w, outer) => {
         const law = Math.abs(k - 1) > 1e-9 ? scaleLaw(spine, k) : null;
-        if (Math.abs(twist) < 1e-9) return flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: "round", law }) as Shape3D);
+        // A circle round the path's start, square to it, is the same twisted or not (a gear's bore): swept
+        // plainly it stays a true cylinder (twisted, a spline with a winding seam that threads couldn't use).
+        if (Math.abs(twist) < 1e-9 || roundAboutPath(w, spine)) return flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: "round", law }) as Shape3D);
         // Twisted: the profile's sideways direction follows a curve wound round the path.
-        const reach = Math.max(1, len(sub(...(w.boundingBox.bounds as [Vec3, Vec3]))));
+        const reach = Math.max(1, len(sub(...(outer.boundingBox.bounds as [Vec3, Vec3]))));
         try {
           return flatFaces(genericSweep(w, spine, { auxiliarySpine: twistGuide(spine, twist, reach), transitionMode: "right", law }) as Shape3D);
         } catch (err) {
@@ -1006,7 +1031,9 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         shape = loftAlong(wires, f.guide ? pathWire(f.guide, ctx) : null, !!f.closed);
       } else
         try {
-          shape = loft(wires, { ruled: f.ruled });
+          // One smooth side where the sections' starts are in line already (see loftAlign.ts).
+          const inLine = loftInLine(wires, f.ruled);
+          shape = inLine && shapeValid(inLine) && volumeOf(inLine) > 0 ? inLine : loft(wires, { ruled: f.ruled });
         } catch {
           throw new Error("These profiles can't be lofted together");
         }
@@ -1023,7 +1050,22 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         // (An edge next to nothing in length - the end of a sliver, picked with the
         // rest of a face's outline before such ends were cleared away - isn't one to round.)
         const real = refs.filter((r) => r.length > 1e-4);
-        const edges = (real.length ? real : refs).map((r) => resolveEdge(body, r, true));
+        // A sliver of a picked run gone (a blade's root cut short where the hub's seam
+        // crossed it, moved when the blade did) is skipped: the round runs on along the
+        // smooth run it was part of. A whole edge gone still says so.
+        const picked = real.length ? real : refs;
+        const longest = Math.max(...picked.map((r) => r.length));
+        const found = picked.map((r) => {
+          try {
+            return resolveEdge(body, r, true);
+          } catch (err) {
+            if (err instanceof Error && err.message === EDGE_GONE && r.length < longest * 0.05) return null;
+            throw err;
+          }
+        });
+        const edges = found.filter((e): e is Edge => !!e);
+        if (!edges.length) throw new Error(EDGE_GONE);
+        if (edges.length < found.length) editNotes.push(`${found.length - edges.length} tiny piece${found.length - edges.length > 1 ? "s" : ""} of the edges it was built on ${found.length - edges.length > 1 ? "are" : "is"} gone - the rest are ${f.type === "fillet" ? "rounded" : "chamfered"}.`);
         let result: Shape3D | null = null;
         // Two-Distance chamfer: each edge's first distance runs along one of
         // its two faces (Flip: the other one), the second along the other.
@@ -2199,6 +2241,25 @@ function sourceWires(src: ExtrudeSource, ctx: Ctx): Wire[] {
   return [resolveFace(need(ctx.bodies, src.face.body), src.face).outerWire()];
 }
 
+/**
+ * Each profile's body made from its outline, its holes made the same way and
+ * cut out (a sweep or a coil only follows a wire: a gear's bore or a tube's
+ * inside was filled in). `make` gets the outline too, to size things by it.
+ */
+function withHoles(src: ExtrudeSource, ctx: Ctx, make: (w: Wire, outer: Wire) => Shape3D): Shape3D[] {
+  const outers = sourceWires(src, ctx);
+  let holes: Wire[][];
+  if (src.kind === "profile") {
+    const sketch = ctx.sketches.get(src.sketch)!;
+    holes = src.regions.map((r) => regionHoleWires(allCurves(sketch), sketch.plane, r));
+  } else holes = [resolveFace(need(ctx.bodies, src.face.body), src.face).innerWires()];
+  return outers.map((w, i) => {
+    const body = make(w, w);
+    const cuts = (holes[i] ?? []).map((h) => make(h, w));
+    return cuts.length ? body.cut(fuseAll(cuts)) : body;
+  });
+}
+
 function pathWire(path: PathRef, ctx: Ctx): Wire {
   if (path.kind === "sketch") {
     const sketch = ctx.sketches.get(path.sketch);
@@ -2466,14 +2527,14 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
 /** Is the face flat (every point on one plane, every normal the same)? */
 function isFlat(face: Face, tol: number): boolean {
   try {
-    const p0 = face.pointOnSurface(0.5, 0.5);
-    const n0 = norm(face.normalAt(p0).toTuple() as Vec3);
-    const o = p0.toTuple() as Vec3;
+    const mid = surfaceAt(face, 0.5, 0.5);
+    const n0 = norm(mid.n);
+    const o = mid.p;
     for (let i = 0; i <= 4; i++)
       for (let j = 0; j <= 4; j++) {
-        const p = face.pointOnSurface(i / 4, j / 4);
-        if (Math.abs(dot(sub(p.toTuple() as Vec3, o), n0)) > tol) return false;
-        if (len(cross(norm(face.normalAt(p).toTuple() as Vec3), n0)) > 1e-7) return false;
+        const { p, n } = surfaceAt(face, i / 4, j / 4);
+        if (Math.abs(dot(sub(p, o), n0)) > tol) return false;
+        if (len(cross(norm(n), n0)) > 1e-7) return false;
       }
     return true;
   } catch {
@@ -2487,9 +2548,9 @@ function cylinderFit(face: Face, tol: number): { c: Vec3; a: Vec3; r: number } |
   const N: Vec3[] = [];
   for (let i = 0; i <= 4; i++)
     for (let j = 0; j <= 4; j++) {
-      const p = face.pointOnSurface(i / 4, j / 4);
-      P.push(p.toTuple() as Vec3);
-      N.push(norm(face.normalAt(p).toTuple() as Vec3));
+      const { p, n } = surfaceAt(face, i / 4, j / 4);
+      P.push(p);
+      N.push(norm(n));
     }
   // The axis: square to the two normals furthest apart.
   let best = 0;
@@ -3129,16 +3190,85 @@ const FACE_GONE = "The face it was built on is gone (something before it changed
 const EDGE_GONE = "An edge it was built on is gone (something before it changed). Tap this step and pick the edges again.";
 
 /** `rounding`: for a fillet or chamfer - a seam (nothing to round) is never it. */
+/** How far a point is from an edge (its curve, between its ends). */
+function pointToEdge(p: Vec3, edge: Edge): number {
+  const v = makeVertex(p);
+  try {
+    return measureDistanceBetween(edge, v);
+  } catch {
+    return Infinity;
+  } finally {
+    v.delete();
+  }
+}
+
+/** The edge (not a seam) whose curve runs through a picked edge's middle, along its direction (else null). */
+function edgeByPlace(table: { edges: Edge[]; infoOf(i: number): EdgeInfo }, ref: EdgeRef, refDir: Vec3, seams?: boolean[]): Edge | null {
+  let best: { edge: Edge; d: number } | null = null;
+  for (const [i, edge] of table.edges.entries()) {
+    if (seams?.[i]) continue;
+    const ei = table.infoOf(i);
+    const tol = Math.max(ref.length, ei.length) * 0.05;
+    // (Too far for its middle to be on it at all.)
+    if (dist(ei.mid, ref.mid) > ei.length / 2 + tol + 1e-9) continue;
+    const d = pointToEdge(ref.mid, edge);
+    if (!(d < tol) || (best && d >= best.d)) continue;
+    // Along it there: the nearest of a few points on it, its direction.
+    let k = 0;
+    let kd = Infinity;
+    for (let j = 0; j <= 20; j++) {
+      const dj = dist(edge.pointAt(j / 20).toTuple() as Vec3, ref.mid);
+      if (dj < kd) [k, kd] = [j, dj];
+    }
+    if (Math.abs(dot(norm(edge.tangentAt(k / 20).toTuple() as Vec3), refDir)) < 0.8) continue;
+    best = { edge, d };
+  }
+  return best?.edge ?? null;
+}
+
+/**
+ * A body's edges and where each is, measured once. Finding the picked edges of
+ * a 300-edge chamfer measured all the body's edges again for each (300 x 1000
+ * on a gear), and each measuring leaves engine objects only freed after the
+ * rebuild: 1.5 GB, and the next rebuild ran out of memory.
+ */
+const edgeTables = new WeakMap<Shape3D, { wrapped: unknown; edges: Edge[]; info: (EdgeInfo | undefined)[] }>();
+function edgeTable(body: Shape3D): { edges: Edge[]; infoOf(i: number): EdgeInfo } {
+  let t = edgeTables.get(body);
+  if (!t || t.wrapped !== body.wrapped) {
+    const edges = body.edges;
+    t = { wrapped: body.wrapped, edges, info: new Array(edges.length) };
+    edgeTables.set(body, t);
+  }
+  const table = t;
+  return { edges: table.edges, infoOf: (i) => (table.info[i] ??= edgeInfo(table.edges[i])) };
+}
+
 function resolveEdge(body: Shape3D, ref: EdgeRef, rounding = false): Edge {
   const size = ref.length || 1;
+  // (Saved directions are of unit length; one that isn't - written by hand, or by a
+  // script from a curve's raw tangent - made the likeness below go negative: any edge fitted.)
+  const refDir = len(ref.dir) > 1e-12 ? norm(ref.dir) : ref.dir;
   let best: { edge: Edge; score: number } | null = null;
+  // A piece of it, or what it's now a piece of (below): only when nothing else is
+  // much the same edge - a lid made 20 wider had its corners' rounds go to the
+  // long side its old middle now lay on.
+  let piece: { edge: Edge; score: number } | null = null;
   // Only edges between faces made by the same steps as the one picked.
   let steps = ref.steps ? edgeSteps(body) : undefined;
   const seams = rounding && steps ? seamEdges(body) : undefined;
-  const all = body.edges;
+  const table = edgeTable(body);
+  const all = table.edges;
   // (Saved with a face put down to another body's step: found by that.)
   if (steps && !steps.some((s, i) => sameSteps(s, ref.steps!) && !seams?.[i])) steps = oldEdgeSteps(body) ?? steps;
-  if (steps && !all.some((_, i) => sameSteps(steps[i], ref.steps!) && !seams?.[i])) throw new Error(EDGE_GONE);
+  if (steps && !all.some((_, i) => sameSteps(steps[i], ref.steps!) && !seams?.[i])) {
+    // No edge between faces of those steps now: a later step took the faces over (a blade's
+    // root, its face trimmed at the tip when it was one face, not when lofted straight in
+    // pieces). Still there if an edge runs through where it was, the same way.
+    const there = edgeByPlace(table, ref, refDir, seams);
+    if (there) return there;
+    throw new Error(EDGE_GONE);
+  }
   // The one between the same two faces (by the sketch curves they came from), wherever it is now.
   const origins = steps && ref.curves ? edgeOrigins(body) : undefined;
   const isIt = (i: number) => !!origins?.[i] && sameSteps(origins[i]!, ref.curves!) && !seams?.[i];
@@ -3148,17 +3278,28 @@ function resolveEdge(body: Shape3D, ref: EdgeRef, rounding = false): Edge {
     if (steps && !sameSteps(steps[i], ref.steps!)) continue;
     if (same.length && !isIt(i)) continue;
     if (seams?.[i]) continue;
-    const ei = edgeInfo(edge);
-    const align = Math.abs(dot(ei.dir, ref.dir));
+    const ei = table.infoOf(i);
+    const align = Math.min(1, Math.abs(dot(ei.dir, refDir)));
     const like = (1 - align) * 2 + Math.abs(Math.log((ei.length + 1e-9) / (ref.length + 1e-9)));
     // Picked with its steps, the candidates are edges of the same kind: the
     // nearest is it, however far a resize moved it (a 3 mm lid's corner edges,
     // 20 mm out when the lid was made 40 wider, were "gone") - if it's still
     // much the same edge (the lid made round: its 3 mm corners aren't the rim circles).
-    if (steps && like > 1.5 && !same.length) continue;
+    if (steps && like > 1.5 && !same.length) {
+      // A piece of this edge when picked (a blade's root cut in two where the hub's seam
+      // crossed it, whole once the blade moved), or the whole of what's now in pieces:
+      // its middle lies on (or right by) this one.
+      if (ei.length < ref.length && ei.length > ref.length * 0.05) continue;
+      const near = pointToEdge(ref.mid, edge);
+      if (!(near < Math.max(ref.length, ei.length) * 0.05)) continue;
+      const score = near / size;
+      if (!piece || score < piece.score) piece = { edge, score };
+      continue;
+    }
     const score = dist(ei.mid, ref.mid) / size + like;
     if (!best || score < best.score) best = { edge, score };
   }
+  best ??= piece;
   // Without steps, only one close by.
   if (!best || (!steps && best.score > 3)) throw new Error(EDGE_GONE);
 
@@ -3606,7 +3747,7 @@ function fillToPlane(sheet: Shape3D, plane: PlaneDef): Shape3D {
     for (const [u, w] of [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]) {
       let fn: Vec3;
       try {
-        fn = norm(f.normalAt(f.pointOnSurface(u, w)).toTuple() as Vec3);
+        fn = norm(surfaceAt(f, u, w).n);
       } catch {
         continue;
       }
@@ -3721,9 +3862,8 @@ function chordFillet(body: Shape3D, edges: Edge[], c1: number, c2: number, flip:
       const radii: number[] = [];
       for (let i = 0; i < N; i++) {
         const u = i / (N - 1);
-        const p = e.pointAt(u);
-        const n1 = norm(two[0].normalAt(p).toTuple() as Vec3);
-        const n2 = norm(two[1].normalAt(p).toTuple() as Vec3);
+        const n1 = normalOnEdge(two[0], e, u) ?? norm(two[0].normalAt(e.pointAt(u)).toTuple() as Vec3);
+        const n2 = normalOnEdge(two[1], e, u) ?? norm(two[1].normalAt(e.pointAt(u)).toTuple() as Vec3);
         const half = len(sub(n1, n2)) / 2; // sin(θ/2)
         if (half < 1e-3) throw new Error("The faces meet almost flat there, so a chord width can't size the round - switch Size to Radius");
         const c = flip ? c2 + (c1 - c2) * u : c1 + (c2 - c1) * u;
@@ -3746,6 +3886,60 @@ function chordFillet(body: Shape3D, edges: Edge[], c1: number, c2: number, flip:
     return cast(builder.Shape()) as Shape3D;
   } finally {
     builder.delete();
+  }
+}
+
+/** A path that runs straight from its start to its end: its ends (else null). */
+function straightRun(spine: Wire): [Vec3, Vec3] | null {
+  const oc = getOC();
+  const ad = new oc.BRepAdaptor_CompCurve(spine.wrapped, true);
+  const a = new oc.gp_Pnt();
+  const b = new oc.gp_Pnt();
+  try {
+    ad.D0(ad.FirstParameter(), a);
+    ad.D0(ad.LastParameter(), b);
+    const p: Vec3 = [a.X(), a.Y(), a.Z()];
+    const run = sub([b.X(), b.Y(), b.Z()], p);
+    const L = len(run);
+    if (L < 1e-9 || spine.edges.some((e) => e.geomType !== "LINE")) return null;
+    const d = norm(run);
+    for (const e of spine.edges)
+      for (const t of [0, 1]) {
+        const q = sub(e.pointAt(t).toTuple() as Vec3, p);
+        if (len(cross(q, d)) > L * 1e-9) return null;
+      }
+    return [p, add(p, run)];
+  } finally {
+    b.delete();
+    a.delete();
+    ad.delete();
+  }
+}
+
+/** Every point of the wire as far from the path's start, in the plane square to the path there (a circle round it). */
+function roundAboutPath(w: Wire, spine: Wire): boolean {
+  const oc = getOC();
+  const ad = new oc.BRepAdaptor_CompCurve(spine.wrapped, true);
+  const p = new oc.gp_Pnt();
+  const v = new oc.gp_Vec();
+  try {
+    ad.D1(ad.FirstParameter(), p, v);
+    const o: Vec3 = [p.X(), p.Y(), p.Z()];
+    const t = norm([v.X(), v.Y(), v.Z()]);
+    let r = -1;
+    const tol = Math.max(1e-9, len(sub(...(w.boundingBox.bounds as [Vec3, Vec3]))) * 1e-7);
+    for (const e of w.edges)
+      for (let i = 0; i <= 8; i++) {
+        const q = sub(e.pointAt(i / 8).toTuple() as Vec3, o);
+        if (Math.abs(dot(q, t)) > tol) return false;
+        if (r < 0) r = len(q);
+        else if (Math.abs(len(q) - r) > tol) return false;
+      }
+    return r > tol;
+  } finally {
+    v.delete();
+    p.delete();
+    ad.delete();
   }
 }
 

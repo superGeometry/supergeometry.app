@@ -158,7 +158,10 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
       return;
     }
     if (!slot) return;
-    if (!slot.accept(hit)) {
+    // Not this one - but another body's face in the same place is (the bolts
+    // flush with the flange they're to cut: the flange came first every time).
+    const body = "body" in hit ? hit.body : null;
+    if (!slot.accept(hit) && !(body && this.app.view.facesAt(p.x, p.y).some((f) => f.kind === "face" && f.body !== body && slot.accept(f)))) {
       if (this.moreRegions && this.regionTap(p)) return;
       if (slot.rejectHint) this.app.ui.toast(slot.rejectHint);
       return;

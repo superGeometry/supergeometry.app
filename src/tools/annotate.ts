@@ -90,8 +90,11 @@ export interface DimWidgetOptions {
   /**
    * Keep the value box off the geometry: "side" puts it beside the middle of
    * the dimension, "beyond" past its end b (e.g. outside a fillet arc).
+   * "clear": beside the middle where the line is long enough on screen for
+   * the box to sit there, else back past its start a (a line just drawn:
+   * the way it came from, not over its end, where the next point is tapped).
    */
-  boxAt?: "middle" | "side" | "beyond";
+  boxAt?: "middle" | "side" | "beyond" | "clear";
   /** Extra screen distance past the end for "beyond" (e.g. to clear a drag arrow there). */
   boxGap?: number;
   /** Which way "beyond" goes when the dimension has no length yet (e.g. the arrow's direction). */
@@ -115,7 +118,7 @@ export class DimWidget {
   private input = document.createElement("input");
   private mid = new Vector3();
   private ends: [Vector3, Vector3] = [new Vector3(), new Vector3()];
-  private boxAt: "middle" | "side" | "beyond";
+  private boxAt: "middle" | "side" | "beyond" | "clear";
   private boxGap: number;
   private dir?: Vec3;
   private hook = () => this.layout();
@@ -272,7 +275,12 @@ export class DimWidget {
       }
       const l = Math.hypot(dx, dy) || 1;
       const half = { w: this.box.offsetWidth / 2 + 10, h: this.box.offsetHeight / 2 + 10 };
-      if (this.boxAt === "beyond") {
+      // Too short for the box beside it (it would cover both ends): behind the start.
+      const behind = this.boxAt === "clear" && l < 2 * Math.hypot(half.w, half.h) + 24;
+      if (behind) {
+        const k = Math.abs((dx / l) * half.w) + Math.abs((dy / l) * half.h) + 6;
+        s = [sa[0] - (dx / l) * k, sa[1] - (dy / l) * k];
+      } else if (this.boxAt === "beyond") {
         // Past the end, far enough that the box's own size clears it.
         const k = Math.abs((dx / l) * half.w) + Math.abs((dy / l) * half.h) + this.boxGap;
         s = [sb[0] + (dx / l) * k, sb[1] + (dy / l) * k];

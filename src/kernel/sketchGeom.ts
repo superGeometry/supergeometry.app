@@ -40,6 +40,14 @@ export function regionWire(entities: SketchEntity[], plane: PlaneDef, ref: Regio
   return loopWire(arr, r.outer, plane);
 }
 
+/** The outlines of a region's holes (for sweeps that make the outer wire's body and cut these out). */
+export function regionHoleWires(entities: SketchEntity[], plane: PlaneDef, ref: RegionRef): Wire[] {
+  const arr = arrangement(entities);
+  const r = resolveRegion(arr, ref);
+  if (!r) throw new Error("A profile it used no longer exists in its sketch");
+  return r.holes.map((h) => loopWire(arr, h, plane));
+}
+
 /** A wire along sketch entities (open or closed), used as a sweep path. */
 export function entitiesWire(entities: SketchEntity[], ids: string[], plane: PlaneDef): Wire {
   const edges: Edge[] = [];

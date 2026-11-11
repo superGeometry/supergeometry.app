@@ -6,7 +6,8 @@
 // open edges, hair-thin faces dropped and their slot closed, faces split on
 // one surface merged, skins made solid, inside-out solids turned round.
 
-import { assembleWire, cast, getOC, makeCompound, makeFace, makeLine, makeThreePointArc, measureArea, measureVolume, type Shape3D, type Wire } from "replicad";
+import { assembleWire, cast, getOC, makeCompound, makeFace, makeLine, makeThreePointArc, measureArea, type Shape3D, type Wire } from "replicad";
+import { measureVolume } from "./ocFree";
 import { unify } from "./faceEdit";
 import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from "./health";
 

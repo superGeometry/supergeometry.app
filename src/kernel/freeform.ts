@@ -2,7 +2,8 @@
 // bicubic B-spline face interpolating its grid of points; faces are sewn and,
 // when the cage is closed, made into a solid.
 
-import { cast, getOC, measureVolume, type Shape3D } from "replicad";
+import { cast, getOC, type Shape3D } from "replicad";
+import { measureVolume } from "./ocFree";
 import { cubicKnots, interpolateGrid } from "../freeform/bspline";
 import { isClosed, limitPoints, subdivide, type Cage, type Subdivided } from "../freeform/cage";
 

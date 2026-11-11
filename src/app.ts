@@ -341,6 +341,14 @@ export class App implements AppContext {
         if (best >= 0) s = { kind: "face", body: s.body, face: best };
       }
     }
+    // Any other edge (a revolved shank's seam runs right along its top): the
+    // round face under the finger.
+    const at = this.selectTool.tapPoint;
+    if (s?.kind === "edge" && at) {
+      const body = s.body;
+      const under = this.view.facesAt(at.x, at.y).find((f) => f.kind === "face" && f.body === body && this.view.body(body)?.faces[f.face]?.round);
+      if (under?.kind === "face") s = { kind: "face", body, face: under.face };
+    }
     if (s?.kind !== "face") return void this.ui.toast("Threads go on round faces: tap a shank or a hole");
     const info = this.view.body(s.body)?.faces[s.face];
     const ref = faceRefOf(this, s);

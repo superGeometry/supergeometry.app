@@ -1727,6 +1727,12 @@ export class SketchTool implements Tool {
       const moved = this.arcBend.moved;
       this.arcBend = null;
       const s = moved ? null : this.snap(p);
+      // A radius typed: the tap only says which side it bends (it used to drop the radius).
+      if (s && this.kind === "arc" && this.locks.r !== undefined) {
+        this.cursor = s;
+        this.addPoint(s.uv, 1);
+        return;
+      }
       const m = moved ? this.arcM : (s?.uv ?? null);
       if (m) {
         this.locks = {};
@@ -2664,6 +2670,18 @@ export class SketchTool implements Tool {
   }
 
   /** Constraints that keep a drawn point where it snapped (on a curve, a line's middle). */
+  /** An existing end or centre exactly at p (a typed point landing on it), not the line being drawn. */
+  private typedEndOn(p: Vec2, not: string): PointRef | null {
+    for (const e of this.entities) {
+      if (e.id === not || e.id === this.lastLineId) continue;
+      for (const q of pointsOf(e)) if (Math.hypot(q.at[0] - p[0], q.at[1] - p[1]) < 1e-6) return { e: e.id, p: q.p };
+    }
+    // The last line's start (the chain coming back on itself): its end is this line's start.
+    const last = this.lastLineId ? this.entities.find((e) => e.id === this.lastLineId) : undefined;
+    if (last?.kind === "line" && Math.hypot(last.a[0] - p[0], last.a[1] - p[1]) < 1e-6) return { e: last.id, p: "a" };
+    return null;
+  }
+
   private snapKeeps(s: Snap | null | undefined, at: PointRef): SketchConstraint[] {
     if (!s || !settings.value.autoConstrain) return [];
     const cs: SketchConstraint[] = [];
@@ -2697,7 +2715,12 @@ export class SketchTool implements Tool {
       const [p0, p1] = this.pts;
       const d = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
       const n: Vec2 = [-(p1[1] - p0[1]) / d, (p1[0] - p0[0]) / d];
-      const side = Math.sign((c[0] - p0[0]) * n[0] + (c[1] - p0[1]) * n[1]) || 1;
+      // The pointer's side of the chord. On a phone there's no pointer: it's
+      // still on the end just tapped, on the chord itself - then the side the
+      // bend preview shows (a counterweight's R72 typed came out bulging up,
+      // the preview had it down).
+      const towards = (q: Vec2) => (q[0] - p0[0]) * n[0] + (q[1] - p0[1]) * n[1];
+      const side = (Math.abs(towards(c)) > d * 1e-9 ? Math.sign(towards(c)) : 0) || (this.arcM ? Math.sign(towards(this.arcM)) : 0) || 1;
       if (this.kind === "rect") return [p1[0] + n[0] * side * L.h, p1[1] + n[1] * side * L.h];
       // Arc through both ends with that radius, bulging the pointer's way (the
       // short way round, unless the pointer is further out than the radius).
@@ -2776,7 +2799,9 @@ export class SketchTool implements Tool {
     const len = Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1]);
     const widget = new DimWidget(this.app.view, {
       value: len,
-      boxAt: "side",
+      // Beside it; a short line's box goes behind its start (it covered the
+      // corner where the next line starts: the tap there went into the box).
+      boxAt: "clear",
       focus: true,
       onInput: (v, text) => {
         if (v <= 0) return;
@@ -2892,6 +2917,14 @@ export class SketchTool implements Tool {
         if (closes) cs.push(co({ e: id, p: "b" }, { e: this.chainFirstId!, p: "a" }));
         else if (snapRef && auto) cs.push(co({ e: id, p: "b" }, snapRef));
         else if (!locked) cs.push(...this.snapKeeps(this.cursor, { e: id, p: "b" }));
+        else {
+          // Typed to end exactly where another line already ends (a nose's
+          // outline typed round back to the first line's start): joined there,
+          // as a tap on that end would be. It was left loose, and the next
+          // size changed slid the typed run off it, opening the outline.
+          const on = this.typedEndOn(pt, id);
+          if (on) cs.push(co({ e: id, p: "b" }, on));
+        }
         if (auto && Math.abs(pt[1] - a[1]) < 1e-9) cs.push({ id: uid(), type: "horizontal", curves: [id] });
         else if (auto && Math.abs(pt[0] - a[0]) < 1e-9) cs.push({ id: uid(), type: "vertical", curves: [id] });
         else if (auto && !locked && this.cursor?.dir) cs.push({ id: uid(), type: this.cursor.dir.type, curves: [id, this.cursor.dir.curve] });

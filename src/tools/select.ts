@@ -971,6 +971,10 @@ export class SelectTool implements Tool {
   }
 
   private lastTap: ToolPointer | null = null;
+  /** Where the last tap on the model was (screen px). */
+  get tapPoint(): ToolPointer | null {
+    return this.lastTap;
+  }
 
   /**
    * Connect picked border edges of freeform surfaces: two edges get a face

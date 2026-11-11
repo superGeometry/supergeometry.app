@@ -18,7 +18,13 @@ export class BooleanOp extends FeatureOp<BooleanFeature> {
   constructor(app: AppContext, op: "subtract" | "intersect", target = "", tools: string[] = [], existing?: BooleanFeature) {
     super(app, { ...app.store.newIdentity("boolean", cap(op)), type: "boolean", op, target, tools: tools.filter((t) => t !== target) }, existing);
     const sub = this.feature.op === "subtract";
-    const bodyOf = (hit: { kind: string; body?: string }) => (hit.kind === "body" || hit.kind === "face" || hit.kind === "edge" || hit.kind === "vertex" ? hit.body ?? null : null);
+    // Not this subtract's own result: with "Keep modified body" on, its preview
+    // shows beside the original, and a tap on it made it one of its own tools.
+    const own = (b: string) => b === this.feature.id || b.startsWith(`${this.feature.id}:`);
+    const bodyOf = (hit: { kind: string; body?: string }) => {
+      const b = hit.kind === "body" || hit.kind === "face" || hit.kind === "edge" || hit.kind === "vertex" ? hit.body ?? null : null;
+      return b && !own(b) ? b : null;
+    };
     const targetSlot: Slot = {
       label: sub ? "Remove from" : "Body",
       describe: () => (this.feature.target ? this.nameOf(this.feature.target) : "Tap a body"),
