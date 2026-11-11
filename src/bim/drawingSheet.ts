@@ -77,6 +77,7 @@ export function drawingOptions(doc: ProjectDoc) {
     lines: { visible: o.lines?.visible ?? 0.5, hidden: o.lines?.hidden ?? 0.25, dims: o.lines?.dims ?? 0.25, center: o.lines?.center ?? 0.25, section: o.lines?.section ?? 0.18 },
     balloons: o.balloons ?? true,
     overall: o.overall ?? true,
+    overallDims: o.overallDims ?? {},
     moved: o.moved ?? {},
     dims: o.dims ?? [],
     notes: o.notes ?? [],
@@ -794,27 +795,9 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     out.push(data.interactive ? `<g data-ann="${m.id}">${svg}</g>` : svg);
   }
 
-  // ---- Overall dimensions: width and height on the front view, depth on the side view.
-  const front = placed.get("front");
-  const side = placed.get(L.side);
-  if (o.overall) {
-    const first = o.angle === "first";
-    if (front) {
-      const w = bw(front.box) * front.s;
-      const h = bh(front.box) * front.s;
-      const y = first ? front.y : front.y + h;
-      out.push(linearDim([front.x, y], [front.x + w, y], first ? 9 : -9, lengthText(bw(front.box), o), lw.dims));
-      out.push(linearDim([front.x, front.y + h], [front.x, front.y], 9, lengthText(bh(front.box), o), lw.dims));
-    }
-    if (side) {
-      const w = bw(side.box) * side.s;
-      const y = first ? side.y : side.y + bh(side.box) * side.s;
-      out.push(linearDim([side.x, y], [side.x + w, y], first ? 9 : -9, lengthText(bw(side.box), o), lw.dims));
-    }
-  }
-
-  // ---- Dimensions put on by hand.
-  for (const d of o.dims) {
+  // ---- Overall dimensions (width and height on the front view, depth on the
+  // side view), then the dimensions put on by hand: each picked, moved, given text alike.
+  for (const d of [...overallDims(o, L), ...o.dims]) {
     const p = placed.get(d.view);
     if (!p) continue;
     const c = color(d.id);
@@ -913,6 +896,38 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
   if (o.titleBlock === "simple" || o.titleBlock === "table") out.push(titleBlock(o, doc.info ?? {}, data.date, L, o.titleBlock === "table" ? parts : []));
   out.push(`</svg>`);
   return { svg: out.join("\n"), layout: L };
+}
+
+/** Is this one of the overall sizes (made by the drawing, not put on by hand)? */
+export const isOverall = (id: string) => id.startsWith("overall-");
+
+/**
+ * The overall sizes as dimensions: width and height on the front view, depth
+ * on the side view, along the view's box (so they follow the model), with
+ * what was changed on them by hand; none taken off.
+ */
+export function overallDims(o: Opts, L: Pick<Layout, "views" | "side">): DrawingDim[] {
+  if (!o.overall) return [];
+  const first = o.angle === "first";
+  const out: DrawingDim[] = [];
+  const add = (id: string, view: string, a: [number, number], b: [number, number], offset: number) => {
+    const e = o.overallDims[id] ?? {};
+    if (e.hidden) return;
+    const { hidden: _h, ...edit } = e;
+    out.push({ id, view, kind: "length", a, b, offset, ...edit });
+  };
+  const front = L.views.find((v) => v.id === "front");
+  const side = L.views.find((v) => v.id === L.side);
+  if (front) {
+    const [[x0, y0], [x1, y1]] = front.box;
+    add("overall-width", "front", [x0, first ? y0 : y1], [x1, first ? y0 : y1], first ? 9 : -9);
+    add("overall-height", "front", [x0, y1], [x0, y0], 9);
+  }
+  if (side) {
+    const [[x0, y0], [x1, y1]] = side.box;
+    add("overall-depth", side.id, [x0, first ? y0 : y1], [x1, first ? y0 : y1], first ? 9 : -9);
+  }
+  return out;
 }
 
 /** One dimension put on by hand, on its view. */

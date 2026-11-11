@@ -622,6 +622,8 @@ export interface DrawingOptions {
   balloons?: boolean;
   /** The overall sizes dimensioned by themselves. */
   overall?: boolean;
+  /** What was changed on an overall size, by its id (overall-width, overall-height, overall-depth): where it sits, its text, taken off. */
+  overallDims?: Record<string, OverallEdit>;
   /** Views moved by hand: mm on the paper, by view. */
   moved?: Record<string, [number, number]>;
   dims?: DrawingDim[];
@@ -711,6 +713,14 @@ export interface DrawingMark {
   r?: number;
   a?: [number, number];
   b?: [number, number];
+}
+
+/** An overall size moved or given text by hand (the rest follows the model). */
+export interface OverallEdit extends DimText {
+  offset?: number;
+  slide?: number;
+  /** Taken off (Overall sizes, switched off and on, brings it back). */
+  hidden?: boolean;
 }
 
 /** What a dimension adds to its value: text before and after, a tolerance. */

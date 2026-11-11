@@ -15,6 +15,8 @@ import { measureBodies } from "./bimTool";
 import { SheetCamera } from "./sheetCamera";
 import { partsList, type PartRow } from "./sheet";
 import {
+  isOverall,
+  overallDims,
   annId,
   drawingOptions,
   drawingSVG,
@@ -574,14 +576,14 @@ export async function openDrawing(app: AppContext): Promise<void> {
       }
     } else {
       const id = drag.target;
-      const dim = o.dims.find((d) => d.id === id);
+      const dim = dimsOf(o).find((d) => d.id === id);
       const note = o.notes.find((n) => n.id === id);
       const img = o.images.find((m) => m.id === id);
       if (note) next.notes = o.notes.map((n) => (n === note ? { ...n, x: note.x + dx, y: note.y + dy } : n));
       if (img) next.images = o.images.map((m) => (m === img ? { ...m, x: img.x + dx, y: img.y + dy } : m));
       if (dim) {
         const p = layout.views.find((v) => v.id === dim.view);
-        if (p) next.dims = o.dims.map((d) => (d === dim ? movedDim(dim, p, q, [dx, dy]) : d));
+        if (p) Object.assign(next, withDim(o, movedDim(dim, p, q, [dx, dy])));
       }
     }
     draft = next;
@@ -622,7 +624,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
     const id = (e.target as Element).closest("[data-ann]")?.getAttribute("data-ann");
     const n = opts().notes.find((x) => x.id === id);
     if (n) return noteInput([n.x, n.y], e.clientX, e.clientY, n);
-    const d = opts().dims.find((x) => x.id === id);
+    const d = dimsOf(opts()).find((x) => x.id === id);
     if (d) return void editDim(d);
     if ((e.target as Element).closest("[data-ann],[data-view],.bim-dhandle")) return;
     if (camera.ratio() < 1.5) zoomBy(2.5, local(e));
@@ -1140,7 +1142,19 @@ export async function openDrawing(app: AppContext): Promise<void> {
       // A view taken off: back with its switch in Views.
       const key = v === "left" || v === "right" ? "side" : (v as "front" | "top" | "iso");
       set({ views: { ...o.views, [key]: false } });
+    } else if (isOverall(id)) {
+      set({ overallDims: { ...o.overallDims, [id]: { ...o.overallDims[id], hidden: true } } });
+      app.ui.toast("Overall size taken off: Overall sizes, off and on again, brings it back");
     } else set({ dims: o.dims.filter((d) => d.id !== id), notes: o.notes.filter((n) => n.id !== id), marks: o.marks.filter((m) => m.id !== id), images: o.images.filter((m) => m.id !== id) });
+  };
+  /** Every dimension on the sheet: the overall sizes, then those put on by hand. */
+  const dimsOf = (o: ReturnType<typeof opts>): DrawingDim[] => [...(layout ? overallDims(o, layout) : []), ...o.dims];
+  /** A dimension changed: one put on by hand in its list; an overall size, as what was changed on it. */
+  const withDim = (o: ReturnType<typeof opts>, d: DrawingDim): Partial<DrawingOptions> => {
+    if (!isOverall(d.id)) return { dims: o.dims.map((x) => (x.id === d.id ? d : x)) };
+    const edit: NonNullable<DrawingOptions["overallDims"]>[string] = { offset: d.offset, slide: d.slide, prefix: d.prefix, suffix: d.suffix, tol: d.tol };
+    for (const k of Object.keys(edit) as (keyof typeof edit)[]) if (edit[k] === undefined) delete edit[k];
+    return { overallDims: { ...o.overallDims, [d.id]: edit } };
   };
 
   /** With something picked and no tool on: what it is, and what can be done to it. */
@@ -1202,7 +1216,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
         scaleSelect(now, (s) => set({ details: o.details.map((x) => (x === det ? { ...x, scale: s } : x)) }));
       } else hint.append(el("span", "", VIEW_NAMES[v] ?? "View"));
     } else {
-      const d = o.dims.find((x) => x.id === id);
+      const d = dimsOf(o).find((x) => x.id === id);
       const n = o.notes.find((x) => x.id === id);
       const img = o.images.find((x) => x.id === id);
       if (img) {
@@ -1212,7 +1226,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
         button("Smaller", () => resize(1 / 1.25));
         button("Bigger", () => resize(1.25));
       } else if (d) {
-        hint.append(el("span", "", d.minmax ? "Min-Max Distance" : "Dimension"));
+        hint.append(el("span", "", d.minmax ? "Min-Max Distance" : isOverall(d.id) ? "Overall size" : "Dimension"));
         const mm = d.minmax;
         if (mm) {
           const pv = layout?.views.find((x) => x.id === d.view);
@@ -1234,13 +1248,13 @@ export async function openDrawing(app: AppContext): Promise<void> {
         far.addEventListener("change", () => {
           const v = Number(far.value);
           if (!(v > 0)) return;
-          set({ dims: o.dims.map((x) => (x === d ? { ...x, offset: (d.kind === "length" || d.kind === "distance" ? Math.sign(d.offset) || 1 : 1) * v } : x)) });
+          set(withDim(o, { ...d, offset: (d.kind === "length" || d.kind === "distance" ? Math.sign(d.offset) || 1 : 1) * v }));
         });
         far.addEventListener("keydown", (e) => e.stopPropagation());
         const lab = el("label", "bim-dim-farlabel", "Distance");
         lab.append(far);
         hint.append(lab);
-        if (d.slide) button("Centre text", () => set({ dims: o.dims.map((x) => (x === d ? { ...x, slide: undefined } : x)) }));
+        if (d.slide) button("Centre text", () => set(withDim(o, { ...d, slide: undefined })));
         button("Text and tolerance", () => void editDim(d));
       } else if (n) {
         hint.append(el("span", "", "Note"));
@@ -1389,7 +1403,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
     const t = kind.value as NonNullable<DimText["tol"]>["kind"] | "none";
     const next: DrawingDim = { ...d, prefix: pre.value || undefined, suffix: post.value || undefined, tol: t === "none" ? undefined : { kind: t, up: num(up.value), down: num(down.value) } };
     for (const key of ["prefix", "suffix", "tol"] as const) if (next[key] === undefined) delete next[key];
-    set({ dims: opts().dims.map((x) => (x.id === d.id ? next : x)) });
+    set(withDim(opts(), next));
   };
 
   /** The first drawing: title, sheet, scale, views - then the sheet. */
@@ -1494,7 +1508,9 @@ export async function openDrawing(app: AppContext): Promise<void> {
       pick("arcAngle", "Arc Angle", "arc");
       pick("radius", "Radius", "arc");
       pick("diameter", "Diameter", "circle");
-      button("Overall sizes", o.overall ? "eye" : "eyeOff", () => set({ overall: !o.overall }), { on: o.overall, sub: true });
+      // Switched on again, the overall sizes taken off one by one come back (where they were moved to).
+      const back = () => Object.fromEntries(Object.entries(o.overallDims).map(([k, { hidden: _h, ...v }]) => [k, v]));
+      button("Overall sizes", o.overall ? "eye" : "eyeOff", () => set(o.overall ? { overall: false } : { overall: true, overallDims: back() }), { on: o.overall, sub: true });
     }
     const markTools: ToolId[] = ["center", "cline", "clineLines"];
     button("Centrelines", "lineDashed", () => ((open = open === "marks" ? null : "marks"), renderTools()), { on: open === "marks" || (!!tool && markTools.includes(tool)) });
