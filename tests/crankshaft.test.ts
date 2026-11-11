@@ -270,7 +270,8 @@ console.log(`${feats.length} steps, ${(V("crank") / 1000).toFixed(1)} cm³ (${((
 // as a new body; the pin's circle on it (22), the second web projected from the
 // first (16), the main journal (24); that throw copied along three times with
 // Move (one turned round 180°) and all joined; the flange with its Ø24 bore, a
-// bolt extruded back into it and patterned 6 round the axis, then subtracted;
+// bolt extruded back into it and patterned 6 round the axis, each of the six
+// tapped for the subtract;
 // a plane 15 up for the keyway (cut 4) and the Ø24 end threaded at pitch 2.
 {
   const { readFileSync } = await import("node:fs");

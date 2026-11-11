@@ -504,6 +504,14 @@ export class App implements AppContext {
         features = this.store.doc.features;
       }
     }
+    // Which patterns a step used whole, as it was made: kept with it (they stay whole when a count changes).
+    if (r.whole && features === this.store.doc.features) {
+      const whole = r.whole;
+      this.store.adopt((d) => {
+        for (const f of d.features) if ((f.type === "boolean" || f.type === "delete") && whole[f.id] && !f.whole) f.whole = whole[f.id];
+      });
+      features = this.store.doc.features;
+    }
     const now = new Set([...r.bodies.map((b) => b.id), ...features.map((f) => f.id)]);
     if (this.isolated) {
       // Made while isolating (a copy, a new sketch or plane): it belongs with what's shown.

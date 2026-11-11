@@ -36,6 +36,8 @@ export class BooleanOp extends FeatureOp<BooleanFeature> {
         if (!b) return false;
         this.feature.target = b;
         this.feature.tools = this.feature.tools.filter((t) => t !== b);
+        // (Worked out again for the bodies as now picked.)
+        this.feature.whole = undefined;
         return true;
       },
     };
@@ -51,6 +53,7 @@ export class BooleanOp extends FeatureOp<BooleanFeature> {
         if (!b || b === this.feature.target) return false;
         const t = this.feature.tools;
         this.feature.tools = t.includes(b) ? t.filter((x) => x !== b) : [...t, b];
+        this.feature.whole = undefined;
         return true;
       },
     };

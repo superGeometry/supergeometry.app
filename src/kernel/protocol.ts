@@ -79,6 +79,8 @@ export interface RegenResult {
   sketchBoundaries: Record<string, SketchEntity[]>;
   /** Sketches whose curves the engine moved (they follow a body's edge that changed): their curves as they are now. */
   sketchEntities?: Record<string, SketchEntity[]>;
+  /** Subtract / Union / Delete steps that don't say yet which patterns they used whole: those, by step (the page keeps them with the step). */
+  whole?: Record<string, string[]>;
   planes: ConstructionInfo[];
   axes: ConstructionInfo[];
   errors: FeatureError[];

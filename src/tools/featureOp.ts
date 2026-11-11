@@ -83,6 +83,10 @@ export abstract class FeatureOp<F extends Feature> implements Tool {
     this.app.ui.setTools(screenClass() === "phone" ? [{ id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: () => this.cancel() }] : []);
     this.app.ui.setBottom([]);
     this.active = this.slots.findIndex((s) => !s.filled());
+    // A step opened again with everything picked: taps add to (or take from) its
+    // list of picks, as they did when it was made. (They did nothing: the four
+    // bolts left out of a Subtract couldn't be added without tapping its slot first.)
+    if (this.active < 0) this.active = this.slots.reduce((last, s, i) => (s.multi ? i : last), -1);
     this.render();
     this.update();
     this.app.ui.focusPanel();

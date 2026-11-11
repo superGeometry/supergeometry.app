@@ -618,7 +618,7 @@ const PRINT_ANGLE = 0.05;
 
 export async function regenerate(features: Feature[], saved = false): Promise<RegenResult> {
   const t0 = performance.now();
-  const { ctx, errors, numbers, notes } = await run(features, saved);
+  const { ctx, errors, numbers, notes, whole } = await run(features, saved);
   const names = bodyNames(features, [...ctx.bodies.keys()], numbers);
   const meshes: BodyMesh[] = [];
   for (const [id, shape] of ctx.bodies) {
@@ -646,7 +646,7 @@ export async function regenerate(features: Feature[], saved = false): Promise<Re
     const f = asGiven.get(id);
     if (f?.type === "sketch" && f.links?.length && s.entities !== f.entities && JSON.stringify(s.entities) !== JSON.stringify(f.entities)) (sketchEntities ??= {})[id] = s.entities;
   }
-  return { bodies: meshes, errors, notes, sketchPlanes, sketchBoundaries, ...(sketchEntities ? { sketchEntities } : {}), planes: [...ctx.planes.values()], axes: [...ctx.axes.values()], ms: performance.now() - t0 };
+  return { bodies: meshes, errors, notes, sketchPlanes, sketchBoundaries, ...(sketchEntities ? { sketchEntities } : {}), ...(whole ? { whole } : {}), planes: [...ctx.planes.values()], axes: [...ctx.axes.values()], ms: performance.now() - t0 };
 }
 
 /**
@@ -683,7 +683,9 @@ async function run(features: Feature[], saved = false) {
     const f = features[i];
     // Chained hashes, not the text itself: a key holding every step's JSON
     // grew with the square of the project (an import's megabytes in each one).
-    const text = JSON.stringify(f, shortBig);
+    // (A step's `whole` is what it worked out the first time, taken in by the
+    // page: not a change to build again for.)
+    const text = JSON.stringify((f.type === "boolean" || f.type === "delete") && f.whole ? { ...f, whole: undefined } : f, shortBig);
     const json = `${hash53(text, 3)}.${text.length}`;
     key = chainKey(key, text);
     const cached: CacheEntry | undefined = !hit ? undefined : cache[i]?.key === key ? cache[i] : savedCache[i]?.key === key ? savedCache[i] : alsoCache[i]?.key === key ? alsoCache[i] : undefined;
@@ -809,11 +811,20 @@ async function run(features: Feature[], saved = false) {
   cache = next;
   if (saved) savedCache = next;
   lastBodies = ctx.bodies;
+  // Steps that don't say yet which patterns they used whole: as they were made.
+  let whole: Record<string, string[]> | undefined;
+  features.forEach((f, i) => {
+    if ((f.type !== "boolean" && f.type !== "delete") || f.whole || f.suppressed) return;
+    const ids: unknown = f.type === "boolean" ? f.tools : f.bodies;
+    const there = next[i]?.input?.bodies;
+    // (Not for a step that failed: its saved values may be damaged.)
+    if (there && !next[i].error && Array.isArray(ids) && ids.every((x) => typeof x === "string")) (whole ??= {})[f.id] = wholeOf(ids, new Set(rawEntries(there).map(([k]) => k)));
+  });
   // Bodies are numbered in the order they first appeared (a body that's
   // deleted later keeps its number used, so the others don't change names).
   const numbers = new Map<string, number>();
   for (const e of next) for (const id of e.ctx.bodies.keys()) if (!numbers.has(id)) numbers.set(id, numbers.size + 1);
-  return { ctx, errors, numbers, notes };
+  return { ctx, errors, numbers, notes, whole };
 }
 
 async function apply(f: Feature, ctx: Ctx): Promise<void> {
@@ -1173,7 +1184,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "boolean": {
       let target = need(bodies, f.target);
-      const toolIds = bodyList(f.tools, bodies, "tools");
+      const toolIds = bodyList(f.tools, bodies, "tools", f.whole);
       const solidsIn = (x: Shape3D) => [...iterTopo(x.wrapped, "solid")].length;
       // Subtract: every tool at once - joined, then one tolerant cut checked by
       // its volume. Cut one by one, eight vents round a lamp shade left it with
@@ -1311,7 +1322,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     }
 
     case "delete":
-      for (const b of bodyList(f.bodies, bodies, "bodies")) bodies.delete(b);
+      for (const b of bodyList(f.bodies, bodies, "bodies", f.whole)) bodies.delete(b);
       return;
 
     case "image":
@@ -3579,27 +3590,40 @@ function readSTL(bytes: Uint8Array): Shape3D {
   }
 }
 
+const copyOf = (id: string) => /^([^:]+:.+):(\d+)$/.exec(id);
+
+/**
+ * The patterns a step uses whole: the original and every copy there is now
+ * picked (`<pattern step>:<original>`). Some of the copies picked is that many
+ * bodies, not the whole pattern.
+ */
+export function wholeOf(ids: string[], there: Set<string>): string[] {
+  const groups = new Map<string, Set<number>>();
+  for (const id of ids) {
+    const m = copyOf(id);
+    if (m) groups.set(m[1], (groups.get(m[1]) ?? new Set()).add(+m[2]));
+  }
+  const out: string[] = [];
+  for (const [prefix, ks] of groups) {
+    const original = prefix.slice(prefix.indexOf(":") + 1);
+    const all = [...there].filter((k) => k.startsWith(`${prefix}:`) && /^\d+$/.test(k.slice(prefix.length + 1)));
+    if (ids.includes(original) && all.length && all.every((k) => ks.has(+k.slice(prefix.length + 1)))) out.push(prefix);
+  }
+  return out;
+}
+
 /**
  * The bodies a step names, as they are now. A whole pattern picked (the
  * original and every copy - "Whole Pattern") stays whole when the pattern's
  * count changes: 8 vents subtracted, made 10, all 10 are cut (and made 6, the
- * step still works). Copies no longer there are left out with a note, as long
- * as something is left to work with.
+ * step still works). Which those are is kept with the step (`whole`, worked
+ * out when it was made); a step without it goes by what's there now. Copies no
+ * longer there are left out with a note, as long as something is left to work with.
  */
-function bodyList(ids: string[], bodies: Bodies, what: "tools" | "bodies"): string[] {
+function bodyList(ids: string[], bodies: Bodies, what: "tools" | "bodies", given?: string[]): string[] {
   const out: string[] = [];
-  const copyOf = (id: string) => /^([^:]+:.+):(\d+)$/.exec(id);
-  const groups = new Map<string, number[]>();
-  for (const id of ids) {
-    const m = copyOf(id);
-    if (m) groups.set(m[1], [...(groups.get(m[1]) ?? []), +m[2]]);
-  }
-  const whole = new Set<string>();
-  for (const [prefix, ks] of groups) {
-    const original = prefix.slice(prefix.indexOf(":") + 1);
-    const sorted = [...new Set(ks)].sort((a, b) => a - b);
-    if (ids.includes(original) && sorted.every((k, i) => k === i)) whole.add(prefix);
-  }
+  // (Only patterns whose original it still names: picks changed by hand since are bodies one by one.)
+  const whole = new Set((Array.isArray(given) ? given : wholeOf(ids, new Set(bodies.keys()))).filter((p) => ids.includes(p.slice(p.indexOf(":") + 1))));
   // Copies of copies too (a row of holes, then mirrored: the mirror's copies of the row's copies).
   const add = (id: string) => {
     if (out.includes(id)) return;

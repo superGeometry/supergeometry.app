@@ -65,8 +65,8 @@ const box = (o: { r?: number; wall?: number; count?: number; boss?: boolean } = 
     { id: "s4", name: "Sketch 04", type: "sketch", plane: { origin: [0, 25, 15], xDir: [-1, 0, 0], normal: [0, 1, 0] }, entities: slot, constraints: [] },
     { id: "vt", name: "Extrude 04", type: "extrude", source: { kind: "profile", sketch: "s4", regions: regs(slot) }, distance: -5, mode: "new" },
     { id: "pt", name: "Pattern 01", type: "transform", bodies: ["vt"], copy: true, op: { kind: "linear", dir: [1, 0, 0], spacing: 5, count } },
-    // Picked as "Whole Pattern" when the pattern had 7.
-    { id: "bs", name: "Subtract 01", type: "boolean", op: "subtract", target: "box", tools: ["vt", "pt:vt:0", "pt:vt:1", "pt:vt:2", "pt:vt:3", "pt:vt:4", "pt:vt:5"] },
+    // Picked as "Whole Pattern" when the pattern had 7 (the page keeps that with the step).
+    { id: "bs", name: "Subtract 01", type: "boolean", op: "subtract", target: "box", tools: ["vt", "pt:vt:0", "pt:vt:1", "pt:vt:2", "pt:vt:3", "pt:vt:4", "pt:vt:5"], whole: ["pt:vt"] },
   ];
 };
 
@@ -97,8 +97,23 @@ check("…made 9: all nine are cut, none left lying about", !r.msg && [...debugB
 r = await run(box().map((f: any) => (f.id === "pt" ? { ...f, suppressed: true } : f)));
 check("…pattern switched off: the one vent left is cut", !r.msg && vol("box") > v3 && [...debugBodies().keys()].join() === "box", `${r.msg} ${vol("box").toFixed(0)}`);
 // Copies picked one by one (not the whole pattern): those gone are left out, with a note.
-r = await run(box({ count: 3 }).map((f: any) => (f.id === "bs" ? { ...f, tools: ["pt:vt:1", "pt:vt:3", "pt:vt:5"] } : f)));
+r = await run(box({ count: 3 }).map((f: any) => (f.id === "bs" ? { ...f, tools: ["pt:vt:1", "pt:vt:3", "pt:vt:5"], whole: undefined } : f)));
 check("…two of three copies picked by hand gone: the rest is cut, with a note", !r.msg && /2 of the bodies it used no longer exist/.test(r.notes), `${r.msg} / ${r.notes}`);
+
+// Each piece is a body: the vent and two of its copies picked cut those three, and
+// the other four stay as bodies of their own.
+{
+  const some = box().map((f: any) => (f.id === "bs" ? { ...f, tools: ["vt", "pt:vt:0", "pt:vt:1"], whole: undefined } : f));
+  r = await run(some);
+  const left = [...debugBodies().keys()].filter((k) => k !== "box").sort();
+  check("three of seven vents picked: three cut, four left as bodies", !r.msg && left.join() === "pt:vt:2,pt:vt:3,pt:vt:4,pt:vt:5", `${r.msg} ${left.join()}`);
+  check("…and the step is told it used no pattern whole", JSON.stringify(r.whole) === JSON.stringify({ bs: [] }), JSON.stringify(r.whole));
+  const all = box().map((f: any) => (f.id === "bs" ? { ...f, whole: undefined } : f));
+  r = await run(all);
+  check("all seven picked, nothing saved with it yet: every vent cut, and it's told it used the pattern whole", !r.msg && [...debugBodies().keys()].join() === "box" && JSON.stringify(r.whole) === JSON.stringify({ bs: ["pt:vt"] }), `${r.msg} ${JSON.stringify(r.whole)}`);
+  r = await run(box());
+  check("…saved with it: nothing more to tell", !r.msg && r.whole === undefined, JSON.stringify(r.whole));
+}
 
 r = await run(box({ boss: false }));
 check("bosses switched off: the thread says its hole is gone, quickly (it threaded the box's corner for 75 s)", /hole it was cut in is gone/.test(r.msg) && r.ms < 5000, `${r.msg} ${r.ms}ms`);

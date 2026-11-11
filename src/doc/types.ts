@@ -203,11 +203,23 @@ export interface BooleanFeature extends FeatureBase {
   keepTarget?: boolean;
   /** Subtract / Intersect: the bodies it was changed with stay. */
   keepTools?: boolean;
+  /**
+   * Patterns it used whole (`<pattern step>:<original body>`): the original and
+   * every copy there was when it was made. They stay whole when the pattern's
+   * count changes. Worked out by the engine the first time it runs (see bodyList).
+   */
+  whole?: string[];
 }
 
 export interface DeleteFeature extends FeatureBase {
   type: "delete";
   bodies: string[];
+  /**
+   * Patterns it used whole (`<pattern step>:<original body>`): the original and
+   * every copy there was when it was made. They stay whole when the pattern's
+   * count changes. Worked out by the engine the first time it runs (see bodyList).
+   */
+  whole?: string[];
 }
 
 /**
