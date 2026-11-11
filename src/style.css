@@ -5018,6 +5018,12 @@ input.bim-tb-value:focus {
 .bim-drawing-paper.picking .bim-drawing-svg [data-ann] {
   cursor: crosshair;
 }
+/* Over something the tool can take (lit up): a pointing hand. */
+.bim-drawing-paper.picking.can-pick .bim-drawing-svg,
+.bim-drawing-paper.picking.can-pick .bim-drawing-svg [data-view],
+.bim-drawing-paper.picking.can-pick .bim-drawing-svg [data-ann] {
+  cursor: pointer;
+}
 .bim-note-input {
   position: absolute;
   z-index: 3;

@@ -157,6 +157,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
     paper.querySelector("svg")?.setAttribute("viewBox", camera.viewBox());
     zoomLabel.textContent = `${Math.round(camera.ratio() * 100)}%`;
     placeHandle();
+    drawHover();
   };
   /** A screen point (px) in the paper's area. */
   const local = (e: { clientX: number; clientY: number }): [number, number] => {
@@ -364,6 +365,8 @@ export async function openDrawing(app: AppContext): Promise<void> {
     }
     if (!fetching) name.textContent = `Drawing · ${drawingOptions(doc).title}`;
     if (s) s.insertAdjacentHTML("beforeend", picksSVG());
+    hoverKey = "";
+    drawHover();
     if (!draft) (renderTools(), renderProps(), showSelection());
   };
   /** What the tool has picked so far, shown on the sheet. */
@@ -502,6 +505,11 @@ export async function openDrawing(app: AppContext): Promise<void> {
   });
   paper.addEventListener("pointermove", (e) => {
     if (fingers.has(e.pointerId)) fingers.set(e.pointerId, local(e));
+    // A mouse or pen over the sheet with a tool on: what a tap would take lights up.
+    if (tool && !pan && !pinch && e.pointerType !== "touch") {
+      hoverClient = { clientX: e.clientX, clientY: e.clientY };
+      drawHover();
+    }
     if (pinch && fingers.size >= 2) {
       const [a, b] = pair();
       const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -691,6 +699,125 @@ export async function openDrawing(app: AppContext): Promise<void> {
     return hit && (!view || hit.view === view) ? { ...hit, line: { a: hit.a, b: hit.b } } : null;
   };
   const step = (msg: string) => (showHint(msg), render());
+
+  // ---- What the tool would take, lit up under the pointer before the tap:
+  // the edge, the circle or arc, the point (a corner, a middle, a centre), the view.
+  const HOVER = "#2f8cff";
+  /** Where the pointer is (screen), while it's over the sheet with a tool on. */
+  let hoverClient: { clientX: number; clientY: number } | null = null;
+  /** What is lit now (redrawn only when it changes). */
+  let hoverKey = "";
+  const hoverSVG = (q: P2): string => {
+    if (!layout || !tool) return "";
+    const view = picks[0]?.view;
+    const px = 1 / camera.z;
+    const f = (v: number) => Math.round(v * 1000) / 1000;
+    const polyline = (pts: P2[]) => `<path d="${pts.map((P, i) => `${i ? "L" : "M"}${f(P[0])} ${f(P[1])}`).join("")}" stroke="${HOVER}" stroke-width="${f(3.5 * px)}" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.85"/>`;
+    const lineOf = (v: string, a: P2, b: P2) => {
+      const p = placedOf(v);
+      return polyline([toPaper(p, a), toPaper(p, b)]);
+    };
+    const dot = (v: string, pt: P2) => {
+      const P = toPaper(placedOf(v), pt);
+      return `<circle cx="${f(P[0])}" cy="${f(P[1])}" r="${f(5 * px)}" fill="${HOVER}" stroke="#fff" stroke-width="${f(1.5 * px)}"/>`;
+    };
+    /** A circle, or an arc from a through m to b, in the view's own units. */
+    const arc = (h: EdgeHit) => {
+      const c = h.c!;
+      const ang = (x: P2) => Math.atan2(x[1] - c[1], x[0] - c[0]);
+      const TAU = Math.PI * 2;
+      const turn = (t: number) => ((t % TAU) + TAU) % TAU;
+      const whole = len2(sub2(h.a, h.b)) < 1e-12;
+      const a0 = ang(h.a);
+      const tm = h.m ? turn(ang(h.m) - a0) : 0;
+      const tb = whole ? TAU : turn(ang(h.b) - a0);
+      const sweep = whole || tm <= tb ? tb : tb - TAU;
+      const n = Math.max(12, Math.ceil((Math.abs(sweep) / TAU) * 72));
+      const p = placedOf(h.view);
+      const pts: P2[] = [];
+      for (let i = 0; i <= n; i++) {
+        const t = a0 + (sweep * i) / n;
+        pts.push(toPaper(p, [c[0] + h.r! * Math.cos(t), c[1] + h.r! * Math.sin(t)]));
+      }
+      return polyline(pts);
+    };
+    const edge = (h: EdgeHit | null) => (!h ? "" : h.kind === "circle" && h.c && h.r !== undefined ? arc(h) : lineOf(h.view, h.a, h.b));
+    const tol = tolerance();
+    switch (tool) {
+      case "length":
+        return edge(edgeAt(views, layout, q, tol, "line"));
+      case "lineLine":
+      case "angle":
+      case "clineLines": {
+        const h = linePick(q, view);
+        return h ? lineOf(h.view, h.a, h.b) : "";
+      }
+      case "distance":
+      case "cline":
+      case "angle3": {
+        const h = pointPick(q, view);
+        return h ? dot(h.view, h.p) : "";
+      }
+      case "pointLine": {
+        if (!picks.length) {
+          const h = pointPick(q);
+          return h ? dot(h.view, h.p) : "";
+        }
+        const h = linePick(q, view);
+        return h ? lineOf(h.view, h.a, h.b) : "";
+      }
+      case "arcAngle":
+      case "radius":
+      case "diameter":
+      case "center":
+        return edge(edgeAt(views, layout, q, tol, "circle"));
+      case "minmax": {
+        const pt = pointAt(views, layout, q, tol * 0.7, view);
+        if (pt) return dot(pt.view, pt.p);
+        const e = edgeAt(views, layout, q, tol);
+        return e && (!view || e.view === view) ? edge(e) : "";
+      }
+      case "section": {
+        if (picks.length >= 2) return "";
+        const h = pointPick(q, view);
+        return h && !placedOf(h.view).clip ? dot(h.view, h.p) : "";
+      }
+      case "projection": {
+        if (picks.length) return "";
+        const p = layout.views.find((v) => {
+          const r = extent(v);
+          return q[0] >= r.x0 - 2 && q[0] <= r.x1 + 2 && q[1] >= r.y0 - 2 && q[1] <= r.y1 + 2;
+        });
+        if (!p || !specOf(p.id, opts())) return "";
+        const r = extent(p);
+        return `<rect x="${f(r.x0 - 2)}" y="${f(r.y0 - 2)}" width="${f(r.x1 - r.x0 + 4)}" height="${f(r.y1 - r.y0 + 4)}" fill="${HOVER}" fill-opacity="0.08" stroke="${HOVER}" stroke-width="${f(2 * px)}"/>`;
+      }
+      default:
+        return "";
+    }
+  };
+  /** Light up what's under the pointer now (nothing when it has left, or no tool is on). */
+  const drawHover = () => {
+    const s = paper.querySelector("svg");
+    if (!s) return;
+    const q = tool && hoverClient ? sheetPoint(hoverClient) : null;
+    const svg = q ? hoverSVG(q) : "";
+    let g = s.querySelector<SVGGElement>("#d-hover");
+    if (svg === hoverKey && (g || !svg)) return;
+    hoverKey = svg;
+    if (!g) {
+      g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.id = "d-hover";
+      g.setAttribute("pointer-events", "none");
+      s.append(g);
+    }
+    g.innerHTML = svg;
+    paper.classList.toggle("can-pick", !!svg);
+  };
+  paper.addEventListener("pointerleave", () => {
+    hoverClient = null;
+    drawHover();
+  });
   const addMark = (m: DrawingMark) => {
     const near = (p?: P2, q?: P2) => (!p && !q) || (!!p && !!q && len2(sub2(p, q)) < 1e-3);
     const o = opts();
