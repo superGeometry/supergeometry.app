@@ -2,7 +2,8 @@
 // transforms, projection of 3D edges, and text outlines.
 
 import type { OutlineOffset, PlaneDef, SketchConstraint, SketchEntity, Vec2, Vec3 } from "../doc/types";
-import { roundSig, toPlane } from "../geom";
+import { roundSig, toPlane, toWorld } from "../geom";
+import type { Arrangement, Region } from "./regions";
 import { constraintError, pointOf, pointsOf, refsOf, solve } from "./constraints";
 import { arcFrom3, closestOnPrim, entityCorners, entityPrims, evalPrim, isClosedPrim, primSegments, samplePrim, type Prim } from "./curves";
 
@@ -1599,5 +1600,47 @@ export function outlineOffsetCurves(boundary: SketchEntity[], links: OutlineOffs
     }
     made.forEach((e, k) => out.push({ ...e, id: `lnk-${o.id}-${k}` }));
   }
+  return out;
+}
+
+/**
+ * A sketch's shapes onto another plane, square to it: each outline (and hole)
+ * of the regions, a run of one curve at a time (a whole circle stays a circle,
+ * one squashed by the slant becomes a spline).
+ */
+export function projectRegions(arr: Arrangement, regions: Region[], from: PlaneDef, to: PlaneDef): SketchEntity[] {
+  const kind = (prim: number) => ({ line: "LINE", circle: "CIRCLE" })[arr.prims[prim].t as "line" | "circle"] ?? "SPLINE";
+  const out: SketchEntity[] = [];
+  const seen = new Set<number>();
+  for (const r of regions)
+    for (const loop of [r.outer, ...r.holes]) {
+      // Runs of pieces of one curve, the run started where the curve changes.
+      const ps = loop.pieces;
+      let start = ps.findIndex((x, i) => arr.pieces[x.piece].prim !== arr.pieces[ps[(i + ps.length - 1) % ps.length].piece].prim);
+      if (start < 0) start = 0;
+      let run: { prim: number; pts: Vec2[]; pieces: number[] } | null = null;
+      const flush = () => {
+        // A piece two regions share (a line between them) is drawn once.
+        if (run && !run.pieces.every((k) => seen.has(k))) {
+          run.pieces.forEach((k) => seen.add(k));
+          const e = projectPolyline(run.pts.map((q) => toWorld(from, q)), to, kind(run.prim));
+          if (e) out.push(e);
+        }
+        run = null;
+      };
+      for (let i = 0; i < ps.length; i++) {
+        const ref = ps[(start + i) % ps.length];
+        const pc = arr.pieces[ref.piece];
+        const poly = ref.reversed ? pc.poly.slice().reverse() : pc.poly;
+        if (run && (run as { prim: number }).prim === pc.prim && kind(pc.prim) !== "LINE") {
+          (run as { pts: Vec2[] }).pts.push(...poly.slice(1));
+          (run as { pieces: number[] }).pieces.push(ref.piece);
+        } else {
+          flush();
+          run = { prim: pc.prim, pts: poly.slice(), pieces: [ref.piece] };
+        }
+      }
+      flush();
+    }
   return out;
 }

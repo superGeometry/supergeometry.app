@@ -1,6 +1,9 @@
 // Project as Edge and Wrap & Emboss: a sketch (or edges) put onto a body's faces.
 
-import type { EdgeRef, ExtrudeSource, FaceRef, ImprintFeature, SketchFeature, WrapFeature } from "../doc/types";
+import type { EdgeRef, ExtrudeSource, FaceRef, ImprintFeature, PlaneDef, SketchFeature, WrapFeature } from "../doc/types";
+import { projectRegions } from "../sketch/edit";
+import { arrangement, resolveRegion, type Region } from "../sketch/regions";
+import { planeSlot } from "./slots";
 import type { PanelItem } from "../ui/ui";
 import { FeatureOp, type Slot } from "./featureOp";
 import { faceRefOf, type AppContext, type Sel } from "./tool";
@@ -115,5 +118,39 @@ export class WrapOp extends FeatureOp<WrapFeature> {
       { type: "number", label: "Height", value: Math.abs(f.height), kind: "length", min: 0.01, onInput: (v) => ((f.height = Math.sign(f.height || 1) * Math.max(0.01, Math.abs(v))), this.update()) },
       { type: "toggle", label: "Sink in", value: f.height < 0, onChange: (v) => ((f.height = (v ? -1 : 1) * Math.abs(f.height)), this.render(), this.update()) },
     ];
+  }
+}
+
+/**
+ * Project as Sketch (a sketch's shapes): a new sketch on a plane or flat face
+ * picked next, the shapes drawn onto it square to it.
+ */
+export class ProjectSketchOp extends FeatureOp<SketchFeature> {
+  readonly id = "projectSketch";
+  private onto: PlaneDef | null = null;
+
+  constructor(app: AppContext, source: Extract<ExtrudeSource, { kind: "profile" }>) {
+    super(app, { ...app.store.newIdentity("sketch"), type: "sketch", plane: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, entities: [] });
+    const from = app.sketchPlane(source.sketch);
+    const arr = arrangement(app.sketchCurves(source.sketch));
+    const regions = source.regions.map((r) => resolveRegion(arr, r)).filter((r): r is Region => !!r);
+    this.slots = [
+      planeSlot(app, "Onto", () => this.onto, (p, face) => {
+        this.onto = p;
+        const f = this.feature;
+        f.plane = p;
+        if (face) f.attachedTo = face;
+        else delete f.attachedTo;
+        f.entities = from ? projectRegions(arr, regions, from, p) : [];
+      }),
+    ];
+  }
+
+  protected hint(): string {
+    return this.onto ? "A new sketch on it, the shapes drawn onto it square to it." : "Tap the plane or flat face to draw the shapes onto (or pick XY / XZ / YZ).";
+  }
+
+  protected items(): PanelItem[] {
+    return [];
   }
 }

@@ -26,7 +26,7 @@ import { pickColor } from "../ui/colorPicker";
 import { BimTool } from "../bim/bimTool";
 import { openDrawing } from "../bim/drawing";
 import { EdgeAnglePlaneOp } from "./planeOps";
-import { ImprintOp, WrapOp } from "./wrapOps";
+import { ImprintOp, ProjectSketchOp, WrapOp } from "./wrapOps";
 import { materialOf } from "../bim/materials";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, viewMenu, type AppContext, type Sel, type Tool } from "./tool";
 
@@ -530,7 +530,8 @@ export class SelectTool implements Tool {
       { id: "revolve", label: "Revolve", icon: "revolve", shortcut: "R", run: () => src && app.setTool(new RevolveOp(app, src)) },
       { id: "sweep", label: "Sweep", icon: "sweep", shortcut: "W", run: () => src && app.setTool(new SweepOp(app, src)) },
       { id: "offset", label: "Offset Edge", icon: "offset", shortcut: "O", run: inSketch("offset") },
-      { id: "projs", label: "Project as Sketch", icon: "project", disabled: true, why: SOON },
+      // A new sketch on a plane or face picked next, the shapes drawn onto it.
+      { id: "projs", label: "Project as Sketch", icon: "project", run: () => src && app.setTool(new ProjectSketchOp(app, src)) },
       // Drawn onto the body's faces seen from the sketch; wrapped round a round face.
       { id: "proje", label: "Project as Edge", icon: "projectEdge", beta: true, run: () => src && app.setTool(new ImprintOp(app, { source: src })) },
       { id: "wrap", label: "Wrap & Emboss", icon: "wrap", beta: true, run: () => src && app.setTool(new WrapOp(app, src)) },

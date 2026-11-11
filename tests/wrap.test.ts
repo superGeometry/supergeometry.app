@@ -6,6 +6,7 @@ import { measureVolume, setOC } from "replicad";
 import { debugBodies, regenerate } from "../src/kernel/engine";
 import { healthOf, isHealthy } from "../src/kernel/repair";
 import { arrangement, regionRef } from "../src/sketch/regions";
+import { projectRegions } from "../src/sketch/edit";
 import type { Feature, PlaneDef } from "../src/doc/types";
 
 setOC(await (opencascade as unknown as () => Promise<any>)());
@@ -97,6 +98,26 @@ const long = await bodyAfter(wrapOf([rect("l", -70, 20, 70, 30)], 2), "C");
 check("longer than the way round: said so", /longer than the way round/.test(long.err ?? ""), long.err);
 const tilted = await bodyAfter(wrapOf(lbl, 2, { origin: [20, 0, 0], xDir: [0, 1, 0], normal: [Math.SQRT1_2, 0, Math.SQRT1_2] }), "C");
 check("a plane across the axis: asked for one along it", /along the round face's axis/.test(tilted.err ?? ""), tilted.err);
+
+// ---- Project as Sketch (a sketch's shapes onto another plane, square to it).
+{
+  const es: any[] = [rect("r", 0, 0, 40, 20), { id: "h", kind: "circle", center: [20, 10], radius: 5 }];
+  const arr = arrangement(es);
+  const ring = arr.regions.find((r) => r.holes.length === 1)!;
+  const flat = projectRegions(arr, [ring], XY(0), XY(10));
+  const kinds = flat.map((e) => e.kind).sort().join(",");
+  check("a plate with a hole onto a parallel plane: its four sides and its circle", kinds === "circle,line,line,line,line", kinds);
+  const c = flat.find((e) => e.kind === "circle") as any;
+  check("  ...the circle where it was, its size", !!c && Math.abs(c.center[0] - 20) < 1e-6 && Math.abs(c.center[1] - 10) < 1e-6 && Math.abs(c.radius - 5) < 1e-3, JSON.stringify(c));
+  // Onto a plane tilted 60° about X: lengths across the tilt halve, the circle is squashed to an ellipse-like spline.
+  const tilt = { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, -Math.sin(Math.PI / 3), Math.cos(Math.PI / 3)] } as PlaneDef;
+  const t = projectRegions(arr, [ring], XY(0), tilt);
+  const ys = t.filter((e: any) => e.kind === "line").flatMap((e: any) => [e.a[1], e.b[1]]);
+  check("onto a plane tilted 60°: the 20 mm sides come out 10 mm, the circle a spline", Math.abs(Math.max(...ys) - Math.min(...ys) - 10) < 1e-6 && t.some((e) => e.kind === "spline") && !t.some((e) => e.kind === "circle"), JSON.stringify(ys));
+  const two = arrangement([rect("a", 0, 0, 10, 10), rect("b", 10, 0, 20, 10)] as any);
+  const both = projectRegions(two, two.regions, XY(0), XY(5));
+  check("two shapes side by side: the side they share drawn once (7 lines)", both.length === 7 && both.every((e) => e.kind === "line"), String(both.length));
+}
 
 console.log(failed ? `${failed} failed` : "all passed");
 process.exit(failed ? 1 : 0);
