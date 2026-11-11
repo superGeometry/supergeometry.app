@@ -8,6 +8,8 @@ import { arrangement, regionRef } from "../src/sketch/regions";
 import {
   angleDim,
   arcSweep,
+  arrangeDims,
+  extent,
   balloonSpots,
   dimLabel,
   dimSVG,
@@ -175,6 +177,34 @@ check("tapping the far side finds that edge, 60 long", !!side && Math.abs(Math.h
 const o2 = drawingOptions(ddoc);
 check("a length dimension says 60", dimSVG({ id: "d1", view: "top", kind: "length", a: side!.a, b: side!.b, offset: 8 }, tp2, o2).includes(">60<"));
 check("a diameter says Ø16, a radius R8", dimSVG({ id: "d2", view: "top", kind: "diameter", a: [0, 0], c: circle!.c, r: 8, offset: 6 }, tp2, o2).includes(">Ø16<") && dimSVG({ id: "d3", view: "top", kind: "radius", a: [0, 0], c: circle!.c, r: 8, offset: 6 }, tp2, o2).includes(">R8<"));
+{
+  // Arranged by the book: two short ones side by side in the first row, 10 mm
+  // out; the long one over them, 7 mm further; a tiny one's value past its end;
+  // a diameter's leader out past the view.
+  const [[x0, y0], [x1, y1]] = tp2.box;
+  const lineY = (d: { a: [number, number]; offset: number }) => tp2.y + (d.a[1] - y0) * tp2.s - d.offset;
+  const r = extent(tp2);
+  const ds = arrangeDims(
+    [
+      { id: "long", view: "top", kind: "length", a: [x0, y0], b: [x1, y0], offset: 3 },
+      { id: "s1", view: "top", kind: "length", a: [x0, y0], b: [x0 + 20, y0], offset: 25 },
+      { id: "s2", view: "top", kind: "length", a: [x0 + 20, y0], b: [x0 + 40, y0], offset: 40 },
+      { id: "tiny", view: "top", kind: "length", a: [x1 - 2, y1], b: [x1, y1], offset: 3 },
+      { id: "dia", view: "top", kind: "diameter", a: [0, 0], c: circle!.c, r: 8, offset: 1 },
+    ],
+    dL,
+    o2,
+  );
+  const by = (id: string) => ds.find((d) => d.id === id)!;
+  check("arranged: the short ones in the first row, 10 mm out", Math.abs(lineY(by("s1")) - (r.y0 - 10)) < 1e-6 && Math.abs(lineY(by("s2")) - (r.y0 - 10)) < 1e-6, `${lineY(by("s1"))} ${lineY(by("s2"))} ${r.y0}`);
+  check("arranged: the long one over them, 7 mm further out", Math.abs(lineY(by("long")) - (r.y0 - 17)) < 1e-6, String(lineY(by("long"))));
+  check("arranged: a dimension along the bottom goes below the view", Math.abs(lineY(by("tiny")) - (r.y1 + 10)) < 1e-6, String(lineY(by("tiny"))));
+  check("arranged: too short for its value, the value goes past its end", (by("tiny").slide ?? 0) > 2 && !by("s1").slide);
+  const dia = by("dia");
+  const C = [tp2.x + (circle!.c[0] - x0) * tp2.s, tp2.y + (circle!.c[1] - y0) * tp2.s];
+  const end = [C[0] + Math.cos(dia.angle!) * (8 * tp2.s + dia.offset), C[1] + Math.sin(dia.angle!) * (8 * tp2.s + dia.offset)];
+  check("arranged: a diameter's leader ends outside the view", end[0] < r.x0 || end[0] > r.x1 || end[1] < r.y0 || end[1] > r.y1, JSON.stringify(end));
+}
 ddoc.drawing = { precision: 2, comma: true, units: "cm" };
 check("lengths in the drawing's units, decimals, comma: 12.345 mm is 1,23 cm", lengthText(12.345, drawingOptions(ddoc)) === "1,23", lengthText(12.345, drawingOptions(ddoc)));
 ddoc.drawing = { precision: 2 };

@@ -15,6 +15,7 @@ import { measureBodies } from "./bimTool";
 import { SheetCamera } from "./sheetCamera";
 import { partsList, type PartRow } from "./sheet";
 import {
+  arrangeDims,
   isOverall,
   overallDims,
   annId,
@@ -1147,6 +1148,22 @@ export async function openDrawing(app: AppContext): Promise<void> {
       app.ui.toast("Overall size taken off: Overall sizes, off and on again, brings it back");
     } else set({ dims: o.dims.filter((d) => d.id !== id), notes: o.notes.filter((n) => n.id !== id), marks: o.marks.filter((m) => m.id !== id), images: o.images.filter((m) => m.id !== id) });
   };
+  /** Every dimension on the sheet laid out by the book: rows out from the views, shorter inside longer, values clear. */
+  const arrange = () => {
+    if (!layout) return;
+    const o = opts();
+    const all = dimsOf(o);
+    if (!all.length) return app.ui.toast("No dimensions to arrange");
+    let cur = o;
+    let patch: Partial<DrawingOptions> = {};
+    for (const d of arrangeDims(all, layout, o)) {
+      const p = withDim(cur, d);
+      patch = { ...patch, ...p };
+      cur = { ...cur, ...p } as typeof o;
+    }
+    set(patch);
+    app.ui.toast(`${all.length} dimension${all.length === 1 ? "" : "s"} arranged`);
+  };
   /** Every dimension on the sheet: the overall sizes, then those put on by hand. */
   const dimsOf = (o: ReturnType<typeof opts>): DrawingDim[] => [...(layout ? overallDims(o, layout) : []), ...o.dims];
   /** A dimension changed: one put on by hand in its list; an overall size, as what was changed on it. */
@@ -1511,6 +1528,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
       // Switched on again, the overall sizes taken off one by one come back (where they were moved to).
       const back = () => Object.fromEntries(Object.entries(o.overallDims).map(([k, { hidden: _h, ...v }]) => [k, v]));
       button("Overall sizes", o.overall ? "eye" : "eyeOff", () => set(o.overall ? { overall: false } : { overall: true, overallDims: back() }), { on: o.overall, sub: true });
+      button("Arrange", "align", arrange, { sub: true });
     }
     const markTools: ToolId[] = ["center", "cline", "clineLines"];
     button("Centrelines", "lineDashed", () => ((open = open === "marks" ? null : "marks"), renderTools()), { on: open === "marks" || (!!tool && markTools.includes(tool)) });

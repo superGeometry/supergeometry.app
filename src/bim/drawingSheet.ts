@@ -898,6 +898,103 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
   return { svg: out.join("\n"), layout: L };
 }
 
+/** Dimension lines (ISO 129-1): the first this far out from the view (mm on the paper), each next one this much further. */
+export const DIM_FIRST = 10;
+export const DIM_STEP = 7;
+
+/**
+ * The dimensions laid out the way a technical drawing has them (ISO 129-1):
+ * - outside the view, on the side nearest what they measure (above or below,
+ *   left or right);
+ * - in rows 10 mm out, then 7 mm apart; the shorter nearer the view, the
+ *   longer further out, so no extension line crosses a dimension line;
+ *   dimensions that don't overlap share a row (a chain);
+ * - the value in the middle, or just past the end when it doesn't fit between
+ *   the arrows; no two values on top of each other;
+ * - a radius's or diameter's leader pointing away from the middle of its view,
+ *   out past the view, no two the same way.
+ * Slanted ones stand 10 mm off; angles stay as they are. The same order back.
+ */
+export function arrangeDims(dims: DrawingDim[], L: Pick<Layout, "views">, o: Opts): DrawingDim[] {
+  const out = new Map<string, DrawingDim>();
+  /** Its line from lo to hi (along the row), its value from tlo to thi. */
+  type Row = { d: DrawingDim; A: [number, number]; n: [number, number]; horiz: boolean; lo: number; hi: number; tlo: number; thi: number; len: number; slide: number };
+  const rows = new Map<string, { p: Placed; side: "top" | "bottom" | "left" | "right"; items: Row[] }>();
+  const circles = new Map<string, DrawingDim[]>();
+  for (const d of dims) {
+    const p = L.views.find((v) => v.id === d.view);
+    if (!p) continue;
+    const r = extent(p);
+    const mid: [number, number] = [(r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2];
+    if ((d.kind === "length" || d.kind === "distance") && d.b) {
+      const A = toPaper(p, d.a);
+      const B = toPaper(p, d.b);
+      const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      if (len < 1e-6) continue;
+      const u: [number, number] = [(B[0] - A[0]) / len, (B[1] - A[1]) / len];
+      const n: [number, number] = [u[1], -u[0]];
+      const horiz = Math.abs(u[1]) < 1e-3;
+      const vert = Math.abs(u[0]) < 1e-3;
+      if (!horiz && !vert) {
+        out.set(d.id, { ...d, offset: (Math.sign(d.offset) || 1) * DIM_FIRST, slide: undefined });
+        continue;
+      }
+      const tw = labelWidth(labelOf(dimLabel(d, Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), o)), 3.5);
+      // Too short for its value between the arrows: the value just past b's end.
+      const slide = len < tw + 8 ? len / 2 + tw / 2 + 4 : 0;
+      const k = horiz ? 0 : 1;
+      const across = horiz ? (A[1] + B[1]) / 2 : (A[0] + B[0]) / 2;
+      const side = horiz ? (across < mid[1] ? "top" : "bottom") : across < mid[0] ? "left" : "right";
+      const tc = (A[k] + B[k]) / 2 + u[k] * slide;
+      const key = `${d.view}|${side}`;
+      if (!rows.has(key)) rows.set(key, { p, side, items: [] });
+      rows.get(key)!.items.push({ d, A, n, horiz, lo: Math.min(A[k], B[k]), hi: Math.max(A[k], B[k]), tlo: tc - tw / 2 - 1.5, thi: tc + tw / 2 + 1.5, len, slide });
+    } else if ((d.kind === "radius" || d.kind === "diameter") && d.c && d.r !== undefined) {
+      if (!circles.has(d.view)) circles.set(d.view, []);
+      circles.get(d.view)!.push(d);
+    }
+  }
+  for (const { p, side, items } of rows.values()) {
+    const r = extent(p);
+    const lanes: Row[][] = [];
+    // Two in one row: their lines may meet end to end (a chain), not overlap; their values clear of each other (a value past an end: of the other's line too).
+    const meet = (a0: number, a1: number, b0: number, b1: number, gap: number) => a0 < b1 - gap && b0 < a1 - gap;
+    const clash = (a: Row, b: Row) => meet(a.lo, a.hi, b.lo, b.hi, 0.5) || meet(a.tlo, a.thi, b.tlo, b.thi, 0) || (!!a.slide && meet(a.tlo, a.thi, b.lo, b.hi, 0)) || (!!b.slide && meet(b.tlo, b.thi, a.lo, a.hi, 0));
+    items.sort((a, b) => a.len - b.len || a.lo - b.lo);
+    for (const it of items) {
+      let k = 0;
+      while (lanes[k]?.some((o) => clash(o, it))) k++;
+      (lanes[k] ??= []).push(it);
+      const out1 = DIM_FIRST + DIM_STEP * k;
+      const line = side === "top" ? r.y0 - out1 : side === "bottom" ? r.y1 + out1 : side === "left" ? r.x0 - out1 : r.x1 + out1;
+      const offset = it.horiz ? (line - it.A[1]) * it.n[1] : (line - it.A[0]) * it.n[0];
+      out.set(it.d.id, { ...it.d, offset, slide: it.slide || undefined });
+    }
+  }
+  for (const [view, list] of circles) {
+    const p = L.views.find((v) => v.id === view)!;
+    const r = extent(p);
+    const mid: [number, number] = [(r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2];
+    const taken: number[] = [];
+    const apart = (a: number, b: number) => Math.abs(((a - b + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+    for (const d of list) {
+      const C = toPaper(p, d.c!);
+      const R = d.r! * p.s;
+      const away = Math.hypot(C[0] - mid[0], C[1] - mid[1]) > 1 ? Math.atan2(C[1] - mid[1], C[0] - mid[0]) : -Math.PI / 4;
+      let a = away;
+      for (let i = 1; i < 12 && taken.some((t) => apart(t, a) < 0.4); i++) a = away + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.45;
+      taken.push(a);
+      // Out past the view along the leader: where it leaves the view's box.
+      const dx = Math.cos(a);
+      const dy = Math.sin(a);
+      const ts = [dx > 1e-9 ? (r.x1 - C[0]) / dx : dx < -1e-9 ? (r.x0 - C[0]) / dx : Infinity, dy > 1e-9 ? (r.y1 - C[1]) / dy : dy < -1e-9 ? (r.y0 - C[1]) / dy : Infinity];
+      const exit = Math.max(0, Math.min(...ts));
+      out.set(d.id, { ...d, angle: a, offset: Math.max(4, exit - R + 5) });
+    }
+  }
+  return dims.map((d) => out.get(d.id) ?? d);
+}
+
 /** Is this one of the overall sizes (made by the drawing, not put on by hand)? */
 export const isOverall = (id: string) => id.startsWith("overall-");
 
