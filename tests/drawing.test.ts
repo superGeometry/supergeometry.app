@@ -224,6 +224,13 @@ check("a diameter says Ø16, a radius R8", dimSVG({ id: "d2", view: "top", kind:
   check("one deleted, the other kept", drawingsOf(pd).length === 1 && drawingsOf(pd)[0].title === "Old");
 }
 {
+  // The frame's fields (ISO 5457) are measured out from the centring marks: the middle of the sheet is a field line.
+  const ticks = /<path d="([^"]+)" stroke="#000" stroke-width="0.35"/.exec(svg)?.[1] ?? "";
+  const W = Number(/viewBox="0 0 ([\d.]+)/.exec(svg)?.[1]);
+  const xs = [...ticks.matchAll(/M([\d.]+) 10L/g)].map((m) => Number(m[1]));
+  check("the centring mark is on a field line, fields 50 mm", xs.includes(W / 2) && xs.every((x) => Math.abs(((x - W / 2) / 50) % 1) < 1e-9), xs.join(","));
+}
+{
   // DXF of a sheet: y up, arcs the right way round, text kept, arrowheads solid.
   const ents = (dxf: string) => {
     const l = dxf.split("\n");

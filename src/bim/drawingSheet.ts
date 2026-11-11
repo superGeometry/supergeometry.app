@@ -680,26 +680,29 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     const R = W - FRAME;
     const B = H - FRAME;
     out.push(`<rect x="${FRAME_L}" y="${FRAME}" width="${f(R - FRAME_L)}" height="${f(B - FRAME)}" stroke="#000" stroke-width="0.7" fill="none"/>`);
-    const cols = Math.max(2, 2 * Math.round(W / 100));
-    const rows = Math.max(2, 2 * Math.round(H / 100));
     const thin = `stroke="#000" stroke-width="0.35"`;
     let ticks = "";
-    for (let i = 0; i <= cols; i++) {
-      const x = FRAME_L + ((R - FRAME_L) * i) / cols;
-      if (i > 0 && i < cols) ticks += `M${f(x)} ${FRAME}L${f(x)} ${FRAME - 5}M${f(x)} ${f(B)}L${f(x)} ${f(B + 5)}`;
-      if (i < cols) {
-        const cx = FRAME_L + ((R - FRAME_L) * (i + 0.5)) / cols;
-        out.push(text(cx, FRAME - 3.2, String(i + 1), 3, { anchor: "middle" }), text(cx, B + 6.8, String(i + 1), 3, { anchor: "middle" }));
-      }
+    // The fields (ISO 5457): 50 mm, measured out both ways from the centring
+    // marks (the sheet's middle), so a centring mark is always a field line;
+    // the end fields take what's left (one too thin joins the next).
+    const cuts = (lo: number, hi: number, mid: number) => {
+      const at = [mid];
+      for (let k = 1; mid - 50 * k > lo; k++) at.unshift(mid - 50 * k);
+      for (let k = 1; mid + 50 * k < hi; k++) at.push(mid + 50 * k);
+      return [lo, ...at.filter((x) => x - lo >= 15 && hi - x >= 15), hi];
+    };
+    const xs = cuts(FRAME_L, R, W / 2);
+    const ys = cuts(FRAME, B, H / 2);
+    for (let i = 0; i + 1 < xs.length; i++) {
+      if (i > 0) ticks += `M${f(xs[i])} ${FRAME}L${f(xs[i])} ${FRAME - 5}M${f(xs[i])} ${f(B)}L${f(xs[i])} ${f(B + 5)}`;
+      const cx = (xs[i] + xs[i + 1]) / 2;
+      out.push(text(cx, FRAME - 3.2, String(i + 1), 3, { anchor: "middle" }), text(cx, B + 6.8, String(i + 1), 3, { anchor: "middle" }));
     }
-    for (let j = 0; j <= rows; j++) {
-      const y = FRAME + ((B - FRAME) * j) / rows;
-      if (j > 0 && j < rows) ticks += `M${FRAME_L} ${f(y)}L${FRAME_L - 5} ${f(y)}M${f(R)} ${f(y)}L${f(R + 5)} ${f(y)}`;
-      if (j < rows) {
-        const cy = FRAME + ((B - FRAME) * (j + 0.5)) / rows + 1;
-        const letter = String.fromCharCode(65 + j);
-        out.push(text(FRAME_L - 5, cy, letter, 3, { anchor: "middle" }), text(R + 5, cy, letter, 3, { anchor: "middle" }));
-      }
+    for (let j = 0; j + 1 < ys.length; j++) {
+      if (j > 0) ticks += `M${FRAME_L} ${f(ys[j])}L${FRAME_L - 5} ${f(ys[j])}M${f(R)} ${f(ys[j])}L${f(R + 5)} ${f(ys[j])}`;
+      const cy = (ys[j] + ys[j + 1]) / 2 + 1;
+      const letter = String.fromCharCode(65 + j);
+      out.push(text(FRAME_L - 5, cy, letter, 3, { anchor: "middle" }), text(R + 5, cy, letter, 3, { anchor: "middle" }));
     }
     out.push(`<path d="${ticks}" ${thin}/>`);
     // Centring marks, across the border.
