@@ -33,6 +33,7 @@ import {
   VIEW_SPECS,
 } from "../src/bim/drawingSheet";
 import { emptyDoc, type Feature } from "../src/doc/types";
+import { sheetToDXF } from "../src/io/sheetDxf";
 import type { PartRow } from "../src/bim/sheet";
 
 setOC(await (opencascade as unknown as () => Promise<any>)());
@@ -221,6 +222,29 @@ check("a diameter says Ø16, a radius R8", dimSVG({ id: "d2", view: "top", kind:
   check("one changed, the other not", drawingsOf(pd)[0].size === "A3" && drawingsOf(pd)[1].title === "Second");
   putDrawing(pd, "second", null);
   check("one deleted, the other kept", drawingsOf(pd).length === 1 && drawingsOf(pd)[0].title === "Old");
+}
+{
+  // DXF of a sheet: y up, arcs the right way round, text kept, arrowheads solid.
+  const ents = (dxf: string) => {
+    const l = dxf.split("\n");
+    const at = l.indexOf("ENTITIES");
+    const list: Record<string, string>[] = [];
+    for (let i = at + 1; i < l.length - 1; i += 2) {
+      if (l[i] === "0") list.push({ type: l[i + 1] });
+      else if (list.length) list[list.length - 1][l[i]] ??= l[i + 1];
+    }
+    return list.filter((e) => e.type !== "ENDSEC" && e.type !== "EOF");
+  };
+  const q = ents(sheetToDXF(`<svg viewBox="0 0 100 100"><path d="M10 0A10 10 0 0 1 0 10" stroke="#000" stroke-width="0.5" fill="none"/></svg>`));
+  check("DXF: a quarter arc, y up, centre and angles right", q.length === 1 && q[0].type === "ARC" && q[0]["10"] === "0" && q[0]["20"] === "100" && q[0]["40"] === "10" && q[0]["50"] === "270" && q[0]["51"] === "0", JSON.stringify(q));
+  const t = ents(sheetToDXF(`<svg viewBox="0 0 100 100"><g transform="rotate(-90 20 30)"><text x="20" y="30" font-size="5" text-anchor="middle">Ø16 ±0,1</text></g><path d="M0 0L3 1L3 -1Z" fill="#000"/><path d="M0 50L10 50" stroke="#000" stroke-width="0.25" stroke-dasharray="3 1"/></svg>`));
+  const tx = t.find((e) => e.type === "TEXT");
+  check("DXF: text kept, turned, centred, Ø and ± as their codes", !!tx && tx["1"] === "%%c16 %%p0,1" && tx["50"] === "90" && tx["72"] === "1" && tx["20"] === "70", JSON.stringify(tx));
+  check("DXF: an arrowhead is a solid, a dashed line on HIDDEN", t.some((e) => e.type === "SOLID") && t.some((e) => e.type === "LINE" && e["8"] === "HIDDEN"));
+  const whole = ents(sheetToDXF(svg));
+  // DXF_OUT=file: the sheet's DXF written there (to open it in a DXF reader).
+  if (process.env.DXF_OUT) (await import("node:fs")).writeFileSync(process.env.DXF_OUT, sheetToDXF(svg));
+  check("DXF: a whole sheet has its lines, the views' outlines and its text", whole.filter((e) => e.type === "LINE").length > 20 && whole.some((e) => e.type === "TEXT") && whole.some((e) => e["8"] === "VISIBLE"), String(whole.length));
 }
 ddoc.drawing = { precision: 2, comma: true, units: "cm" };
 check("lengths in the drawing's units, decimals, comma: 12.345 mm is 1,23 cm", lengthText(12.345, drawingOptions(ddoc)) === "1,23", lengthText(12.345, drawingOptions(ddoc)));

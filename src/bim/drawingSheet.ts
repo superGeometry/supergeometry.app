@@ -995,6 +995,21 @@ export function arrangeDims(dims: DrawingDim[], L: Pick<Layout, "views">, o: Opt
   return dims.map((d) => out.get(d.id) ?? d);
 }
 
+/** The views a drawing's sheet shows (to be drawn by the kernel): the standard ones switched on, then those added. */
+export function sheetViewSpecs(o: Opts): ViewSpec[] {
+  const side = o.angle === "first" ? "left" : "right";
+  const base = VIEW_SPECS.filter((v) => (v.id === "front" || v.id === "top" || v.id === "iso" ? o.views[v.id] : o.views.side && v.id === side));
+  return [...base, ...extraSpecs(o)];
+}
+
+/** What a drawing for other bodies takes from one before it: the sheet and how it's drawn, not what's on it. */
+export function sheetSettings(d: DrawingOptions): DrawingOptions {
+  const keep: (keyof DrawingOptions)[] = ["size", "portrait", "angle", "hidden", "views", "titleBlock", "dateFormat", "units", "precision", "anglePrecision", "comma", "lines", "balloons", "overall"];
+  const out: DrawingOptions = {};
+  for (const k of keep) if (d[k] !== undefined) (out as Record<string, unknown>)[k] = structuredClone(d[k]);
+  return out;
+}
+
 /** The project's drawings, each with its id (a project saved with one drawing: that one). */
 export function drawingsOf(doc: ProjectDoc): (DrawingOptions & { id: string })[] {
   const list = doc.drawings ?? (doc.drawing ? [doc.drawing] : []);

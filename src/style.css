@@ -4925,7 +4925,16 @@ input.bim-tb-value:focus {
 .bim-drawing-svg > rect:first-of-type {
   filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.35));
 }
-/* The project's drawings, listed under the tools. */
+/* The project's drawings, listed under the tools; a box to find one among many. */
+.bim-dtools .bim-dfind {
+  flex: none;
+  margin: 2px 4px 4px;
+  width: auto;
+  padding: 5px 8px;
+}
+html[data-screen="phone"] .bim-dtools .bim-dfind {
+  display: none;
+}
 .bim-dtools-head {
   margin: 10px 8px 2px;
   padding-top: 8px;

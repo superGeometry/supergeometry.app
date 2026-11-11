@@ -13,11 +13,15 @@ import { UNIT_MM } from "../units";
 import type { AppContext } from "../tools/tool";
 import { measureBodies } from "./bimTool";
 import { SheetCamera } from "./sheetCamera";
+import { sheetToDXF } from "../io/sheetDxf";
+import { zip } from "../io/threemf";
 import { partsList, type PartRow } from "./sheet";
 import {
   arrangeDims,
   drawingsOf,
   putDrawing,
+  sheetSettings,
+  sheetViewSpecs,
   isOverall,
   overallDims,
   annId,
@@ -34,7 +38,6 @@ import {
   scaleLabel,
   SCALES,
   extraName,
-  extraSpecs,
   isIsoView,
   minMax,
   ORIENTS,
@@ -121,18 +124,27 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
   document.querySelector(".bim-sheet")?.remove();
   const store = app.store;
   const existing = drawingsOf(store.doc);
-  const want = which === "new" ? null : (existing.find((d) => d.id === (which ?? lastOpened)) ?? existing[0] ?? null);
+  // Bodies picked as Drawings is tapped: their drawing (the one of just them; a new one if there's none).
+  const picked = which ? [] : [...new Set(app.selection.flatMap((s) => ("body" in s ? [s.body] : [])))];
+  const bodyName = (id: string) => store.doc.names?.[id] ?? app.view.bodyList.find((b) => b.id === id)?.name ?? "Body";
+  const pickedTitle = picked.length ? picked.map(bodyName).join(", ") : "";
+  const ofPicked = picked.length ? existing.find((d) => d.bodies?.length === picked.length && picked.every((id) => d.bodies!.includes(id))) : undefined;
+  const want = which === "new" ? null : picked.length ? (ofPicked ?? null) : (existing.find((d) => d.id === (which ?? lastOpened)) ?? existing[0] ?? null);
   /** Which drawing this is. */
   const current = want?.id ?? annId("drawing");
+  // Picked bodies with no drawing of their own, beside other drawings: one made now, set out like the last one.
+  if (!want && picked.length && existing.length) {
+    const like = existing.find((d) => d.id === lastOpened) ?? existing[existing.length - 1];
+    store.commit((d) => putDrawing(d, current, { ...sheetSettings(like), title: pickedTitle, bodies: picked }));
+    app.ui.toast(`A new drawing of ${pickedTitle}`);
+  }
   lastOpened = current;
   const curDrawing = (): DrawingOptions | undefined => drawingsOf(store.doc).find((d) => d.id === current);
 
   // A new drawing: its preferences asked first (and nothing kept if they're cancelled).
-  const fresh = !want;
-  /** A new drawing beside others: its own title to start with. */
-  const startTitle = existing.length && fresh ? `${store.doc.name || "Untitled"} ${existing.length + 1}` : undefined;
-  // The bodies drawn: those picked as it opens, or the ones chosen before, or all shown.
-  const picked = [...new Set(app.selection.flatMap((s) => ("body" in s ? [s.body] : [])))];
+  const fresh = !curDrawing();
+  /** A new drawing: its own title to start with (the picked bodies', or the project's and its number). */
+  const startTitle = fresh ? pickedTitle || (existing.length ? `${store.doc.name || "Untitled"} ${existing.length + 1}` : undefined) : undefined;
 
   // ---- The workspace
   const back = el("div", "bim-sheet bim-drawing");
@@ -140,12 +152,14 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
   const name = el("span", "bim-sheet-name", "Drawing");
   const print = el("button", "text-btn", "Print / PDF");
   const svgBtn = el("button", "text-btn", "SVG");
+  const dxfBtn = el("button", "text-btn", "DXF");
+  dxfBtn.title = "This drawing as a DXF file (for CAD programs)";
   const propsBtn = el("button", "text-btn on", "Properties");
   const close = el("button", "bim-close");
   close.innerHTML = icons.close;
   close.title = "Exit Drawing";
   close.setAttribute("aria-label", "Exit Drawing");
-  bar.append(name, print, svgBtn, propsBtn, close);
+  bar.append(name, print, svgBtn, dxfBtn, propsBtn, close);
   const work = el("div", "bim-dwork");
   const tools = el("div", "bim-dtools");
   const stage = el("div", "bim-dstage");
@@ -304,7 +318,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     paper.append(status);
     try {
       allParts = partsList(app, await measureBodies(app));
-      const want = drawingOptions(store.doc).bodies?.filter((id) => allParts.some((p) => p.id === id));
+      const want = opts().bodies?.filter((id) => allParts.some((p) => p.id === id));
       parts = want?.length ? allParts.filter((p) => want.includes(p.id)) : allParts;
       if (!parts.length) {
         paper.innerHTML = "";
@@ -338,12 +352,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
   /** What each drawn view was drawn as (a section flipped is drawn again). */
   const drawnAs = new Map<string, string>();
   let fetching = false;
-  const wanted = (): ViewSpec[] => {
-    const o = opts();
-    const side = o.angle === "first" ? "left" : "right";
-    const base = VIEW_SPECS.filter((v) => (v.id === "front" || v.id === "top" || v.id === "iso" ? o.views[v.id] : o.views.side && v.id === side));
-    return [...base, ...extraSpecs(o)];
-  };
+  const wanted = (): ViewSpec[] => sheetViewSpecs(opts());
   const fetchMissing = async () => {
     const miss = wanted().filter((v) => (!views.has(v.id) || drawnAs.get(v.id) !== JSON.stringify(v)) && !failed.has(JSON.stringify(v)));
     if (!miss.length || fetching) return;
@@ -1564,14 +1573,38 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     tools.append(el("div", "bim-dtools-head", "Drawings"));
     const all = drawingsOf(store.doc);
     const listed = all.some((d) => d.id === current) ? all : [...all, { id: current }];
-    for (const d of listed) {
-      const title = d.id === current ? o.title : drawingOptions({ ...store.doc, drawing: d }).title;
-      button(title, "drawing", () => d.id !== current && switchTo(d.id), { on: d.id === current, sub: true });
-    }
     button("New drawing", "insert", () => switchTo("new"), { sub: true });
     button("Copy drawing", "copy", copyDrawing, { sub: true, disabled: !curDrawing() });
     button("Delete drawing", "trash", () => void deleteDrawing(), { sub: true, disabled: !curDrawing() });
+    button(`Print / PDF all (${all.length})`, "file", () => void printAll(), { sub: true, disabled: !all.length || !!busy });
+    button(`DXF all (${all.length})`, "share", () => void dxfAll(), { sub: true, disabled: !all.length || !!busy });
+    // Many drawings: a box to find one by its title (the list narrows as it's typed).
+    if (listed.length > 8) {
+      const find = el("input", "bim-input bim-dfind");
+      find.type = "search";
+      find.placeholder = `Find among ${listed.length}…`;
+      find.value = listFilter;
+      find.addEventListener("keydown", (e) => e.stopPropagation());
+      find.addEventListener("input", () => {
+        listFilter = find.value;
+        narrow();
+      });
+      tools.append(find);
+    }
+    const rows: [HTMLElement, string][] = [];
+    for (const d of listed) {
+      const title = d.id === current ? o.title : drawingOptions({ ...store.doc, drawing: d }).title;
+      button(title, "drawing", () => d.id !== current && switchTo(d.id), { on: d.id === current, sub: true });
+      rows.push([tools.lastElementChild as HTMLElement, title.toLowerCase()]);
+    }
+    const narrow = () => {
+      const q = listFilter.trim().toLowerCase();
+      for (const [row, t] of rows) row.hidden = !!q && !t.includes(q);
+    };
+    narrow();
   };
+  /** What the list of drawings is narrowed to. */
+  let listFilter = "";
 
   // ---- The properties at the right
   propsBtn.addEventListener("click", () => {
@@ -1780,6 +1813,90 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   });
 
+  // ---- Every drawing's sheet, made one after the other (each its own bodies and views), for printing or DXF.
+  let busy = "";
+  const allSheets = async (what: string): Promise<{ title: string; svg: string; W: number; H: number }[] | null> => {
+    if (busy) return null;
+    busy = what;
+    renderTools();
+    const list = drawingsOf(store.doc);
+    const out: { title: string; svg: string; W: number; H: number }[] = [];
+    try {
+      if (!allParts.length) allParts = partsList(app, await measureBodies(app));
+      for (const [i, d] of list.entries()) {
+        const doc = { ...store.doc, drawing: d };
+        const o = drawingOptions(doc);
+        name.textContent = `${what}: drawing ${i + 1} of ${list.length} · ${o.title}…`;
+        const want = o.bodies?.filter((id) => allParts.some((p) => p.id === id));
+        const ps = want?.length ? allParts.filter((p) => want.includes(p.id)) : allParts;
+        if (!ps.length) continue;
+        const specs = sheetViewSpecs(o);
+        let vs: Map<string, ProjectedView>;
+        if (d.id === current && specs.every((v) => views.has(v.id) && drawnAs.get(v.id) === JSON.stringify(v))) vs = views;
+        else vs = new Map((specs.length ? await app.kernel.drawing(store.doc.features as never, specs, ps.map((p) => p.id)) : []).map((v) => [v.id, v]));
+        const [W, H] = sheetSize(o);
+        out.push({ title: o.title, svg: drawingSVG({ doc, views: vs, parts: ps, date }).svg, W, H });
+      }
+      return out;
+    } catch (err) {
+      app.ui.toast(`The drawings could not all be made: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    } finally {
+      busy = "";
+      name.textContent = `Drawing · ${opts().title}`;
+      renderTools();
+    }
+  };
+  /** Sheets printed together, each on its own page of its own size (saved as one PDF from the print window). */
+  const printSheets = (sheets: { svg: string; W: number; H: number }[]) => {
+    const page = document.createElement("style");
+    const sizes = [...new Set(sheets.map((s) => `${s.W}x${s.H}`))];
+    page.textContent =
+      sizes.map((k, i) => `@page sheet${i} { size: ${k.split("x")[0]}mm ${k.split("x")[1]}mm; margin: 0; }`).join("\n") +
+      `\n@page { margin: 0; } body.printing-drawing .bim-drawing-print > div { break-after: page; } body.printing-drawing .bim-drawing-print > div:last-child { break-after: auto; }` +
+      sheets.map((s, i) => `\nbody.printing-drawing .bim-drawing-print > div:nth-child(${i + 1}) { page: sheet${sizes.indexOf(`${s.W}x${s.H}`)}; } body.printing-drawing .bim-drawing-print > div:nth-child(${i + 1}) svg { width: ${s.W}mm; height: ${s.H}mm; display: block; }`).join("");
+    document.head.append(page);
+    const holder = el("div", "bim-drawing-print");
+    for (const s of sheets) {
+      const one = el("div", "");
+      one.innerHTML = s.svg;
+      holder.append(one);
+    }
+    document.body.append(holder);
+    document.body.classList.add("printing-drawing");
+    window.print();
+    document.body.classList.remove("printing-drawing");
+    holder.remove();
+    page.remove();
+  };
+  const printAll = async () => {
+    const sheets = await allSheets("Print");
+    if (sheets?.length) printSheets(sheets);
+  };
+  const fileName = (t: string) => t.replace(/[\\/:*?"<>|]+/g, "-").trim() || "Drawing";
+  const download = (blob: Blob, file: string) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = file;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  const dxfAll = async () => {
+    const sheets = await allSheets("DXF");
+    if (!sheets?.length) return;
+    const used = new Map<string, number>();
+    const enc = new TextEncoder();
+    const files = sheets.map((s) => {
+      const base = fileName(s.title);
+      const k = (used.get(base.toLowerCase()) ?? 0) + 1;
+      used.set(base.toLowerCase(), k);
+      return { name: `${k > 1 ? `${base} (${k})` : base}.dxf`, data: enc.encode(sheetToDXF(s.svg)) };
+    });
+    download(await zip(files), `${fileName(store.doc.name || "Project")} - drawings.zip`);
+    app.ui.toast(`${files.length} drawing${files.length === 1 ? "" : "s"} saved as DXF (in one .zip)`);
+  };
+  dxfBtn.addEventListener("click", () => download(new Blob([sheetToDXF(sheetOut())], { type: "application/dxf" }), `${fileName(opts().title)}.dxf`));
+
   // ---- The project's drawings (listed under the tools): another opened, a copy, this one deleted.
   const switchTo = (id: string) => {
     shut();
@@ -1803,7 +1920,9 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
   };
 
   renderTools();
-  if (fresh && !(await preferences())) return shut();
-  if (picked.length) set({ bodies: picked });
+  if (fresh) {
+    if (!(await preferences())) return shut();
+    if (picked.length) set({ bodies: picked });
+  }
   await load();
 }
