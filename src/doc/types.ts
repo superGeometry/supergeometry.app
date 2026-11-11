@@ -590,12 +590,16 @@ export interface ProjectDoc {
   customMaterials?: MaterialDef[];
   /** BIM: what the title block of the technical sheet and the drawings says. */
   info?: ProjectInfo;
-  /** BIM: how the drawing sheet is set out. */
+  /** BIM: the project's one drawing, as projects saved before there could be several had it (read as the first of `drawings`). */
   drawing?: DrawingOptions;
+  /** BIM: the project's drawings, each its own sheet. */
+  drawings?: DrawingOptions[];
 }
 
 /** The drawing sheet: paper size, projection method, scale (missing: the largest that fits), what it shows. */
 export interface DrawingOptions {
+  /** Which drawing of the project it is. */
+  id?: string;
   /** The sheet's title (missing: the project's name). */
   title?: string;
   size?: "A4" | "A3" | "A2" | "A1" | "A0" | "ANSI A" | "ANSI B" | "ANSI C" | "ANSI D" | "ANSI E";

@@ -16,6 +16,8 @@ import { SheetCamera } from "./sheetCamera";
 import { partsList, type PartRow } from "./sheet";
 import {
   arrangeDims,
+  drawingsOf,
+  putDrawing,
   isOverall,
   overallDims,
   annId,
@@ -108,12 +110,27 @@ const cross2 = (a: P2, b: P2) => a[0] * b[1] - a[1] * b[0];
 /** Two edges this close to parallel (sin of 1°) are taken as parallel. */
 const PARALLEL = Math.sin(Math.PI / 180);
 
-export async function openDrawing(app: AppContext): Promise<void> {
+/** The drawing open last (Drawings opens it again). */
+let lastOpened: string | null = null;
+
+/**
+ * A drawing of the project: `which` (an id), or "new" for one more, or the
+ * one open last (else the first; a project with none: its first, new).
+ */
+export async function openDrawing(app: AppContext, which?: string): Promise<void> {
   document.querySelector(".bim-sheet")?.remove();
   const store = app.store;
+  const existing = drawingsOf(store.doc);
+  const want = which === "new" ? null : (existing.find((d) => d.id === (which ?? lastOpened)) ?? existing[0] ?? null);
+  /** Which drawing this is. */
+  const current = want?.id ?? annId("drawing");
+  lastOpened = current;
+  const curDrawing = (): DrawingOptions | undefined => drawingsOf(store.doc).find((d) => d.id === current);
 
-  // The first drawing of the project: its preferences asked first.
-  const fresh = !store.doc.drawing;
+  // A new drawing: its preferences asked first (and nothing kept if they're cancelled).
+  const fresh = !want;
+  /** A new drawing beside others: its own title to start with. */
+  const startTitle = existing.length && fresh ? `${store.doc.name || "Untitled"} ${existing.length + 1}` : undefined;
   // The bodies drawn: those picked as it opens, or the ones chosen before, or all shown.
   const picked = [...new Set(app.selection.flatMap((s) => ("body" in s ? [s.body] : [])))];
 
@@ -121,6 +138,8 @@ export async function openDrawing(app: AppContext): Promise<void> {
   const back = el("div", "bim-sheet bim-drawing");
   const bar = el("div", "bim-sheet-bar");
   const name = el("span", "bim-sheet-name", "Drawing");
+  const listBtn = el("button", "text-btn bim-dlist-btn", "Drawings ▾");
+  listBtn.title = "The project's drawings: open another, add, copy, delete";
   const print = el("button", "text-btn", "Print / PDF");
   const svgBtn = el("button", "text-btn", "SVG");
   const propsBtn = el("button", "text-btn on", "Properties");
@@ -128,7 +147,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
   close.innerHTML = icons.close;
   close.title = "Exit Drawing";
   close.setAttribute("aria-label", "Exit Drawing");
-  bar.append(name, print, svgBtn, propsBtn, close);
+  bar.append(name, listBtn, print, svgBtn, propsBtn, close);
   const work = el("div", "bim-dwork");
   const tools = el("div", "bim-dtools");
   const stage = el("div", "bim-dstage");
@@ -260,13 +279,15 @@ export async function openDrawing(app: AppContext): Promise<void> {
   /** The sheet as printed or saved (made then: each redraw needn't). */
   const sheetOut = () => drawingSVG({ doc: docNow(), views, parts, date }).svg;
 
-  const docNow = (): ProjectDoc => (draft ? { ...store.doc, drawing: draft } : store.doc);
+  /** The project as this drawing sees it: this drawing as its one (while dragging: as it would be). */
+  const docNow = (): ProjectDoc => ({ ...store.doc, drawing: draft ?? curDrawing() ?? (startTitle ? { title: startTitle } : {}) });
   const opts = (): Opts => drawingOptions(docNow());
   const set = (patch: Partial<DrawingOptions>) =>
     store.commit((d) => {
-      const next: DrawingOptions = { ...(d.drawing ?? {}), ...patch };
+      const now = drawingsOf(d).find((x) => x.id === current) ?? (startTitle ? { title: startTitle } : {});
+      const next: DrawingOptions = { ...now, ...patch };
       for (const k of Object.keys(next) as (keyof DrawingOptions)[]) if (next[k] === undefined) delete next[k];
-      d.drawing = next;
+      putDrawing(d, current, next);
     });
 
   const shut = () => {
@@ -500,7 +521,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
     }
     // A picked view held anywhere but its handle: the sheet moves.
     if (target.startsWith("view:") && !onGrip) return startPan(e, false);
-    drag = { id: e.pointerId, x: q[0], y: q[1], target, moved: false, start: structuredClone(store.doc.drawing ?? {}) };
+    drag = { id: e.pointerId, x: q[0], y: q[1], target, moved: false, start: structuredClone(curDrawing() ?? {}) };
     try {
       paper.setPointerCapture(e.pointerId);
     } catch {
@@ -614,7 +635,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
     drag = null;
     const d = draft;
     draft = null;
-    if (moved && d) store.commit((doc) => (doc.drawing = d));
+    if (moved && d) store.commit((doc) => putDrawing(doc, current, d));
     else render();
   };
   paper.addEventListener("pointerup", endDrag);
@@ -1449,7 +1470,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
     );
     if (!ok) return false;
     set({
-      title: title.value.trim() && title.value.trim() !== o.title ? title.value.trim() : undefined,
+      title: title.value.trim() && (title.value.trim() !== o.title || startTitle) ? title.value.trim() : undefined,
       portrait: orient.value === "portrait" || undefined,
       size: size.value as SheetSize,
       scale: scale.value === "auto" ? undefined : Number(scale.value),
@@ -1715,7 +1736,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
         choose(
           o.lines[k],
           list.map((w) => [w, `${w.toFixed(2)} mm`] as [number, string]),
-          (v) => set({ lines: { ...(store.doc.drawing?.lines ?? {}), [k]: v } }),
+          (v) => set({ lines: { ...(curDrawing()?.lines ?? {}), [k]: v } }),
         ),
       );
     width("visible", "Visible outlines", [0.25, 0.35, 0.4, 0.5, 0.7]);
@@ -1749,8 +1770,73 @@ export async function openDrawing(app: AppContext): Promise<void> {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   });
 
+  // ---- The project's drawings: open another, a new one, a copy of this one, this one deleted.
+  let listPop: HTMLElement | null = null;
+  const closeList = () => {
+    listPop?.remove();
+    listPop = null;
+    listBtn.classList.remove("on");
+  };
+  const switchTo = (id: string) => {
+    closeList();
+    shut();
+    void openDrawing(app, id);
+  };
+  listBtn.addEventListener("click", () => {
+    if (listPop) return closeList();
+    const all = drawingsOf(store.doc);
+    const pop = el("div", "bim-dlist");
+    for (const d of all) {
+      const row = el("button", `bim-dlist-row${d.id === current ? " on" : ""}`, drawingOptions({ ...store.doc, drawing: d }).title);
+      row.addEventListener("click", () => (d.id === current ? closeList() : switchTo(d.id)));
+      pop.append(row);
+    }
+    if (!all.some((d) => d.id === current)) pop.append(el("div", "bim-dlist-row on", opts().title));
+    const acts = el("div", "bim-dlist-acts");
+    const act = (label: string, run: () => void, disabled = false) => {
+      const b = el("button", "text-btn", label);
+      b.disabled = disabled;
+      b.addEventListener("click", run);
+      acts.append(b);
+    };
+    act("New drawing", () => switchTo("new"));
+    act(
+      "Copy this one",
+      () => {
+        const me = curDrawing();
+        if (!me) return;
+        const id = annId("drawing");
+        const title = `${opts().title} (copy)`;
+        store.commit((d) => putDrawing(d, id, { ...structuredClone(me), title }));
+        switchTo(id);
+      },
+      !curDrawing(),
+    );
+    act(
+      "Delete this one",
+      async () => {
+        closeList();
+        if (!(await form("Delete drawing", [], `“${opts().title}” goes from the project (Undo brings it back).`))) return;
+        const rest = drawingsOf(store.doc).filter((d) => d.id !== current);
+        store.commit((d) => putDrawing(d, current, null));
+        app.ui.toast("Drawing deleted");
+        if (rest.length) switchTo(rest[0].id);
+        else shut();
+      },
+      !curDrawing(),
+    );
+    pop.append(acts);
+    bar.append(pop);
+    listPop = pop;
+    listBtn.classList.add("on");
+  });
+  // A tap anywhere else closes the list.
+  back.addEventListener("pointerdown", (e) => {
+    if (listPop && !(e.target as Element).closest(".bim-dlist, .bim-dlist-btn")) closeList();
+  });
+
   renderTools();
   if (fresh && !(await preferences())) return shut();
-  if (picked.length) store.commit((d) => (d.drawing = { ...(d.drawing ?? {}), bodies: picked }));
+  if (picked.length) set({ bodies: picked });
   await load();
 }

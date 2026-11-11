@@ -995,6 +995,24 @@ export function arrangeDims(dims: DrawingDim[], L: Pick<Layout, "views">, o: Opt
   return dims.map((d) => out.get(d.id) ?? d);
 }
 
+/** The project's drawings, each with its id (a project saved with one drawing: that one). */
+export function drawingsOf(doc: ProjectDoc): (DrawingOptions & { id: string })[] {
+  const list = doc.drawings ?? (doc.drawing ? [doc.drawing] : []);
+  return list.map((d, i) => ({ ...d, id: d.id ?? `drawing-${i + 1}` }));
+}
+
+/** A drawing put into the project (added if new), or taken out (null); the project then keeps them as a list. */
+export function putDrawing(doc: ProjectDoc, id: string, next: DrawingOptions | null): void {
+  const list = drawingsOf(doc);
+  const i = list.findIndex((d) => d.id === id);
+  if (!next) {
+    if (i >= 0) list.splice(i, 1);
+  } else if (i >= 0) list[i] = { ...next, id };
+  else list.push({ ...next, id });
+  doc.drawings = list;
+  delete doc.drawing;
+}
+
 /** Is this one of the overall sizes (made by the drawing, not put on by hand)? */
 export const isOverall = (id: string) => id.startsWith("overall-");
 

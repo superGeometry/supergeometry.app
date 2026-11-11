@@ -9,6 +9,8 @@ import {
   angleDim,
   arcSweep,
   arrangeDims,
+  drawingsOf,
+  putDrawing,
   extent,
   balloonSpots,
   dimLabel,
@@ -204,6 +206,21 @@ check("a diameter says Ø16, a radius R8", dimSVG({ id: "d2", view: "top", kind:
   const C = [tp2.x + (circle!.c[0] - x0) * tp2.s, tp2.y + (circle!.c[1] - y0) * tp2.s];
   const end = [C[0] + Math.cos(dia.angle!) * (8 * tp2.s + dia.offset), C[1] + Math.sin(dia.angle!) * (8 * tp2.s + dia.offset)];
   check("arranged: a diameter's leader ends outside the view", end[0] < r.x0 || end[0] > r.x1 || end[1] < r.y0 || end[1] > r.y1, JSON.stringify(end));
+}
+{
+  // Several drawings in one project; one saved before there could be several is the first.
+  const pd = emptyDoc();
+  check("no drawings in a new project", drawingsOf(pd).length === 0);
+  pd.drawing = { title: "Old", size: "A4" };
+  const old = drawingsOf(pd);
+  check("a project with one drawing (saved before): that one, with an id", old.length === 1 && old[0].title === "Old" && !!old[0].id);
+  putDrawing(pd, "second", { title: "Second" });
+  const two = drawingsOf(pd);
+  check("a drawing added: both kept, the old one first and unchanged", two.length === 2 && two[0].title === "Old" && two[0].size === "A4" && two[1].id === "second" && !pd.drawing);
+  putDrawing(pd, old[0].id, { ...old[0], size: "A3" });
+  check("one changed, the other not", drawingsOf(pd)[0].size === "A3" && drawingsOf(pd)[1].title === "Second");
+  putDrawing(pd, "second", null);
+  check("one deleted, the other kept", drawingsOf(pd).length === 1 && drawingsOf(pd)[0].title === "Old");
 }
 ddoc.drawing = { precision: 2, comma: true, units: "cm" };
 check("lengths in the drawing's units, decimals, comma: 12.345 mm is 1,23 cm", lengthText(12.345, drawingOptions(ddoc)) === "1,23", lengthText(12.345, drawingOptions(ddoc)));
