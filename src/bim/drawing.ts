@@ -12,6 +12,7 @@ import { el, textButton } from "../ui/ui";
 import { UNIT_MM } from "../units";
 import type { AppContext } from "../tools/tool";
 import { measureBodies } from "./bimTool";
+import { SheetCamera } from "./sheetCamera";
 import { partsList, type PartRow } from "./sheet";
 import {
   annId,
@@ -138,6 +139,85 @@ export async function openDrawing(app: AppContext): Promise<void> {
   document.body.append(back);
   paper.append(el("div", "bim-sub", "Drawing the views…"));
 
+  // ---- Zoom and move round the sheet: the wheel or two fingers zoom where
+  // they are; dragging the empty paper (or with the middle or right button)
+  // moves it; a double tap on the empty paper goes closer there, or back to
+  // all of it. Only the SVG's viewBox changes (the sheet isn't drawn again).
+  const camera = new SheetCamera();
+  const zoomBox = el("div", "bim-dzoom");
+  const zoomOut = el("button", "bim-dzoom-btn", "−");
+  const zoomLabel = el("button", "bim-dzoom-btn bim-dzoom-fit", "100%");
+  const zoomIn = el("button", "bim-dzoom-btn", "+");
+  zoomOut.title = "Zoom out (−)";
+  zoomLabel.title = "All of the sheet (F)";
+  zoomIn.title = "Zoom in (+)";
+  zoomBox.append(zoomOut, zoomLabel, zoomIn);
+  stage.append(zoomBox);
+  const applyCamera = () => {
+    paper.querySelector("svg")?.setAttribute("viewBox", camera.viewBox());
+    zoomLabel.textContent = `${Math.round(camera.ratio() * 100)}%`;
+  };
+  /** A screen point (px) in the paper's area. */
+  const local = (e: { clientX: number; clientY: number }): [number, number] => {
+    const r = paper.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  };
+  const copyCamera = () => Object.assign(new SheetCamera(), { vw: camera.vw, vh: camera.vh, W: camera.W, H: camera.H, z: camera.z, cx: camera.cx, cy: camera.cy });
+  let glide = 0;
+  /** To another zoom smoothly (a fifth of a second). */
+  const glideTo = (to: { z: number; cx: number; cy: number }, fitted = false) => {
+    cancelAnimationFrame(glide);
+    const from = camera.state;
+    const t0 = performance.now();
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / 180);
+      camera.blend(from, to, 1 - Math.pow(1 - k, 3));
+      camera.fitted = fitted && k === 1;
+      applyCamera();
+      if (k < 1) glide = requestAnimationFrame(step);
+    };
+    glide = requestAnimationFrame(step);
+  };
+  const fitAll = () => {
+    const c = copyCamera();
+    c.fit();
+    glideTo(c.state, true);
+  };
+  const zoomBy = (k: number, at: [number, number] = [camera.vw / 2, camera.vh / 2]) => {
+    const c = copyCamera();
+    c.zoomAt(at[0], at[1], k);
+    glideTo(c.state);
+  };
+  zoomOut.addEventListener("click", () => zoomBy(1 / 1.5));
+  zoomIn.addEventListener("click", () => zoomBy(1.5));
+  zoomLabel.addEventListener("click", fitAll);
+  /** The area's exact size (not rounded to whole pixels: the paper under the cursor would creep). */
+  const sizeCamera = () => {
+    const r = paper.getBoundingClientRect();
+    camera.resize(r.width, r.height);
+  };
+  const resized = new ResizeObserver(() => {
+    sizeCamera();
+    applyCamera();
+  });
+  resized.observe(paper);
+  paper.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      cancelAnimationFrame(glide);
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+      const at = local(e);
+      // A touchpad swiped sideways moves the sheet; a wheel (or a touchpad pinch: ctrl) zooms, about 8 % a notch.
+      if (!e.ctrlKey && !e.metaKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) camera.panBy(-e.deltaX * unit, -e.deltaY * unit);
+      else camera.zoomAt(at[0], at[1], Math.exp(-e.deltaY * unit * (e.ctrlKey ? 0.01 : 0.0008)));
+      applyCamera();
+    },
+    { passive: false },
+  );
+  // The right button moves the sheet (no menu).
+  paper.addEventListener("contextmenu", (e) => e.preventDefault());
+
   let views = new Map<string, ProjectedView>();
   let parts: PartRow[] = [];
   let allParts: PartRow[] = [];
@@ -161,6 +241,8 @@ export async function openDrawing(app: AppContext): Promise<void> {
     });
 
   const shut = () => {
+    resized.disconnect();
+    cancelAnimationFrame(glide);
     back.remove();
     window.removeEventListener("keydown", onKey, true);
     off();
@@ -241,14 +323,18 @@ export async function openDrawing(app: AppContext): Promise<void> {
     const doc = docNow();
     const made = drawingSVG({ doc, views, parts, date, interactive: true, selected });
     layout = made.layout;
-    const zoomed = paper.querySelector("svg")?.classList.contains("zoomed") ?? false;
     paper.innerHTML = made.svg;
     const s = paper.querySelector("svg");
     if (s) {
-      s.removeAttribute("width");
-      s.removeAttribute("height");
+      // The sheet fills the area; what of it is seen is the camera's.
+      const vb = s.viewBox.baseVal;
+      camera.setSheet(vb.width, vb.height);
+      if (camera.vw <= 1) sizeCamera();
+      s.setAttribute("width", "100%");
+      s.setAttribute("height", "100%");
+      s.setAttribute("preserveAspectRatio", "xMidYMid meet");
       s.classList.add("bim-drawing-svg");
-      s.classList.toggle("zoomed", zoomed);
+      applyCamera();
     }
     if (!fetching) name.textContent = `Drawing · ${drawingOptions(doc).title}`;
     if (s) s.insertAdjacentHTML("beforeend", picksSVG());
@@ -307,16 +393,48 @@ export async function openDrawing(app: AppContext): Promise<void> {
     return [p.x, p.y];
   };
   /** 12 screen pixels, in mm on the paper. */
-  const tolerance = () => {
-    const s = paper.querySelector("svg");
-    const [W] = sheetSize(opts());
-    return s ? (12 * W) / Math.max(1, s.getBoundingClientRect().width) : 3;
-  };
+  const tolerance = () => 12 / camera.z;
 
   // ---- Tapping and dragging on the sheet
   let frame = 0;
   let drag: { id: number; x: number; y: number; target: string; moved: boolean; start: DrawingOptions } | null = null;
+  /** The fingers (or the mouse) down on the paper, where they are (px). */
+  const fingers = new Map<number, [number, number]>();
+  let pinch: { d: number; mid: [number, number] } | null = null;
+  let pan: { id: number; x: number; y: number; moved: boolean; deselect: boolean } | null = null;
+  const pair = (): [[number, number], [number, number]] => {
+    const [a, b] = [...fingers.values()];
+    return [a, b];
+  };
+  const startPan = (e: PointerEvent, deselect: boolean) => {
+    const [x, y] = local(e);
+    pan = { id: e.pointerId, x, y, moved: false, deselect };
+  };
   paper.addEventListener("pointerdown", (e) => {
+    fingers.set(e.pointerId, local(e));
+    try {
+      paper.setPointerCapture(e.pointerId);
+    } catch {
+      // Already let go.
+    }
+    if (fingers.size >= 2) {
+      // A second finger: no dragging of what the first one held; the two zoom and move the sheet.
+      if (drag) {
+        drag = null;
+        draft = null;
+        render();
+      }
+      pan = null;
+      const [a, b] = pair();
+      pinch = { d: Math.hypot(b[0] - a[0], b[1] - a[1]), mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
+      cancelAnimationFrame(glide);
+      return;
+    }
+    // The middle or right button: the sheet moves, whatever is under it.
+    if (e.button === 1 || e.button === 2) {
+      e.preventDefault();
+      return startPan(e, false);
+    }
     const q = sheetPoint(e);
     if (!q || !layout) return;
     if (tool) {
@@ -330,8 +448,9 @@ export async function openDrawing(app: AppContext): Promise<void> {
     const view = t.closest("[data-view]")?.getAttribute("data-view");
     const target = ann ?? (view ? `view:${view}` : null);
     if (!target) {
-      if (selected) (selected = null), render();
-      return;
+      // The empty paper: dragged, it moves; tapped, nothing is picked any more.
+      e.preventDefault();
+      return startPan(e, true);
     }
     e.preventDefault();
     selected = target;
@@ -344,6 +463,29 @@ export async function openDrawing(app: AppContext): Promise<void> {
     render();
   });
   paper.addEventListener("pointermove", (e) => {
+    if (fingers.has(e.pointerId)) fingers.set(e.pointerId, local(e));
+    if (pinch && fingers.size >= 2) {
+      const [a, b] = pair();
+      const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      camera.panBy(mid[0] - pinch.mid[0], mid[1] - pinch.mid[1]);
+      if (pinch.d > 0 && d > 0) camera.zoomAt(mid[0], mid[1], d / pinch.d);
+      pinch = { d, mid };
+      applyCamera();
+      return;
+    }
+    if (pan && e.pointerId === pan.id) {
+      const [x, y] = local(e);
+      if (!pan.moved && Math.hypot(x - pan.x, y - pan.y) < 4) return;
+      if (!pan.moved) cancelAnimationFrame(glide);
+      pan.moved = true;
+      paper.classList.add("panning");
+      camera.panBy(x - pan.x, y - pan.y);
+      pan.x = x;
+      pan.y = y;
+      applyCamera();
+      return;
+    }
     if (!drag || e.pointerId !== drag.id || !layout) return;
     const q = sheetPoint(e);
     if (!q) return;
@@ -403,6 +545,19 @@ export async function openDrawing(app: AppContext): Promise<void> {
       });
   });
   const endDrag = (e: PointerEvent) => {
+    fingers.delete(e.pointerId);
+    if (pinch) {
+      // The pinch is over once a finger lifts (the other doesn't start a drag).
+      if (fingers.size < 2) pinch = null;
+      return;
+    }
+    if (pan && e.pointerId === pan.id) {
+      const p = pan;
+      pan = null;
+      paper.classList.remove("panning");
+      if (!p.moved && p.deselect && selected) (selected = null), render();
+      return;
+    }
     if (!drag || e.pointerId !== drag.id) return;
     const moved = drag.moved;
     drag = null;
@@ -422,7 +577,8 @@ export async function openDrawing(app: AppContext): Promise<void> {
     const d = opts().dims.find((x) => x.id === id);
     if (d) return void editDim(d);
     if ((e.target as Element).closest("[data-ann],[data-view]")) return;
-    paper.querySelector("svg")?.classList.toggle("zoomed");
+    if (camera.ratio() < 1.5) zoomBy(2.5, local(e));
+    else fitAll();
   });
 
   /** A dimension dragged to a point: its line through there (a circle's: its leader towards it). */
@@ -1088,6 +1244,13 @@ export async function openDrawing(app: AppContext): Promise<void> {
       e.preventDefault();
       e.stopPropagation();
       removeSelected();
+    } else if (!e.ctrlKey && !e.metaKey && !e.altKey && ["+", "=", "-", "_", "f", "F", "0"].includes(e.key)) {
+      // Zoom in / out, all of the sheet.
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "+" || e.key === "=") zoomBy(1.5);
+      else if (e.key === "-" || e.key === "_") zoomBy(1 / 1.5);
+      else fitAll();
     }
   };
   window.addEventListener("keydown", onKey, true);
