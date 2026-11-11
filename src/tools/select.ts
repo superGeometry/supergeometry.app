@@ -6,7 +6,7 @@ import { arrangement } from "../sketch/regions";
 import { projectPolyline } from "../sketch/edit";
 import type { MenuRow, ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
-import { add, dot, len, originOnPlane, planeY, scale, sub } from "../geom";
+import { add, cross, dot, len, norm, originOnPlane, planeY, scale, sub } from "../geom";
 import { evaluate, fmtLen } from "../units";
 import { DimWidget } from "./annotate";
 import { Gimbal, IN_PLANE } from "./gimbal";
@@ -24,6 +24,7 @@ import { SketchTool, type SketchKind } from "./sketch";
 import { BooleanOp } from "./booleanOp";
 import { pickColor } from "../ui/colorPicker";
 import { BimTool } from "../bim/bimTool";
+import { openDrawing } from "../bim/drawing";
 import { materialOf } from "../bim/materials";
 import { bodiesOf, edgeRefOf, faceRefOf, hitToSel, oppositeFace, sameSel, sourceFrame, sourcesOf, viewMenu, type AppContext, type Sel, type Tool } from "./tool";
 
@@ -545,9 +546,16 @@ export class SelectTool implements Tool {
     const faceRefs = sel.flatMap((x) => (x.kind === "face" ? [faceRefOf(app, x)!] : []));
     const needFlat = { disabled: !flat || !one, why: "Needs one flat face" };
     const ref = faceRefOf(app, s);
+    const bodies = bodiesOf(sel);
+    // A round face: its axis (from its mesh).
+    const axis = info?.round && one ? roundAxis(app, s.body, s.face) : null;
     // A face a Freeform Face step made: that step opens again to reshape it.
     const shaped = info?.step ? app.store.find(info.step) : undefined;
     const editFree: ToolItem[] = shaped?.type === "faceFreeform" && one ? [{ id: "editFreeform", label: "Edit Freeform", icon: "freeform", active: true, beta: true, run: () => app.editStep(shaped.id) }] : [];
+    // What only a flat face can take (a sketch, an extrude, a plane on it) isn't
+    // offered for a round or curved one at all, the way the body's tools aren't
+    // offered for an edge: only what the face can do is listed.
+    const flatOnly = new Set(["sketch", "move", "scale", "offsetFromEdge", "extrude", "plane", "loft", "faceFreeform", "split", "revolve", "sweep", "replace", "projs"]);
     return [
       ...editFree,
       { id: "sketch", label: "Sketch", icon: "sketch", shortcut: "S", ...needFlat, run: () => this.sketchOnFace() },
@@ -564,7 +572,9 @@ export class SelectTool implements Tool {
       { id: "chamfer", label: "Chamfer", icon: "chamfer", run: () => this.edgesOfFaces("chamfer") },
       { id: "extrude", label: "Extrude", icon: "extrude", ...needFlat, run: () => src && app.setTool(new ExtrudeOp(app, src, undefined, "new")) },
       { id: "shell", label: "Shell", icon: "shell", run: () => app.setTool(new ShellOp(app, s.body, faceRefs)) },
-      { id: "axis", label: "Axis – Perp. to Face", icon: "axis", run: () => info && app.setTool(new AxisOp(app, info.center, info.normal)) },
+      axis
+        ? { id: "axis", label: "Axis – Cylinder", icon: "axis", run: () => app.setTool(new AxisOp(app, axis.origin, axis.dir)) }
+        : { id: "axis", label: "Axis – Perp. to Face", icon: "axis", run: () => info && app.setTool(new AxisOp(app, info.center, info.normal)) },
       { id: "plane", label: "Plane – Offset", icon: "plane", ...needFlat, run: () => info?.plane && app.setTool(new PlaneOp(app, info.plane, faceRefOf(app, s)!)) },
       { id: "loft", label: "Loft", icon: "loft", ...needFlat, run: () => app.setTool(new LoftOp(app, sourcesOf(app, sel).flatMap(splitRegions), sel)) },
       // The face made smooth: a grid of points over it to pull out or push in; its edges stay put.
@@ -574,13 +584,17 @@ export class SelectTool implements Tool {
       { id: "split", label: "Split Body", icon: "split", disabled: !flat || app.view.bodyList.length < 2, why: "Needs another body to split", run: () => this.splitWith(info!.plane!, s.body) },
       { id: "revolve", label: "Revolve", icon: "revolve", ...needFlat, run: () => src && app.setTool(new RevolveOp(app, src)) },
       { id: "sweep", label: "Sweep", icon: "sweep", ...needFlat, run: () => src && app.setTool(new SweepOp(app, src)) },
-      // What else works on the face itself (patterns, mirror, translate, move
-      // body are body tools: they're offered when the body is selected).
+      // The face's body moved, copied round or mirrored, without picking the body first.
+      { id: "patl", label: "Pattern – Linear", icon: "patternLinear", run: () => app.setTool(new TransformOp(app, "linear", bodies)) },
+      { id: "patc", label: "Pattern – Circular", icon: "patternCircular", run: () => app.setTool(new TransformOp(app, "circular", bodies)) },
+      { id: "translate", label: "Translate", icon: "translate", shortcut: "N", run: () => app.setTool(new TransformOp(app, "translate", bodies)) },
+      { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: () => app.setTool(new TransformOp(app, "rotate", bodies)) },
+      { id: "mirror", label: "Mirror", icon: "mirror", run: () => app.setTool(new TransformOp(app, "mirror", bodies)) },
       { id: "replace", label: "Replace Face", icon: "replaceFace", ...needFlat, run: () => ref && app.setTool(new ReplaceFaceOp(app, ref)) },
       { id: "projs", label: "Project as Sketch", icon: "project", ...needFlat, run: () => this.projectFace("select") },
       // The neighbours extend to close the gap (fillets, chamfers, holes).
       { id: "delete", label: "Delete Face", icon: "trash", shortcut: "Del", run: () => this.deleteGeom(s.body, { faces: faceRefs.filter((f) => f.body === s.body) }) },
-    ];
+    ].filter((t) => flat || !flatOnly.has(t.id)) as ToolItem[];
   }
 
   private edgeActions(): ToolItem[] {
@@ -698,6 +712,11 @@ export class SelectTool implements Tool {
       // An open surface (a freeform sheet): filled down to a plane to make it a solid.
       ...(openSurface ? [{ id: "fillToPlane", label: "Fill to Plane", icon: "fill" as const, run: () => app.setTool(new FillToPlaneOp(app, bodies[0])) }] : []),
       { id: "shell", label: "Shell", icon: "shell", run: () => app.setTool(new ShellOp(app, bodies[0], [])) },
+      // Every edge of the body rounded or bevelled (each can be taken off in the list after).
+      { id: "fillet", label: "Fillet", icon: "fillet", shortcut: "F", run: () => this.edgesOfBodies("fillet", bodies) },
+      { id: "chamfer", label: "Chamfer", icon: "chamfer", run: () => this.edgesOfBodies("chamfer", bodies) },
+      // The body on a drawing sheet: views, dimensions, sections.
+      { id: "drawing", label: "Create Drawing", icon: "drawing", run: () => void openDrawing(app) },
       {
         id: "color",
         label: "Color",
@@ -874,20 +893,35 @@ export class SelectTool implements Tool {
     return this.app.selection.flatMap((s) => (s.kind === "edge" ? [edgeRefOf(this.app, s)!].filter(Boolean) : []));
   }
 
-  /** Fillet/chamfer every edge lying on the selected flat faces. */
+  /** Fillet/chamfer every edge round the selected faces: on a flat one's plane, or a round one's rims. */
   private edgesOfFaces(kind: "fillet" | "chamfer"): void {
     const refs: EdgeRef[] = [];
     for (const s of this.app.selection) {
       if (s.kind !== "face") continue;
       const b = this.app.view.body(s.body);
       const f = b?.faces[s.face];
-      if (!b || !f?.plane) continue;
+      if (!b || !f) continue;
+      const ax = f.round ? roundAxis(this.app, s.body, s.face) : null;
+      const r = f.round?.r ?? 0;
+      const onFace = (p: Vec3) =>
+        f.plane
+          ? Math.abs((p[0] - f.center[0]) * f.normal[0] + (p[1] - f.center[1]) * f.normal[1] + (p[2] - f.center[2]) * f.normal[2]) < 1e-5
+          : !!ax && Math.abs(len(cross(sub(p, ax.origin), ax.dir)) - r) < Math.max(1e-4, r * 1e-4);
+      if (!f.plane && !ax) continue;
       b.edges.forEach((e, i) => {
-        const on = [e.start, e.end, e.mid].every((p) => Math.abs((p[0] - f.center[0]) * f.normal[0] + (p[1] - f.center[1]) * f.normal[1] + (p[2] - f.center[2]) * f.normal[2]) < 1e-5);
-        if (on) refs.push(edgeRefOf(this.app, { body: s.body, edge: i })!);
+        // A round face's seam (a straight line along it) is no edge to round.
+        if (ax && e.type === "LINE") return;
+        if ([e.start, e.end, e.mid].every(onFace)) refs.push(edgeRefOf(this.app, { body: s.body, edge: i })!);
       });
     }
-    if (!refs.length) return this.app.ui.toast("Select flat faces, or tap the edges directly");
+    if (!refs.length) return this.app.ui.toast("Select flat or round faces, or tap the edges directly");
+    this.app.setTool(new EdgeOp(this.app, kind, refs));
+  }
+
+  /** Fillet/chamfer every edge of the bodies. */
+  private edgesOfBodies(kind: "fillet" | "chamfer", bodies: string[]): void {
+    const refs = bodies.flatMap((body) => (this.app.view.body(body)?.edges ?? []).map((_, edge) => edgeRefOf(this.app, { body, edge })!).filter(Boolean));
+    if (!refs.length) return this.app.ui.toast("That body has no edges to round");
     this.app.setTool(new EdgeOp(this.app, kind, refs));
   }
 
@@ -1124,4 +1158,31 @@ function withGroups(items: ToolItem[]): ToolItem[] {
     last = g;
   });
   return out;
+}
+
+/** A round face's axis, from its mesh: square to every normal on it, its radius in from its surface (out of a hole). */
+export function roundAxis(app: AppContext, body: string, face: number): { origin: Vec3; dir: Vec3 } | null {
+  const b = app.view.body(body);
+  const info = b?.faces[face];
+  const g = b?.faceGroups.find((x) => x.face === face);
+  if (!b || !info?.round || !g || g.count < 3) return null;
+  const N = b.normals;
+  const P = b.positions;
+  const I = b.indices;
+  const nAt = (i: number): Vec3 => [N[3 * i], N[3 * i + 1], N[3 * i + 2]];
+  const n0 = nAt(I[g.start]);
+  let best: Vec3 | null = null;
+  let most = 0;
+  for (let k = g.start; k < g.start + g.count; k++) {
+    const c = cross(n0, nAt(I[k]));
+    const l = len(c);
+    if (l > most) (most = l), (best = c);
+  }
+  if (!best || most < 1e-3) return null;
+  const dir = norm(best);
+  const i = I[g.start];
+  const p: Vec3 = [P[3 * i], P[3 * i + 1], P[3 * i + 2]];
+  const o = add(p, scale(norm(n0), info.round.hole ? info.round.r : -info.round.r));
+  // Its middle level with the face's.
+  return { origin: add(o, scale(dir, dot(sub(info.center, o), dir))), dir };
 }

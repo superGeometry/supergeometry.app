@@ -384,7 +384,7 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
   }
   const bodies = [...ctx.bodies.entries()].filter(([id]) => !only || only.includes(id));
   const marks = threadMarks(threads, ctx);
-  const withMarks = (out: ProjectedView[]) => {
+  const withMarks = (out: ProjectedView[], views: ViewSpec[]) => {
     out.forEach((pv, k) =>
       pv.bodies.forEach((vb) => {
         for (const m of marks.filter((m) => m.body === vb.id)) {
@@ -397,15 +397,113 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
     );
     return out;
   };
+  // Section views: the bodies cut, each on its own.
+  const plain = views.filter((v) => !v.cut);
+  const drawn = new Map<ViewSpec, ProjectedView>();
+  if (plain.length) withMarks(drawViews(bodies, plain, method), plain).forEach((pv, k) => drawn.set(plain[k], pv));
+  for (const v of views) if (v.cut) drawn.set(v, sectionView(bodies, v, method));
+  return views.map((v) => drawn.get(v)!);
+}
+
+/**
+ * A section view: each body cut by the plane through `cut` square to the
+ * view, the part between the eye and the plane taken off. The faces the cut
+ * makes come back as closed outlines, to hatch; hidden lines aren't drawn in
+ * a section (ISO 128-40).
+ */
+function sectionView(bodies: [string, Shape3D][], v: ViewSpec, method: "auto" | "exact" | "mesh"): ProjectedView {
+  const d = norm(v.dir as Vec3);
+  const look = scale(d, -1);
+  const X = norm(v.xAxis as Vec3);
+  const Y = cross(d, X);
+  const at = v.cut as Vec3;
+  const to2 = (p: Vec3): [number, number] => [dot(p, X), -dot(p, Y)];
+  const cut: [string, Shape3D][] = [];
+  const faces = new Map<string, string>();
+  for (const [id, s] of bodies) {
+    let part: Shape3D;
+    try {
+      part = s.intersect(halfSpace({ origin: at, xDir: xDirFor(look), normal: look }, s));
+    } catch {
+      continue;
+    }
+    if (isEmpty(part)) continue;
+    cut.push([id, part]);
+    let path = "";
+    for (const face of part.faces) {
+      if (face.geomType !== "PLANE") continue;
+      const pl = planeOf(face);
+      if (Math.abs(Math.abs(dot(pl.normal, look)) - 1) > 1e-6 || Math.abs(dot(sub(pl.origin, at), look)) > 1e-4) continue;
+      path += closedLoops(face.edges.map((e) => edgePoints(e).map(to2)));
+    }
+    if (path) faces.set(id, path);
+  }
+  if (!cut.length) return { id: v.id, bodies: [], box: null };
+  const [pv] = drawViews(cut, [{ ...v, cut: undefined }], method);
+  for (const b of pv.bodies) {
+    b.hidden = "";
+    delete b.under;
+    const f = faces.get(b.id);
+    if (f) b.section = f;
+  }
+  return pv;
+}
+
+/** An edge's points in space: its ends for a line, more along a curve. */
+function edgePoints(e: Edge): Vec3[] {
+  const oc = getOC();
+  const ad = new oc.BRepAdaptor_Curve(e.wrapped as never);
+  try {
+    const u0 = ad.FirstParameter();
+    const u1 = ad.LastParameter();
+    const at = (u: number): Vec3 => {
+      const p = ad.Value(u);
+      const r: Vec3 = [p.X(), p.Y(), p.Z()];
+      p.delete();
+      return r;
+    };
+    if (ad.GetType() === oc.GeomAbs_CurveType.GeomAbs_Line) return [at(u0), at(u1)];
+    let length = 0;
+    for (let i = 1; i <= 8; i++) length += dist(at(u0 + ((u1 - u0) * (i - 1)) / 8), at(u0 + ((u1 - u0) * i) / 8));
+    const n = Math.max(8, Math.min(96, Math.ceil(length / 0.5)));
+    return Array.from({ length: n + 1 }, (_, i) => at(u0 + ((u1 - u0) * i) / n));
+  } finally {
+    ad.delete();
+  }
+}
+
+/** Edges (as point runs, any order and way round) joined end to end into closed outlines: SVG path data. */
+export function closedLoops(runs: [number, number][][]): string {
+  const left = runs.filter((r) => r.length > 1);
+  const same = (a: [number, number], b: [number, number]) => Math.abs(a[0] - b[0]) < 1e-3 && Math.abs(a[1] - b[1]) < 1e-3;
+  let d = "";
+  while (left.length) {
+    const loop = [...left.shift()!];
+    for (let grew = true; grew && !same(loop[0], loop[loop.length - 1]); ) {
+      grew = false;
+      const end = loop[loop.length - 1];
+      const i = left.findIndex((r) => same(r[0], end) || same(r[r.length - 1], end));
+      if (i < 0) break;
+      const r = left.splice(i, 1)[0];
+      loop.push(...(same(r[0], end) ? r : [...r].reverse()).slice(1));
+      grew = true;
+    }
+    d += loop.map((p, i) => `${i ? "L" : "M"}${r3(p[0])} ${r3(p[1])}`).join("") + "Z";
+  }
+  return d;
+}
+
+/** Views drawn the usual way: exact hidden line removal, or from the meshes for freeform or very big models. */
+function drawViews(bodies: [string, Shape3D][], views: ViewSpec[], method: "auto" | "exact" | "mesh"): ProjectedView[] {
   // Freeform faces (or a great many faces) take the exact hidden line removal
   // seconds to minutes a view: those models are drawn from their meshes.
   const meshes = bodies.map(([id, s]) => ({ id, shape: s, mesh: drawingMesh(id, s) }));
   const faces = meshes.reduce((n, m) => n + m.mesh.faces.length, 0);
   const free = meshes.reduce((n, m) => n + freeformFaces(m.mesh), 0);
   const how = method === "auto" ? (free > 0 || faces > 600 ? "mesh" : "exact") : method;
-  if (how === "mesh") return withMarks(meshViews(meshes, views));
+  if (how === "mesh") return meshViews(meshes, views);
   const oc = getOC();
-  return withMarks(views.map((v) => {
+  return views.map((v) => {
     const cam = new ProjectionCamera([0, 0, 0], v.dir, v.xAxis);
     const algo = new oc.HLRBRep_Algo();
     for (const [, s] of bodies) algo.Add(s.wrapped, 0);
@@ -479,7 +577,7 @@ export async function projectViews(features: Feature[], views: ViewSpec[], only?
     algo.delete();
     cam.delete();
     return { id: v.id, bodies: result, box: lo[0] <= hi[0] ? [lo, hi] : null };
-  }));
+  });
 }
 
 const r3 = (n: number) => String(Math.round(n * 1000) / 1000);

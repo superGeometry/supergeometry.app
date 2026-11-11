@@ -5,7 +5,7 @@ import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";
 import { projectViews } from "../src/kernel/engine";
 import { arrangement, regionRef } from "../src/sketch/regions";
-import { balloonSpots, dimSVG, drawingSVG, edgeAt, layoutSheet, drawingOptions, lengthText, sheetSize, VIEW_SPECS } from "../src/bim/drawingSheet";
+import { angleDim, balloonSpots, dimLabel, dimSVG, drawingSVG, edgeAt, layoutSheet, drawingOptions, lengthText, markSVG, nextLetter, noteSVG, sectionSpec, sheetSize, VIEW_SPECS } from "../src/bim/drawingSheet";
 import { emptyDoc, type Feature } from "../src/doc/types";
 import type { PartRow } from "../src/bim/sheet";
 
@@ -166,6 +166,87 @@ const [t0, t1] = [dL.views.find((v) => v.id === "top")!, mL.views.find((v) => v.
 check("moving the front view takes the top view along, still lined up", f1.x - f0.x === 5 && f1.y - f0.y === 7 && t1.x - t0.x === 5 && t1.x === f1.x);
 ddoc.drawing = { views: { iso: false, top: false } };
 check("views switched off are not drawn", layoutSheet(dv, drawingOptions(ddoc), 0).views.map((v) => v.id).sort().join() === "front,left");
+
+// ---- Section views: the plate with the hole cut across the hole, from the top view.
+{
+  const sdoc = emptyDoc();
+  sdoc.drawing = { sections: [{ id: "sec-1", letter: "A", view: "top", a: [-5, -20], b: [65, -20], look: [0, 1], gap: 15 }] };
+  let so = drawingOptions(sdoc);
+  const spec = sectionSpec(so.sections[0], so)!;
+  check("a section of the top view, looking down the paper: square to the cut, the plate's x along it", spec.dir.join() === "0,1,0" && spec.xAxis.join() === "1,0,0" && !!spec.cut, JSON.stringify(spec));
+  const sv = (await holed(disc, [spec]))[0];
+  check("the section is the plate's width by its thickness", !!sv.box && Math.abs(sv.box[1][0] - sv.box[0][0] - 60) < 1e-6 && Math.abs(sv.box[1][1] - sv.box[0][1] - 10) < 1e-6, JSON.stringify(sv.box));
+  // The cut faces: closed outlines, their area the plate's section less the hole's (60 - 16) x 10.
+  const area = (d: string) =>
+    d
+      .split("Z")
+      .filter((s) => s.trim())
+      .reduce((sum, s) => {
+        const pts = [...s.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+        let a = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const [p, q] = [pts[i], pts[(i + 1) % pts.length]];
+          a += p[0] * q[1] - q[0] * p[1];
+        }
+        return sum + Math.abs(a) / 2;
+      }, 0);
+  const cut = sv.bodies[0]?.section ?? "";
+  check("the faces it cuts come back as closed outlines, 440 mm² (the hole left out)", Math.abs(area(cut) - 440) < 1e-3, cut);
+  check("no hidden lines in a section", sv.bodies.every((b) => !b.hidden));
+  const sviews = new Map([...dv, ["sec-1", sv]]);
+  const sL = layoutSheet(sviews, so, 1);
+  const [stop, ssec] = [sL.views.find((v) => v.id === "top")!, sL.views.find((v) => v.id === "sec-1")!];
+  const sh = 10 * ssec.s;
+  check("first angle: placed the way its arrows point (below the top view), lined up with it, its middle as far off as it was put", !!ssec && Math.abs(ssec.x - stop.x) < 1e-9 && Math.abs(ssec.y + sh / 2 - (stop.y + 40 * stop.s + Math.max(15, sh / 2 + 16))) < 1e-9, JSON.stringify([stop, ssec]));
+  const ssvg = drawingSVG({ doc: sdoc, views: sviews, parts: [], date: new Date() }).svg;
+  check("drawn hatched, labelled A-A, its cut line on the top view with its letters", ssvg.includes('fill="url(#hatch-a)"') && ssvg.includes(">A-A<") && (ssvg.match(/font-size="5"[^>]*>A</g) ?? []).length === 2 && ssvg.includes('stroke-dasharray="8 1.5 1.5 1.5"'));
+  sdoc.drawing = { ...sdoc.drawing, angle: "third" };
+  so = drawingOptions(sdoc);
+  const tL = layoutSheet(new Map([...dv, ["sec-1", (await holed(disc, [sectionSpec(so.sections[0], so)!]))[0]]]), so, 1);
+  const [ttop, tsec] = [tL.views.find((v) => v.id === "top")!, tL.views.find((v) => v.id === "sec-1")!];
+  check("third angle: placed against its arrows (above the top view)", !!tsec && tsec.y + 10 * tsec.s < ttop.y);
+  // A cut down the front view, looking right: in first angle that is the view from the left.
+  const fdoc = emptyDoc();
+  fdoc.drawing = { sections: [{ id: "s2", letter: "B", view: "front", a: [30, -20], b: [30, 5], look: [1, 0], gap: 20 }] };
+  const fs = sectionSpec(drawingOptions(fdoc).sections[0], drawingOptions(fdoc))!;
+  check("a section down the front view, looking right, faces the way the left view does", fs.dir.join() === "-1,0,0" && fs.xAxis.map((x) => x + 0).join() === "0,-1,0", JSON.stringify(fs));
+  check("letters go on from the last, skipping I and O", nextLetter(drawingOptions({ ...emptyDoc(), drawing: { sections: ["A", "B", "C", "D", "E", "F", "G", "H"].map((letter) => ({ id: letter, letter, view: "top", a: [0, 0], b: [1, 0], look: [0, 1], gap: 1 })) } })) === "J");
+}
+
+// ---- Detail views: a circle of a view, twice as big, where it was put.
+{
+  const ddoc2 = emptyDoc();
+  ddoc2.drawing = { details: [{ id: "det-1", letter: "B", view: "top", c: [30, -20], r: 10, at: [300, 200] }] };
+  const dL2 = layoutSheet(dv, drawingOptions(ddoc2), 0);
+  const [top2, det] = [dL2.views.find((v) => v.id === "top")!, dL2.views.find((v) => v.id === "det-1")!];
+  check("a detail: twice its view's scale, its circle where it was put", !!det && det.s === top2.s * 2 && det.clip?.c.join() === "300,200" && det.clip.r === 10 * det.s && det.src === "top");
+  const dsvg = drawingSVG({ doc: ddoc2, views: dv, parts: [], date: new Date() }).svg;
+  check("drawn cut to its circle, captioned with its letter and scale", dsvg.includes('clip-path="url(#clip-det-1)"') && dsvg.includes(`>B (${det.s}:1)<`));
+  const inDetail = edgeAt(dv, dL2, [300 + 8 * det.s, 200], 1);
+  check("tapping the hole inside the detail finds it, on the detail", inDetail?.view === "det-1" && inDetail.kind === "circle" && Math.abs((inDetail.r ?? 0) - 8) < 1e-6, JSON.stringify(inDetail));
+  check("nothing is found outside the detail's circle", !edgeAt(dv, dL2, [300 + 10 * det.s + 3, 200], 1)?.view.startsWith("det"));
+}
+
+// ---- Angles, tolerances, centre marks, notes that point.
+{
+  const ao = drawingOptions(emptyDoc());
+  const a90 = dimSVG({ id: "a", view: "top", kind: "angle", c: [0, 0], a: [60, 0], b: [0, -40], offset: 15 }, tp2, ao);
+  check("an angle between two edges square to each other says 90°", a90.includes(">90°<") && a90.includes("A15 15 0 0 "), a90.slice(0, 200));
+  check("an angle is the smaller way round", angleDim([0, 0], [10, 0], [-10, -1], 10, "x", 0.25).includes("A10 10 0 0 0"));
+  const d = { id: "l", view: "top", kind: "length" as const, a: [0, 0] as [number, number], b: [60, 0] as [number, number], offset: 8 };
+  check("± tolerance", dimLabel({ ...d, tol: { kind: "sym", up: 0.02 } }, 60, ao).main === "60 ±0.02");
+  const dev = dimLabel({ ...d, tol: { kind: "dev", up: 0.1, down: 0.05 } }, 60, ao);
+  check("deviations stacked after the value: +0.1 over -0.05", dev.main === "60" && dev.up === "+0.1" && dev.down === "-0.05");
+  const lim = dimLabel({ ...d, tol: { kind: "limits", up: 0.1, down: 0.05 } }, 60, ao);
+  check("limits: the largest size over the smallest", lim.up === "60.1" && lim.down === "59.95");
+  check("a basic size is boxed", dimSVG({ ...d, tol: { kind: "basic" } }, tp2, ao).includes("<rect"));
+  check("text before and after the value", dimLabel({ ...d, kind: "diameter", prefix: "4× ", suffix: " THRU" }, 16, ao, "Ø").main === "4× Ø16 THRU");
+  const cm = markSVG({ id: "m", view: "top", kind: "center", c: circle!.c, r: 8 }, tp2, 0.25);
+  const arms = [...cm.matchAll(/M(-?[\d.]+) (-?[\d.]+)L(-?[\d.]+) (-?[\d.]+)/g)].map((m) => Math.hypot(Number(m[3]) - Number(m[1]), Number(m[4]) - Number(m[2])));
+  check("a centre mark: four arms, each 2.5 mm past the circle", arms.length === 4 && arms.every((l) => Math.abs(l - (8 * tp2.s + 2.5)) < 0.02), JSON.stringify(arms));
+  const nt = noteSVG({ id: "n", x: 300, y: 100, text: "Deburr", to: { view: "top", p: [60, -20] } }, tp2, 0.25);
+  check("a note pointing at an edge has a leader and an arrow", (nt.match(/<path/g) ?? []).length === 2 && nt.includes(">Deburr<"));
+}
 
 const spots = balloonSpots({ x0: 0, y0: 0, x1: 100, y1: 100 }, [1, 2, 3].map((item) => ({ item, at: [50 + item * 0.1, 10] as [number, number] })));
 const apart = spots.every((a, i) => spots.every((b, j) => i === j || Math.hypot(a.x - b.x, a.y - b.y) >= 9.99));

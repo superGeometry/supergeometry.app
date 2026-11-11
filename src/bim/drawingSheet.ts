@@ -11,7 +11,7 @@
 //
 // This file makes the sheet (SVG, mm); drawing.ts shows it and edits it.
 
-import type { DrawingDim, DrawingNote, DrawingOptions, ProjectDoc, ProjectInfo } from "../doc/types";
+import type { DrawingDetail, DrawingDim, DrawingMark, DrawingNote, DrawingOptions, DrawingSection, ProjectDoc, ProjectInfo } from "../doc/types";
 import type { ProjectedView, ViewSpec } from "../kernel/protocol";
 import { trim, UNIT_MM, units } from "../units";
 import { fmtMass } from "./materials";
@@ -28,6 +28,7 @@ export const SHEETS: Record<NonNullable<DrawingOptions["size"]>, [number, number
   "ANSI B": [431.8, 279.4],
   "ANSI C": [558.8, 431.8],
   "ANSI D": [863.6, 558.8],
+  "ANSI E": [1117.6, 863.6],
 };
 export type SheetSize = keyof typeof SHEETS;
 
@@ -71,13 +72,17 @@ export function drawingOptions(doc: ProjectDoc) {
     dateFormat: o.dateFormat ?? "iso",
     units: o.units ?? (appUnits === "ft" ? "in" : appUnits),
     precision: o.precision ?? 2,
+    anglePrecision: o.anglePrecision ?? 1,
     comma: o.comma ?? false,
-    lines: { visible: o.lines?.visible ?? 0.5, hidden: o.lines?.hidden ?? 0.25, dims: o.lines?.dims ?? 0.25 },
+    lines: { visible: o.lines?.visible ?? 0.5, hidden: o.lines?.hidden ?? 0.25, dims: o.lines?.dims ?? 0.25, center: o.lines?.center ?? 0.25, section: o.lines?.section ?? 0.18 },
     balloons: o.balloons ?? true,
     overall: o.overall ?? true,
     moved: o.moved ?? {},
     dims: o.dims ?? [],
     notes: o.notes ?? [],
+    sections: o.sections ?? [],
+    details: o.details ?? [],
+    marks: o.marks ?? [],
   };
 }
 export type Opts = ReturnType<typeof drawingOptions>;
@@ -95,6 +100,67 @@ export function lengthText(mm: number, o: Opts): string {
   if (t.includes(".")) t = t.replace(/0+$/, "").replace(/\.$/, "");
   if (t === "-0") t = "0";
   return o.comma ? t.replace(".", ",") : t;
+}
+
+/** An angle (radians) as the drawing writes it: degrees, its decimals, its decimal mark. */
+export function angleText(rad: number, o: Opts): string {
+  let t = ((Math.abs(rad) * 180) / Math.PI).toFixed(o.anglePrecision);
+  if (t.includes(".")) t = t.replace(/0+$/, "").replace(/\.$/, "");
+  return `${o.comma ? t.replace(".", ",") : t}°`;
+}
+
+// ---- Section and detail views
+
+type V3 = [number, number, number];
+const v3 = {
+  mul: (a: V3, k: number): V3 => [a[0] * k, a[1] * k, a[2] * k],
+  sub: (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  cross: (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  unit: (a: V3): V3 => {
+    const l = Math.hypot(a[0], a[1], a[2]) || 1;
+    return [a[0] / l, a[1] / l, a[2] / l];
+  },
+};
+
+/** The way a section view sits from its view, on the paper: where its arrows point (first angle), the other way (third angle). */
+export const placeDir = (sec: DrawingSection, o: Opts): [number, number] => (o.angle === "first" ? sec.look : [-sec.look[0], -sec.look[1]]);
+
+/** What a view is (a base view, a section of one); null for one it can't say. */
+export function specOf(id: string, o: Opts, depth = 0): ViewSpec | null {
+  const base = VIEW_SPECS.find((v) => v.id === id);
+  if (base) return id === "iso" ? null : base;
+  const sec = o.sections.find((x) => x.id === id);
+  return sec && depth < 8 ? sectionSpec(sec, o, depth + 1) : null;
+}
+
+/**
+ * A section view's direction and cut: looking along its arrows, square to the
+ * cut line, turned so that it lines up with the view it is cut from (along
+ * the line) - the way a projected view lines up.
+ */
+export function sectionSpec(sec: DrawingSection, o: Opts, depth = 0): ViewSpec | null {
+  const parent = specOf(sec.view, o, depth);
+  if (!parent) return null;
+  const d = v3.unit(parent.dir as V3);
+  const X = v3.unit(parent.xAxis as V3);
+  const Y = v3.cross(d, X);
+  const to3 = (q: [number, number]): V3 => v3.sub(v3.mul(X, q[0]), v3.mul(Y, q[1]));
+  const L = Math.hypot(sec.b[0] - sec.a[0], sec.b[1] - sec.a[1]);
+  if (L < 1e-9) return null;
+  const u: [number, number] = [(sec.b[0] - sec.a[0]) / L, (sec.b[1] - sec.a[1]) / L];
+  const dir = v3.mul(to3(sec.look), -1);
+  const pl = placeDir(sec, o);
+  let xAxis: V3;
+  if (Math.abs(pl[1]) >= Math.abs(pl[0])) xAxis = to3(u[0] < 0 ? [-u[0], -u[1]] : u);
+  else xAxis = v3.cross(v3.mul(to3(u[1] < 0 ? [-u[0], -u[1]] : u), -1), dir);
+  return { id: sec.id, dir, xAxis, cut: to3(sec.a) };
+}
+
+/** The next free letter for a section or a detail (I, O and Q are left out: they read as numbers). */
+export function nextLetter(o: Opts): string {
+  const used = new Set([...o.sections.map((x) => x.letter), ...o.details.map((x) => x.letter)]);
+  const letters = "ABCDEFGHJKLMNPRSTUVWXYZ".split("");
+  for (let n = 1; ; n++) for (const l of letters) if (!used.has(l.repeat(n))) return l.repeat(n);
 }
 
 export function dateText(d: Date, f: Opts["dateFormat"]): string {
@@ -126,6 +192,10 @@ const bh = (b: Box | null) => (b ? b[1][1] - b[0][1] : 0);
 
 export interface Placed {
   id: string;
+  /** The drawn view its lines come from (a detail's: its view's), if not its own. */
+  src?: string;
+  /** A detail: the circle it is cut to, on the paper. */
+  clip?: { c: [number, number]; r: number };
   /** Where the view's box corner (lowest x, lowest y) goes on the paper. */
   x: number;
   y: number;
@@ -149,6 +219,12 @@ export interface Layout {
 /** Where a view's point (its own mm) is on the paper, and back. */
 export const toPaper = (p: Placed, q: [number, number]): [number, number] => [p.x + (q[0] - p.box[0][0]) * p.s, p.y + (q[1] - p.box[0][1]) * p.s];
 export const fromPaper = (p: Placed, q: [number, number]): [number, number] => [p.box[0][0] + (q[0] - p.x) / p.s, p.box[0][1] + (q[1] - p.y) / p.s];
+
+/** The paper a placed view takes: its box, or a detail's circle. */
+export function extent(p: Placed): { x0: number; y0: number; x1: number; y1: number } {
+  if (p.clip) return { x0: p.clip.c[0] - p.clip.r, y0: p.clip.c[1] - p.clip.r, x1: p.clip.c[0] + p.clip.r, y1: p.clip.c[1] + p.clip.r };
+  return { x0: p.x, y0: p.y, x1: p.x + bw(p.box) * p.s, y1: p.y + bh(p.box) * p.s };
+}
 
 /** Where each view goes, and at which scale: the largest standard scale at which they fit. Views moved by hand stay moved. */
 export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: number): Layout {
@@ -244,9 +320,46 @@ export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: n
     p.x += gx + ox;
     p.y += gy + oy;
   }
+  // Sections, each lined up with its view, as far off it as it was put.
+  const waiting = o.sections.slice();
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (let i = 0; i < waiting.length; i++) {
+      const sec = waiting[i];
+      const p = placed.find((x) => x.id === sec.view);
+      const box = views.get(sec.id)?.box;
+      if (!p || !box) continue;
+      waiting.splice(i--, 1);
+      grew = true;
+      const pl = placeDir(sec, o);
+      const w = bw(box) * p.s;
+      const h = bh(box) * p.s;
+      const pr = extent(p);
+      let x: number;
+      let y: number;
+      // `gap`: from its view's edge to its middle - never so little that it would lie on its view or its arrows.
+      if (Math.abs(pl[1]) >= Math.abs(pl[0])) {
+        x = p.x + (box[0][0] - p.box[0][0]) * p.s;
+        const g = Math.max(sec.gap, h / 2 + 16);
+        y = pl[1] > 0 ? pr.y1 + g - h / 2 : pr.y0 - g - h / 2;
+      } else {
+        y = p.y + (box[0][1] - p.box[0][1]) * p.s;
+        const g = Math.max(sec.gap, w / 2 + 16);
+        x = pl[0] > 0 ? pr.x1 + g - w / 2 : pr.x0 - g - w / 2;
+      }
+      placed.push({ id: sec.id, x, y, s: p.s, box });
+    }
+  }
+  // Details: a circle of their view, bigger, where they were put.
+  for (const det of o.details) {
+    const p = placed.find((x) => x.id === det.view);
+    if (!p || p.clip) continue;
+    const sd = det.scale ?? p.s * 2;
+    placed.push({ id: det.id, src: p.src ?? p.id, x: det.at[0] - (det.c[0] - p.box[0][0]) * sd, y: det.at[1] - (det.c[1] - p.box[0][1]) * sd, s: sd, box: p.box, clip: { c: det.at, r: det.r * sd } });
+  }
   const e = 0.01;
   const fits = placed.every((p) => {
-    const r = { x0: p.x, y0: p.y, x1: p.x + bw(p.box) * p.s, y1: p.y + bh(p.box) * p.s };
+    const r = extent(p);
     return r.x0 >= FRAME_L - e && r.y0 >= T - e && r.x1 <= R + e && r.y1 <= B + e && !(blockH && overlaps(r, { x0: cornerRect.x0 + e, y0: cornerRect.y0 + e, x1: R, y1: B }));
   });
   return { W, H, scale: s, isoScale: isoAt?.si, views: placed, side, fits };
@@ -294,6 +407,41 @@ function text(x: number, y: number, t: string, size: number, opts: { anchor?: st
   return `<text x="${f(x)}" y="${f(y)}" font-size="${size}" ${FONT} text-anchor="${opts.anchor ?? "start"}"${opts.weight ? ` font-weight="${opts.weight}"` : ""} fill="${opts.fill ?? "#000"}"${rot}>${esc(t)}</text>`;
 }
 
+/** A rough width of a text (Arial: about 0.55 of its size a letter). */
+const textWidth = (t: string, size: number) => t.length * size * 0.55;
+
+/** A dimension's text: its value (`main`); a tolerance stacked after it (`up` over `down`), then `tail`; `boxed`: a basic size. */
+export interface DimLabel {
+  main: string;
+  up?: string;
+  down?: string;
+  tail?: string;
+  boxed?: boolean;
+}
+const labelOf = (l: string | DimLabel): DimLabel => (typeof l === "string" ? { main: l } : l);
+const labelWidth = (l: DimLabel, size: number) =>
+  textWidth(l.main, size) + (l.up || l.down ? Math.max(textWidth(l.up ?? "", size * 0.7), textWidth(l.down ?? "", size * 0.7)) + 0.8 : 0) + textWidth(l.tail ?? "", size);
+
+/** A dimension's text, its middle at (x, y) (its baseline), turned `angle` degrees. */
+function labelSVG(x: number, y: number, label: string | DimLabel, size: number, color: string, angle = 0): string {
+  const l = labelOf(label);
+  if (!l.up && !l.down && !l.boxed && !l.tail) return text(x, y, l.main, size, { anchor: "middle", angle, fill: color });
+  const w = labelWidth(l, size);
+  const x0 = x - w / 2;
+  const wm = textWidth(l.main, size);
+  let out = l.main ? text(x0, y, l.main, size, { fill: color }) : "";
+  if (l.boxed) out += `<rect x="${f(x0 - 0.8)}" y="${f(y - size * 0.9)}" width="${f(wm + 1.6)}" height="${f(size * 1.2)}" stroke="${color}" stroke-width="0.25" fill="none"/>`;
+  let xt = x0 + wm;
+  if (l.up || l.down) {
+    const s = size * 0.7;
+    const xs = x0 + wm + 0.8;
+    out += text(xs, y - size * 0.45, l.up ?? "", s, { fill: color }) + text(xs, y + size * 0.25, l.down ?? "", s, { fill: color });
+    xt = xs + Math.max(textWidth(l.up ?? "", s), textWidth(l.down ?? "", s));
+  }
+  if (l.tail) out += text(xt, y, l.tail, size, { fill: color });
+  return angle ? `<g transform="rotate(${f(angle)} ${f(x)} ${f(y)})">${out}</g>` : out;
+}
+
 /** A filled arrowhead, 3 mm long, its tip at (x, y), pointing along (dx, dy). */
 function arrow(x: number, y: number, dx: number, dy: number, color: string): string {
   const l = 3;
@@ -308,7 +456,7 @@ function arrow(x: number, y: number, dx: number, dy: number, color: string): str
  * the left of a→b (negative: to the right), with extension lines and the
  * value written along it, readable from the bottom or the right (ISO 129).
  */
-export function linearDim(A: [number, number], B: [number, number], offset: number, label: string, width: number, color = "#000"): string {
+export function linearDim(A: [number, number], B: [number, number], offset: number, label: string | DimLabel, width: number, color = "#000"): string {
   const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
   if (L < 1e-9) return "";
   const u = [(B[0] - A[0]) / L, (B[1] - A[1]) / L];
@@ -325,24 +473,57 @@ export function linearDim(A: [number, number], B: [number, number], offset: numb
   if (ang <= -90.01) ang += 180;
   const t = (ang * Math.PI) / 180;
   const mid = [(da[0] + db[0]) / 2 + Math.sin(t) * 1.2, (da[1] + db[1]) / 2 - Math.cos(t) * 1.2];
-  return out + text(mid[0], mid[1], label, 3.5, { anchor: "middle", angle: ang, fill: color });
+  return out + labelSVG(mid[0], mid[1], label, 3.5, color, ang);
+}
+
+/**
+ * An angle: an arc round C from ray C→A to ray C→B (the smaller way), R mm
+ * out, arrows at its ends, the value outside its middle; the rays drawn on
+ * (thin) when the arc lies beyond the edges.
+ */
+export function angleDim(C: [number, number], A: [number, number], B: [number, number], R: number, label: string | DimLabel, width: number, color = "#000"): string {
+  const a1 = Math.atan2(A[1] - C[1], A[0] - C[0]);
+  const t = angleBetween(C, A, B);
+  if (Math.abs(t) < 1e-6 || R < 1) return "";
+  const a2 = a1 + t;
+  const at = (a: number, r: number): [number, number] => [C[0] + Math.cos(a) * r, C[1] + Math.sin(a) * r];
+  const thin = `stroke="${color}" stroke-width="${width}" fill="none"`;
+  const P1 = at(a1, R);
+  const P2 = at(a2, R);
+  let out = `<path d="M${f(P1[0])} ${f(P1[1])}A${f(R)} ${f(R)} 0 0 ${t > 0 ? 1 : 0} ${f(P2[0])} ${f(P2[1])}" ${thin}/>`;
+  for (const [a, Q] of [
+    [a1, A],
+    [a2, B],
+  ] as [number, [number, number]][]) {
+    const len = Math.hypot(Q[0] - C[0], Q[1] - C[1]);
+    if (R > len + 1) {
+      const s = at(a, len + 1);
+      const e = at(a, R + 2);
+      out += `<path d="M${f(s[0])} ${f(s[1])}L${f(e[0])} ${f(e[1])}" ${thin}/>`;
+    }
+  }
+  const sg = Math.sign(t);
+  out += arrow(P1[0], P1[1], sg * Math.sin(a1), -sg * Math.cos(a1), color);
+  out += arrow(P2[0], P2[1], -sg * Math.sin(a2), sg * Math.cos(a2), color);
+  const m = at(a1 + t / 2, R + 3);
+  return out + labelSVG(m[0], m[1] + 1.2, label, 3.5, color);
 }
 
 /** A radius or diameter: a leader through the centre to the circle, the value on a shoulder outside it. */
-export function circleDim(c: [number, number], r: number, angle: number, offset: number, label: string, diameter: boolean, width: number, color = "#000"): string {
+export function circleDim(c: [number, number], r: number, angle: number, offset: number, label: string | DimLabel, diameter: boolean, width: number, color = "#000"): string {
   const d = [Math.cos(angle), Math.sin(angle)];
   const at = (k: number): [number, number] => [c[0] + d[0] * k, c[1] + d[1] * k];
   const tip = at(r);
   const end = at(r + Math.max(2, offset));
   const start = diameter ? at(-r) : c;
   const thin = `stroke="${color}" stroke-width="${width}" fill="none"`;
-  const w = label.length * 3.5 * 0.6 + 2;
+  const w = labelWidth(labelOf(label), 3.5) + 2;
   const right = d[0] >= 0;
   const sh = [end[0] + (right ? w : -w), end[1]];
   let out = `<path d="M${f(start[0])} ${f(start[1])}L${f(end[0])} ${f(end[1])}L${f(sh[0])} ${f(sh[1])}" ${thin}/>`;
   out += arrow(tip[0], tip[1], d[0], d[1], color);
   if (diameter) out += arrow(start[0], start[1], -d[0], -d[1], color);
-  return out + text((end[0] + sh[0]) / 2, end[1] - 1.2, label, 3.5, { anchor: "middle", fill: color });
+  return out + labelSVG((end[0] + sh[0]) / 2, end[1] - 1.2, label, 3.5, color);
 }
 
 /** The projection method symbol (ISO 5456-2): a truncated cone, then its end view. */
@@ -379,6 +560,10 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
   const out: string[] = [];
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${f(W)}mm" height="${f(H)}mm" viewBox="0 0 ${f(W)} ${f(H)}">`);
   out.push(`<rect x="0" y="0" width="${f(W)}" height="${f(H)}" fill="#fff"/>`);
+  // Hatching for the faces a section cuts (ISO 128-50): thin lines at 45°, the other way for every other body.
+  const hatch = (id: string, angle: number) =>
+    `<pattern id="${id}" width="2.5" height="2.5" patternUnits="userSpaceOnUse" patternTransform="rotate(${angle})"><path d="M0 0V2.5" stroke="#000" stroke-width="${o.lines.section}"/></pattern>`;
+  if (o.sections.length) out.push(`<defs>${hatch("hatch-a", 45)}${hatch("hatch-b", -45)}</defs>`);
   const color = (id: string) => (data.interactive && data.selected === id ? SEL : "#000");
 
   // ---- Frame (ISO 5457): border, centring marks, grid zones.
@@ -428,22 +613,70 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     out.push(`<clipPath id="sheet-area"><path d="${area}"/></clipPath><g clip-path="url(#sheet-area)">`);
   }
   for (const p of L.views) {
-    const v = views.get(p.id)!;
+    const v = views.get(p.src ?? p.id);
+    if (!v) continue;
     const iso = p.id === "iso";
     const c = color(`view:${p.id}`);
+    const sec = o.sections.find((x) => x.id === p.id);
+    const det = o.details.find((x) => x.id === p.id);
+    const r = extent(p);
     const g: string[] = [];
-    if (data.interactive)
-      g.push(`<rect x="${f(p.x - 2)}" y="${f(p.y - 2)}" width="${f(bw(p.box) * p.s + 4)}" height="${f(bh(p.box) * p.s + 4)}" fill="transparent" stroke="${c === SEL ? SEL : "none"}" stroke-width="0.3" stroke-dasharray="2 1"/>`);
-    for (const b of v.bodies) {
-      if (o.hidden && !iso && b.hidden) g.push(`<path d="${placePath(b.hidden, p)}" stroke="${c}" stroke-width="${lw.hidden}" stroke-dasharray="3 1" fill="none"/>`);
-      if (b.tangent) g.push(`<path d="${placePath(b.tangent, p)}" stroke="${c}" stroke-width="${lw.dims}" fill="none"/>`);
-      if (b.visible) g.push(`<path d="${placePath(b.visible, p)}" stroke="${c}" stroke-width="${lw.visible}" stroke-linecap="round" fill="none"/>`);
+    if (data.interactive) {
+      g.push(
+        p.clip
+          ? `<circle cx="${f(p.clip.c[0])}" cy="${f(p.clip.c[1])}" r="${f(p.clip.r + 2)}" fill="transparent" stroke="${c === SEL ? SEL : "none"}" stroke-width="0.3" stroke-dasharray="2 1"/>`
+          : `<rect x="${f(r.x0 - 2)}" y="${f(r.y0 - 2)}" width="${f(r.x1 - r.x0 + 4)}" height="${f(r.y1 - r.y0 + 4)}" fill="transparent" stroke="${c === SEL ? SEL : "none"}" stroke-width="0.3" stroke-dasharray="2 1"/>`,
+      );
     }
+    const lines: string[] = [];
+    v.bodies.forEach((b, i) => {
+      if (b.section) lines.push(`<path d="${placePath(b.section, p)}" fill="url(#hatch-${i % 2 ? "b" : "a"})" fill-rule="evenodd" stroke="none"/>`);
+      if (o.hidden && !iso && b.hidden) lines.push(`<path d="${placePath(b.hidden, p)}" stroke="${c}" stroke-width="${lw.hidden}" stroke-dasharray="3 1" fill="none"/>`);
+      if (b.tangent) lines.push(`<path d="${placePath(b.tangent, p)}" stroke="${c}" stroke-width="${lw.dims}" fill="none"/>`);
+      if (b.visible) lines.push(`<path d="${placePath(b.visible, p)}" stroke="${c}" stroke-width="${lw.visible}" stroke-linecap="round" fill="none"/>`);
+    });
+    if (p.clip) {
+      // A detail: cut to its circle (drawn thin round it).
+      const cid = `clip-${p.id.replace(/[^\w-]/g, "")}`;
+      g.push(`<clipPath id="${cid}"><circle cx="${f(p.clip.c[0])}" cy="${f(p.clip.c[1])}" r="${f(p.clip.r)}"/></clipPath><g clip-path="url(#${cid})">${lines.join("")}</g>`);
+      g.push(`<circle cx="${f(p.clip.c[0])}" cy="${f(p.clip.c[1])}" r="${f(p.clip.r)}" stroke="${c}" stroke-width="${lw.dims}" fill="none"/>`);
+    } else g.push(...lines);
     if (iso) {
       const label = `Isometric view${L.isoScale !== L.scale ? ` (${scaleLabel(p.s)})` : ""}`;
       g.push(text(p.x + (bw(p.box) * p.s) / 2, p.y + bh(p.box) * p.s + ISO_PAD + 2, label, 3, { anchor: "middle", fill: c }));
     }
+    if (sec) g.push(text((r.x0 + r.x1) / 2, r.y1 + 8, `${sec.letter}-${sec.letter}`, 5, { anchor: "middle", fill: c }));
+    if (det) g.push(text((r.x0 + r.x1) / 2, r.y1 + 8, `${det.letter} (${scaleLabel(p.s)})`, 5, { anchor: "middle", fill: c }));
     out.push(data.interactive ? `<g data-view="${p.id}">${g.join("")}</g>` : g.join("\n"));
+  }
+
+  // ---- Where the sections are cut (ISO 128-40: a chain line, thick at its
+  // ends, arrows the way it is looked at, its letter), and the circles the
+  // details are drawn from (thin, with their letter).
+  for (const sec of o.sections) {
+    const p = placed.get(sec.view);
+    if (!p || !placed.has(sec.id)) continue;
+    const c = color(`view:${sec.id}`);
+    out.push(`<g${data.interactive ? ` data-view="${sec.id}"` : ""}>${cutLine(toPaper(p, sec.a), toPaper(p, sec.b), sec.look, sec.letter, lw, c)}</g>`);
+  }
+  for (const det of o.details) {
+    const p = placed.get(det.view);
+    if (!p || !placed.has(det.id)) continue;
+    const c = color(`view:${det.id}`);
+    const C = toPaper(p, det.c);
+    const R = det.r * p.s;
+    const at: [number, number] = [C[0] + (R + 2.5) * Math.SQRT1_2, C[1] - (R + 2.5) * Math.SQRT1_2];
+    out.push(
+      `<g${data.interactive ? ` data-view="${det.id}"` : ""}><circle cx="${f(C[0])}" cy="${f(C[1])}" r="${f(R)}" stroke="${c}" stroke-width="${lw.dims}" fill="none"/>${text(at[0], at[1], det.letter, 5, { fill: c })}</g>`,
+    );
+  }
+
+  // ---- Centre marks and centrelines (thin chain lines).
+  for (const m of o.marks) {
+    const p = placed.get(m.view);
+    if (!p) continue;
+    const svg = markSVG(m, p, lw.center, color(m.id));
+    out.push(data.interactive ? `<g data-ann="${m.id}">${svg}</g>` : svg);
   }
 
   // ---- Overall dimensions: width and height on the front view, depth on the side view.
@@ -474,9 +707,9 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     out.push(data.interactive ? `<g data-ann="${d.id}">${svg}</g>` : svg);
   }
 
-  // ---- Notes.
+  // ---- Notes (pointing at what they are about).
   for (const n of o.notes) {
-    const svg = text(n.x, n.y, n.text, 3.5, { fill: color(n.id) });
+    const svg = noteSVG(n, n.to ? placed.get(n.to.view) : undefined, lw.dims, color(n.id));
     out.push(data.interactive ? `<g data-ann="${n.id}">${svg}</g>` : svg);
   }
 
@@ -510,7 +743,8 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     if (block && x > L.W - FRAME - TB_W - 4.5 && y > L.H - FRAME - block - 4.5) return false;
     for (const p of L.views) {
       if (p === host) continue;
-      if (x > p.x - 4.5 && x < p.x + bw(p.box) * p.s + 4.5 && y > p.y - 4.5 && y < p.y + bh(p.box) * p.s + 4.5) return false;
+      const r = extent(p);
+      if (x > r.x0 - 4.5 && x < r.x1 + 4.5 && y > r.y0 - 4.5 && y < r.y1 + 4.5) return false;
     }
     return taken.every(([tx, ty]) => Math.hypot(x - tx, y - ty) >= 8.5);
   };
@@ -571,14 +805,109 @@ export function dimSVG(d: DrawingDim, p: Placed, o: Opts, color = "#000"): strin
   if ((d.kind === "length" || d.kind === "distance") && d.b) {
     const A = toPaper(p, d.a);
     const B = toPaper(p, d.b);
-    return linearDim(A, B, d.offset, lengthText(Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), o), o.lines.dims, color);
+    return linearDim(A, B, d.offset, dimLabel(d, Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), o), o.lines.dims, color);
   }
   if ((d.kind === "radius" || d.kind === "diameter") && d.c && d.r !== undefined) {
     const dia = d.kind === "diameter";
-    const label = dia ? `Ø${lengthText(2 * d.r, o)}` : `R${lengthText(d.r, o)}`;
+    const label = dimLabel(d, dia ? 2 * d.r : d.r, o, dia ? "Ø" : "R");
     return circleDim(toPaper(p, d.c), d.r * p.s, d.angle ?? -Math.PI / 4, d.offset, label, dia, o.lines.dims, color);
   }
+  if (d.kind === "angle" && d.c && d.b) {
+    const C = toPaper(p, d.c);
+    const A = toPaper(p, d.a);
+    const B = toPaper(p, d.b);
+    return angleDim(C, A, B, d.offset, dimLabel(d, angleBetween(d.c, d.a, d.b), o), o.lines.dims, color);
+  }
   return "";
+}
+
+/** The angle at c from a to b (radians, the smaller way round, signed: positive turning clockwise on the paper). */
+export function angleBetween(c: [number, number], a: [number, number], b: [number, number]): number {
+  let t = Math.atan2(b[1] - c[1], b[0] - c[0]) - Math.atan2(a[1] - c[1], a[0] - c[0]);
+  while (t > Math.PI) t -= 2 * Math.PI;
+  while (t <= -Math.PI) t += 2 * Math.PI;
+  return t;
+}
+
+/** A dimension's text: its value (a length in mm, or an angle), what goes before and after it, its tolerance. */
+export function dimLabel(d: DrawingDim, value: number, o: Opts, sign = ""): DimLabel {
+  const angle = d.kind === "angle";
+  const fmt = (v: number) => (angle ? angleText(v, o) : lengthText(v, o));
+  // Tolerances to a thousandth whatever the drawing's precision (no trailing zeros).
+  const fine = (v: number) => (angle ? angleText(v, { ...o, anglePrecision: Math.max(o.anglePrecision, 2) }) : lengthText(v, { ...o, precision: Math.max(o.precision, 3) }));
+  const pre = `${d.prefix ?? ""}${sign}`;
+  const post = d.suffix ?? "";
+  const t = d.tol;
+  const up = t?.up ?? 0;
+  const down = t?.down ?? up;
+  if (t?.kind === "sym") return { main: `${pre}${fmt(value)} ±${fine(up)}${post}` };
+  if (t?.kind === "dev") return { main: `${pre}${fmt(value)}`, up: `+${fine(up)}`, down: `-${fine(down)}`, tail: post };
+  if (t?.kind === "limits") return { main: pre, up: fmt(value + up), down: fmt(value - down), tail: post };
+  if (t?.kind === "basic") return { main: `${pre}${fmt(value)}${post}`, boxed: true };
+  return { main: `${pre}${fmt(value)}${post}` };
+}
+
+/** A section's cut line on its view: A and B on the paper, `look` the way its arrows point. */
+function cutLine(A: [number, number], B: [number, number], look: [number, number], letter: string, lw: Opts["lines"], color: string): string {
+  const L = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
+  const u = [(B[0] - A[0]) / L, (B[1] - A[1]) / L];
+  const a = [A[0] - u[0] * 3, A[1] - u[1] * 3];
+  const b = [B[0] + u[0] * 3, B[1] + u[1] * 3];
+  const thin = `stroke="${color}" stroke-width="${lw.center}" fill="none"`;
+  let out = `<path d="M${f(a[0])} ${f(a[1])}L${f(b[0])} ${f(b[1])}" ${thin} stroke-dasharray="8 1.5 1.5 1.5"/>`;
+  out += `<path d="M${f(a[0])} ${f(a[1])}l${f(u[0] * 6)} ${f(u[1] * 6)}M${f(b[0])} ${f(b[1])}l${f(-u[0] * 6)} ${f(-u[1] * 6)}" stroke="${color}" stroke-width="${lw.visible}" fill="none"/>`;
+  for (const e of [a, b]) {
+    const tip: [number, number] = [e[0] + look[0] * 8, e[1] + look[1] * 8];
+    out += `<path d="M${f(e[0])} ${f(e[1])}L${f(tip[0])} ${f(tip[1])}" stroke="${color}" stroke-width="${lw.dims}"/>`;
+    out += arrow(tip[0], tip[1], look[0], look[1], color);
+    out += text(tip[0] + look[0] * 3.5, tip[1] + look[1] * 3.5 + 1.8, letter, 5, { anchor: "middle", fill: color });
+  }
+  return out;
+}
+
+/** A centre mark (a cross a little past its circle) or a centreline (a little past its ends): thin chain lines. */
+export function markSVG(m: DrawingMark, p: Placed, width: number, color = "#000"): string {
+  const line = (a: [number, number], b: [number, number]) => `M${f(a[0])} ${f(a[1])}L${f(b[0])} ${f(b[1])}`;
+  const style = `stroke="${color}" stroke-width="${width}" fill="none"`;
+  if (m.kind === "center" && m.c && m.r !== undefined) {
+    const C = toPaper(p, m.c);
+    const e = m.r * p.s + 2.5;
+    // Each arm from the middle out: the dashes cross at the centre.
+    const arms = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ].map(([x, y]) => line(C, [C[0] + x * e, C[1] + y * e]));
+    return `<path d="${arms.join("")}" ${style}${m.r * p.s > 4 ? ` stroke-dasharray="1.5 1 6 1"` : ""}/>`;
+  }
+  if (m.kind === "line" && m.a && m.b) {
+    const A = toPaper(p, m.a);
+    const B = toPaper(p, m.b);
+    const L = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
+    const u = [(B[0] - A[0]) / L, (B[1] - A[1]) / L];
+    const M: [number, number] = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+    // From the middle out both ways: it looks the same at either end.
+    const half = L / 2 + 2.5;
+    return `<path d="${line(M, [M[0] + u[0] * half, M[1] + u[1] * half])}${line(M, [M[0] - u[0] * half, M[1] - u[1] * half])}" ${style} stroke-dasharray="1.5 1 6 1"/>`;
+  }
+  return "";
+}
+
+/** A note: its text; pointing at something, a leader from the near end of its text with an arrow there. */
+export function noteSVG(n: DrawingNote, p: Placed | undefined, width: number, color = "#000"): string {
+  let out = text(n.x, n.y, n.text, 3.5, { fill: color });
+  if (n.to && p) {
+    const P = toPaper(p, n.to.p);
+    const w = textWidth(n.text, 3.5);
+    const toLeft = P[0] < n.x + w / 2;
+    const E: [number, number] = [toLeft ? n.x - 1 : n.x + w + 1, n.y - 1.2];
+    const S: [number, number] = [E[0] + (toLeft ? -2.5 : 2.5), E[1]];
+    const d = Math.hypot(P[0] - S[0], P[1] - S[1]) || 1;
+    out += `<path d="M${f(E[0])} ${f(E[1])}L${f(S[0])} ${f(S[1])}L${f(P[0])} ${f(P[1])}" stroke="${color}" stroke-width="${width}" fill="none"/>`;
+    out += arrow(P[0], P[1], (P[0] - S[0]) / d, (P[1] - S[1]) / d, color);
+  }
+  return out;
 }
 
 function titleBlock(o: Opts, info: ProjectInfo, date: Date, L: Layout, parts: PartRow[]): string {
@@ -763,8 +1092,8 @@ export interface EdgeHit {
 export function edgeAt(views: Map<string, ProjectedView>, L: Layout, q: [number, number], tol: number, want?: "line" | "circle"): EdgeHit | null {
   let best: EdgeHit | null = null;
   for (const p of L.views) {
-    if (p.id === "iso") continue;
-    const v = views.get(p.id);
+    if (p.id === "iso" || (p.clip && Math.hypot(q[0] - p.clip.c[0], q[1] - p.clip.c[1]) > p.clip.r)) continue;
+    const v = views.get(p.src ?? p.id);
     if (!v) continue;
     for (const b of v.bodies)
       for (const e of b.edges) {
@@ -787,12 +1116,13 @@ export function edgeAt(views: Map<string, ProjectedView>, L: Layout, q: [number,
   return best;
 }
 
-/** The end of an edge (a corner) nearest a point on the paper, within `tol` mm. */
+/** The end of an edge (a corner), the middle of a straight one or a circle's centre nearest a point on the paper, within `tol` mm. */
 export function pointAt(views: Map<string, ProjectedView>, L: Layout, q: [number, number], tol: number, view?: string): { view: string; p: [number, number] } | null {
   let best: { view: string; p: [number, number]; d: number } | null = null;
   for (const pl of L.views) {
     if (pl.id === "iso" || (view && pl.id !== view)) continue;
-    const v = views.get(pl.id);
+    if (pl.clip && Math.hypot(q[0] - pl.clip.c[0], q[1] - pl.clip.c[1]) > pl.clip.r) continue;
+    const v = views.get(pl.src ?? pl.id);
     if (!v) continue;
     const consider = (pt: [number, number]) => {
       const P = toPaper(pl, pt);
@@ -804,6 +1134,7 @@ export function pointAt(views: Map<string, ProjectedView>, L: Layout, q: [number
         consider(e.a);
         consider(e.b);
         if ("c" in e) consider(e.c);
+        else consider([(e.a[0] + e.b[0]) / 2, (e.a[1] + e.b[1]) / 2]);
       }
   }
   return best ? { view: (best as { view: string }).view, p: (best as { p: [number, number] }).p } : null;
@@ -843,4 +1174,4 @@ export function outward(p: Placed, a: [number, number], b: [number, number]): nu
   return n[0] * m[0] + n[1] * m[1] >= 0 ? 8 : -8;
 }
 
-export type { DrawingDim, DrawingNote };
+export type { DrawingDetail, DrawingDim, DrawingMark, DrawingNote, DrawingSection };

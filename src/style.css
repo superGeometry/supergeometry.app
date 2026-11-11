@@ -1948,6 +1948,22 @@ form.dialog {
 .dialog.feedback {
   width: min(460px, calc(100vw - 24px - var(--safe-l, 0px) - var(--safe-r, 0px)));
 }
+/* A yes/no in a window: the box at the end of its label's line. */
+.dialog-field:has(> input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dialog-field input[type="checkbox"] {
+  min-height: 0;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  padding: 0;
+  accent-color: var(--accent, #3b82f6);
+}
+
 .dialog-field textarea {
   min-height: 110px;
   resize: vertical;
@@ -4623,6 +4639,11 @@ html[data-screen="phone"] body.bim-open .hint {
 }
 
 /* The technical sheet: a document on paper. */
+/* A window opened from a drawing or a sheet: above it. */
+.dialog-back.over-sheet {
+  z-index: 70;
+}
+
 .bim-sheet {
   position: fixed;
   inset: 0;

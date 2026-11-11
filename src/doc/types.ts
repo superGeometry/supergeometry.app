@@ -571,7 +571,7 @@ export interface ProjectDoc {
 export interface DrawingOptions {
   /** The sheet's title (missing: the project's name). */
   title?: string;
-  size?: "A4" | "A3" | "A2" | "A1" | "A0" | "ANSI A" | "ANSI B" | "ANSI C" | "ANSI D";
+  size?: "A4" | "A3" | "A2" | "A1" | "A0" | "ANSI A" | "ANSI B" | "ANSI C" | "ANSI D" | "ANSI E";
   portrait?: boolean;
   angle?: "first" | "third";
   scale?: number;
@@ -587,9 +587,11 @@ export interface DrawingOptions {
   units?: "mm" | "cm" | "m" | "in";
   /** Decimals shown in dimensions. */
   precision?: number;
+  /** Decimals shown in angles. */
+  anglePrecision?: number;
   comma?: boolean;
   /** Line widths, mm. */
-  lines?: { visible?: number; hidden?: number; dims?: number };
+  lines?: { visible?: number; hidden?: number; dims?: number; center?: number; section?: number };
   balloons?: boolean;
   /** The overall sizes dimensioned by themselves. */
   overall?: boolean;
@@ -597,16 +599,71 @@ export interface DrawingOptions {
   moved?: Record<string, [number, number]>;
   dims?: DrawingDim[];
   notes?: DrawingNote[];
+  sections?: DrawingSection[];
+  details?: DrawingDetail[];
+  /** Centre marks and centrelines. */
+  marks?: DrawingMark[];
+}
+
+/**
+ * A section view (A-A): the model cut along a line drawn on another view,
+ * seen square to the cut, lined up with that view.
+ */
+export interface DrawingSection {
+  id: string;
+  letter: string;
+  /** The view the cut line is on, and the line (that view's coordinates: model mm, y down). */
+  view: string;
+  a: [number, number];
+  b: [number, number];
+  /** The way the eye looks, on that view (a unit vector square to the line): where its arrows point. */
+  look: [number, number];
+  /** How far its middle is from its view's edge (mm on the paper). */
+  gap: number;
+}
+
+/** A detail view (B): a circle of another view drawn bigger. */
+export interface DrawingDetail {
+  id: string;
+  letter: string;
+  view: string;
+  /** The circle (the view's coordinates). */
+  c: [number, number];
+  r: number;
+  /** Its scale (missing: twice its view's). */
+  scale?: number;
+  /** Where its middle is on the paper. */
+  at: [number, number];
+}
+
+/** A centre mark on a circle, or a centreline from a to b (a view's coordinates). */
+export interface DrawingMark {
+  id: string;
+  view: string;
+  kind: "center" | "line";
+  c?: [number, number];
+  r?: number;
+  a?: [number, number];
+  b?: [number, number];
+}
+
+/** What a dimension adds to its value: text before and after, a tolerance. */
+export interface DimText {
+  prefix?: string;
+  suffix?: string;
+  /** Symmetrical (± up), deviation (+up / -down), limits (the largest and smallest sizes), basic (boxed). */
+  tol?: { kind: "sym" | "dev" | "limits" | "basic"; up?: number; down?: number };
 }
 
 /**
  * A dimension put on a drawing: its points in its view's own coordinates
  * (model mm, y down), so it stays on its edge at any scale or place of the view.
  */
-export interface DrawingDim {
+export interface DrawingDim extends DimText {
   id: string;
   view: string;
-  kind: "length" | "distance" | "radius" | "diameter";
+  /** Angle: from ray c→a to ray c→b, its arc `offset` mm (on the paper) from c. */
+  kind: "length" | "distance" | "radius" | "diameter" | "angle";
   a: [number, number];
   b?: [number, number];
   /** Circle (radius, diameter): its centre and radius. */
@@ -624,6 +681,8 @@ export interface DrawingNote {
   x: number;
   y: number;
   text: string;
+  /** What it points at: a point on a view (that view's coordinates), its leader drawn to it. */
+  to?: { view: string; p: [number, number] };
 }
 
 /** The title block: who made it, for whom, which revision. */

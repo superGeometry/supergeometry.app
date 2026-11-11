@@ -108,6 +108,8 @@ export interface ViewSpec {
   id: string;
   dir: Vec3;
   xAxis: Vec3;
+  /** A section view: a point on the cut plane (square to `dir`); what lies between the eye and it is taken off. */
+  cut?: Vec3;
 }
 
 /** One body in a drawn view: SVG path data (mm on the paper at 1:1, y down). */
@@ -125,6 +127,8 @@ export interface ViewBody {
   under?: [number, number];
   /** Its seen straight edges and circles (arcs), to dimension by tapping them. */
   edges: ViewEdge[];
+  /** A section view: the faces the cut made, as closed outlines (to hatch). */
+  section?: string;
 }
 
 /** A seen edge in a view (mm, y down): a line from a to b, or a circle (an arc from a through m to b; whole when a = b). */
