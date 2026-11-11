@@ -138,8 +138,6 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
   const back = el("div", "bim-sheet bim-drawing");
   const bar = el("div", "bim-sheet-bar");
   const name = el("span", "bim-sheet-name", "Drawing");
-  const listBtn = el("button", "text-btn bim-dlist-btn", "Drawings ▾");
-  listBtn.title = "The project's drawings: open another, add, copy, delete";
   const print = el("button", "text-btn", "Print / PDF");
   const svgBtn = el("button", "text-btn", "SVG");
   const propsBtn = el("button", "text-btn on", "Properties");
@@ -147,7 +145,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
   close.innerHTML = icons.close;
   close.title = "Exit Drawing";
   close.setAttribute("aria-label", "Exit Drawing");
-  bar.append(name, listBtn, print, svgBtn, propsBtn, close);
+  bar.append(name, print, svgBtn, propsBtn, close);
   const work = el("div", "bim-dwork");
   const tools = el("div", "bim-dtools");
   const stage = el("div", "bim-dstage");
@@ -1561,6 +1559,18 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     button("Note", "text", () => startTool(tool === "note" ? null : "note"), { on: tool === "note" });
     button("Image", "image", () => void addImage());
     button("Delete", "trash", removeSelected, { disabled: !selected });
+
+    // ---- The project's drawings: tap one to open it; a new one, a copy of this one, this one deleted.
+    tools.append(el("div", "bim-dtools-head", "Drawings"));
+    const all = drawingsOf(store.doc);
+    const listed = all.some((d) => d.id === current) ? all : [...all, { id: current }];
+    for (const d of listed) {
+      const title = d.id === current ? o.title : drawingOptions({ ...store.doc, drawing: d }).title;
+      button(title, "drawing", () => d.id !== current && switchTo(d.id), { on: d.id === current, sub: true });
+    }
+    button("New drawing", "insert", () => switchTo("new"), { sub: true });
+    button("Copy drawing", "copy", copyDrawing, { sub: true, disabled: !curDrawing() });
+    button("Delete drawing", "trash", () => void deleteDrawing(), { sub: true, disabled: !curDrawing() });
   };
 
   // ---- The properties at the right
@@ -1770,70 +1780,27 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   });
 
-  // ---- The project's drawings: open another, a new one, a copy of this one, this one deleted.
-  let listPop: HTMLElement | null = null;
-  const closeList = () => {
-    listPop?.remove();
-    listPop = null;
-    listBtn.classList.remove("on");
-  };
+  // ---- The project's drawings (listed under the tools): another opened, a copy, this one deleted.
   const switchTo = (id: string) => {
-    closeList();
     shut();
     void openDrawing(app, id);
   };
-  listBtn.addEventListener("click", () => {
-    if (listPop) return closeList();
-    const all = drawingsOf(store.doc);
-    const pop = el("div", "bim-dlist");
-    for (const d of all) {
-      const row = el("button", `bim-dlist-row${d.id === current ? " on" : ""}`, drawingOptions({ ...store.doc, drawing: d }).title);
-      row.addEventListener("click", () => (d.id === current ? closeList() : switchTo(d.id)));
-      pop.append(row);
-    }
-    if (!all.some((d) => d.id === current)) pop.append(el("div", "bim-dlist-row on", opts().title));
-    const acts = el("div", "bim-dlist-acts");
-    const act = (label: string, run: () => void, disabled = false) => {
-      const b = el("button", "text-btn", label);
-      b.disabled = disabled;
-      b.addEventListener("click", run);
-      acts.append(b);
-    };
-    act("New drawing", () => switchTo("new"));
-    act(
-      "Copy this one",
-      () => {
-        const me = curDrawing();
-        if (!me) return;
-        const id = annId("drawing");
-        const title = `${opts().title} (copy)`;
-        store.commit((d) => putDrawing(d, id, { ...structuredClone(me), title }));
-        switchTo(id);
-      },
-      !curDrawing(),
-    );
-    act(
-      "Delete this one",
-      async () => {
-        closeList();
-        if (!(await form("Delete drawing", [], `“${opts().title}” goes from the project (Undo brings it back).`))) return;
-        const rest = drawingsOf(store.doc).filter((d) => d.id !== current);
-        store.commit((d) => putDrawing(d, current, null));
-        app.ui.toast("Drawing deleted");
-        if (rest.length) switchTo(rest[0].id);
-        else shut();
-      },
-      !curDrawing(),
-    );
-    pop.append(acts);
-    bar.append(pop);
-    listPop = pop;
-    listBtn.classList.add("on");
-  });
-  // A tap anywhere else closes the list.
-  back.addEventListener("pointerdown", (e) => {
-    if (listPop && !(e.target as Element).closest(".bim-dlist, .bim-dlist-btn")) closeList();
-  });
+  const copyDrawing = () => {
+    const me = curDrawing();
+    if (!me) return;
+    const id = annId("drawing");
+    const title = `${opts().title} (copy)`;
+    store.commit((d) => putDrawing(d, id, { ...structuredClone(me), title }));
+    switchTo(id);
+  };
+  const deleteDrawing = async () => {
+    if (!(await form("Delete drawing", [], `“${opts().title}” goes from the project (Undo brings it back).`))) return;
+    const rest = drawingsOf(store.doc).filter((d) => d.id !== current);
+    store.commit((d) => putDrawing(d, current, null));
+    app.ui.toast("Drawing deleted");
+    if (rest.length) switchTo(rest[0].id);
+    else shut();
+  };
 
   renderTools();
   if (fresh && !(await preferences())) return shut();

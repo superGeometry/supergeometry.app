@@ -4925,53 +4925,22 @@ input.bim-tb-value:focus {
 .bim-drawing-svg > rect:first-of-type {
   filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.35));
 }
-/* The project's drawings: a list under its button in the bar. */
-.bim-sheet-bar {
-  position: relative;
+/* The project's drawings, listed under the tools. */
+.bim-dtools-head {
+  margin: 10px 8px 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
 }
-.bim-dlist {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 8px;
-  z-index: 20;
-  min-width: 240px;
-  max-width: min(360px, calc(100vw - 16px));
-  padding: 6px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--chrome-solid, #202126);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.bim-dlist-row {
-  text-align: left;
-  font: inherit;
-  font-size: 13px;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
+.bim-dtool span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.bim-dlist-row:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-.bim-dlist-row.on {
-  background: rgba(26, 115, 232, 0.25);
-}
-.bim-dlist-acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
 }
 /* A picked dimension: how far out it sits, typed. */
 .bim-dim-farlabel {
@@ -5186,6 +5155,11 @@ html[data-screen="phone"] .bim-dtool {
 }
 html[data-screen="phone"] .bim-dtool span {
   display: none;
+}
+html[data-screen="phone"] .bim-dtools-head {
+  margin: 8px 2px 2px;
+  font-size: 9px;
+  text-align: center;
 }
 html[data-screen="phone"] .bim-dtool.sub {
   padding-left: 0;
