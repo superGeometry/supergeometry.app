@@ -4925,10 +4925,81 @@ input.bim-tb-value:focus {
 .bim-drawing-svg > rect:first-of-type {
   filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.35));
 }
-/* The project's drawings, listed under the tools; a box to find one among many. */
+/* The left column: the tools at the top, the sheets in their own pane under them (scrolling by itself). */
+.bim-dtools {
+  overflow: hidden !important;
+}
+.bim-dtools-main {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 62%;
+  overflow-y: auto;
+}
+.bim-dsheets {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px -6px calc(-8px - var(--safe-b)) calc(-6px - var(--safe-l));
+  padding: 8px 6px calc(8px + var(--safe-b)) calc(6px + var(--safe-l));
+  border-top: 1px solid var(--line);
+  background: rgba(127, 127, 127, 0.07);
+}
+.bim-dsheets .bim-dtools-head {
+  margin: 0 8px 4px;
+  padding-top: 0;
+  border-top: 0;
+}
+.bim-dsheets-acts {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0 2px 4px;
+}
+.bim-dsheets-act {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.bim-dsheets-act svg {
+  width: 18px;
+  height: 18px;
+}
+.bim-dsheets-act:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.15);
+}
+.bim-dsheets-act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.bim-dsheets-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bim-dsheets-list .bim-dtool {
+  flex: none;
+}
+.bim-dsheets-list .bim-dtool.on {
+  background: rgba(26, 115, 232, 0.18);
+}
 .bim-dtools .bim-dfind {
   flex: none;
-  margin: 2px 4px 4px;
+  margin: 0 4px 4px;
   width: auto;
   padding: 5px 8px;
 }
@@ -5169,6 +5240,15 @@ html[data-screen="phone"] .bim-dtools-head {
   margin: 8px 2px 2px;
   font-size: 9px;
   text-align: center;
+}
+html[data-screen="phone"] .bim-dsheets {
+  margin-left: calc(-4px - var(--safe-l));
+  margin-right: -4px;
+  padding-left: calc(4px + var(--safe-l));
+  padding-right: 4px;
+}
+html[data-screen="phone"] .bim-dsheets-acts {
+  justify-content: center;
 }
 html[data-screen="phone"] .bim-dtool.sub {
   padding-left: 0;

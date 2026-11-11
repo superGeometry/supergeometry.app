@@ -1512,7 +1512,13 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
   // ---- The tools at the left
   let open: "views" | "dims" | "marks" | null = null;
   const renderTools = () => {
+    // The tools at the top; the sheets (the project's drawings) in their own pane under them, scrolling by itself.
+    const keptScroll = tools.querySelector(".bim-dsheets-list")?.scrollTop;
     tools.innerHTML = "";
+    const main = el("div", "bim-dtools-main");
+    const sheets = el("div", "bim-dsheets");
+    tools.append(main, sheets);
+    let into: HTMLElement = main;
     const o = opts();
     const button = (label: string, icon: IconName, run: () => void, opt: { on?: boolean; disabled?: boolean; sub?: boolean } = {}) => {
       const b = el("button", `bim-dtool${opt.on ? " on" : ""}${opt.sub ? " sub" : ""}`);
@@ -1521,7 +1527,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
       b.title = label;
       b.disabled = !!opt.disabled;
       b.addEventListener("click", run);
-      tools.append(b);
+      into.append(b);
     };
     button("Exit Drawing", "close", shut);
     const pick = (t: ToolId, label: string, icon: IconName) => button(label, icon, () => startTool(tool === t ? null : t), { on: tool === t, sub: true });
@@ -1570,14 +1576,26 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     button("Delete", "trash", removeSelected, { disabled: !selected });
 
     // ---- The project's drawings: tap one to open it; a new one, a copy of this one, this one deleted.
-    tools.append(el("div", "bim-dtools-head", "Drawings"));
     const all = drawingsOf(store.doc);
     const listed = all.some((d) => d.id === current) ? all : [...all, { id: current }];
-    button("New drawing", "insert", () => switchTo("new"), { sub: true });
-    button("Copy drawing", "copy", copyDrawing, { sub: true, disabled: !curDrawing() });
-    button("Delete drawing", "trash", () => void deleteDrawing(), { sub: true, disabled: !curDrawing() });
-    button(`Print / PDF all (${all.length})`, "file", () => void printAll(), { sub: true, disabled: !all.length || !!busy });
-    button(`DXF all (${all.length})`, "share", () => void dxfAll(), { sub: true, disabled: !all.length || !!busy });
+    sheets.append(el("div", "bim-dtools-head", `Sheets (${listed.length})`));
+    // What's done with the sheets: small buttons in a row (their names as tips).
+    const acts = el("div", "bim-dsheets-acts");
+    const act = (label: string, icon: IconName, run: () => void, disabled = false) => {
+      const b = el("button", "bim-dsheets-act");
+      b.innerHTML = icons[icon];
+      b.title = label;
+      b.setAttribute("aria-label", label);
+      b.disabled = disabled;
+      b.addEventListener("click", run);
+      acts.append(b);
+    };
+    act("New drawing", "insert", () => switchTo("new"));
+    act("Copy this drawing", "copy", copyDrawing, !curDrawing());
+    act("Delete this drawing", "trash", () => void deleteDrawing(), !curDrawing());
+    act(`Print / PDF all ${all.length}`, "file", () => void printAll(), !all.length || !!busy);
+    act(`DXF of all ${all.length} (one .zip)`, "share", () => void dxfAll(), !all.length || !!busy);
+    sheets.append(acts);
     // Many drawings: a box to find one by its title (the list narrows as it's typed).
     if (listed.length > 8) {
       const find = el("input", "bim-input bim-dfind");
@@ -1589,19 +1607,28 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
         listFilter = find.value;
         narrow();
       });
-      tools.append(find);
+      sheets.append(find);
     }
+    const list = el("div", "bim-dsheets-list");
+    sheets.append(list);
+    into = list;
     const rows: [HTMLElement, string][] = [];
+    let mine: HTMLElement | null = null;
     for (const d of listed) {
       const title = d.id === current ? o.title : drawingOptions({ ...store.doc, drawing: d }).title;
-      button(title, "drawing", () => d.id !== current && switchTo(d.id), { on: d.id === current, sub: true });
-      rows.push([tools.lastElementChild as HTMLElement, title.toLowerCase()]);
+      button(title, "drawing", () => d.id !== current && switchTo(d.id), { on: d.id === current });
+      const row = list.lastElementChild as HTMLElement;
+      if (d.id === current) mine = row;
+      rows.push([row, title.toLowerCase()]);
     }
     const narrow = () => {
       const q = listFilter.trim().toLowerCase();
       for (const [row, t] of rows) row.hidden = !!q && !t.includes(q);
     };
     narrow();
+    // Where the list was scrolled to stays; opened, the open drawing is in sight.
+    if (keptScroll !== undefined) list.scrollTop = keptScroll;
+    else requestAnimationFrame(() => mine?.scrollIntoView({ block: "nearest" }));
   };
   /** What the list of drawings is narrowed to. */
   let listFilter = "";
