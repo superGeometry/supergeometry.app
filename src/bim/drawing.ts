@@ -486,12 +486,14 @@ export async function openDrawing(app: AppContext): Promise<void> {
     }
     e.preventDefault();
     if (target !== selected) {
-      // A tap picks it; a drag from there moves the sheet, not it (nothing
-      // moves by accident while looking round). Picked, a view moves by its
-      // handle, a dimension or note by itself.
+      // A tap picks it. A view: a drag from there moves the sheet, not it
+      // (nothing big moves by accident while looking round); picked, it moves
+      // by its handle. A dimension or note moves as soon as it's dragged.
       selected = target;
-      render();
-      return startPan(e, false);
+      if (!ann) {
+        render();
+        return startPan(e, false);
+      }
     }
     // A picked view held anywhere but its handle: the sheet moves.
     if (target.startsWith("view:") && !onGrip) return startPan(e, false);
@@ -579,7 +581,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
       if (img) next.images = o.images.map((m) => (m === img ? { ...m, x: img.x + dx, y: img.y + dy } : m));
       if (dim) {
         const p = layout.views.find((v) => v.id === dim.view);
-        if (p) next.dims = o.dims.map((d) => (d === dim ? movedDim(dim, p, q) : d));
+        if (p) next.dims = o.dims.map((d) => (d === dim ? movedDim(dim, p, q, [dx, dy]) : d));
       }
     }
     draft = next;
@@ -627,8 +629,13 @@ export async function openDrawing(app: AppContext): Promise<void> {
     else fitAll();
   });
 
-  /** A dimension dragged to a point: its line through there (a circle's: its leader towards it). */
-  const movedDim = (d: DrawingDim, p: Layout["views"][number], q: [number, number]): DrawingDim => {
+  /**
+   * A dimension dragged by (dx, dy) to q: a length's line out or in by as much
+   * as the pointer went across it, its value along by as much as it went
+   * along (back in the middle when near it); an angle's arc through q; a
+   * circle's leader towards q.
+   */
+  const movedDim = (d: DrawingDim, p: Layout["views"][number], q: [number, number], by: [number, number]): DrawingDim => {
     if (d.kind === "angle" && d.c) {
       const c = toPaper(p, d.c);
       return { ...d, offset: Math.max(3, Math.hypot(q[0] - c[0], q[1] - c[1])) };
@@ -641,8 +648,13 @@ export async function openDrawing(app: AppContext): Promise<void> {
     const A = toPaper(p, d.a);
     const B = toPaper(p, d.b);
     const L = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
-    const n = [(B[1] - A[1]) / L, -(B[0] - A[0]) / L];
-    return { ...d, offset: (q[0] - A[0]) * n[0] + (q[1] - A[1]) * n[1] };
+    const u = [(B[0] - A[0]) / L, (B[1] - A[1]) / L];
+    const n = [u[1], -u[0]];
+    const offset = d.offset + by[0] * n[0] + by[1] * n[1];
+    let slide = (d.slide ?? 0) + by[0] * u[0] + by[1] * u[1];
+    if (Math.abs(slide) < 2) slide = 0;
+    // Never across what it measures (it flips side instead of sitting on it).
+    return { ...d, offset: Math.abs(offset) < 2 ? 2 * (Math.sign(offset) || Math.sign(d.offset) || 1) : offset, slide: slide || undefined };
   };
 
   // ---- The dimension and note tools
@@ -1212,6 +1224,23 @@ export async function openDrawing(app: AppContext): Promise<void> {
           button("Min", () => flip(false), !d.max);
           button("Max", () => flip(true), !!d.max);
         }
+        // How far out from what it measures, typed (mm on the paper).
+        const far = el("input", "bim-input bim-dim-far");
+        far.type = "number";
+        far.min = "1";
+        far.step = "1";
+        far.value = String(Math.round(Math.abs(d.offset) * 10) / 10);
+        far.title = "How far out from what it measures (mm on the paper)";
+        far.addEventListener("change", () => {
+          const v = Number(far.value);
+          if (!(v > 0)) return;
+          set({ dims: o.dims.map((x) => (x === d ? { ...x, offset: (d.kind === "length" || d.kind === "distance" ? Math.sign(d.offset) || 1 : 1) * v } : x)) });
+        });
+        far.addEventListener("keydown", (e) => e.stopPropagation());
+        const lab = el("label", "bim-dim-farlabel", "Distance");
+        lab.append(far);
+        hint.append(lab);
+        if (d.slide) button("Centre text", () => set({ dims: o.dims.map((x) => (x === d ? { ...x, slide: undefined } : x)) }));
         button("Text and tolerance", () => void editDim(d));
       } else if (n) {
         hint.append(el("span", "", "Note"));

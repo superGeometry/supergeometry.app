@@ -556,7 +556,7 @@ function arrow(x: number, y: number, dx: number, dy: number, color: string): str
  * the left of a→b (negative: to the right), with extension lines and the
  * value written along it, readable from the bottom or the right (ISO 129).
  */
-export function linearDim(A: [number, number], B: [number, number], offset: number, label: string | DimLabel, width: number, color = "#000"): string {
+export function linearDim(A: [number, number], B: [number, number], offset: number, label: string | DimLabel, width: number, color = "#000", slide = 0): string {
   const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
   if (L < 1e-9) return "";
   const u = [(B[0] - A[0]) / L, (B[1] - A[1]) / L];
@@ -572,7 +572,15 @@ export function linearDim(A: [number, number], B: [number, number], offset: numb
   if (ang > 90.01) ang -= 180;
   if (ang <= -90.01) ang += 180;
   const t = (ang * Math.PI) / 180;
-  const mid = [(da[0] + db[0]) / 2 + Math.sin(t) * 1.2, (da[1] + db[1]) / 2 - Math.cos(t) * 1.2];
+  // The value slid along: past an end, the dimension line runs on under it.
+  const half = labelWidth(labelOf(label), 3.5) / 2 + 1;
+  if (Math.abs(slide) > L / 2 - half) {
+    const k = slide > 0 ? 1 : -1;
+    const from = k > 0 ? db : da;
+    const reach = Math.abs(slide) + half - L / 2;
+    if (reach > 0) out += `<path d="M${f(from[0])} ${f(from[1])}L${f(from[0] + u[0] * k * reach)} ${f(from[1] + u[1] * k * reach)}" ${thin}/>`;
+  }
+  const mid = [(da[0] + db[0]) / 2 + u[0] * slide + Math.sin(t) * 1.2, (da[1] + db[1]) / 2 + u[1] * slide - Math.cos(t) * 1.2];
   return out + labelSVG(mid[0], mid[1], label, 3.5, color, ang);
 }
 
@@ -912,7 +920,7 @@ export function dimSVG(d: DrawingDim, p: Placed, o: Opts, color = "#000"): strin
   if ((d.kind === "length" || d.kind === "distance") && d.b) {
     const A = toPaper(p, d.a);
     const B = toPaper(p, d.b);
-    return linearDim(A, B, d.offset, dimLabel(d, Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), o), o.lines.dims, color);
+    return linearDim(A, B, d.offset, dimLabel(d, Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]), o), o.lines.dims, color, d.slide ?? 0);
   }
   if ((d.kind === "radius" || d.kind === "diameter") && d.c && d.r !== undefined) {
     const dia = d.kind === "diameter";

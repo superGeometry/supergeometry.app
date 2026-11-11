@@ -739,6 +739,8 @@ export interface DrawingDim extends DimText {
   offset: number;
   /** Circle: the leader's direction (radians). */
   angle?: number;
+  /** A length or distance: its value moved along its line from the middle (mm on the paper, towards b); past an end, the line runs out to it. */
+  slide?: number;
   /** An arc's angle: a point on the arc, so the angle goes round the way the arc does (past 180° too). */
   through?: [number, number];
   /** A min-max distance: the nearest and the farthest points of the two things it was measured between (a and b are one pair). */
