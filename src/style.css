@@ -4894,6 +4894,7 @@ input.bim-tb-value:focus {
   display: none;
 }
 .bim-drawing-paper {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -4923,6 +4924,56 @@ input.bim-tb-value:focus {
 /* The paper (the sheet's first rectangle) casts a shadow on the grey round it. */
 .bim-drawing-svg > rect:first-of-type {
   filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.35));
+}
+/* A picked view: the handle to move it by, its scale under it. */
+.bim-dhandle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.bim-dhandle[hidden],
+.bim-dhandle-scale[hidden] {
+  display: none;
+}
+.bim-dhandle-grip {
+  position: absolute;
+  left: -20px;
+  top: -20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a73e8;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: move;
+}
+.bim-dhandle-grip svg {
+  width: 24px;
+  height: 24px;
+}
+.bim-dhandle-scale {
+  position: absolute;
+  top: 26px;
+  left: 0;
+  transform: translateX(-50%);
+  padding: 3px 6px;
+  border: 1px solid #1a73e8;
+  border-radius: 6px;
+  background: #202126;
+  color: #e3e4e8;
+  font: inherit;
+  font-size: 12px;
+  pointer-events: auto;
+  cursor: pointer;
 }
 /* Zoom: out, how close (tap: all of the sheet), in. */
 .bim-dzoom {

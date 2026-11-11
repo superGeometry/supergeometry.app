@@ -156,6 +156,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
   const applyCamera = () => {
     paper.querySelector("svg")?.setAttribute("viewBox", camera.viewBox());
     zoomLabel.textContent = `${Math.round(camera.ratio() * 100)}%`;
+    placeHandle();
   };
   /** A screen point (px) in the paper's area. */
   const local = (e: { clientX: number; clientY: number }): [number, number] => {
@@ -217,6 +218,30 @@ export async function openDrawing(app: AppContext): Promise<void> {
   );
   // The right button moves the sheet (no menu).
   paper.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // ---- A picked view: a handle in its middle to move it by, and its scale
+  // under it (tap for the list). Screen-sized, whatever the zoom; it rides
+  // on the paper (put back after each redraw) and follows the camera.
+  const handle = el("div", "bim-dhandle");
+  const grip = el("div", "bim-dhandle-grip");
+  grip.innerHTML = icons.move;
+  grip.title = "Drag to move the view";
+  const chip = el("select", "bim-dhandle-scale");
+  chip.title = "The view's scale";
+  handle.append(grip, chip);
+  handle.hidden = true;
+  const placeHandle = () => {
+    const id = !tool && selected?.startsWith("view:") ? selected.slice(5) : null;
+    const p = id ? layout?.views.find((x) => x.id === id) : undefined;
+    if (!p) {
+      handle.hidden = true;
+      return;
+    }
+    const r = extent(p);
+    const [x, y] = camera.toScreen((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2);
+    handle.hidden = false;
+    handle.style.transform = `translate(${x}px, ${y}px)`;
+  };
 
   let views = new Map<string, ProjectedView>();
   let parts: PartRow[] = [];
@@ -334,6 +359,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
       s.setAttribute("height", "100%");
       s.setAttribute("preserveAspectRatio", "xMidYMid meet");
       s.classList.add("bim-drawing-svg");
+      paper.append(handle);
       applyCamera();
     }
     if (!fetching) name.textContent = `Drawing · ${drawingOptions(doc).title}`;
@@ -411,6 +437,8 @@ export async function openDrawing(app: AppContext): Promise<void> {
     pan = { id: e.pointerId, x, y, moved: false, deselect };
   };
   paper.addEventListener("pointerdown", (e) => {
+    // The scale chip opens its own list.
+    if ((e.target as Element).closest?.(".bim-dhandle-scale")) return;
     fingers.set(e.pointerId, local(e));
     try {
       paper.setPointerCapture(e.pointerId);
@@ -444,16 +472,26 @@ export async function openDrawing(app: AppContext): Promise<void> {
       return void useTool(q, e);
     }
     const t = e.target as Element;
+    const onGrip = !!t.closest(".bim-dhandle-grip");
     const ann = t.closest("[data-ann]")?.getAttribute("data-ann");
     const view = t.closest("[data-view]")?.getAttribute("data-view");
-    const target = ann ?? (view ? `view:${view}` : null);
+    const target = onGrip ? selected : (ann ?? (view ? `view:${view}` : null));
     if (!target) {
       // The empty paper: dragged, it moves; tapped, nothing is picked any more.
       e.preventDefault();
       return startPan(e, true);
     }
     e.preventDefault();
-    selected = target;
+    if (target !== selected) {
+      // A tap picks it; a drag from there moves the sheet, not it (nothing
+      // moves by accident while looking round). Picked, a view moves by its
+      // handle, a dimension or note by itself.
+      selected = target;
+      render();
+      return startPan(e, false);
+    }
+    // A picked view held anywhere but its handle: the sheet moves.
+    if (target.startsWith("view:") && !onGrip) return startPan(e, false);
     drag = { id: e.pointerId, x: q[0], y: q[1], target, moved: false, start: structuredClone(store.doc.drawing ?? {}) };
     try {
       paper.setPointerCapture(e.pointerId);
@@ -576,7 +614,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
     if (n) return noteInput([n.x, n.y], e.clientX, e.clientY, n);
     const d = opts().dims.find((x) => x.id === id);
     if (d) return void editDim(d);
-    if ((e.target as Element).closest("[data-ann],[data-view]")) return;
+    if ((e.target as Element).closest("[data-ann],[data-view],.bim-dhandle")) return;
     if (camera.ratio() < 1.5) zoomBy(2.5, local(e));
     else fitAll();
   });
@@ -968,6 +1006,7 @@ export async function openDrawing(app: AppContext): Promise<void> {
 
   /** With something picked and no tool on: what it is, and what can be done to it. */
   const showSelection = () => {
+    chip.hidden = true;
     if (tool) return;
     hint.innerHTML = "";
     hint.hidden = !selected;
@@ -979,9 +1018,10 @@ export async function openDrawing(app: AppContext): Promise<void> {
       b.addEventListener("click", run);
       hint.append(b);
     };
-    /** A view's scale, picked from the standard ones. */
+    /** A view's scale, picked from the standard ones: on the chip under its handle. */
     const scaleSelect = (now: number, change: (s: number) => void) => {
-      const s = el("select", "bim-select");
+      const s = chip;
+      s.innerHTML = "";
       for (const sc of SCALES) {
         const op = el("option", "", scaleLabel(sc));
         op.value = String(sc);
@@ -994,9 +1034,8 @@ export async function openDrawing(app: AppContext): Promise<void> {
         op.selected = true;
         s.prepend(op);
       }
-      s.title = "Scale";
-      s.addEventListener("change", () => change(Number(s.value)));
-      hint.append(s);
+      s.onchange = () => change(Number(s.value));
+      s.hidden = false;
     };
     if (id.startsWith("view:")) {
       const v = id.slice(5);
