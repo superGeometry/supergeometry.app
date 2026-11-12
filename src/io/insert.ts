@@ -7,6 +7,7 @@ import { uid } from "../sketch/edit";
 import type { AppContext } from "../tools/tool";
 import { bareExpr, evaluate, fmtLen, setVariables, withUnitOf } from "../units";
 import { DIALOG_ACTION } from "../ui/dialogAction";
+import { read3mf } from "./formats";
 import { parseSVG } from "./svg";
 
 export function pickFile(accept: string): Promise<File | null> {
@@ -38,7 +39,7 @@ function unreadable(bytes: Uint8Array, format: "step" | "stl"): string | null {
 }
 
 export async function insertFile(app: AppContext): Promise<void> {
-  const file = await pickFile(".step,.stp,.stl,.obj,.dxf,.svg,.dwg,.super,.tessel");
+  const file = await pickFile(".step,.stp,.stl,.obj,.3mf,.dxf,.svg,.dwg,.super,.tessel");
   if (!file) return;
   const ext = file.name.split(".").pop()!.toLowerCase();
   try {
@@ -72,6 +73,8 @@ export async function insertFile(app: AppContext): Promise<void> {
       bytes = objToStl(new TextDecoder().decode(bytes));
       format = "stl";
     }
+    // 3MF: the exact model packed in it (ours), else its meshes.
+    if (ext === "3mf") ({ format, bytes } = await read3mf(bytes));
     // A damaged or wrong file stops here, not as a failed step in History
     // (that kept the broken file in the project).
     const why = unreadable(bytes, format);

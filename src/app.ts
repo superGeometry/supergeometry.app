@@ -50,7 +50,8 @@ import { icons } from "./ui/icons";
 import { Updates } from "./ui/update";
 import { Offline } from "./ui/offline";
 import { Install } from "./ui/install";
-import { exportThreeMF } from "./io/threemf";
+import { exportThreeMF, zip } from "./io/threemf";
+import { glb } from "./io/formats";
 import { sketchToDXF } from "./io/dxf";
 import { isHeadset, screenClass } from "./device";
 import { Viewport } from "./view/viewport";
@@ -921,7 +922,7 @@ export class App implements AppContext {
         icon: "insert",
         children: [
           { id: "image", label: "Image", icon: "image", run: () => void insertImage(this).then((f) => f && this.setTool(new ImageOp(this, f))) },
-          { id: "file", label: "File", icon: "file", sub: "STEP, STL, OBJ, DXF, SVG", run: () => void insertFile(this) },
+          { id: "file", label: "File", icon: "file", sub: "STEP, STL, OBJ, 3MF, DXF, SVG", run: () => void insertFile(this) },
           { id: "project", label: "Project", icon: "file", sub: ".super", run: () => void insertFile(this) },
         ],
       },
@@ -1333,6 +1334,13 @@ export class App implements AppContext {
     item("m-stl", () => void this.export("stl"));
     item("m-step", () => void this.export("step"));
     item("m-3mf", () => void this.export3mf());
+    item("m-glb", () => void this.exportGLB());
+    item("m-each", () => {
+      // Which format each body is saved in: a menu where the File menu was.
+      const r = document.getElementById("file-btn")!.getBoundingClientRect();
+      const row = (f: "stl" | "step" | "3mf" | "glb", label: string) => ({ label, run: () => void this.exportEach(f) });
+      this.ui.menu(r.left, r.bottom + 4, [row("stl", "Each body as STL"), row("step", "Each body as STEP"), row("3mf", "Each body as 3MF"), row("glb", "Each body as GLB")]);
+    });
     item("m-dxf", () => this.exportDXF());
     // A share button at the right of each export (and Save): straight to the share sheet.
     // Only for the file types this browser will really share (Chrome on Android,
@@ -1343,6 +1351,7 @@ export class App implements AppContext {
         ["m-stl", "stl", () => void this.export("stl", "share")],
         ["m-step", "step", () => void this.export("step", "share")],
         ["m-3mf", "3mf", () => void this.export3mf("share")],
+        ["m-glb", "glb", () => void this.exportGLB("share")],
         ["m-dxf", "dxf", () => this.exportDXF("share")],
       ];
       // Android's share sheet turns these files away or mangles them: downloads only there.
@@ -1654,6 +1663,70 @@ export class App implements AppContext {
     this.ui.toast(`Exported “${sk.name}” as DXF`);
   }
 
+  /** The bodies to export (chosen, else shown) with their fine meshes - for GLB. */
+  private async fineMeshes(ids: string[]): Promise<{ name: string; positions: Float32Array; indices: Uint32Array; color?: string; opacity?: number }[]> {
+    const fine = JSON.parse(await (await this.kernel.export(this.store.doc.features, "mesh", ids)).text()) as { id: string; positions: number[]; indices: number[] }[];
+    const names = this.store.doc.names ?? {};
+    return ids.flatMap((id) => {
+      const b = this.result?.bodies.find((x) => x.id === id);
+      const m = fine.find((x) => x.id === id);
+      if (!b) return [];
+      return [{ name: names[id] ?? b.name, positions: m ? new Float32Array(m.positions) : b.positions, indices: m ? new Uint32Array(m.indices) : b.indices, color: this.store.doc.colors?.[id], opacity: this.store.doc.opacity?.[id] }];
+    });
+  }
+
+  /** GLB (one-file glTF): for the web, AR and renderers - the bodies' meshes and colours. */
+  private async exportGLB(how: Delivery = "download"): Promise<void> {
+    const ids = chosenBodies(this);
+    const bodies = (this.result?.bodies ?? []).filter((b) => (ids.length ? ids.includes(b.id) : !this.view.isHidden(b.id)));
+    if (!bodies.length) return this.ui.toast("Nothing to export");
+    try {
+      this.ui.setStatus("Exporting GLB…");
+      const out = glb(await this.fineMeshes(bodies.map((b) => b.id)), this.store.doc.name);
+      await this.deliver(new Blob([out as BlobPart], { type: "model/gltf-binary" }), `${this.store.doc.name}.glb`, how);
+    } catch (err) {
+      this.ui.toast(`Export failed: ${(err as Error).message}`, "error");
+    } finally {
+      this.ui.setStatus(null);
+    }
+  }
+
+  /** Each body in a file of its own (named after it), together in a ZIP. */
+  private async exportEach(format: "stl" | "step" | "3mf" | "glb"): Promise<void> {
+    const ids = chosenBodies(this);
+    const bodies = (this.result?.bodies ?? []).filter((b) => (ids.length ? ids.includes(b.id) : !this.view.isHidden(b.id)));
+    if (!bodies.length) return this.ui.toast("Nothing to export");
+    const names = this.store.doc.names ?? {};
+    const used = new Set<string>();
+    const fileName = (id: string, fallback: string) => {
+      const base = (names[id] ?? fallback).replace(/[\\/:*?"<>|]+/g, "-").trim() || "Body";
+      let n = base;
+      for (let k = 2; used.has(n.toLowerCase()); k++) n = `${base} ${k}`;
+      used.add(n.toLowerCase());
+      return `${n}.${format}`;
+    };
+    try {
+      const files: { name: string; data: Uint8Array }[] = [];
+      for (const [i, b] of bodies.entries()) {
+        this.ui.setStatus(`Exporting body ${i + 1} of ${bodies.length}…`);
+        let blob: Blob;
+        if (format === "glb") blob = new Blob([glb(await this.fineMeshes([b.id]), names[b.id] ?? b.name) as BlobPart]);
+        else if (format === "3mf") {
+          const [m] = await this.fineMeshes([b.id]);
+          blob = await exportThreeMF([m], m.name, await this.kernel.export(this.store.doc.features, "step", [b.id]));
+        } else blob = await this.kernel.export(this.store.doc.features, format, [b.id]);
+        files.push({ name: fileName(b.id, b.name), data: new Uint8Array(await blob.arrayBuffer()) });
+      }
+      const out = await zip(files);
+      await this.deliver(new Blob([out], { type: "application/zip" }), `${this.store.doc.name} - ${bodies.length} ${bodies.length === 1 ? "body" : "bodies"}.zip`, "download");
+      this.ui.toast(`${bodies.length} ${bodies.length === 1 ? "body" : "bodies"}, each its own ${format.toUpperCase()} file, in a ZIP`);
+    } catch (err) {
+      this.ui.toast(`Export failed: ${(err as Error).message}`, "error");
+    } finally {
+      this.ui.setStatus(null);
+    }
+  }
+
   /** 3MF for slicers: the meshes, with the exact STEP model packed inside. */
   private async export3mf(how: Delivery = "download"): Promise<void> {
     const ids = chosenBodies(this);
@@ -1710,6 +1783,7 @@ const MIME: Record<string, string> = {
   stl: "model/stl",
   step: "model/step",
   "3mf": "model/3mf",
+  glb: "model/gltf-binary",
   dxf: "image/vnd.dxf",
   super: "application/json",
 };
