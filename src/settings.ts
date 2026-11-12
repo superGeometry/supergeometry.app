@@ -23,6 +23,12 @@ export interface Settings {
   animateCamera: boolean;
   ortho: boolean;
   shader: "shaded" | "wireframe" | "xray";
+  /** Surface analysis on the bodies (Display modes): zebra stripes or a curvature map. */
+  analysis: "none" | "zebra" | "curvature";
+  zebraStripes: number;
+  zebraDirection: "vertical" | "horizontal";
+  /** Curvature map: a curve this tight (radius, mm) shows fully red (domed) or blue (hollow). */
+  curvatureRadius: number;
   showEdges: boolean;
   showHiddenEdges: boolean;
   showPinned: boolean;
@@ -55,6 +61,10 @@ const DEFAULTS: Settings = {
   animateCamera: true,
   ortho: true,
   shader: "shaded",
+  analysis: "none",
+  zebraStripes: 16,
+  zebraDirection: "vertical",
+  curvatureRadius: 10,
   showEdges: true,
   showHiddenEdges: false,
   showPinned: true,

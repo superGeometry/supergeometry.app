@@ -112,7 +112,25 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
     }
     host.append(heading("Options"));
     host.append(toggleRow("Show edges", s.showEdges, (v) => settings.set("showEdges", v)), toggleRow("Show hidden edges", s.showHiddenEdges, (v) => settings.set("showHiddenEdges", v)));
-  }, () => ({ shaded: "Shaded", wireframe: "Wire", xray: "X-Ray" })[settings.value.shader]);
+    // Surface analysis: how smoothly faces meet (zebra), how much they bend (curvature).
+    host.append(heading("Analysis"));
+    for (const [id, label] of [["none", "Off"], ["zebra", "Zebra stripes"], ["curvature", "Curvature map"]] as const) {
+      host.append(choiceRow(label, s.analysis === id, () => (settings.set("analysis", id), ui.refreshPopover())));
+    }
+    if (s.analysis === "zebra") {
+      host.append(
+        toggleRow("Horizontal stripes", s.zebraDirection === "horizontal", (v) => settings.set("zebraDirection", v ? "horizontal" : "vertical")),
+        sliderRow("Stripes", 4, 48, 1, s.zebraStripes, (v) => settings.set("zebraStripes", v), (v) => String(v)),
+      );
+    }
+    if (s.analysis === "curvature") {
+      // On a log scale: a 0.5 mm fillet and a 5 m roof both get a useful setting.
+      host.append(
+        sliderRow("Full colour at radius", Math.log10(0.5), Math.log10(5000), 0.01, Math.log10(s.curvatureRadius), (v) => settings.set("curvatureRadius", +(10 ** v).toPrecision(2)), (v) => fmtLen(10 ** v)),
+        el("div", "pop-note", "Red: domed. Green: flat. Blue: hollow."),
+      );
+    }
+  }, () => (settings.value.analysis === "zebra" ? "Zebra" : settings.value.analysis === "curvature" ? "Curv." : ({ shaded: "Shaded", wireframe: "Wire", xray: "X-Ray" })[settings.value.shader]));
 
   ui.addRight("shot", "camera", "Screenshot", () => {
     void view.screenshot({ project: store.doc.name, isolated: isolatedNames() }).then((blob) => {
@@ -157,6 +175,29 @@ function toggleRow(label: string, value: boolean, onChange: (v: boolean) => void
     onChange(next);
   });
   return row;
+}
+
+/** A slider with its value beside it (set while dragging). */
+function sliderRow(label: string, min: number, max: number, step: number, value: number, onChange: (v: number) => void, show: (v: number) => string): HTMLElement {
+  const row = el("label", "pop-row slider-row");
+  const out = el("span", "slider-value", show(value));
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(value);
+  input.addEventListener("input", () => {
+    out.textContent = show(Number(input.value));
+    onChange(Number(input.value));
+  });
+  row.append(el("span", "slider-label", label), input, out);
+  return row;
+}
+
+function fmtLen(mm: number): string {
+  const v = +mm.toPrecision(2);
+  return v >= 1000 ? `${v / 1000} m` : `${v} mm`;
 }
 
 function choiceRow(label: string, active: boolean, run: () => void): HTMLElement {

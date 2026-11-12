@@ -5429,3 +5429,22 @@ html[data-screen="phone"] .bim-props {
   font-size: 13.5px;
   cursor: pointer;
 }
+
+/* Sliders in the right column's pop-ups (zebra stripes, curvature scale) */
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  align-items: center;
+  cursor: default;
+}
+.slider-row input[type="range"] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  width: 100%;
+  accent-color: var(--accent);
+}
+.slider-value {
+  color: var(--muted);
+  font-size: 12px;
+}

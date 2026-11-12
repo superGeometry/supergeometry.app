@@ -59,6 +59,7 @@ import { entityPolylines } from "../sketch/curves";
 import { arrangement } from "../sketch/regions";
 import { CameraController, type Insets } from "./camera";
 import { AdaptiveGrid } from "./grid";
+import { analysisMaterial, curvatureOf } from "./analysis";
 
 export type PickHit =
   | { kind: "face"; body: string; face: number; point: Vec3 }
@@ -279,6 +280,10 @@ export class Viewport {
     this.light.target.position.copy(this.cam.target);
     this.grid.update(this.cam.worldPerPixel(this.height), this.cam.target, this.cam.distance, this.cam.camera.position);
     this.layoutOriginPlanes();
+    if (this.anaMat && settings.value.analysis !== "none") {
+      this.anaMat.uniforms.uOrtho.value = this.cam.ortho;
+      this.anaMat.uniforms.uViewDir.value.copy(this.cam.viewDir());
+    }
     this.frameHooks.forEach((f) => f());
     this.renderer.render(this.scene, cam);
   }
@@ -303,7 +308,32 @@ export class Viewport {
       m.side = see ? DoubleSide : FrontSide;
       m.needsUpdate = true;
     }
+    this.applyAnalysis();
     this.applyHidden();
+  }
+
+  /** Zebra stripes / curvature map (Display modes): every body wears it while on. */
+  private anaMat: ReturnType<typeof analysisMaterial> | null = null;
+
+  private applyAnalysis(): void {
+    const s = settings.value;
+    if (s.analysis === "none") {
+      for (const [id, b] of this.bodies) if (b.mesh.material === this.anaMat) b.mesh.material = this.matsFor(id).body;
+      return;
+    }
+    const m = (this.anaMat ??= analysisMaterial());
+    m.uniforms.uKind.value = s.analysis === "zebra" ? 0 : 1;
+    m.uniforms.uStripes.value = s.zebraStripes;
+    m.uniforms.uHorizontal.value = s.zebraDirection === "horizontal" ? 1 : 0;
+    m.uniforms.uScale.value = 1 / Math.max(s.curvatureRadius, 1e-3);
+    m.clippingPlanes = this.clip ? [this.clip] : [];
+    m.needsUpdate = true;
+    for (const b of this.bodies.values()) {
+      const g = b.mesh.geometry;
+      if (!g.getAttribute("curv")) g.setAttribute("curv", new BufferAttribute(curvatureOf(b.data.positions, b.data.normals, b.data.indices), 1));
+      b.mesh.material = m;
+    }
+    this.dirty = true;
   }
 
   // ---------------------------------------------------------------- bodies
