@@ -53,6 +53,7 @@ import type {
   SketchFeature,
   Vec3,
 } from "../doc/types";
+import { fillEdgeKey } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, toWorld, xDirFor } from "../geom";
 import { outlineOffsetCurves, projectPolyline } from "../sketch/edit";
 import { solveFine } from "../sketch/constraints";
@@ -67,6 +68,7 @@ import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossi
 import { useSafeBooleans } from "./safeBooleans";
 import { measureArea as trueArea, measureVolume, normalOnEdge, surfaceAt, volumeProperties } from "./ocFree";
 import { loftInLine } from "./loftAlign";
+import { railLoft } from "./loftRails";
 import { edgeOrigins, edgeSteps, faceAliases, faceOrigins, faceSteps, inheritTags, oldEdgeSteps, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
 import { closestOnEntity } from "../sketch/regions";
 
@@ -1199,7 +1201,12 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         wires = withEndPulls(wires, nrm, f.startContinuity, f.startWeight ?? 1, f.endContinuity, f.endWeight ?? 1);
       }
       let shape: Shape3D;
-      if (f.guide || f.closed) {
+      if (f.rails?.length || f.connections?.length) {
+        if (f.guide || f.closed) throw new Error("Guide curves and connections can't be used with a centre line or a closed loop");
+        const rails = (f.rails ?? []).map((r) => pathWire(r, ctx));
+        const conns = (f.connections ?? []).map((c) => order.map((i) => c[i]));
+        shape = railLoft(wires, rails, conns);
+      } else if (f.guide || f.closed) {
         if (f.closed && wires.length < 3 && !f.guide) throw new Error("A closed loop needs at least three profiles");
         shape = loftAlong(wires, f.guide ? pathWire(f.guide, ctx) : null, !!f.closed);
       } else
@@ -2227,7 +2234,10 @@ function helicalSweep(wire: Wire, origin: Vec3, dir: Vec3, angle: number, travel
 function fillNetwork(f: Extract<Feature, { type: "fill" }>, ctx: Ctx): Shape3D {
   if (!f.boundary.length) throw new Error("Pick the curves or edges round the surface");
   const oc = getOC();
-  const order = f.continuity === "g2" ? oc.GeomAbs_Shape.GeomAbs_G2 : f.continuity === "g1" ? oc.GeomAbs_Shape.GeomAbs_G1 : oc.GeomAbs_Shape.GeomAbs_C0;
+  const orderOf = (c?: string) => (c === "g2" ? oc.GeomAbs_Shape.GeomAbs_G2 : c === "g1" ? oc.GeomAbs_Shape.GeomAbs_G1 : oc.GeomAbs_Shape.GeomAbs_C0);
+  // Each body edge: its own continuity, else the one for all.
+  const cont = (r?: EdgeRef) => (r && f.edgeContinuity?.[fillEdgeKey(r)]) ?? f.continuity;
+  let g2 = f.continuity === "g2";
   const edgesOf = (p: PathRef): Edge[] => {
     if (p.kind === "edges") return p.edges.map((r) => resolveEdge(need(ctx.bodies, r.body), r));
     return pathWire(p, ctx).edges;
@@ -2236,13 +2246,15 @@ function fillNetwork(f: Extract<Feature, { type: "fill" }>, ctx: Ctx): Shape3D {
   try {
     let n = 0;
     for (const p of f.boundary)
-      for (const e of edgesOf(p)) {
+      edgesOf(p).forEach((e, k) => {
         // A body's edge, held to the face beside it (the first one of that body that has it).
-        const beside = p.kind === "edges" && f.continuity && f.continuity !== "g0" ? need(ctx.bodies, p.edges[0].body).faces.find((fc) => fc.edges.some((x) => x.isSame(e))) : undefined;
-        if (beside) fill.Add(e.wrapped, beside.wrapped, order, true);
+        const c = p.kind === "edges" ? cont(p.edges[k]) : undefined;
+        if (c === "g2") g2 = true;
+        const beside = p.kind === "edges" && c && c !== "g0" ? need(ctx.bodies, p.edges[0].body).faces.find((fc) => fc.edges.some((x) => x.isSame(e))) : undefined;
+        if (beside) fill.Add(e.wrapped, beside.wrapped, orderOf(c), true);
         else fill.Add(e.wrapped, oc.GeomAbs_Shape.GeomAbs_C0, true);
         n++;
-      }
+      });
     const only = n === 1 ? edgesOf(f.boundary[0])[0] : null;
     if (n === 0 || (only && dist(only.startPoint.toTuple() as Vec3, only.endPoint.toTuple() as Vec3) > 1e-6)) throw new Error("The boundary needs curves that close a loop");
     for (const p of f.guides ?? []) for (const e of edgesOf(p)) fill.Add(e.wrapped, oc.GeomAbs_Shape.GeomAbs_C0, false);
@@ -2259,7 +2271,7 @@ function fillNetwork(f: Extract<Feature, { type: "fill" }>, ctx: Ctx): Shape3D {
     return cast(shell) as Shape3D;
   } catch (err) {
     if (err instanceof Error && /boundary needs/.test(err.message)) throw err;
-    if (f.continuity === "g2") throw new Error("Curvature (G2) couldn't be held along these edges - Tangent (G1) can be tried");
+    if (g2) throw new Error("Curvature (G2) couldn't be held along these edges - Tangent (G1) can be tried");
     throw new Error("These curves don't make a surface - the boundary must close a loop (end to end), and guides lie across it");
   } finally {
     fill.delete();

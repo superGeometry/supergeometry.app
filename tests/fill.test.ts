@@ -1,7 +1,7 @@
 // Fill: a surface over a network of curves - a boundary loop and guides.
 // Run: npx tsx tests/fill.test.ts
 import { measureArea } from "replicad";
-import type { Feature, Vec3 } from "../src/doc/types";
+import { fillEdgeKey, type Feature, type Vec3 } from "../src/doc/types";
 import { after, check, done, line, near, sketch, XY, XZ } from "./kit";
 
 const area = (s: { faces: unknown[] } | undefined) => (s ? (s.faces as Parameters<typeof measureArea>[0][]).reduce((a, f) => a + measureArea(f), 0) : 0);
@@ -48,6 +48,9 @@ const fill = (extra: Record<string, unknown> = {}): Feature => ({ id: "F", name:
   check("tangent to both (G1): an S, a little bigger", !g1.err && area(g1.body) > area(g0.body) + 0.5, { err: g1.err, a: area(g1.body) });
   const g2 = await after([...base, sides, far, bridge("g2")], "W");
   // (OpenCascade's filling can't hold curvature along flat faces: it says so, rather than a G1 passed off as G2.)
+  // Tangent to one patch only (its edge set on its own): between the two.
+  const half = await after([...base, sides, far, { ...bridge(), edgeContinuity: Object.fromEntries(left.map((r) => [fillEdgeKey(r), "g1"])) } as Feature], "W");
+  check("one edge tangent, the other touching: in between", !half.err && area(half.body) > area(g0.body) + 0.1 && area(half.body) < area(g1.body) - 0.1, { err: half.err, a: [area(g0.body), area(half.body), area(g1.body)] });
   check("G2 builds, or says to try G1", (!g2.err && area(g2.body) > area(g0.body) + 0.5) || /G1/.test(g2.err ?? ""), { err: g2.err, a: area(g2.body) });
 }
 

@@ -295,6 +295,10 @@ export interface LoftFeature extends FeatureBase {
   closed?: boolean;
   /** A curve the body follows from profile to profile (its centre line). */
   guide?: PathRef;
+  /** Guide curves along its sides: each runs through every profile, and the sides follow them. */
+  rails?: PathRef[];
+  /** Connection points: which point of each profile joins which (one point per profile, in `sections` order). */
+  connections?: Vec3[][];
   /** How the body leaves the first profile and meets the last: straight out of it (G1, tangent) or smoother still (G2); missing: free. */
   startContinuity?: "g1" | "g2";
   endContinuity?: "g1" | "g2";
@@ -556,7 +560,12 @@ export interface FillFeature extends FeatureBase {
   guides?: PathRef[];
   /** Along body edges: just touching (G0), tangent to the face there (G1) or curving on with it (G2). Sketch curves are always G0. */
   continuity?: "g0" | "g1" | "g2";
+  /** One edge's own continuity, by fillEdgeKey (missing: `continuity`). */
+  edgeContinuity?: Record<string, "g0" | "g1" | "g2">;
 }
+
+/** Which boundary edge of a Fill an edge continuity is for. */
+export const fillEdgeKey = (r: EdgeRef): string => `${r.body}@${r.mid.map((x) => x.toFixed(3)).join(",")}`;
 
 export type Feature =
   | FillFeature

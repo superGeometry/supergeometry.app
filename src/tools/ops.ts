@@ -2,6 +2,7 @@
 // pick slots + values + live preview; see featureOp.ts.
 
 import type { ThreadFeature } from "../doc/types";
+import { fillEdgeKey } from "../doc/types";
 import { defaultPitch, threadLabel } from "../kernel/threads";
 import type { AxisFeature, AxisRef, ConnectFeature, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillFeature, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
 import { FRONT, GROUND, RIGHT, add, cross, dot, len, norm, niceStep, patternSpacing, roundSig, scale, sub, xDirFor } from "../geom";
@@ -10,8 +11,8 @@ import { evaluate, fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
 import { FeatureOp, type Slot } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
-import { axisSlot, curvesSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
-import { faceIndexOf, faceRefOf, goneRefs, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
+import { axisSlot, chainThrough, curvesSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
+import { edgeRefOf, faceIndexOf, faceRefOf, goneRefs, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
 import { SketchTool } from "./sketch";
 import { screenClass } from "../device";
 import { faceBeforeShell } from "./shellFace";
@@ -956,10 +957,89 @@ export class SweepOp extends FeatureOp<SweepFeature> {
 export class LoftOp extends FeatureOp<LoftFeature> {
   readonly id = "loft";
 
+  /** Which optional slots are open: the centre-line guide, guide curves along the sides, connections. */
+  private extra: { guide: boolean; rails: boolean; conns: boolean };
+  /** A connection being picked: its points so far, one per profile. */
+  private pending: Vec3[] = [];
+
   constructor(app: AppContext, sections: ExtrudeSource[], initial: Sel[], existing?: LoftFeature) {
     super(app, { ...app.store.newIdentity("loft"), type: "loft", sections, ruled: false, mode: "new" }, existing);
-    this.slots = [sectionsSlot(app, () => this.feature.sections, (s) => (this.feature.sections = s), initial)];
-    if (existing?.guide) this.slots.push(this.guideSlot());
+    this.extra = { guide: !!existing?.guide, rails: !!existing?.rails?.length, conns: !!existing?.connections?.length };
+    this.slots = this.makeSlots(initial);
+  }
+
+  private makeSlots(initial: Sel[] = []): Slot[] {
+    const first = this.slots[0] ?? sectionsSlot(this.app, () => this.feature.sections, (s) => (this.feature.sections = s), initial);
+    return [first, ...(this.extra.guide ? [this.guideSlot()] : []), ...(this.extra.rails ? [this.railsSlot()] : []), ...(this.extra.conns ? [this.connSlot()] : [])];
+  }
+
+  /** Guide curves along the sides: each a curve tapped (with the curves joined to it end to end), or an edge. */
+  private railsSlot(): Slot {
+    const f = this.feature;
+    const app = this.app;
+    const rails = () => f.rails ?? [];
+    const set = (r: PathRef[]) => ((f.rails = r.length ? r : undefined), (f.ruled = false));
+    return {
+      label: "Guide curves",
+      multi: true,
+      describe: () => (rails().length ? `${rails().length} guide${rails().length > 1 ? "s" : ""}` : "Tap curves that run through every profile"),
+      filled: () => true,
+      pick: { profiles: false, curves: true, planes: false, axes: false },
+      shows: () => rails().flatMap((p) => (p.kind === "sketch" ? p.entities.map((entity) => ({ kind: "curve", sketch: p.sketch, entity }) as Sel) : [])),
+      get presets() {
+        return rails().length ? [{ label: "Clear", apply: () => set([]) }] : [];
+      },
+      accept: (hit) => {
+        if (hit.kind === "curve") {
+          // Tapped again: that guide goes.
+          const i = rails().findIndex((p) => p.kind === "sketch" && p.sketch === hit.sketch && p.entities.includes(hit.entity));
+          if (i >= 0) return set(rails().filter((_, k) => k !== i)), true;
+          const sk = app.store.find<SketchFeature>(hit.sketch);
+          const chain = sk?.type === "sketch" ? chainThrough(sk.entities, hit.entity) : [hit.entity];
+          set([...rails(), { kind: "sketch", sketch: hit.sketch, entities: chain.length ? chain : [hit.entity] }]);
+          return true;
+        }
+        if (hit.kind === "edge") {
+          const ref = edgeRefOf(app, hit);
+          if (!ref) return false;
+          const same = (p: PathRef) => p.kind === "edges" && JSON.stringify(p.edges[0]) === JSON.stringify(ref);
+          set(rails().some(same) ? rails().filter((p) => !same(p)) : [...rails(), { kind: "edges", edges: [ref] }]);
+          return true;
+        }
+        return false;
+      },
+    };
+  }
+
+  /** Connections: a point on each profile in turn (the loft joins them). */
+  private connSlot(): Slot {
+    const f = this.feature;
+    const n = () => f.sections.length;
+    const base = pointSlot(this.app, "Connections", () => null, (p) => {
+      this.pending.push(p);
+      if (this.pending.length >= n()) {
+        f.connections = [...(f.connections ?? []), this.pending];
+        this.pending = [];
+        f.ruled = false;
+      }
+    });
+    const done = () => f.connections?.length ?? 0;
+    const pending = () => this.pending;
+    const pendingClear = () => (this.pending = []);
+    return {
+      ...base,
+      multi: true,
+      describe: () =>
+        this.pending.length
+          ? `Now a point on profile ${this.pending.length + 1} of ${n()}`
+          : done()
+            ? `${done()} connection${done() > 1 ? "s" : ""} - tap a point on profile 1 for another`
+            : `Tap a point on profile 1 (a corner snaps), then one on each next profile`,
+      filled: () => true,
+      get presets() {
+        return done() || pending().length ? [{ label: "Clear", apply: () => ((f.connections = undefined), (pendingClear())) }] : [];
+      },
+    };
   }
 
   private continuityItems(): PanelItem[] {
@@ -991,39 +1071,46 @@ export class LoftOp extends FeatureOp<LoftFeature> {
 
   /** The optional guide: a curve the body follows from profile to profile. */
   private guideSlot() {
-    return { ...pathSlot(this.app, () => this.feature.guide ?? null, (p) => (this.feature.guide = p)), label: "Guide" };
+    return { ...pathSlot(this.app, () => this.feature.guide ?? null, (p) => (this.feature.guide = p)), label: "Centre line" };
   }
 
   protected hint(): string {
+    if (this.extra.conns) return "Connections: tap a point on each profile in turn - the loft joins them (a corner of a square to a point on a circle).";
+    if (this.extra.rails) return "Guide curves: each runs through every profile, and the sides follow it. Tap one again to take it off.";
     if (this.feature.guide) return "The body follows the guide through each shape. Tap more curves to make the guide longer.";
     return "Tap the shapes in order: the body passes through each one.";
   }
 
+  /** An optional slot switched on (and the others it can't go with off) or off. */
+  private toggleExtra(k: "guide" | "rails" | "conns"): void {
+    const f = this.feature;
+    const on = !this.extra[k];
+    this.extra[k] = on;
+    if (on && k === "guide") (this.extra.rails = this.extra.conns = false), (f.rails = f.connections = undefined), (f.closed = undefined);
+    if (on && k !== "guide") (this.extra.guide = false), (f.guide = undefined), (f.closed = undefined);
+    if (!on) {
+      if (k === "guide") f.guide = undefined;
+      if (k === "rails") f.rails = undefined;
+      if (k === "conns") (f.connections = undefined), (this.pending = []);
+    }
+    this.slots = this.makeSlots();
+    this.active = on ? this.slots.length - 1 : -1;
+    this.render();
+    this.update();
+  }
+
   protected items(): PanelItem[] {
     const f = this.feature;
-    const guided = this.slots.length > 1;
+    const guided = this.extra.guide;
+    const held = this.extra.rails || this.extra.conns;
     return [
-      ...(f.closed || guided ? [] : [{ type: "toggle" as const, label: "Straight sides", value: f.ruled, onChange: (v: boolean) => ((f.ruled = v), this.render(), this.update()) }]),
-      { type: "toggle", label: "Closed loop", value: !!f.closed, onChange: (v) => ((f.closed = v || undefined), this.render(), this.update()) },
+      ...(f.closed || guided || held ? [] : [{ type: "toggle" as const, label: "Straight sides", value: f.ruled, onChange: (v: boolean) => ((f.ruled = v), this.render(), this.update()) }]),
+      ...(held ? [] : [{ type: "toggle" as const, label: "Closed loop", value: !!f.closed, onChange: (v: boolean) => ((f.closed = v || undefined), this.render(), this.update()) }]),
       // How it leaves the first shape and meets the last (free, tangent, or smoother still).
-      ...(f.closed || guided || f.ruled ? [] : this.continuityItems()),
-      {
-        type: "button",
-        label: guided ? "Remove guide" : "Add guide",
-        icon: guided ? "close" : "sweep",
-        onClick: () => {
-          if (guided) {
-            this.slots.length = 1;
-            f.guide = undefined;
-            this.active = -1;
-          } else {
-            this.slots.push(this.guideSlot());
-            this.active = 1;
-          }
-          this.render();
-          this.update();
-        },
-      },
+      ...(f.closed || guided || held || f.ruled ? [] : this.continuityItems()),
+      { type: "button", label: guided ? "Remove centre line" : "Centre line", icon: guided ? "close" : "sweep", onClick: () => this.toggleExtra("guide") },
+      { type: "button", label: this.extra.rails ? "Remove guide curves" : "Guide curves", icon: this.extra.rails ? "close" : "sweep", onClick: () => this.toggleExtra("rails") },
+      { type: "button", label: this.extra.conns ? "Remove connections" : "Connections", icon: this.extra.conns ? "close" : "sweep", onClick: () => this.toggleExtra("conns") },
       modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render()),
     ];
   }
@@ -2514,22 +2601,40 @@ export class FillOp extends FeatureOp<FillFeature> {
 
   protected items(): PanelItem[] {
     const f = this.feature;
-    const onEdges = f.boundary.some((p) => p.kind === "edges");
-    return onEdges
-      ? [
-          {
-            type: "choice",
-            label: "At body edges",
-            options: [
-              { id: "g0", label: "Touch (G0)" },
-              { id: "g1", label: "Tangent (G1)" },
-              { id: "g2", label: "Curvature (G2)" },
-            ],
-            value: f.continuity ?? "g0",
-            onChange: (v) => ((f.continuity = v === "g0" ? undefined : (v as "g1" | "g2")), this.update()),
+    const edges = f.boundary.flatMap((p) => (p.kind === "edges" ? p.edges : []));
+    const opts = [
+      { id: "g0", label: "Touch (G0)" },
+      { id: "g1", label: "Tangent (G1)" },
+      { id: "g2", label: "Curvature (G2)" },
+    ];
+    if (!edges.length) return [];
+    const all: PanelItem = {
+      type: "choice",
+      label: edges.length > 1 ? "At body edges (all)" : "At body edges",
+      options: opts,
+      value: f.continuity ?? "g0",
+      // (Setting all of them clears the ones set edge by edge.)
+      onChange: (v) => ((f.continuity = v === "g0" ? undefined : (v as "g1" | "g2")), (f.edgeContinuity = undefined), this.render(), this.update()),
+    };
+    if (edges.length < 2) return [all];
+    const names = this.app.store.doc.names ?? {};
+    // Each edge its own (an edge tapped in the list lights up on the model).
+    return [
+      all,
+      ...edges.map(
+        (r, i): PanelItem => ({
+          type: "choice",
+          label: `Edge ${i + 1}${names[r.body] ? ` (${names[r.body]})` : ""}`,
+          options: opts,
+          value: f.edgeContinuity?.[fillEdgeKey(r)] ?? f.continuity ?? "g0",
+          onChange: (v) => {
+            const next = { ...(f.edgeContinuity ?? {}), [fillEdgeKey(r)]: v as "g0" | "g1" | "g2" };
+            f.edgeContinuity = next;
+            this.update();
           },
-        ]
-      : [];
+        }),
+      ),
+    ];
   }
 }
 
