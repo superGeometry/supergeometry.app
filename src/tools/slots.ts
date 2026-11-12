@@ -213,6 +213,50 @@ export function pathSlot(app: AppContext, get: () => PathRef | null, set: (p: Pa
   };
 }
 
+/**
+ * Curves from any sketches and edges of any bodies, as a list of paths (one
+ * per sketch, one for the edges): Fill's boundary and guides. Tapping one
+ * again leaves it out.
+ */
+export function curvesSlot(app: AppContext, label: string, get: () => PathRef[], set: (p: PathRef[]) => void, optional = false): Slot {
+  const count = () => get().reduce((n, p) => n + (p.kind === "sketch" ? p.entities.length : p.edges.length), 0);
+  return {
+    label,
+    multi: true,
+    describe: () => (count() ? `${count()} curve${count() > 1 ? "s" : ""}` : optional ? "None" : "Tap curves or edges"),
+    filled: () => optional || count() > 0,
+    pick: { profiles: false, curves: true, planes: false, axes: false },
+    shows: () => get().flatMap((p) => (p.kind === "sketch" ? p.entities.map((entity) => ({ kind: "curve", sketch: p.sketch, entity }) as Sel) : [])),
+    get presets() {
+      return count() ? [{ label: "Clear", apply: () => set([]) }] : [];
+    },
+    accept(hit) {
+      const paths = get();
+      if (hit.kind === "curve") {
+        const i = paths.findIndex((p) => p.kind === "sketch" && p.sketch === hit.sketch);
+        if (i < 0) return set([...paths, { kind: "sketch", sketch: hit.sketch, entities: [hit.entity] }]), true;
+        const p = paths[i] as Extract<PathRef, { kind: "sketch" }>;
+        const entities = p.entities.includes(hit.entity) ? p.entities.filter((e) => e !== hit.entity) : [...p.entities, hit.entity];
+        set(entities.length ? paths.map((x, k) => (k === i ? { ...p, entities } : x)) : paths.filter((_, k) => k !== i));
+        return true;
+      }
+      if (hit.kind === "edge") {
+        const ref = edgeRefOf(app, hit);
+        if (!ref) return false;
+        // One path per body (its face is found from its own body).
+        const i = paths.findIndex((p) => p.kind === "edges" && p.edges[0]?.body === ref.body);
+        if (i < 0) return set([...paths, { kind: "edges", edges: [ref] }]), true;
+        const p = paths[i] as Extract<PathRef, { kind: "edges" }>;
+        const same = (e: EdgeRef) => JSON.stringify(e) === JSON.stringify(ref);
+        const edges = p.edges.some(same) ? p.edges.filter((e) => !same(e)) : [...p.edges, ref];
+        set(edges.length ? paths.map((x, k) => (k === i ? { ...p, edges } : x)) : paths.filter((_, k) => k !== i));
+        return true;
+      }
+      return false;
+    },
+  };
+}
+
 /** Faces of one body (e.g. faces to open in Shell). */
 export function facesSlot(app: AppContext, label: string, get: () => FaceRef[], set: (f: FaceRef[]) => void, optional = false): Slot {
   const picked: Sel[] = [];

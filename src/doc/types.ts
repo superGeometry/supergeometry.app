@@ -536,7 +536,21 @@ export interface WrapFeature extends FeatureBase {
   height: number;
 }
 
+/**
+ * Fill: a surface stretched over a network of curves - the boundary (sketch
+ * curves and body edges that close a loop) and guide curves inside it that
+ * it passes through.
+ */
+export interface FillFeature extends FeatureBase {
+  type: "fill";
+  boundary: PathRef[];
+  guides?: PathRef[];
+  /** Along body edges: just touching (G0), tangent to the face there (G1) or curving on with it (G2). Sketch curves are always G0. */
+  continuity?: "g0" | "g1" | "g2";
+}
+
 export type Feature =
+  | FillFeature
   | ImprintFeature
   | WrapFeature
   | ConnectFeature

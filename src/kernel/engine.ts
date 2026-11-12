@@ -1643,6 +1643,11 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       return;
     }
 
+    case "fill": {
+      bodies.set(f.id, fillNetwork(f, ctx));
+      return;
+    }
+
     case "fillToPlane": {
       const sheet = need(bodies, f.body);
       bodies.set(f.body, fillToPlane(sheet, f.plane));
@@ -2198,6 +2203,54 @@ function helicalSweep(wire: Wire, origin: Vec3, dir: Vec3, angle: number, travel
   } finally {
     builder.delete();
     bi.delete();
+  }
+}
+
+/**
+ * Fill: a surface over a network of curves (BRepOffsetAPI_MakeFilling). The
+ * boundary's edges bound it; along a body's edge it can meet that body's face
+ * tangentially (G1) or with matching curvature (G2). Guides are curves it
+ * passes through. The surface is an open body of its own.
+ */
+function fillNetwork(f: Extract<Feature, { type: "fill" }>, ctx: Ctx): Shape3D {
+  if (!f.boundary.length) throw new Error("Pick the curves or edges round the surface");
+  const oc = getOC();
+  const order = f.continuity === "g2" ? oc.GeomAbs_Shape.GeomAbs_G2 : f.continuity === "g1" ? oc.GeomAbs_Shape.GeomAbs_G1 : oc.GeomAbs_Shape.GeomAbs_C0;
+  const edgesOf = (p: PathRef): Edge[] => {
+    if (p.kind === "edges") return p.edges.map((r) => resolveEdge(need(ctx.bodies, r.body), r));
+    return pathWire(p, ctx).edges;
+  };
+  const fill = new oc.BRepOffsetAPI_MakeFilling(3, 15, 2, false, 1e-5, 1e-4, 0.01, 0.1, 8, 9);
+  try {
+    let n = 0;
+    for (const p of f.boundary)
+      for (const e of edgesOf(p)) {
+        // A body's edge, held to the face beside it (the first one of that body that has it).
+        const beside = p.kind === "edges" && f.continuity && f.continuity !== "g0" ? need(ctx.bodies, p.edges[0].body).faces.find((fc) => fc.edges.some((x) => x.isSame(e))) : undefined;
+        if (beside) fill.Add(e.wrapped, beside.wrapped, order, true);
+        else fill.Add(e.wrapped, oc.GeomAbs_Shape.GeomAbs_C0, true);
+        n++;
+      }
+    const only = n === 1 ? edgesOf(f.boundary[0])[0] : null;
+    if (n === 0 || (only && dist(only.startPoint.toTuple() as Vec3, only.endPoint.toTuple() as Vec3) > 1e-6)) throw new Error("The boundary needs curves that close a loop");
+    for (const p of f.guides ?? []) for (const e of edgesOf(p)) fill.Add(e.wrapped, oc.GeomAbs_Shape.GeomAbs_C0, false);
+    fill.Build(new oc.Message_ProgressRange());
+    if (!fill.IsDone()) throw new Error("no fill");
+    const made = cast(fill.Shape()) as AnyShape;
+    const faces = "faces" in made ? (made as unknown as { faces: Face[] }).faces : [made as unknown as Face];
+    if (!faces.length) throw new Error("no fill");
+    const builder = new oc.TopoDS_Builder();
+    const shell = new oc.TopoDS_Shell();
+    builder.MakeShell(shell);
+    for (const fc of faces) builder.Add(shell, fc.wrapped);
+    builder.delete();
+    return cast(shell) as Shape3D;
+  } catch (err) {
+    if (err instanceof Error && /boundary needs/.test(err.message)) throw err;
+    if (f.continuity === "g2") throw new Error("Curvature (G2) couldn't be held along these edges - Tangent (G1) can be tried");
+    throw new Error("These curves don't make a surface - the boundary must close a loop (end to end), and guides lie across it");
+  } finally {
+    fill.delete();
   }
 }
 

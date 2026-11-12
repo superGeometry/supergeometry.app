@@ -3,14 +3,14 @@
 
 import type { ThreadFeature } from "../doc/types";
 import { defaultPitch, threadLabel } from "../kernel/threads";
-import type { AxisFeature, AxisRef, ConnectFeature, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
+import type { AxisFeature, AxisRef, ConnectFeature, EdgeFeature, EdgeRef, ExtrudeFeature, ExtrudeSource, FaceRef, FillFeature, FillToPlaneFeature, ImageFeature, LoftFeature, MoveFaceFeature, PathRef, PlaneDef, PlaneFeature, ReplaceFaceFeature, RevolveFeature, ScaleFaceFeature, ShellFeature, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Vec3 } from "../doc/types";
 import { FRONT, GROUND, RIGHT, add, cross, dot, len, norm, niceStep, patternSpacing, roundSig, scale, sub, xDirFor } from "../geom";
 import type { PanelItem } from "../ui/ui";
 import { evaluate, fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
 import { FeatureOp, type Slot } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
-import { axisSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
+import { axisSlot, curvesSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
 import { faceIndexOf, faceRefOf, goneRefs, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
 import { SketchTool } from "./sketch";
 import { screenClass } from "../device";
@@ -2456,6 +2456,48 @@ export class ConnectOp extends FeatureOp<ConnectFeature> {
         : [{ type: "slider" as const, label: "Bend", value: f.bulge ?? 1, min: 0.2, max: 2.5, step: 0.05, show: (v: number) => v.toFixed(2), onInput: (v: number) => ((f.bulge = v), this.update()) }]),
       { type: "slider", label: "Size", value: f.size ?? 1, min: 0.1, max: 1, step: 0.01, show: (v) => `${Math.round(v * 100)}%`, onInput: (v) => ((f.size = v), this.update()) },
     ];
+  }
+}
+
+// -------------------------------------------------------------------- fill
+
+/**
+ * Fill: a surface over a network of curves - a boundary that closes a loop
+ * (sketch curves, body edges) and, if wanted, guide curves across it.
+ */
+export class FillOp extends FeatureOp<FillFeature> {
+  readonly id = "fill";
+
+  constructor(app: AppContext, boundary: PathRef[] = [], existing?: FillFeature) {
+    super(app, { ...app.store.newIdentity("fill"), type: "fill", boundary }, existing);
+    this.slots = [
+      curvesSlot(app, "Boundary", () => this.feature.boundary, (p) => (this.feature.boundary = p)),
+      curvesSlot(app, "Guides", () => this.feature.guides ?? [], (p) => (this.feature.guides = p.length ? p : undefined), true),
+    ];
+  }
+
+  protected hint(): string {
+    return this.feature.boundary.length ? "Tap more curves or edges until they close a loop. Guides are curves inside it the surface passes through." : "Tap the curves or edges round the surface.";
+  }
+
+  protected items(): PanelItem[] {
+    const f = this.feature;
+    const onEdges = f.boundary.some((p) => p.kind === "edges");
+    return onEdges
+      ? [
+          {
+            type: "choice",
+            label: "At body edges",
+            options: [
+              { id: "g0", label: "Touch (G0)" },
+              { id: "g1", label: "Tangent (G1)" },
+              { id: "g2", label: "Curvature (G2)" },
+            ],
+            value: f.continuity ?? "g0",
+            onChange: (v) => ((f.continuity = v === "g0" ? undefined : (v as "g1" | "g2")), this.update()),
+          },
+        ]
+      : [];
   }
 }
 

@@ -8,7 +8,7 @@ import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjec
 import { showLibrary } from "./ui/library";
 import { showAbout } from "./ui/about";
 import { findAction, openCommandSearch, showShortcuts } from "./ui/commands";
-import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
+import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, FillToPlaneFeature, ImageFeature, LoftFeature, PathRef, PinDef, PlaneDef, PlaneFeature, ProjectDoc, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
 import { createVariable, insertFile, insertImage } from "./io/insert";
 import { numpadVariables } from "./ui/numpad";
@@ -27,7 +27,7 @@ import { openDrawing } from "./bim/drawing";
 import { ItemsPanel } from "./ui/items";
 import { OffsetEdgeOp } from "./tools/offsetEdge";
 import { faceFreeformTool } from "./tools/faceFreeform";
-import { AxisOp, ConnectOp, EdgeOp, ExtrudeOp, FillToPlaneOp, ThreadOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, ScaleRefOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
+import { AxisOp, ConnectOp, EdgeOp, ExtrudeOp, FillOp, FillToPlaneOp, ThreadOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, ScaleRefOp, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
 import { add, dist, scale, toWorld, xDirFor } from "./geom";
 import { entityPolylines } from "./sketch/curves";
 import { FreeformTool } from "./tools/freeform";
@@ -813,6 +813,8 @@ export class App implements AppContext {
         return this.setTool(new SplitOp(this, f.body, f as SplitFeature));
       case "fillToPlane":
         return this.setTool(new FillToPlaneOp(this, f.body, f as FillToPlaneFeature));
+      case "fill":
+        return this.setTool(new FillOp(this, f.boundary, f));
       case "imprint":
         return this.setTool(new ImprintOp(this, f.source ? { source: f.source } : { edges: f.edges ?? [] }, f));
       case "wrap":
@@ -999,6 +1001,7 @@ export class App implements AppContext {
           { id: "intersect", label: "Intersect", icon: "intersect", run: () => this.setTool(new BooleanOp(this, "intersect")) },
           { id: "split", label: "Split Body", icon: "split", run: wait("Split Body", ["body", "face"], () => this.setTool(new SplitOp(this, bodiesOf(this.selection)[0]))) },
           { id: "fillToPlane", label: "Fill to Plane", icon: "fill", run: wait("Fill to Plane (tap the surface)", ["body", "face", "edge"], () => this.setTool(new FillToPlaneOp(this, bodiesOf(this.selection)[0]))) },
+          { id: "fillNetwork", label: "Fill", icon: "fill", sub: "a surface over curves", run: () => this.setTool(new FillOp(this, this.pickedCurves())) },
           { id: "revolve", label: "Revolve", icon: "revolve", run: wait("Revolve", ["profile", "face"], () => src() && this.setTool(new RevolveOp(this, src()!))) },
           { id: "thread", label: "Thread", icon: "thread", run: wait("Thread (tap a round face or its rim)", ["face", "edge"], () => this.startThread()) },
           { id: "sweep", label: "Sweep", icon: "sweep", run: wait("Sweep", ["profile", "face"], () => src() && this.setTool(new SweepOp(this, src()!))) },
@@ -1139,6 +1142,25 @@ export class App implements AppContext {
 
   /** Where the pointer was last over the view (Space zooms to the face there). */
   private pointerAt: [number, number] | null = null;
+
+  /** The picked sketch curves and edges, as paths (one per sketch, one per body): what Fill starts with. */
+  private pickedCurves(): PathRef[] {
+    const out: PathRef[] = [];
+    for (const s of this.selection) {
+      if (s.kind === "curve") {
+        const p = out.find((x): x is Extract<PathRef, { kind: "sketch" }> => x.kind === "sketch" && x.sketch === s.sketch);
+        if (p) p.entities.push(s.entity);
+        else out.push({ kind: "sketch", sketch: s.sketch, entities: [s.entity] });
+      } else if (s.kind === "edge") {
+        const ref = edgeRefOf(this, s);
+        if (!ref) continue;
+        const p = out.find((x): x is Extract<PathRef, { kind: "edges" }> => x.kind === "edges" && x.edges[0]?.body === ref.body);
+        if (p) p.edges.push(ref);
+        else out.push({ kind: "edges", edges: [ref] });
+      }
+    }
+    return out;
+  }
 
   /** Run the first of these commands that's offered now (the picked thing's tools first). */
   private runCommand(labels: string[]): boolean {
