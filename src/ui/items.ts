@@ -244,6 +244,32 @@ export class ItemsPanel {
     this.list.append(li);
   }
 
+  /**
+   * Reveal in Items: the panel opens, the folders and headings holding the
+   * rows unfold, and the first is scrolled to and flashes.
+   */
+  reveal(ids: string[]): void {
+    this.toggle(true);
+    const want = new Set(ids);
+    const byId = new Map(this.folders.map((f) => [f.id, f]));
+    for (const f of this.folders)
+      if (f.items.some((i) => want.has(i))) for (let g: ItemFolder | undefined = f; g; g = g.parent ? byId.get(g.parent) : undefined) this.collapsed.delete(g.id);
+    this.render(this.last);
+    const find = () => [...this.list.querySelectorAll<HTMLElement>("li[data-id]")].find((li) => want.has(li.dataset.id!));
+    let li = find();
+    if (!li) {
+      // Under a heading folded away: the headings open.
+      for (const k of [...this.collapsed]) if (k.startsWith("cat:")) this.collapsed.delete(k);
+      this.render(this.last);
+      li = find();
+    }
+    if (!li) return;
+    li.scrollIntoView({ block: "center" });
+    li.classList.remove("flash");
+    void li.offsetWidth;
+    li.classList.add("flash");
+  }
+
   /** What's selected in the view (a body double-clicked, a plane…): its row lights up. */
   private selectedIds = new Set<string>();
   markSelected(ids: string[]): void {

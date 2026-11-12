@@ -346,6 +346,9 @@ export class SelectTool implements Tool {
         rows.push({ label: it.label, shortcut: it.shortcut, disabled: it.disabled, run: () => run() });
       }
       if (rows[rows.length - 1] === "-") rows.pop();
+      // Where it is in the Items list.
+      const ids = [...new Set(this.app.selection.flatMap((s) => (s.kind === "body" || s.kind === "face" || s.kind === "edge" || s.kind === "vertex" ? [s.body] : s.kind === "plane" || s.kind === "axis" || s.kind === "image" ? [s.id] : s.kind === "curve" || s.kind === "point" || s.kind === "profile" ? [s.sketch] : [])))];
+      if (ids.length) rows.push("-", { label: "Reveal in Items", run: () => this.app.revealInItems(ids) });
     }
     viewMenu(this.app, p.x, p.y, rows);
   }

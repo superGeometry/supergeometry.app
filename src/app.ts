@@ -393,6 +393,10 @@ export class App implements AppContext {
   /** Bodies and features seen at the last rebuild: anything new while isolating joins the isolated set. */
   private known: Set<string> | null = null;
 
+  revealInItems(ids: string[]): void {
+    this.items.reveal(ids);
+  }
+
   isolate(bodies: string[] | null): void {
     this.isolated = bodies?.length ? [...bodies] : null;
     // What exists now; anything made from here on joins the isolated set.

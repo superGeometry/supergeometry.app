@@ -69,6 +69,8 @@ export interface AppContext {
   /** Bodies shown alone, or null when nothing is isolated. */
   readonly isolated: string[] | null;
   isolate(bodies: string[] | null): void;
+  /** Reveal in Items: the Items panel opens at these rows. */
+  revealInItems(ids: string[]): void;
 }
 
 /** Index of the body face matching a stored reference (by centre and normal). */

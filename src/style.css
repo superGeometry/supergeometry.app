@@ -1647,6 +1647,16 @@ body.items-open #bottom-left {
 .items-row.selected .items-name {
   color: var(--accent);
 }
+/* Reveal in Items: the row flashes once. */
+.items-row.flash {
+  animation: items-flash 1.2s ease-out;
+}
+@keyframes items-flash {
+  0%,
+  30% {
+    background: var(--accent);
+  }
+}
 .items-row.in-folder {
   padding-left: 18px;
 }
