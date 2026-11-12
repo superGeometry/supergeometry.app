@@ -200,4 +200,41 @@ check("Cut: the bridge's ends are cut out of both cubes", !r.errors && !r.bad &&
   }
 }
 
+// Many outlines, joined and cut, a face above a face: each one sound body
+// (the bridge from the faces' very edges where that joins; else the other way).
+{
+  const ext = (id: string, es: any[], h: number, z: number): Feature[] => [
+    { id: `s${id}`, name: `s${id}`, type: "sketch", plane: plane(z), entities: es } as Feature,
+    { id, name: id, type: "extrude", source: { kind: "profile", sketch: `s${id}`, regions: arrangement(es as any).regions.map(regionRef) }, distance: h, mode: "new" } as Feature,
+  ];
+  const ngon = (n: number, r: number, cx: number, turn = 0) => ({ id: "p", kind: "polyline", closed: true, points: Array.from({ length: n }, (_, i) => [cx + r * Math.cos(turn + (i * 2 * Math.PI) / n), r * Math.sin(turn + (i * 2 * Math.PI) / n)]) });
+  const shapes: [string, (cx: number) => any][] = [
+    ["a triangle", (cx) => ({ id: "p", kind: "polyline", closed: true, points: [[cx, -10], [cx + 30, -10], [cx + 10, 20]] })],
+    ["a hexagon", (cx) => ngon(6, 12, cx)],
+    ["a square turned 30°", (cx) => ngon(4, 14, cx, Math.PI / 6)],
+    ["a circle", (cx) => ({ id: "c", kind: "circle", center: [cx, 0], radius: 9 })],
+    ["a 30 × 8 strip", (cx) => ({ id: "r", kind: "rect", center: [cx, 0], w: 30, h: 8, rotation: 0 })],
+  ];
+  const topOf = (id: string, up: boolean) => {
+    const f = (debugBodies().get(id) as Shape3D).faces.find((x) => (up ? x.normalAt().z > 0.99 : x.normalAt().z < -0.99))!;
+    return face(id, [f.center.x, f.center.y, f.center.z], [0, 0, up ? 1 : -1], 0);
+  };
+  for (const [na, A] of shapes)
+    for (const [nb, B] of shapes) {
+      const fs = [...ext("A", [A(0)], 10, 0), ...ext("B", [B(45)], 15, 50)];
+      await build(fs);
+      const [ta, tb] = [topOf("A", true), topOf("B", false)];
+      for (const mode of ["join", "cut"] as const) {
+        r = await build([...fs, connect(ta, tb, mode)]);
+        // (A triangle's sharp corners: a few of these can't be made yet - then it
+        // says so in words, and never leaves a torn or broken body behind.)
+        const hard = na === "a triangle" || nb === "a triangle";
+        const sound = !r.errors && !r.bad && r.ids.length === (mode === "join" ? 1 : 2);
+        const refused = !!r.errors && !/invalid|open edges/.test(r.bad) && r.ids.length === 2;
+        const pieces = !r.errors && !/invalid|open edges/.test(r.bad) && mode === "cut";
+        check(`${na} up to ${nb}, ${mode}`, sound || (hard && (refused || pieces)), `${r.errors}${r.bad} ${r.ids}`);
+      }
+    }
+}
+
 process.exit(failed ? 1 : 0);

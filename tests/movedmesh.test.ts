@@ -41,6 +41,16 @@ function check1(name: string, m: BodyMesh) {
     if (off + da * 10 > worst) (worst = off + da * 10), (worstAt = `face ${g.face} (${f.type}): middle ${off.toFixed(3)} mm off, area ${(da * 100).toFixed(2)} % off`);
   }
   check(`${name}: every face's triangles are that face, facing out`, worst < 0.3 && inward === 0, `${worstAt}; ${inward} triangles facing in`);
+  // Each edge's line is that edge: its ends are the edge's own (either way round).
+  let far = 0;
+  const E = (i: number): Vec3 => [m.edgePositions[i * 3], m.edgePositions[i * 3 + 1], m.edgePositions[i * 3 + 2]];
+  const d = (a: Vec3, b: Vec3) => Math.hypot(...sub(a, b));
+  for (const g of m.edgeGroups) {
+    const e = m.edges[g.edge];
+    const [p, q] = [E(g.start), E(g.start + g.count - 1)];
+    far = Math.max(far, Math.min(d(p, e.start) + d(q, e.end), d(p, e.end) + d(q, e.start)));
+  }
+  check(`${name}: every edge's line is that edge`, far < 0.05, `${far.toFixed(4)} mm off`);
 }
 
 const moves: [string, Feature, string[]][] = [

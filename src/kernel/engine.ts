@@ -1642,26 +1642,42 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         for (let k = 0; k < 40 && !found; k++) found = fit((pts = smoothed(pts, 10, ea.dir, eb.dir)));
         along = found ?? guideCurve(drawn, ea.center, eb.center, ea.dir, eb.dir, 1.5 * reach);
       } else along = plainSpine(ea.center, ea.dir, eb.center, eb.dir, f.bulge ?? 1, width);
-      let bridge: Shape3D;
+      // Into both bodies (one, when both faces are on it).
+      const into = (bridge: Shape3D) => {
+        combine(f.id, m, ra.body, bridge, false, ctx);
+        if (rb.body !== ra.body) {
+          if (m === "join") {
+            combine(f.id, "join", ra.body, need(bodies, rb.body), false, ctx);
+            bodies.delete(rb.body);
+            ctx.freeforms.delete(rb.body);
+          } else combine(f.id, "cut", rb.body, bridge, false, ctx);
+        }
+        ctx.freeforms.delete(ra.body);
+      };
       try {
-        bridge = sweepBridge(ea, eb, along, !!f.guide);
+        const made = sweepBridge(ea, eb, along, !!f.guide, true);
+        if (m === "new") {
+          bodies.set(f.id, made.shape);
+          return;
+        }
+        if (!made.exact) return into(made.shape);
+        // Starting on the faces' very edges, its walls lie on the bodies' own:
+        // where joining (or cutting) that fails, the bridge made the other way
+        // (a little inside the edges) - on the bodies as they were.
+        const was = [ra.body, rb.body].map((id) => [id, bodies.get(id), ctx.freeforms.get(id)] as const);
+        try {
+          into(made.shape);
+        } catch (err) {
+          if (isFault(err)) throw err;
+          for (const [id, body, ff] of was) {
+            if (body) bodies.set(id, body);
+            if (ff) ctx.freeforms.set(id, ff);
+          }
+          into(sweepBridge(ea, eb, along, !!f.guide, false).shape);
+        }
       } finally {
         for (const e of [ea, eb]) (e.outline.delete(), e.rim.delete());
       }
-      if (m === "new") {
-        bodies.set(f.id, bridge);
-        return;
-      }
-      // Into both bodies (one, when both faces are on it).
-      combine(f.id, m, ra.body, bridge, false, ctx);
-      if (rb.body !== ra.body) {
-        if (m === "join") {
-          combine(f.id, "join", ra.body, need(bodies, rb.body), false, ctx);
-          bodies.delete(rb.body);
-          ctx.freeforms.delete(rb.body);
-        } else combine(f.id, "cut", rb.body, bridge, false, ctx);
-      }
-      ctx.freeforms.delete(ra.body);
       return;
     }
 
@@ -3487,7 +3503,7 @@ function bridgeEnd(body: Shape3D, face: Face, size: number, inward: boolean, sin
  * faces' edges (as sized by bridgeEnd), and goes on, straight, as far into
  * the bodies as bridgeEnd set it back.
  */
-function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3, guided: boolean): Shape3D {
+function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3, guided: boolean, exact: boolean): { shape: Shape3D; exact: boolean } {
   const oc = getOC();
   const spine = (lead: boolean) => {
     // In from deep in A, straight out through its face; along the curve; and the same into B.
@@ -3536,7 +3552,7 @@ function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3, gui
   // instead, the outline was already part way to the other face's where it
   // left its own - a square end into a small round one started inside the
   // square's edges.
-  if (a.depth > 0 || b.depth > 0) {
+  if (exact && (a.depth > 0 || b.depth > 0)) {
     const plug = (e: BridgeEnd): Shape3D => {
       const mf = new oc.BRepBuilderAPI_MakeFace(oc.TopoDS.Wire(e.rim), true);
       const v = new oc.gp_Vec(-e.dir[0] * e.depth, -e.dir[1] * e.depth, -e.dir[2] * e.depth);
@@ -3557,7 +3573,7 @@ function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3, gui
         let out = s;
         for (const e of [a, b]) if (e.depth > 0) out = out.fuse(plug(e));
         if (measureVolume(out) < 0) out = cast(out.wrapped.Reversed()) as Shape3D;
-        if (shapeValid(out) && [...iterTopo(out.wrapped, "solid")].length === 1 && measureVolume(out) > measureVolume(s)) return out;
+        if (shapeValid(out) && [...iterTopo(out.wrapped, "solid")].length === 1 && measureVolume(out) > measureVolume(s)) return { shape: out, exact: true };
       } catch {
         /* (a curved face, or a plug that won't join) the way below */
       }
@@ -3573,7 +3589,7 @@ function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3, gui
     return assembleWire([makeBSplineApproximation([...round, round[0]], { tolerance: Math.max(1e-4, e.reach * 1e-3), degMax: 5, degMin: 3 })]).wrapped;
   };
   const s = pipe(spine(true), [() => [a.outline, b.outline], () => [smooth(a), smooth(b)]]);
-  if (s) return s;
+  if (s) return { shape: s, exact: false };
   throw new Error(
     guided
       ? "The bridge can't be made along this curve (it turns too tightly for its width, or twists through itself) - try a gentler curve, or a smaller Size"
@@ -4056,7 +4072,7 @@ function patternCount(n: number): void {
 }
 
 /** Edits that change a solid in place (their results are checked). */
-const GUARDED = new Set<string>(["extrude", "revolve", "sweep", "loft", "boolean", "fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom", "split"]);
+const GUARDED = new Set<string>(["extrude", "revolve", "sweep", "loft", "boolean", "fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom", "split", "connect"]);
 /** Edits that must not break a body into pieces (cuts and booleans may). */
 const NO_SPLIT = new Set<string>(["fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom"]);
 

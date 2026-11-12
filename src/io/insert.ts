@@ -134,31 +134,33 @@ export async function insertImage(app: AppContext, plane: PlaneDef = GROUND): Pr
   return f;
 }
 
-/** Create a named variable (optionally from a field's current value); returns its name. */
 /**
- * One new variable. "Add Another" at the top makes it and opens a fresh one
- * (a window needs twenty: the dialog had to be reopened from the card each time).
+ * Create a named variable (optionally from a field's current value); returns
+ * its name. "Add Another" at the top makes it and opens a fresh one (a window
+ * needs twenty: the dialog had to be reopened from the card each time) - the
+ * name returned is still the first one's, the one made from the field's value.
  */
 export async function createVariable(app: AppContext, value = ""): Promise<string | null> {
-  let made: string | null = null;
+  let first: string | null = null;
+  let name = "";
   for (;;) {
-    const r = await createOne(app, value);
-    if (r.name) made = r.name;
-    if (!r.another) return made;
-    // A bad name or value: the next window lets it be typed again.
-    value = r.name ? "" : value;
+    const r = await createOne(app, name, value);
+    first ??= r.made;
+    if (!r.another) return first;
+    // A bad name or value: the next window has what was typed, to put right.
+    [name, value] = r.made ? ["", ""] : [r.typed.name, r.typed.expr];
   }
 }
 
-async function createOne(app: AppContext, value: string): Promise<{ name: string | null; another: boolean }> {
+async function createOne(app: AppContext, name: string, value: string): Promise<{ made: string | null; another: boolean; typed: { name: string; expr: string } }> {
   const list = app.store.doc.variables;
   const note = list.length ? `Existing: ${list.map((v) => `${v.name} = ${v.expr}`).join(", ")}` : "Use variables in any field, e.g. width*2 or wall + 1mm.";
   const v = await app.ui.dialog("Create Variable", [
-    { key: "name", label: "Name", value: "", placeholder: "width" },
+    { key: "name", label: "Name", value: name, placeholder: "width" },
     { key: "expr", label: "Value", value, placeholder: "40 or 1.5in or depth/2" },
   ], note, { label: "Add Another", icon: "variableNew" });
-  if (!v) return { name: null, another: false };
-  return { name: makeVariable(app, list, v), another: !!v[DIALOG_ACTION] };
+  if (!v) return { made: null, another: false, typed: { name: "", expr: "" } };
+  return { made: makeVariable(app, list, v), another: !!v[DIALOG_ACTION], typed: { name: v.name, expr: v.expr } };
 }
 
 function makeVariable(app: AppContext, list: AppContext["store"]["doc"]["variables"], v: Record<string, string>): string | null {

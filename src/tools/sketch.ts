@@ -527,6 +527,10 @@ export class SketchTool implements Tool {
    * origin was a trip to the Views menu away).
    */
   private choosePlane(): void {
+    // (Only while it's empty: what's drawn stays on the plane it was drawn on.)
+    if (this.sketchId || this.entities.length) return this.updateMenu();
+    // A shape started (its first point placed): dropped, it was on the old plane.
+    this.resetDrawing();
     this.plane = null;
     this.attachedTo = undefined;
     this.onPlane = undefined;
