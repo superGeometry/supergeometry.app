@@ -1642,8 +1642,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       try {
         bridge = sweepBridge(ea, eb, along, !!f.guide);
       } finally {
-        ea.outline.delete();
-        eb.outline.delete();
+        for (const e of [ea, eb]) (e.outline.delete(), e.rim.delete());
       }
       if (m === "new") {
         bodies.set(f.id, bridge);
@@ -3416,6 +3415,8 @@ interface BridgeEnd {
   dir: Vec3;
   /** The outline swept (sized, and moved `depth` back against `dir`). */
   outline: any;
+  /** The same outline on the face itself. */
+  rim: any;
   depth: number;
   /** How far the outline reaches from the middle. */
   reach: number;
@@ -3425,8 +3426,9 @@ interface BridgeEnd {
 
 /**
  * One end of Connect's bridge: the face's outline (`size` of it, about its
- * middle), moved a little way into its body when it's to be joined or cut
- * (so the bodies overlap it, not only touch) - never out of the far side.
+ * middle), and the same moved a little way into its body when it's to be
+ * joined or cut (so the bodies overlap it, not only touch) - never out of the
+ * far side.
  */
 function bridgeEnd(body: Shape3D, face: Face, size: number, inward: boolean, sink: boolean): BridgeEnd {
   const oc = getOC();
@@ -3450,25 +3452,94 @@ function bridgeEnd(body: Shape3D, face: Face, size: number, inward: boolean, sin
   const both = move.Multiplied(t);
   const mk = new oc.BRepBuilderAPI_Transform(oc.BRepTools.OuterWire(face.wrapped), both, true);
   const outline = mk.Shape();
-  for (const x of [t, at, move, v, both, mk]) x.delete();
-  return { center: info.center, dir, outline, depth, reach, ring: around };
+  const mr = new oc.BRepBuilderAPI_Transform(oc.BRepTools.OuterWire(face.wrapped), t, true);
+  const rim = mr.Shape();
+  for (const x of [t, at, move, v, both, mk, mr]) x.delete();
+  return { center: info.center, dir, outline, rim, depth, reach, ring: around };
 }
 
 /**
  * Connect's bridge: face A's outline swept along `along` (0..1, from A's
  * middle to B's) turning into face B's - it starts and ends exactly on the
- * faces (as sized, and set back, by bridgeEnd).
+ * faces' edges (as sized by bridgeEnd), and goes on, straight, as far into
+ * the bodies as bridgeEnd set it back.
  */
 function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3, guided: boolean): Shape3D {
   const oc = getOC();
-  // In from deep in A, straight out through its face; along the curve; and the same into B.
-  const lead = (e: BridgeEnd, back: boolean) => {
-    const k = [0, 1, 2, 3].map((i) => (e.depth * (back ? i : 3 - i)) / 3);
-    return e.depth > 0 ? k.filter((x) => x > 0).map((x) => sub(e.center, scale(e.dir, x))) : [];
+  const spine = (lead: boolean) => {
+    // In from deep in A, straight out through its face; along the curve; and the same into B.
+    const back = (e: BridgeEnd, rev: boolean) => {
+      const k = [0, 1, 2, 3].map((i) => (e.depth * (rev ? i : 3 - i)) / 3);
+      return lead && e.depth > 0 ? k.filter((x) => x > 0).map((x) => sub(e.center, scale(e.dir, x))) : [];
+    };
+    const pts = [...back(a, false), ...Array.from({ length: 61 }, (_, i) => along(i / 60)), ...back(b, true)];
+    const span = dist(pts[0], pts[pts.length - 1]) + 1;
+    return assembleWire([makeBSplineApproximation(pts, { tolerance: span * 1e-4, degMax: 5, degMin: 3 })]);
   };
-  const pts = [...lead(a, false), ...Array.from({ length: 61 }, (_, i) => along(i / 60)), ...lead(b, true)];
-  const span = dist(pts[0], pts[pts.length - 1]) + 1;
-  const spine = assembleWire([makeBSplineApproximation(pts, { tolerance: span * 1e-4, degMax: 5, degMin: 3 })]);
+  const pipe = (path: ReturnType<typeof spine>, sections: (() => any[])[]): Shape3D | null => {
+    // The way the outline is carried along: each copes with curves the others don't.
+    for (const section of sections)
+      for (const mode of ["discrete", "corrected"]) {
+        let ends: any[];
+        try {
+          ends = section();
+        } catch {
+          continue;
+        }
+        const mk = new oc.BRepOffsetAPI_MakePipeShell(path.wrapped);
+        const progress = new oc.Message_ProgressRange();
+        try {
+          if (mode === "discrete") mk.SetDiscreteMode();
+          else mk.SetMode(false);
+          for (const w of ends) mk.Add(w, false, false);
+          mk.Build(progress);
+          if (!mk.IsDone()) throw new Error("sweep");
+          mk.MakeSolid();
+          let s = cast(mk.Shape()) as Shape3D;
+          if (measureVolume(s) < 0) s = cast(s.wrapped.Reversed()) as Shape3D;
+          if (!shapeValid(s) || !(measureVolume(s) > 0)) throw new Error("bad");
+          return s;
+        } catch {
+          /* the next way, or none */
+        } finally {
+          mk.delete();
+          progress.delete();
+        }
+      }
+    return null;
+  };
+  // Set back into the bodies: from face to face, then each face's outline
+  // straight on into its body (a plug). Swept from where it was set back
+  // instead, the outline was already part way to the other face's where it
+  // left its own - a square end into a small round one started inside the
+  // square's edges.
+  if (a.depth > 0 || b.depth > 0) {
+    const plug = (e: BridgeEnd): Shape3D => {
+      const mf = new oc.BRepBuilderAPI_MakeFace(oc.TopoDS.Wire(e.rim), true);
+      const v = new oc.gp_Vec(-e.dir[0] * e.depth, -e.dir[1] * e.depth, -e.dir[2] * e.depth);
+      try {
+        if (!mf.IsDone()) throw new Error("not flat");
+        const pr = new oc.BRepPrimAPI_MakePrism(mf.Face(), v, true, true);
+        const s = cast(pr.Shape()) as Shape3D;
+        pr.delete();
+        return s;
+      } finally {
+        mf.delete();
+        v.delete();
+      }
+    };
+    const s = pipe(spine(false), [() => [a.rim, b.rim]]);
+    if (s) {
+      try {
+        let out = s;
+        for (const e of [a, b]) if (e.depth > 0) out = out.fuse(plug(e));
+        if (measureVolume(out) < 0) out = cast(out.wrapped.Reversed()) as Shape3D;
+        if (shapeValid(out) && [...iterTopo(out.wrapped, "solid")].length === 1 && measureVolume(out) > measureVolume(s)) return out;
+      } catch {
+        /* (a curved face, or a plug that won't join) the way below */
+      }
+    }
+  }
   // The faces' own outlines; and, where one can't be turned into the other (a
   // square into an L: not the same number of sides, corners that don't pair
   // up), each as one smooth closed curve through points round it.
@@ -3478,37 +3549,8 @@ function sweepBridge(a: BridgeEnd, b: BridgeEnd, along: (t: number) => Vec3, gui
     const round = e.ring.map((p) => add(base, scale(p, 0.97)));
     return assembleWire([makeBSplineApproximation([...round, round[0]], { tolerance: Math.max(1e-4, e.reach * 1e-3), degMax: 5, degMin: 3 })]).wrapped;
   };
-  const sections: (() => any[])[] = [() => [a.outline, b.outline], () => [smooth(a), smooth(b)]];
-  // The way the outline is carried along: each copes with curves the others don't.
-  for (const section of sections)
-  for (const mode of ["discrete", "corrected"]) {
-    let ends: any[];
-    try {
-      ends = section();
-    } catch {
-      continue;
-    }
-    const mk = new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped);
-    const progress = new oc.Message_ProgressRange();
-    try {
-      if (mode === "discrete") mk.SetDiscreteMode();
-      else mk.SetMode(false);
-      mk.Add(ends[0], false, false);
-      mk.Add(ends[1], false, false);
-      mk.Build(progress);
-      if (!mk.IsDone()) throw new Error("sweep");
-      mk.MakeSolid();
-      let s = cast(mk.Shape()) as Shape3D;
-      if (measureVolume(s) < 0) s = cast(s.wrapped.Reversed()) as Shape3D;
-      if (!shapeValid(s) || !(measureVolume(s) > 0)) throw new Error("bad");
-      return s;
-    } catch {
-      /* the next way, or none */
-    } finally {
-      mk.delete();
-      progress.delete();
-    }
-  }
+  const s = pipe(spine(true), [() => [a.outline, b.outline], () => [smooth(a), smooth(b)]]);
+  if (s) return s;
   throw new Error(
     guided
       ? "The bridge can't be made along this curve (it turns too tightly for its width, or twists through itself) - try a gentler curve, or a smaller Size"

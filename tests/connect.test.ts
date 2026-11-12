@@ -4,7 +4,7 @@
 // other, side by side (the bridge bends round), different sizes and shapes,
 // two faces of one body (a curved tunnel when cut), a thin plate.
 import opencascade from "replicad-opencascadejs";
-import { getOC, measureVolume, setOC, type Shape3D } from "replicad";
+import { getOC, makeBox, measureVolume, setOC, type Shape3D } from "replicad";
 import { debugBodies, regenerate, shapeValid } from "../src/kernel/engine";
 import { arrangement, regionRef } from "../src/sketch/regions";
 import type { Feature, PlaneDef, Vec3 } from "../src/doc/types";
@@ -88,6 +88,15 @@ check("Cut: the bridge's ends are cut out of both cubes", !r.errors && !r.bad &&
   const fs = [...box("A", 20, 30, 10, [0, 0, 0]), ...cyl("B", 6, 20, [50, 0, 45])];
   r = await build([...fs, connect(face("A", [0, 0, 10], [0, 0, 1], 600), face("B", [50, 0, 45], [0, 0, -1], Math.PI * 36), "join")]);
   check("a flat 20 × 30 top to a cylinder's round end above it", !r.errors && !r.bad && r.ids.length === 1, `${r.errors}${r.bad} ${r.ids}`);
+  // It leaves the face from its edges: a slice just above it is the whole
+  // 20 × 30 (it was 19.5 × 28.9 - already part way to the round end there).
+  for (const mode of ["join", "new"] as const) {
+    r = await build([...fs, connect(face("A", [0, 0, 10], [0, 0, 1], 600), face("B", [50, 0, 45], [0, 0, -1], Math.PI * 36), mode)]);
+    const body = debugBodies().get(mode === "new" ? "cn" : "A") as Shape3D;
+    const [lo, hi] = body.intersect(makeBox([-100, -100, 10.01], [100, 100, 10.05])).boundingBox.bounds;
+    const off = Math.max(Math.abs(lo[0] + 10), Math.abs(hi[0] - 10), Math.abs(lo[1] + 15), Math.abs(hi[1] - 15));
+    check(`…${mode}: the bridge starts on the face's edges, not inside them`, !r.errors && !r.bad && off < 0.02, `${r.errors}${r.bad} ${lo[0].toFixed(2)}..${hi[0].toFixed(2)} × ${lo[1].toFixed(2)}..${hi[1].toFixed(2)}`);
+  }
 }
 
 // Two faces of one body: cut, a curved tunnel from the top to the front.
