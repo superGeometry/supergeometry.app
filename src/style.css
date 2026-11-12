@@ -5282,3 +5282,120 @@ html[data-screen="phone"] .bim-props {
     display: block;
   }
 }
+
+/* The command search (X or Ctrl+F) */
+.cmd-search {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100vw - 32px));
+  background: var(--chrome-solid);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.cmd-input {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  padding: 14px 16px;
+  outline: none;
+}
+.cmd-list {
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  padding: 6px;
+}
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.cmd-row svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.cmd-row.on {
+  background: rgba(61, 139, 255, 0.18);
+}
+.cmd-row.off {
+  opacity: 0.45;
+  cursor: default;
+}
+.cmd-words {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.cmd-label {
+  font-size: 14px;
+}
+.cmd-where {
+  color: var(--muted);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmd-key {
+  flex: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.cmd-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 10px;
+}
+/* The keyboard cheat sheet (?) */
+.dialog.shortcuts {
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100vh - 48px);
+}
+.shortcuts-body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.shortcuts-group {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 8px;
+}
+.shortcuts-row {
+  display: grid;
+  grid-template-columns: minmax(110px, auto) 1fr;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+}
+.shortcuts-row .cmd-key {
+  justify-self: start;
+}

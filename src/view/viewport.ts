@@ -520,6 +520,20 @@ export class Viewport {
     this.cam.fit(this.bounds(), animate, this.coveredInsets());
   }
 
+  /** Zoom to one face (Space over it): the face filling the free part of the screen. */
+  zoomToFace(body: string, face: number): boolean {
+    const d = this.body(body);
+    if (!d) return false;
+    const box = new Box3();
+    const p = new Vector3();
+    for (const g of d.faceGroups)
+      if (g.face === face)
+        for (let i = g.start; i < g.start + g.count; i++) box.expandByPoint(p.fromArray(d.positions, d.indices[i] * 3));
+    if (box.isEmpty()) return false;
+    this.cam.fit(box, true, this.coveredInsets());
+    return true;
+  }
+
   /**
    * Bring what a tool is working on (its highlighted picks, else everything)
    * into the free part of the screen - only when some of it is outside it,

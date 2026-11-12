@@ -336,13 +336,15 @@ export class SketchTool implements Tool {
 
   constructor(
     private app: AppContext,
-    opts: { sketchId?: string; plane?: PlaneDef; attachedTo?: FaceRef } = {},
+    opts: { sketchId?: string; plane?: PlaneDef; attachedTo?: FaceRef; kind?: Kind } = {},
   ) {
     this.sketchId = opts.sketchId ?? null;
     this.plane = opts.sketchId ? (app.sketchPlane(opts.sketchId) ?? null) : (opts.plane ?? null);
     this.attachedTo = opts.attachedTo;
     this.phase = this.plane ? "draw" : "plane";
     if (opts.sketchId) this.kind = "select";
+    // Started by its key (L, C, R…): that drawing tool, once the plane is picked.
+    if (opts.kind) this.kind = opts.kind;
   }
 
   get activeSketch(): string | undefined {

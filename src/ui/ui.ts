@@ -298,6 +298,10 @@ export class UI {
     this.fitToolbar();
   }
 
+  /** What is offered now: the left column, the bottom bar and the open window's buttons. */
+  offered(): ToolItem[] {
+    return [...this.toolItems, ...this.bottomItems, ...(this.panelSpec?.actions ?? [])];
+  }
   private toolItems: ToolItem[] = [];
   private bottomItems: ToolItem[] = [];
 

@@ -7,6 +7,7 @@ import { SUPPORT, openSupport } from "./ui/support";
 import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, renameProject, setCurrentProject } from "./doc/library";
 import { showLibrary } from "./ui/library";
 import { showAbout } from "./ui/about";
+import { findAction, openCommandSearch, showShortcuts } from "./ui/commands";
 import type { EdgeFeature, ExtrudeFeature, ExtrudeSource, Feature, ProjectDoc, FillToPlaneFeature, ImageFeature, LoftFeature, PinDef, PlaneDef, PlaneFeature, RevolveFeature, ShellFeature, SketchEntity, SketchFeature, SplitFeature, SweepFeature, TransformFeature, Units, Vec3 } from "./doc/types";
 import { emptyDoc } from "./doc/types";
 import { createVariable, insertFile, insertImage } from "./io/insert";
@@ -215,6 +216,11 @@ export class App implements AppContext {
 
     this.store.onChange(() => this.docChanged());
     window.addEventListener("keydown", (e) => this.onKey(e));
+    this.view.canvas.addEventListener("pointermove", (e) => {
+      const r = this.view.canvas.getBoundingClientRect();
+      this.pointerAt = [e.clientX - r.left, e.clientY - r.top];
+    });
+    this.view.canvas.addEventListener("pointerleave", () => (this.pointerAt = null));
     // A phone may drop the page once it's in the background: save now, undo steps included.
     document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && void this.store.flush());
     window.addEventListener("pagehide", () => void this.store.flush());
@@ -996,14 +1002,95 @@ export class App implements AppContext {
       this.save();
       return;
     }
+    // Search commands: Ctrl+F anywhere (X too, outside a sketch - see below).
+    if (mod && k === "f") {
+      e.preventDefault();
+      this.searchCommands();
+      return;
+    }
+    // The standard views: Ctrl (or Alt, where the browser keeps Ctrl+1… for its tabs) + 1 to 7.
+    if ((mod || e.altKey) && /^[1-7]$/.test(e.key)) {
+      e.preventDefault();
+      this.viewByNumber(Number(e.key));
+      return;
+    }
     if (this.tool.key?.(e)) {
       e.preventDefault();
       return;
     }
-    if (mod) return;
+    // Space over a face: zoom to it.
+    if (k === " " && !mod && this.pointerAt) {
+      const hit = this.view.pick(this.pointerAt[0], this.pointerAt[1], { edges: false, planes: false, profiles: false });
+      if (hit?.kind === "face" && this.view.zoomToFace(hit.body, hit.face)) e.preventDefault();
+      return;
+    }
     if (this.tool !== this.selectTool) return;
-    if (k === "s" && !this.selection.length) this.setTool(new SketchTool(this));
-    else if (k === "f" && !this.selection.length) this.fit();
+    // The booleans: Ctrl+U / B / I.
+    if (mod && !e.shiftKey && (k === "u" || k === "b" || k === "i")) {
+      if (this.runCommand([{ u: "Union", b: "Subtract", i: "Intersect" }[k]])) e.preventDefault();
+      return;
+    }
+    if (mod || e.altKey) return;
+    if (k === "x") return void (e.preventDefault(), this.searchCommands());
+    if (e.key === "?") return void showShortcuts();
+    const none = !this.selection.length;
+    if (k === "s" && none) return void this.setTool(new SketchTool(this));
+    if (k === "f" && none) return void this.fit();
+    // A drawing tool's letter with nothing picked: a sketch, with that tool (once its plane is picked).
+    const draw: Record<string, "line" | "arc" | "circle" | "rect" | "polygon" | "spline" | "offset" | "trim"> = { l: "line", a: "arc", c: "circle", r: "rect", g: "polygon", i: "spline", o: "offset", t: "trim" };
+    if (draw[k] && none && !e.shiftKey) return void this.setTool(new SketchTool(this, { kind: draw[k] }));
+    // A modeling tool's letter: that tool, for what's picked (or waiting for it).
+    const tools: Record<string, string[]> = {
+      e: ["Extrude", "Offset Face"],
+      f: ["Fillet"],
+      h: ["Shell"],
+      m: ["Move/Rotate"],
+      n: ["Translate"],
+      p: ["Project as Sketch"],
+      s: ["Scale", "Scale Sketch"],
+      v: ["Revolve"],
+      w: ["Sweep"],
+      o: ["Offset Edge"],
+    };
+    if (tools[k] && !e.shiftKey && this.runCommand(tools[k])) e.preventDefault();
+  }
+
+  /** Where the pointer was last over the view (Space zooms to the face there). */
+  private pointerAt: [number, number] | null = null;
+
+  /** Run the first of these commands that's offered now (the picked thing's tools first). */
+  private runCommand(labels: string[]): boolean {
+    const hit = findAction(this.ui.offered(), this.mainTools(), labels);
+    if (!hit) return false;
+    hit.item.run!();
+    return true;
+  }
+
+  private searchCommands(): void {
+    openCommandSearch(
+      () => this.ui.offered(),
+      () => [...this.mainTools(), { id: "shortcuts", label: "Keyboard shortcuts", icon: "menu", shortcut: "?", run: () => showShortcuts() }],
+    );
+  }
+
+  /** 1 the default view; 2-7 front, back, top, bottom, right, left. */
+  private viewByNumber(n: number): void {
+    const cam = this.view.cam;
+    if (n === 1) {
+      cam.iso();
+      this.view.fitAll();
+      return;
+    }
+    const views: [Vec3, Vec3?][] = [
+      [[0, -1, 0]],
+      [[0, 1, 0], [-1, 0, 0]],
+      [[0, 0, 1]],
+      [[0, 0, -1]],
+      [[1, 0, 0], [0, 1, 0]],
+      [[-1, 0, 0], [0, -1, 0]],
+    ];
+    const [normal, xDir] = views[n - 2];
+    cam.lookAlong(normal, xDir);
   }
 
   private fit(): void {
