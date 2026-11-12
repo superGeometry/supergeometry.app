@@ -916,6 +916,36 @@ export class SweepOp extends FeatureOp<SweepFeature> {
     return [
       { type: "number", label: "End size", value: this.feature.scale ?? 1, kind: "number", min: 0.01, onInput: (v) => ((this.feature.scale = v > 0 ? v : 1), this.update()) },
       { type: "number", label: "Twist", value: this.feature.twist ?? 0, kind: "angle", onInput: (v) => ((this.feature.twist = v || undefined), this.update()) },
+      {
+        type: "choice",
+        label: "Profile position",
+        options: [
+          { id: "auto", label: "Where it is" },
+          { id: "start", label: "On the path's start" },
+        ],
+        value: this.feature.position ?? "auto",
+        onChange: (v) => ((this.feature.position = v === "start" ? "start" : undefined), this.update()),
+      },
+      {
+        type: "choice",
+        label: "Orientation",
+        options: [
+          { id: "normal", label: "Normal to path" },
+          { id: "parallel", label: "Parallel to profile" },
+        ],
+        value: this.feature.orientation ?? "normal",
+        onChange: (v) => ((this.feature.orientation = v === "parallel" ? "parallel" : undefined), this.update()),
+      },
+      {
+        type: "choice",
+        label: "Corners",
+        options: [
+          { id: "round", label: "Round" },
+          { id: "mitre", label: "Mitre" },
+        ],
+        value: this.feature.corner ?? "round",
+        onChange: (v) => ((this.feature.corner = v === "mitre" ? "mitre" : undefined), this.update()),
+      },
       modeChoice(() => this.feature.mode, (m) => ((this.feature.mode = m), this.update()), () => this.render()),
     ];
   }
@@ -930,6 +960,33 @@ export class LoftOp extends FeatureOp<LoftFeature> {
     super(app, { ...app.store.newIdentity("loft"), type: "loft", sections, ruled: false, mode: "new" }, existing);
     this.slots = [sectionsSlot(app, () => this.feature.sections, (s) => (this.feature.sections = s), initial)];
     if (existing?.guide) this.slots.push(this.guideSlot());
+  }
+
+  private continuityItems(): PanelItem[] {
+    const f = this.feature;
+    const opts = [
+      { id: "free", label: "Free" },
+      { id: "g1", label: "Tangent (G1)" },
+      { id: "g2", label: "Smooth (G2)" },
+    ];
+    const end = (which: "start" | "end"): PanelItem[] => {
+      const key = which === "start" ? "startContinuity" : "endContinuity";
+      const wkey = which === "start" ? "startWeight" : "endWeight";
+      const on = f[key];
+      return [
+        {
+          type: "choice",
+          label: which === "start" ? "Start" : "End",
+          options: opts,
+          value: on ?? "free",
+          onChange: (v) => ((f[key] = v === "free" ? undefined : (v as "g1" | "g2")), this.render(), this.update()),
+        },
+        ...(on
+          ? [{ type: "slider" as const, label: "Magnitude", value: f[wkey] ?? 1, min: 0.1, max: 3, step: 0.05, show: (v: number) => v.toFixed(2), onInput: (v: number) => ((f[wkey] = v === 1 ? undefined : v), this.update()) }]
+          : []),
+      ];
+    };
+    return [...end("start"), ...end("end")];
   }
 
   /** The optional guide: a curve the body follows from profile to profile. */
@@ -948,6 +1005,8 @@ export class LoftOp extends FeatureOp<LoftFeature> {
     return [
       ...(f.closed || guided ? [] : [{ type: "toggle" as const, label: "Straight sides", value: f.ruled, onChange: (v: boolean) => ((f.ruled = v), this.render(), this.update()) }]),
       { type: "toggle", label: "Closed loop", value: !!f.closed, onChange: (v) => ((f.closed = v || undefined), this.render(), this.update()) },
+      // How it leaves the first shape and meets the last (free, tangent, or smoother still).
+      ...(f.closed || guided || f.ruled ? [] : this.continuityItems()),
       {
         type: "button",
         label: guided ? "Remove guide" : "Add guide",

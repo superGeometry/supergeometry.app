@@ -274,6 +274,12 @@ export interface SweepFeature extends FeatureBase {
   scale?: number;
   /** Degrees the profile turns round the path from start to end, evenly along it (0 or missing: none). */
   twist?: number;
+  /** Where the profile starts: where it is (auto), or moved onto the path's nearer end, square to it (start). */
+  position?: "auto" | "start";
+  /** The profile turns with the path (normal, the default) or keeps facing the same way (parallel). */
+  orientation?: "normal" | "parallel";
+  /** At a sharp corner of the path: rounded (the default) or mitred. */
+  corner?: "round" | "mitre";
 }
 
 export interface LoftFeature extends FeatureBase {
@@ -286,6 +292,12 @@ export interface LoftFeature extends FeatureBase {
   closed?: boolean;
   /** A curve the body follows from profile to profile (its centre line). */
   guide?: PathRef;
+  /** How the body leaves the first profile and meets the last: straight out of it (G1, tangent) or smoother still (G2); missing: free. */
+  startContinuity?: "g1" | "g2";
+  endContinuity?: "g1" | "g2";
+  /** How far that pull reaches (1: a quarter of the way to the next profile). */
+  startWeight?: number;
+  endWeight?: number;
 }
 
 export interface ShellFeature extends FeatureBase {

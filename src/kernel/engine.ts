@@ -1125,11 +1125,16 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       const k = f.scale ?? 1;
       if (!(k > 0)) throw new Error("The end size must be more than 0");
       const twist = f.twist ?? 0;
+      const parallel = f.orientation === "parallel";
+      if (parallel && Math.abs(twist) > 1e-9) throw new Error("A twist turns the profile with the path: set Orientation to Normal to path");
+      const corner = f.corner === "mitre" ? "right" : "round";
+      // Moved onto the path: its centre to the path's nearer end, turned square to the path there.
+      const place = f.position === "start" ? onPathStart(sourceFaces(f.source, ctx), spine) : null;
       // Along a straight line square to the profiles, from one of its ends,
       // unturned and the same size all the way: an extrusion, made as one (the
       // sweep's faces looked the same but wouldn't take a chamfer round a
       // gear's teeth that the extrusion's took).
-      const ends = Math.abs(k - 1) < 1e-9 && Math.abs(twist) < 1e-9 ? straightRun(spine) : null;
+      const ends = Math.abs(k - 1) < 1e-9 && Math.abs(twist) < 1e-9 && !place ? straightRun(spine) : null;
       if (ends) {
         const faces = sourceFaces(f.source, ctx);
         const [a, b] = ends;
@@ -1149,11 +1154,14 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           return;
         }
       }
-      const parts = withHoles(f.source, ctx, (w, outer) => {
+      const parts = withHoles(f.source, ctx, (w0, outer0) => {
+        const w = place ? place(w0) : w0;
+        const outer = place ? place(outer0) : outer0;
         const law = Math.abs(k - 1) > 1e-9 ? scaleLaw(spine, k) : null;
+        if (parallel) return flatFaces(fixedSweep(w, spine, corner, law));
         // A circle round the path's start, square to it, is the same twisted or not (a gear's bore): swept
         // plainly it stays a true cylinder (twisted, a spline with a winding seam that threads couldn't use).
-        if (Math.abs(twist) < 1e-9 || roundAboutPath(w, spine)) return flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: "round", law }) as Shape3D);
+        if (Math.abs(twist) < 1e-9 || roundAboutPath(w, spine)) return flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: corner, law }) as Shape3D);
         // Twisted: the profile's sideways direction follows a curve wound round the path.
         const reach = Math.max(1, len(sub(...(outer.boundingBox.bounds as [Vec3, Vec3]))));
         try {
@@ -1184,7 +1192,12 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // The same profile picked twice counts once.
       order = order.filter((i, k) => k === 0 || JSON.stringify(f.sections[i]) !== JSON.stringify(f.sections[order[k - 1]]));
       if (order.length < 2) throw new Error("Pick at least two different profiles");
-      const wires = order.map((i) => sourceWires(f.sections[i], ctx)[0]);
+      let wires = order.map((i) => sourceWires(f.sections[i], ctx)[0]);
+      if ((f.startContinuity || f.endContinuity) && !f.guide && !f.closed) {
+        if (f.ruled) throw new Error("Straight sides can't also leave a profile smoothly: switch off Straight sides");
+        const nrm = order.map((i) => frames[i].normal);
+        wires = withEndPulls(wires, nrm, f.startContinuity, f.startWeight ?? 1, f.endContinuity, f.endWeight ?? 1);
+      }
       let shape: Shape3D;
       if (f.guide || f.closed) {
         if (f.closed && wires.length < 3 && !f.guide) throw new Error("A closed loop needs at least three profiles");
@@ -2186,6 +2199,80 @@ function helicalSweep(wire: Wire, origin: Vec3, dir: Vec3, angle: number, travel
     builder.delete();
     bi.delete();
   }
+}
+
+/** Sweep a profile along a path without turning it (Orientation: Parallel to profile). */
+function fixedSweep(wire: Wire, spine: Wire, corner: "round" | "right", law: ReturnType<typeof scaleLaw> | null): Shape3D {
+  const oc = getOC();
+  const builder = new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped);
+  const p = new oc.gp_Pnt(0, 0, 0);
+  const d = new oc.gp_Dir(0, 0, 1);
+  const ax = new oc.gp_Ax2(p, d);
+  try {
+    builder.SetMode(ax);
+    builder.SetTransitionMode(corner === "right" ? oc.BRepBuilderAPI_TransitionMode.BRepBuilderAPI_RightCorner : oc.BRepBuilderAPI_TransitionMode.BRepBuilderAPI_RoundCorner);
+    if (law) builder.SetLaw(wire.wrapped, law, false, false);
+    else builder.Add(wire.wrapped, false, false);
+    builder.Build();
+    if (!builder.IsDone()) throw new Error("The profile can't be swept along this path facing the same way - try Normal to path");
+    builder.MakeSolid();
+    const shape = cast(builder.Shape());
+    if (!isShape3D(shape)) throw new Error("The profile can't be swept along this path facing the same way - try Normal to path");
+    return shape;
+  } finally {
+    builder.delete();
+    ax.delete();
+    p.delete();
+    d.delete();
+  }
+}
+
+/**
+ * Profile Position "start": a function that moves a wire of the profile so
+ * the profile's centre is on the path's end nearer to it, and turns it square
+ * to the path there (its normal along the path, pointing on along it).
+ */
+function onPathStart(faces: { face: Face; normal: Vec3 }[], spine: Wire): (w: Wire) => Wire {
+  if (!faces.length) return (w) => w;
+  const c = faces[0].face.center.toTuple() as Vec3;
+  const n = norm(faces[0].normal);
+  const a = spine.startPoint.toTuple() as Vec3;
+  const b = spine.endPoint.toTuple() as Vec3;
+  const atStart = dist(c, a) <= dist(c, b);
+  const p = atStart ? a : b;
+  // On along the path, from that end.
+  let t = norm(spine.tangentAt(atStart ? 0 : 1).toTuple() as Vec3);
+  if (!atStart) t = scale(t, -1);
+  // The profile's side that faces along the path stays its front (n·t > 0 after turning).
+  const from = dot(n, t) < 0 ? scale(n, -1) : n;
+  const axis = cross(from, t);
+  const s = len(axis);
+  const angle = (Math.atan2(s, dot(from, t)) * 180) / Math.PI;
+  return (w) => {
+    let out = w.clone();
+    if (s > 1e-9 && Math.abs(angle) > 1e-9) out = out.rotate(angle, c, scale(axis, 1 / s));
+    return out.translate(sub(p, c));
+  };
+}
+
+/**
+ * Loft end continuity: copies of the first (last) profile set a little way
+ * along its normal, towards the next one, so the smooth loft leaves it
+ * straight out (G1); a second copy further on holds the curve too (G2).
+ */
+function withEndPulls(wires: Wire[], normals: Vec3[], start: "g1" | "g2" | undefined, sw: number, end: "g1" | "g2" | undefined, ew: number): Wire[] {
+  const centre = (w: Wire) => w.boundingBox.center as Vec3;
+  const pulls = (w: Wire, n: Vec3, next: Wire, kind: "g1" | "g2", weight: number): Wire[] => {
+    const toward = sub(centre(next), centre(w));
+    const gap = Math.abs(dot(toward, n)) || len(toward);
+    const dir = dot(toward, n) < 0 ? scale(n, -1) : n;
+    const d = (gap * 0.25 * Math.max(weight, 0.05)) / (kind === "g2" ? 2 : 1);
+    return (kind === "g2" ? [1, 2] : [1]).map((k) => w.clone().translate(scale(dir, d * k)));
+  };
+  const last = wires.length - 1;
+  const head = start ? pulls(wires[0], norm(normals[0]), wires[1], start, sw) : [];
+  const tail = end ? pulls(wires[last], norm(normals[last]), wires[last - 1], end, ew).reverse() : [];
+  return [wires[0], ...head, ...wires.slice(1, last), ...tail, wires[last]];
 }
 
 /** Sweep a profile along a path, keeping it square to `up` (a helix: the profile stays in planes through the axis). */
