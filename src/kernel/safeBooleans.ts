@@ -24,7 +24,7 @@ function run(kind: "fuse" | "cut" | "common", a: { wrapped: unknown }, b: { wrap
     if (opts.optimisation === "sameFace") algo.SetGlue(oc.BOPAlgo_GlueEnum.BOPAlgo_GlueFull);
     algo.Build(new oc.Message_ProgressRange());
     if (opts.simplify !== false) algo.SimplifyResult(true, true, 0.001);
-    const out = cast(algo.Shape());
+    const out = cast(withoutInternals(algo.Shape()));
     if (!isShape3D(out)) throw new Error(`Could not ${kind} as a 3d shape`);
     return out;
   } finally {
@@ -32,6 +32,36 @@ function run(kind: "fuse" | "cut" | "common", a: { wrapped: unknown }, b: { wrap
     args.delete();
     tools.delete();
   }
+}
+
+/**
+ * A boolean's result without the edges (and points) it left lying in a face,
+ * bounding nothing: where an edge of one shape ran along a face of the other
+ * (a prism's corner standing against a block's wall), the join kept it there
+ * as a line across the wall - an edge with no face on its other side, taken
+ * for a gap ("would tear the body open") though the solid was closed.
+ * (Only faces the boolean made anew hold such edges: the shapes it was given
+ * stay as they were.)
+ */
+export function withoutInternals<T>(wrapped: T): T {
+  const oc = getOC();
+  const INTERNAL = oc.TopAbs_Orientation.TopAbs_INTERNAL;
+  const has = (kind: unknown): boolean => {
+    const ex = new oc.TopExp_Explorer(wrapped as never, kind as never, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+    try {
+      for (; ex.More(); ex.Next()) if (ex.Current().Orientation() === INTERNAL) return true;
+      return false;
+    } finally {
+      ex.delete();
+    }
+  };
+  try {
+    if ((wrapped as { IsNull?: () => boolean } | null)?.IsNull?.() !== false) return wrapped;
+    if (has(oc.TopAbs_ShapeEnum.TopAbs_EDGE) || has(oc.TopAbs_ShapeEnum.TopAbs_VERTEX)) oc.BRepTools.RemoveInternals(wrapped as never, false);
+  } catch {
+    // As it came: the usual checks speak for it.
+  }
+  return wrapped;
 }
 
 let done = false;

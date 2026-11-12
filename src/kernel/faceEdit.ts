@@ -6,7 +6,7 @@
 // the body is on (planes → half-spaces, cylinders → infinite cylinders). Changing
 // F then only means adding/removing the right slab of E.
 
-import { assembleWire, basicFaceExtrusion, getOC, loft, makeFace, makeBSplineApproximation, makeCylinder, makeLine, makePolygon, makeSphere, measureArea, cast, Vector, type Face, type Shape3D } from "replicad";
+import { assembleWire, basicFaceExtrusion, getOC, loft, makeFace, makeBSplineApproximation, makeCylinder, makeLine, makePolygon, makeSphere, measureArea, cast, Vector, type Edge, type Face, type Shape3D } from "replicad";
 import { measureVolume } from "./ocFree";
 import type { PlaneDef, Vec3 } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, xDirFor } from "../geom";
@@ -514,7 +514,7 @@ export function replaceFacePlane(body: Shape3D, F: Face, to: PlaneDef): Shape3D 
   // (the half-space trick would clip it to its convex part).
   const old = planeOf(F);
   const nn = norm(to.normal);
-  if (Math.abs(dot(nn, old.normal)) > 1 - 1e-9 && !convexFace(F)) {
+  if (Math.abs(dot(nn, old.normal)) > 1 - 1e-9 && !convexFace(F) && !F.clone().innerWires().length) {
     const d = dot(sub(to.origin, old.origin), old.normal);
     if (Math.abs(d) < 1e-12) return body;
     try {
@@ -842,106 +842,113 @@ function offsetByContinuation(body: Shape3D, F: Face, d: number): Shape3D {
   const size = sizeOf(body);
   const tol = size * 1e-6;
   const nbrs = neighbours(body, F);
-  // F's outline as a loop of edges, end to end.
-  const edges = F.clone().outerWire().edges;
-  const ends = (e: { startPoint: { toTuple(): number[] }; endPoint: { toTuple(): number[] } }): [Vec3, Vec3] => [e.startPoint.toTuple() as Vec3, e.endPoint.toTuple() as Vec3];
-  const order: { k: number; rev: boolean }[] = [{ k: 0, rev: false }];
-  const used = new Set([0]);
-  let at = ends(edges[0])[1];
-  while (used.size < edges.length) {
-    const k = edges.findIndex((e, i) => !used.has(i) && ends(e).some((q) => dist(q, at) < tol * 10));
-    if (k < 0) throw new Error("outline not closed");
-    used.add(k);
-    const [a, b] = ends(edges[k]);
-    const rev = dist(b, at) < dist(a, at);
-    order.push({ k, rev });
-    at = rev ? a : b;
-  }
-  // Where a point on edge k goes: along its neighbour, across the edge, out of F's plane.
-  // Cutting: the cutter reaches a hair past the walls and above F, so no sliver stays on the coincident surfaces.
-  const eps = d < 0 ? size * 1e-4 : 0;
-  const outward = (k: number, t: number): Vec3 => {
-    const e = edges[k];
-    const g = nbrs.find((h) => h.edges.some((he) => he.isSame(e)))!;
-    const ng = norm(tup(g.normalAt(tup(e.pointAt(t)))));
-    const flat = sub(ng, scale(n, dot(ng, n)));
-    return len(flat) < 1e-9 ? [0, 0, 0] : scale(norm(flat), eps);
-  };
-  const movedAt = (k: number, t: number): Vec3 => {
-    const e = edges[k];
-    const g = nbrs.find((h) => h.edges.some((he) => he.isSame(e)));
-    if (!g) throw new Error("no neighbour");
-    const p = tup(e.pointAt(t));
-    const dt = 1e-3;
-    const tangent = norm(sub(tup(e.pointAt(Math.min(1, t + dt))), tup(e.pointAt(Math.max(0, t - dt)))));
-    // Just inside the edge on g: its normal there (exactly on the edge it can be the other face's).
-    const ng = norm(tup(g.normalAt(p)));
-    let dir = norm(cross(ng, tangent));
-    if (dot(dir, n) < 0) dir = scale(dir, -1);
-    const rise = dot(dir, n);
-    if (rise < 0.15) throw new Error("neighbour runs along the face");
-    return add(add(p, scale(dir, d / rise)), outward(k, t));
-  };
-  const liftedAt = (k: number, t: number): Vec3 => add(add(tup(edges[k].pointAt(t)), scale(n, eps)), outward(k, t));
-  // Corners: shared by two edges. Where the two neighbours meet along an edge
-  // of the body (a box's corner edge), the corner slides along that edge to
-  // the new plane - it stays on both neighbours. Each neighbour on its own
-  // would move it its own way (a wall at 45° and one square to F disagree,
-  // and halfway between them leaves both: slanted slivers stood up as fins).
-  // Without such an edge: halfway between their two estimates.
-  const m = order.length;
-  const fEdges = F.edges;
-  const bodyEdges = body.edges.filter((e) => !fEdges.some((fe) => fe.isSame(e)));
-  const alongEdge = (v: Vec3): Vec3 | null => {
-    for (const e of bodyEdges) {
-      const [a, b] = ends(e);
-      const atStart = dist(a, v) < tol * 10;
-      if (!atStart && dist(b, v) >= tol * 10) continue;
-      const dt = 1e-3;
-      const q = tup(e.pointAt(atStart ? dt : 1 - dt));
-      const dir = norm(sub(q, v));
-      const rise = dot(dir, n);
-      if (Math.abs(rise) < 0.15) continue;
-      return add(v, scale(dir, d / rise));
+  // The slab between one of F's outlines (its outer one, or a hole's) and
+  // where that outline goes: the outline as a loop of edges, end to end.
+  const column = (edges: Edge[]): Shape3D => {
+    const ends = (e: { startPoint: { toTuple(): number[] }; endPoint: { toTuple(): number[] } }): [Vec3, Vec3] => [e.startPoint.toTuple() as Vec3, e.endPoint.toTuple() as Vec3];
+    const order: { k: number; rev: boolean }[] = [{ k: 0, rev: false }];
+    const used = new Set([0]);
+    let at = ends(edges[0])[1];
+    while (used.size < edges.length) {
+      const k = edges.findIndex((e, i) => !used.has(i) && ends(e).some((q) => dist(q, at) < tol * 10));
+      if (k < 0) throw new Error("outline not closed");
+      used.add(k);
+      const [a, b] = ends(edges[k]);
+      const rev = dist(b, at) < dist(a, at);
+      order.push({ k, rev });
+      at = rev ? a : b;
     }
-    return null;
+    // Where a point on edge k goes: along its neighbour, across the edge, out of F's plane.
+    // Cutting: the cutter reaches a hair past the walls and above F, so no sliver stays on the coincident surfaces.
+    const eps = d < 0 ? size * 1e-4 : 0;
+    const outward = (k: number, t: number): Vec3 => {
+      const e = edges[k];
+      const g = nbrs.find((h) => h.edges.some((he) => he.isSame(e)))!;
+      const ng = norm(tup(g.normalAt(tup(e.pointAt(t)))));
+      const flat = sub(ng, scale(n, dot(ng, n)));
+      return len(flat) < 1e-9 ? [0, 0, 0] : scale(norm(flat), eps);
+    };
+    const movedAt = (k: number, t: number): Vec3 => {
+      const e = edges[k];
+      const g = nbrs.find((h) => h.edges.some((he) => he.isSame(e)));
+      if (!g) throw new Error("no neighbour");
+      const p = tup(e.pointAt(t));
+      const dt = 1e-3;
+      const tangent = norm(sub(tup(e.pointAt(Math.min(1, t + dt))), tup(e.pointAt(Math.max(0, t - dt)))));
+      // Just inside the edge on g: its normal there (exactly on the edge it can be the other face's).
+      const ng = norm(tup(g.normalAt(p)));
+      let dir = norm(cross(ng, tangent));
+      if (dot(dir, n) < 0) dir = scale(dir, -1);
+      const rise = dot(dir, n);
+      if (rise < 0.15) throw new Error("neighbour runs along the face");
+      return add(add(p, scale(dir, d / rise)), outward(k, t));
+    };
+    const liftedAt = (k: number, t: number): Vec3 => add(add(tup(edges[k].pointAt(t)), scale(n, eps)), outward(k, t));
+    // Corners: shared by two edges. Where the two neighbours meet along an edge
+    // of the body (a box's corner edge), the corner slides along that edge to
+    // the new plane - it stays on both neighbours. Each neighbour on its own
+    // would move it its own way (a wall at 45° and one square to F disagree,
+    // and halfway between them leaves both: slanted slivers stood up as fins).
+    // Without such an edge: halfway between their two estimates.
+    const m = order.length;
+    const fEdges = F.edges;
+    const bodyEdges = body.edges.filter((e) => !fEdges.some((fe) => fe.isSame(e)));
+    const alongEdge = (v: Vec3): Vec3 | null => {
+      for (const e of bodyEdges) {
+        const [a, b] = ends(e);
+        const atStart = dist(a, v) < tol * 10;
+        if (!atStart && dist(b, v) >= tol * 10) continue;
+        const dt = 1e-3;
+        const q = tup(e.pointAt(atStart ? dt : 1 - dt));
+        const dir = norm(sub(q, v));
+        const rise = dot(dir, n);
+        if (Math.abs(rise) < 0.15) continue;
+        return add(v, scale(dir, d / rise));
+      }
+      return null;
+    };
+    const corner: Vec3[] = order.map(({ k, rev }, i) => {
+      const prev = order[(i - 1 + m) % m];
+      const a = movedAt(k, rev ? 1 : 0);
+      const b = movedAt(prev.k, prev.rev ? 0 : 1);
+      const v = ends(edges[k])[rev ? 1 : 0];
+      return alongEdge(v) ?? scale(add(a, b), 0.5);
+    });
+    const lowerCorner: Vec3[] = order.map(({ k, rev }) => liftedAt(k, rev ? 1 : 0));
+    const lowerEdges = eps
+      ? order.map(({ k, rev }, i) => {
+          // Cutting: F's outline nudged up and out (see eps).
+          const c0 = lowerCorner[i];
+          const c1 = lowerCorner[(i + 1) % m];
+          if (edges[k].geomType === "LINE") return makeLine(c0, c1);
+          const pts: Vec3[] = [];
+          for (let j = 0; j <= 24; j++) pts.push(liftedAt(k, rev ? 1 - j / 24 : j / 24));
+          pts[0] = c0;
+          pts[24] = c1;
+          return makeBSplineApproximation(pts, { tolerance: size * 1e-6, degMax: 5, degMin: 2 });
+        })
+      : order.map(({ k }) => edges[k].clone());
+    const upperEdges = order.map(({ k, rev }, i) => {
+      const e = edges[k];
+      const c0 = corner[i];
+      const c1 = corner[(i + 1) % m];
+      if (e.geomType === "LINE") return makeLine(c0, c1);
+      // A curved edge: a smooth curve through its moved points.
+      const pts: Vec3[] = [];
+      for (let j = 0; j <= 24; j++) pts.push(movedAt(k, rev ? 1 - j / 24 : j / 24));
+      pts[0] = c0;
+      pts[24] = c1;
+      return makeBSplineApproximation(pts, { tolerance: size * 1e-6, degMax: 5, degMin: 2 });
+    });
+    const a = assembleWire(lowerEdges);
+    const b = assembleWire(upperEdges);
+    return loft(d > 0 ? [a, b] : [b, a], { ruled: true }) as Shape3D;
   };
-  const corner: Vec3[] = order.map(({ k, rev }, i) => {
-    const prev = order[(i - 1 + m) % m];
-    const a = movedAt(k, rev ? 1 : 0);
-    const b = movedAt(prev.k, prev.rev ? 0 : 1);
-    const v = ends(edges[k])[rev ? 1 : 0];
-    return alongEdge(v) ?? scale(add(a, b), 0.5);
-  });
-  const lowerCorner: Vec3[] = order.map(({ k, rev }) => liftedAt(k, rev ? 1 : 0));
-  const lowerEdges = eps
-    ? order.map(({ k, rev }, i) => {
-        // Cutting: F's outline nudged up and out (see eps).
-        const c0 = lowerCorner[i];
-        const c1 = lowerCorner[(i + 1) % m];
-        if (edges[k].geomType === "LINE") return makeLine(c0, c1);
-        const pts: Vec3[] = [];
-        for (let j = 0; j <= 24; j++) pts.push(liftedAt(k, rev ? 1 - j / 24 : j / 24));
-        pts[0] = c0;
-        pts[24] = c1;
-        return makeBSplineApproximation(pts, { tolerance: size * 1e-6, degMax: 5, degMin: 2 });
-      })
-    : order.map(({ k }) => edges[k].clone());
-  const upperEdges = order.map(({ k, rev }, i) => {
-    const e = edges[k];
-    const c0 = corner[i];
-    const c1 = corner[(i + 1) % m];
-    if (e.geomType === "LINE") return makeLine(c0, c1);
-    // A curved edge: a smooth curve through its moved points.
-    const pts: Vec3[] = [];
-    for (let j = 0; j <= 24; j++) pts.push(movedAt(k, rev ? 1 - j / 24 : j / 24));
-    pts[0] = c0;
-    pts[24] = c1;
-    return makeBSplineApproximation(pts, { tolerance: size * 1e-6, degMax: 5, degMin: 2 });
-  });
-  const a = assembleWire(lowerEdges);
-  const b = assembleWire(upperEdges);
-  const slab = loft(d > 0 ? [a, b] : [b, a], { ruled: true });
+  let slab = column(F.clone().outerWire().edges);
+  // A hole in F (or something standing on it): the slab stops at its walls,
+  // carried on the same way. (Over the whole outline, a top pulled up closed
+  // the hole through it with a lid; pushed down, it cut a boss off at its foot.)
+  for (const hole of F.clone().innerWires()) slab = slab.cut(column(hole.edges)) as Shape3D;
   const out = d > 0 ? body.fuse(slab) : body.cut(slab);
   return sanity(body, out);
 }
@@ -951,11 +958,28 @@ export function offsetFace(body: Shape3D, F: Face, d: number): Shape3D {
   // Curved neighbours, or a face with inward corners (a zigzag, an L): the
   // half-space trick would clip it to its convex part, so each edge carries on
   // along its own neighbour instead.
-  if (F.geomType === "PLANE" && (needsContinuation(body, F) || !convexFace(F))) {
+  // (A face with holes whose neighbours are flat or stand upright: the plane
+  // trick first - it takes each hole's own walls on as they are, a round one
+  // staying one true cylinder. Edge by edge is the way for it only if that fails.)
+  const holed = F.geomType === "PLANE" && F.clone().innerWires().length > 0;
+  const curved = F.geomType === "PLANE" && needsContinuation(body, F);
+  if (F.geomType === "PLANE" && (curved || (!holed && !convexFace(F)))) {
     try {
       return offsetByContinuation(body, F, d);
     } catch {
       // fall through to the plane trick
+    }
+  }
+  if (holed && !curved) {
+    const { origin, normal } = planeOf(F);
+    try {
+      return replaceFacePlane(body, F, { origin: add(origin, scale(normal, d)), normal, xDir: xDirFor(normal) });
+    } catch (err) {
+      try {
+        return offsetByContinuation(body, F, d);
+      } catch {
+        throw err;
+      }
     }
   }
   if (F.geomType === "PLANE") {

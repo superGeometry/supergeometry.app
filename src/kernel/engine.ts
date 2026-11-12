@@ -13,6 +13,7 @@ import {
   importSTEP,
   loft,
   makeCompound,
+  makeBox,
   iterTopo,
   makeBSplineApproximation,
   makeBezierCurve,
@@ -65,7 +66,7 @@ import { deepCopy, hairThin, meshVolume, openEdges, shapeValid, subShapes } from
 import { healthOf, isHealthy, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
-import { useSafeBooleans } from "./safeBooleans";
+import { useSafeBooleans, withoutInternals } from "./safeBooleans";
 import { areaProperties, measureArea as trueArea, measureVolume, normalOnEdge, surfaceAt, volumeProperties } from "./ocFree";
 import { loftInLine } from "./loftAlign";
 import { railLoft } from "./loftRails";
@@ -73,7 +74,7 @@ import { edgeOrigins, edgeSteps, faceAliases, faceOrigins, faceSteps, inheritTag
 import { closestOnEntity } from "../sketch/regions";
 
 import { cylinderOf, deleteFace,
- deleteFaces as deleteBodyFaces, editNotes, freeformFace, sameSizesAgain, sheetFace, hasBlends, offsetFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
+ deleteFaces as deleteBodyFaces, editNotes, freeformFace, sameSizesAgain, sheetFace, hasBlends, offsetFace, onFace as pointOnFace, planeOf, replaceFacePlane, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { anchorOf, freeformFaces, meshViews, viewEdge } from "./viewLines";
 import { entitiesWire, regionFaces, regionHoleWires, regionWire, withFittedSplines } from "./sketchGeom";
@@ -887,7 +888,14 @@ async function run(features: Feature[], saved = false) {
               if (before && (out.freeforms.has(id) || ctx.freeforms.has(id)) && !subShapes(before, "SOLID").length) continue;
               // Offsetting a face of the body itself is a face move: it doesn't split it either.
               const inPlace = f.type === "extrude" && f.source.kind === "face" && f.mode !== "new" && f.target === f.source.face.body;
-              const kept = guardEdit(before, after, !NO_SPLIT.has(f.type) && !inPlace);
+              let kept: Shape3D | null;
+              try {
+                kept = guardEdit(before, after, !NO_SPLIT.has(f.type) && !inPlace);
+              } catch (err) {
+                // A shell that came out torn or broken: its walls ran into each other ("would tear the body open" said nothing of walls).
+                if (f.type !== "shell" || isFault(err)) throw err;
+                throw new Error(/break the body into pieces/.test(errorText(err)) ? SHELL_LOOSE : WALLS_CLASH);
+              }
               // Cut away to dust: the body is gone.
               if (kept) out.bodies.set(id, kept);
               else out.bodies.delete(id);
@@ -1326,32 +1334,63 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         return;
       }
       // Positive thickness shells inward (negative grows outward with rounded corners).
+      const t = Math.abs(f.thickness);
       const v0 = Math.abs(measureVolume(body));
-      const hollowed = (s: Shape3D | null) => !!s && Math.abs(Math.abs(measureVolume(s)) - v0) > 1e-6 * v0;
-      let out: Shape3D | null = null;
-      // No face picked: a closed hollow (a sealed void inside a wall). The one-step
-      // shell gives only the inner core back then (a battery case came out solid).
-      if (!faces.length) out = shellByOffset(body, [], Math.abs(f.thickness));
-      else
-        try {
-          out = body.shell(Math.abs(f.thickness), (finder) => finder.inList(faces));
-        } catch {
-          out = null;
-        }
-      // Many-faced shapes trip the one-step shell: hollow with an offset copy
-      // of the body instead, then cut the openings through.
-      if (!hollowed(out)) out = shellByOffset(body, faces, Math.abs(f.thickness));
-      // A wall exactly as thick as the corners are round (2 mm walls in a box
-      // with 2 mm corners): the inside corners shrink to nothing, and that
-      // exact case defeats both. A hair thicker gives the sharp inside corner
+      const hollowed = (s: Shape3D | null): s is Shape3D => !!s && Math.abs(Math.abs(measureVolume(s)) - v0) > 1e-6 * v0;
+      // A shell to trust: hollow, a sound solid, a wall behind every face it
+      // kept and nothing left deep inside. OpenCascade can "succeed" without
+      // hollowing anything, or hollowing only a corner of it - or hollow it
+      // and leave a wall out: where two faces are closer together than two
+      // walls (a pocket 1.7 mm from a hole, 1 mm walls) it dropped the
+      // pocket's walls without a word, the pocket a window into the hollow.
+      const kept = body.faces.filter((g) => !faces.some((h) => h.isSame(g)));
+      const gaps = openEdges(body).length;
+      const good = (s: Shape3D | null): s is Shape3D => hollowed(s) && shapeValid(s) && openEdges(s).length <= gaps && wallsStand(body, s, kept, t) && hollowInside(body, s, kept, t);
+      // The ways there are, in turn: in one step (no face picked: that gives
+      // only the inner core back - a battery case came out solid); hollowed
+      // with an offset copy of the body, the openings cut through (many-faced
+      // shapes trip the one-step shell); and that a hair thicker - a wall
+      // exactly as thick as the corners are round (2 mm walls in a box with
+      // 2 mm corners) has inside corners that shrink to nothing, and that
+      // exact case defeats both: a hair thicker gives the sharp inside corner
       // it should have.
-      for (const k of [1 + 1e-4, 1 + 1e-3]) {
-        if (hollowed(out) || !faces.length) break;
-        out = shellByOffset(body, faces, Math.abs(f.thickness) * k);
+      const ways: (() => Shape3D | null)[] = [
+        () => {
+          if (!faces.length) return null;
+          try {
+            return body.shell(t, (finder) => finder.inList(faces));
+          } catch {
+            return null;
+          }
+        },
+        () => shellByOffset(body, faces, t),
+        ...(faces.length ? [1 + 1e-4, 1 + 1e-3].map((k) => () => shellByOffset(body, faces, t * k)) : []),
+      ];
+      let out: Shape3D | null = null;
+      let rough: Shape3D | null = null;
+      for (const way of ways) {
+        const made = way();
+        if (good(made)) {
+          out = made;
+          break;
+        }
+        // (Hollow, but torn or broken: put right below, if nothing better comes.)
+        if (hollowed(made)) rough ??= made;
       }
-      // OpenCascade can "succeed" without hollowing anything: say so.
-      if (!hollowed(out)) throw new Error("Shell didn't work on this shape (try a smaller thickness)");
-      bodies.set(f.body, out!);
+      if (!out && rough) {
+        // Put right as any edit's result is - and then held to the same: a
+        // broken shell "repaired" came out sound and a sixth too light, the
+        // walls round two bores gone.
+        const fixed = repairShape(rough, { maxSolids: Math.max(1, subShapes(body, "SOLID").length) });
+        if (fixed && good(fixed.shape)) {
+          if (fixed.fixes.length) editNotes.push(`Repaired automatically: ${fixed.fixes.join(", ")}.`);
+          out = fixed.shape;
+        }
+      }
+      // (A pocket or a blind hole cut into the face being opened hangs from that face alone.)
+      const loose = faces.some((g) => g.clone().innerWires().length > 0);
+      if (!out) throw new Error(!rough ? "Shell didn't work on this shape (try a smaller thickness)" : loose ? `${WALLS_CLASH} - or what is cut into the opened face would be left standing loose (open another face)` : WALLS_CLASH);
+      bodies.set(f.body, out);
       return;
     }
 
@@ -2548,6 +2587,107 @@ export function threadFace(body: Shape3D, face: Face, pitch: number, left = fals
   throw new Error(pitch < 0.1 * cy.r ? "The thread couldn't be cut here - try a coarser pitch" : "The thread couldn't be cut here - try a slightly different pitch");
 }
 
+/** A shell in pieces: what was cut into the opened face hung from that face alone. */
+const SHELL_LOOSE = "Opening this face would leave what is cut into it (a pocket, a blind hole) standing loose from the rest - open another face";
+const WALLS_CLASH =
+  "Walls this thick don't fit everywhere: somewhere two faces are closer together than two walls (a hole near a side, a pocket near a hole), and their walls would run into each other - try a thinner wall";
+
+/**
+ * Does a shell have a wall behind every face it kept? Small cubes half a wall
+ * deep behind spots spread over each face (all of a cube within a wall's
+ * thickness of the face, so in the wall wherever it is in the body): as much
+ * of the cubes must be in the shell as is in the body. (Two joins with all
+ * the cubes at once; 600 cubes at most, shared out among the faces.)
+ */
+function wallsStand(body: Shape3D, shell: Shape3D, kept: Face[], t: number): boolean {
+  if (!kept.length || !(t > 0)) return true;
+  try {
+    const each = Math.max(1, Math.min(6, Math.floor(600 / kept.length)));
+    const every = Math.ceil(kept.length / 600);
+    const h = t / 6;
+    const cubes: Shape3D[] = [];
+    for (const [i, g] of kept.entries()) {
+      if (i % every) continue;
+      for (const { p, n } of spotsOn(body, g, each)) {
+        const c = sub(p, scale(n, t / 2));
+        cubes.push(makeBox([c[0] - h, c[1] - h, c[2] - h], [c[0] + h, c[1] + h, c[2] + h]) as Shape3D);
+      }
+    }
+    if (!cubes.length) return true;
+    const probes = cubes.length === 1 ? cubes[0] : (makeCompound(cubes) as unknown as Shape3D);
+    const inBody = body.intersect(probes);
+    const want = isEmpty(inBody) ? 0 : Math.abs(measureVolume(inBody));
+    if (!(want > 0)) return true;
+    const inShell = shell.intersect(probes);
+    const got = isEmpty(inShell) ? 0 : Math.abs(measureVolume(inShell));
+    return got >= want * (1 - 1e-3);
+  } catch {
+    // Can't tell: the usual checks speak for it.
+    return true;
+  }
+}
+
+/** Up to `n` points spread over a face (the middles of triangles of its mesh, taken evenly through them), each with the face's outward normal there. */
+function spotsOn(body: Shape3D, face: Face, n: number): { p: Vec3; n: Vec3 }[] {
+  const one = () => [pointOnFace(body, face)];
+  if (n <= 1) return one();
+  let tri = face.triangulation();
+  if (!tri || !tri.trianglesIndexes.length) {
+    body.mesh({ tolerance: sizeOf(body) * 1e-3, angularTolerance: 0.3 });
+    tri = face.triangulation();
+  }
+  if (!tri || !tri.trianglesIndexes.length) return one();
+  const count = tri.trianglesIndexes.length / 3;
+  const v = (i: number): Vec3 => [tri!.vertices[3 * i], tri!.vertices[3 * i + 1], tri!.vertices[3 * i + 2]];
+  const out: { p: Vec3; n: Vec3 }[] = [];
+  for (let k = 0; k < Math.min(n, count); k++) {
+    const at = Math.floor(((k + 0.5) * count) / Math.min(n, count)) * 3;
+    const [a, b, c] = [0, 1, 2].map((j) => v(tri!.trianglesIndexes[at + j]));
+    const p = scale(add(add(a, b), c), 1 / 3);
+    try {
+      out.push({ p, n: norm(face.normalAt(p).toTuple() as Vec3) });
+    } catch {
+      // (A spot the surface gives no normal at: the others will do.)
+    }
+  }
+  return out.length ? out : one();
+}
+
+/**
+ * Is a shell hollow where it should be? Spots three walls deep behind its
+ * faces that are well clear of every face of the body (more than two walls:
+ * past the sharpest inside corner a shell can have) must be empty - a shell
+ * that hollowed one corner of a part and left the rest solid passed for one.
+ */
+function hollowInside(body: Shape3D, shell: Shape3D, kept: Face[], t: number): boolean {
+  if (!kept.length || !(t > 0)) return true;
+  try {
+    const skin = subShapes(body, "SHELL").map((x) => cast(x) as AnyShape);
+    if (!skin.length) return true;
+    const every = Math.ceil(kept.length / 40);
+    const h = t / 6;
+    const cubes: Shape3D[] = [];
+    for (const [i, g] of kept.entries()) {
+      if (i % every) continue;
+      const { p, n } = pointOnFace(body, g);
+      const q = sub(p, scale(n, 3 * t));
+      const point = makeVertex(q);
+      if (Math.min(...skin.map((sk) => measureDistanceBetween(point, sk))) < 2.1 * t) continue;
+      cubes.push(makeBox([q[0] - h, q[1] - h, q[2] - h], [q[0] + h, q[1] + h, q[2] + h]) as Shape3D);
+    }
+    if (!cubes.length) return true;
+    const probes = cubes.length === 1 ? cubes[0] : (makeCompound(cubes) as unknown as Shape3D);
+    const inBody = body.intersect(probes);
+    const deep = isEmpty(inBody) ? 0 : Math.abs(measureVolume(inBody));
+    if (!(deep > 0)) return true;
+    const left = shell.intersect(probes);
+    return (isEmpty(left) ? 0 : Math.abs(measureVolume(left))) <= deep * 1e-3;
+  } catch {
+    // Can't tell: the usual checks speak for it.
+    return true;
+  }
+}
+
 /**
  * Shell without BRepOffsetAPI_MakeThickSolid: body − (body offset inward by t)
  * leaves a closed skin; each removed flat face then gets a hole cut through
@@ -2576,11 +2716,31 @@ function shellByOffset(body: Shape3D, faces: Face[], t: number): Shape3D | null 
       }
     }
     if (!inner) return null;
-    let skin = body.cut(inner);
+    const tol = sizeOf(body) * 1e-6;
+    // The openings: the hollow's own floor behind each opened face, carried on
+    // out through the wall (the hollow and its way out, cut away as one). So
+    // what stands in the hollow there keeps its walls right down to the
+    // opening - a bore through the floor, its tube: cut by the face's outline
+    // brought in, as it was, the tube ended a wall and a half short of it.
+    let hollow: Shape3D = inner;
+    const byOutline: { face: Face; n: Vec3 }[] = [];
     for (const face of faces) {
       if (face.geomType !== "PLANE") return null;
       const n = norm(face.normalAt().toTuple() as Vec3);
-      // The opening: the face's outline brought in by the wall thickness.
+      const at = face.pointOnSurface(0.5, 0.5).toTuple() as Vec3;
+      const floors = inner.faces.filter((g) => {
+        if (g.geomType !== "PLANE" || dot(norm(g.normalAt().toTuple() as Vec3), n) < 1 - 1e-6) return false;
+        const { p } = pointOnFace(inner!, g);
+        if (Math.abs(dot(sub(p, at), n) + t) > tol * 10) return false;
+        // (Another face of the body on the same plane, not opened: its floor stays.)
+        return measureDistanceBetween(makeVertex(add(p, scale(n, t))), face) < tol * 10;
+      });
+      if (!floors.length) byOutline.push({ face, n });
+      for (const g of floors) hollow = hollow.fuse(basicFaceExtrusion(g.clone(), new Vector(scale(n, t * 1.5))) as Shape3D);
+    }
+    let skin = body.cut(hollow);
+    for (const { face, n } of byOutline) {
+      // (No such floor found: the face's outline brought in by the wall thickness, pushed through.)
       const wire = face.clone().outerWire().offset2D(-t, "intersection");
       const start = new Vector(scale(n, t * 0.5));
       const hole = basicFaceExtrusion(makeFace(wire).translate(start), new Vector(scale(n, -t * 2)));
@@ -2919,7 +3079,7 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
     algo.SetNonDestructive(true);
     algo.Build(new oc.Message_ProgressRange());
     if (!algo.IsDone()) throw new Error("boolean failed");
-    const out = cast(algo.Shape()) as Shape3D;
+    const out = cast(withoutInternals(algo.Shape())) as Shape3D;
     // Fuse and cut keep their faces tidy like the usual booleans do.
     return op === "common" ? out : (unify(out, Math.max(sizeOf(a), sizeOf(b))) as Shape3D);
   } catch {
