@@ -633,13 +633,20 @@ export class SketchTool implements Tool {
     glyphs.innerHTML = `<span class="cl">Show constraints</span><span class="switch"></span>`;
     glyphs.title = "Show or hide the constraint badges and dimensions on the sketch";
     glyphs.addEventListener("click", () => settings.set("showConstraintGlyphs", !settings.value.showConstraintGlyphs));
+    // Which of two things a constraint leaves where it is.
+    const anchor = document.createElement("button");
+    anchor.className = "cbar-toggle";
+    const last = settings.value.sketchAnchor === "last";
+    anchor.innerHTML = `<span class="cl">Stays put: ${last ? "last picked" : "first picked"}</span>`;
+    anchor.title = "When a constraint joins two things, which one stays where it is (the other moves to it)";
+    anchor.addEventListener("click", () => settings.set("sketchAnchor", last ? "first" : "last"));
     // The constraints themselves are in the card of what's selected - just the
     // ones that fit it, one tap each (a column of mostly greyed-out buttons sat
     // on top of that card).
     const note = document.createElement("div");
     note.className = "cbar-note";
     note.textContent = "Tap lines or points: the constraints that fit show in their card. Tap a badge on the sketch to change or delete it.";
-    this.bar.append(auto, glyphs, note);
+    this.bar.append(auto, glyphs, anchor, note);
     this.placeBar();
   }
 
@@ -781,6 +788,14 @@ export class SketchTool implements Tool {
     return cands[0]?.e;
   }
 
+  /** The anchored one (the setting): the first picked, or the last. */
+  private anchorPicked(): string | undefined {
+    if (settings.value.sketchAnchor !== "last") return this.firstPicked();
+    const cands = [...[...this.selected].map((id) => ({ e: id, k: id })), ...this.selPts.map((r) => ({ e: r.e, k: refKey(r) }))];
+    cands.sort((a, b) => (this.pickSeq.get(a.k) ?? 0) - (this.pickSeq.get(b.k) ?? 0));
+    return cands[cands.length - 1]?.e;
+  }
+
   private distDim: DimWidget | null = null;
 
   /**
@@ -862,8 +877,8 @@ export class SketchTool implements Tool {
     // Lock holds points where they are now.
     if (type === "fix") cs = cs.map((c) => (c.type === "fix" ? { ...c, at: pointOf(this.entities.find((e) => e.id === c.pts![0].e)!, c.pts![0].p) ?? [0, 0] } : c));
     if (!cs.length) return this.app.ui.toast("That constraint doesn't fit the selection");
-    // The first thing picked is the reference: it stays, the others adapt to it.
-    const first = this.firstPicked();
+    // The anchored thing (first picked, or last - the setting) is the reference: it stays, the others adapt to it.
+    const first = this.anchorPicked();
     // Equal: a size dimension on the curves picked after the first would fight it - drop those.
     const others = new Set(curves.slice(1).map((e) => e.id));
     const kept = type === "equal" ? this.constraints.filter((c) => !(c.type === "dim" && c.curves?.length === 1 && others.has(c.curves[0]) && ["length", "radius", "diameter"].includes(c.prop ?? ""))) : this.constraints;
@@ -4298,6 +4313,23 @@ export class SketchTool implements Tool {
     return out;
   }
 
+  /**
+   * A pattern's copies, each tied to its original (in the order transformed()
+   * makes them: every selected curve, once per step).
+   */
+  private patternLinks(results: SketchEntity[]): SketchConstraint[] {
+    if (this.kind !== "patternLinear" && this.kind !== "patternCircular") return [];
+    const sel = this.entities.filter((e) => this.selected.has(e.id));
+    if (!sel.length) return [];
+    const full = Math.abs(Math.abs(this.edit.patAngle) - 360) < 1e-6;
+    const step = this.edit.patAngle / (full ? this.edit.count : Math.max(1, this.edit.count - 1));
+    return results.map((e, i) => {
+      const k = Math.floor(i / sel.length) + 1;
+      const base = { id: uid(), type: "pattern" as const, curves: [sel[i % sel.length].id, e.id] };
+      return this.kind === "patternLinear" ? { ...base, at: [this.edit.dx * k, this.edit.dy * k] as Vec2 } : { ...base, turn: true, at: this.edit.pivot ?? ([0, 0] as Vec2), value: step * k };
+    });
+  }
+
   private applyTransform(): void {
     if (!this.selected.size) return this.app.ui.toast("Select curves first");
     if (this.kind === "patternCircular" && !this.edit.pivot) return this.app.ui.toast("Tap the centre of the pattern first");
@@ -4312,6 +4344,8 @@ export class SketchTool implements Tool {
       results = results.filter((e) => !(e.kind === "line" && onAxis(e.a) && onAxis(e.b)));
     }
     const keepOriginals = this.kind === "patternLinear" || this.kind === "patternCircular" || ((this.kind === "mirror" ? this.edit.mirrorCopy : this.edit.copy));
+    // A pattern's copies stay linked to their originals: change one, and the copies follow.
+    const links = this.patternLinks(results);
     const base = keepOriginals ? this.entities : this.entities.filter((e) => !this.selected.has(e.id));
     // Moved (not copied): ties between what moves and what stays let go, and
     // so do pins holding the moved curves in place - an arch's circle snapped
@@ -4348,7 +4382,7 @@ export class SketchTool implements Tool {
       this.edit.refA = this.edit.refB = undefined;
       if (this.edit.picking === "refA" || this.edit.picking === "refB") this.edit.picking = undefined;
     }
-    this.commit([...base, ...results], cons);
+    this.commit([...base, ...results], [...cons, ...links]);
     if (this.kind === "scale") {
       this.refreshRefDim();
       this.updatePanel();

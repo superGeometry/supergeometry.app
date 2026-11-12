@@ -120,7 +120,8 @@ export type ConstraintType =
   | "symmetric"
   | "fix"
   | "distance"
-  | "dim";
+  | "dim"
+  | "pattern";
 
 /**
  * Sketch constraint. Geometry refs: `pts` (points) and `curves` (entity ids).
@@ -135,8 +136,10 @@ export interface SketchConstraint {
   prop?: string;
   value?: number;
   expr?: string;
-  /** fix: where the point is held. */
+  /** fix: where the point is held. pattern: the copy's offset (move), or the centre it turns round (turn). */
   at?: Vec2;
+  /** pattern: "turn" - the copy is the original turned `value` degrees round `at`; else moved by `at`. */
+  turn?: boolean;
 }
 
 export interface SketchFeature extends FeatureBase {

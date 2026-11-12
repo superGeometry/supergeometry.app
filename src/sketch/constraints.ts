@@ -239,6 +239,26 @@ function residuals(c: SketchConstraint, get: Lookup): number[] {
       const a = c.pts?.[0] && P(c.pts[0]);
       return a && c.at ? [a[0] - c.at[0], a[1] - c.at[1]] : [];
     }
+    case "pattern": {
+      // A copy in a sketch pattern: each of its points is the original's,
+      // moved by `at` (or turned round `at` by `value` degrees); sizes the same.
+      const o = E(0);
+      const k = E(1);
+      if (!o || !k || o.kind !== k.kind || !c.at) return [];
+      const t = ((c.value ?? 0) * Math.PI) / 180;
+      const [cx, cy] = c.at;
+      const map = (p: Vec2): Vec2 => (c.turn ? [cx + (p[0] - cx) * Math.cos(t) - (p[1] - cy) * Math.sin(t), cy + (p[0] - cx) * Math.sin(t) + (p[1] - cy) * Math.cos(t)] : [p[0] + cx, p[1] + cy]);
+      const out: number[] = [];
+      for (const q of pointsOf(o)) {
+        const w = pointOf(k, q.p);
+        if (!w) return [];
+        const m = map(q.at);
+        out.push(w[0] - m[0], w[1] - m[1]);
+      }
+      if ((o.kind === "circle" || o.kind === "polygon") && (k.kind === "circle" || k.kind === "polygon")) out.push(k.radius - o.radius);
+      if (o.kind === "ellipse" && k.kind === "ellipse") out.push(k.rx - o.rx, k.ry - o.ry);
+      return out;
+    }
     case "distance": {
       if (c.value === undefined) return [];
       // Point to line: perpendicular distance.
@@ -710,6 +730,107 @@ function sameTurns(a: Map<string, number>, b: Map<string, number>): boolean {
 }
 
 /** Entity ids a constraint refers to. */
+/**
+ * Which curves the constraints hold completely - nothing about them can
+ * change without breaking one (a sketch drawn green there) - and whether that's
+ * all of them. From the rank of the constraints' Jacobian: a parameter is held
+ * when no free direction of the system moves it. Null for a sketch too big
+ * to work it out quickly.
+ */
+export function definedCurves(entities: SketchEntity[], constraints: SketchConstraint[]): { defined: Set<string>; all: boolean } | null {
+  const ids = new Set(entities.map((e) => e.id));
+  const live = constraints.filter((c) => refsOf(c).every((id) => ids.has(id)));
+  // Curves that follow a body's edge are where the edge is: held already.
+  const movers = entities.filter((e) => !e.id.startsWith(LINKED));
+  const offsets: number[] = [];
+  const counts: number[] = [];
+  const x0: number[] = [];
+  for (const e of movers) {
+    const p = params(e);
+    offsets.push(x0.length);
+    counts.push(p.length);
+    x0.push(...p);
+  }
+  const n = x0.length;
+  const linked = new Set(entities.filter((e) => e.id.startsWith(LINKED)).map((e) => e.id));
+  if (!n) return { defined: linked, all: true };
+  if (n > 300) return null;
+  const byId = new Map(entities.map((e) => [e.id, e]));
+  const at = (id: string) => byId.get(id);
+  const rowStart: number[] = [];
+  let m = 0;
+  for (const c of live) {
+    rowStart.push(m);
+    m += residuals(c, at).length;
+  }
+  const J: Float64Array[] = Array.from({ length: m }, () => new Float64Array(n));
+  const moverOf = new Map(movers.map((e, i) => [e.id, i]));
+  const usedBy: number[][] = movers.map(() => []);
+  live.forEach((c, ci) => {
+    for (const id of new Set(refsOf(c))) {
+      const i = moverOf.get(id);
+      if (i !== undefined) usedBy[i].push(ci);
+    }
+  });
+  let big = 0;
+  movers.forEach((e, i) => {
+    const xs = x0.slice(offsets[i], offsets[i] + counts[i]);
+    for (let k = 0; k < counts[i]; k++) {
+      const j = offsets[i] + k;
+      const h = 1e-6 * Math.max(1, Math.abs(xs[k]));
+      const up = xs.slice();
+      const down = xs.slice();
+      up[k] += h;
+      down[k] -= h;
+      const ep = withParams(e, up);
+      const em = withParams(e, down);
+      for (const ci of usedBy[i]) {
+        const rp = residuals(live[ci], (id) => (id === e.id ? ep : byId.get(id)));
+        const rm = residuals(live[ci], (id) => (id === e.id ? em : byId.get(id)));
+        for (let r = 0; r < rp.length; r++) {
+          const v = (rp[r] - rm[r]) / (2 * h);
+          if (Number.isFinite(v)) {
+            J[rowStart[ci] + r][j] = v;
+            big = Math.max(big, Math.abs(v));
+          }
+        }
+      }
+    }
+  });
+  // Reduced row echelon form; the columns without a pivot are free directions.
+  const tol = 1e-7 * Math.max(1, big);
+  const pivotRow = new Int32Array(n).fill(-1);
+  let row = 0;
+  for (let col = 0; col < n && row < m; col++) {
+    let p = row;
+    for (let r = row + 1; r < m; r++) if (Math.abs(J[r][col]) > Math.abs(J[p][col])) p = r;
+    if (Math.abs(J[p][col]) < tol) continue;
+    [J[row], J[p]] = [J[p], J[row]];
+    const R = J[row];
+    const d = R[col];
+    for (let c = col; c < n; c++) R[c] /= d;
+    for (let r = 0; r < m; r++) {
+      if (r === row) continue;
+      const f = J[r][col];
+      if (Math.abs(f) < 1e-15) continue;
+      const Rr = J[r];
+      for (let c = col; c < n; c++) Rr[c] -= f * R[c];
+    }
+    pivotRow[col] = row++;
+  }
+  const free: number[] = [];
+  for (let j = 0; j < n; j++) if (pivotRow[j] < 0) free.push(j);
+  // A pivot parameter is held when no free direction moves it.
+  const held = (j: number) => pivotRow[j] >= 0 && free.every((f) => Math.abs(J[pivotRow[j]][f]) < 1e-6);
+  const defined = new Set(linked);
+  movers.forEach((e, i) => {
+    let ok = true;
+    for (let k = 0; k < counts[i] && ok; k++) ok = held(offsets[i] + k);
+    if (ok) defined.add(e.id);
+  });
+  return { defined, all: defined.size === entities.length };
+}
+
 export function refsOf(c: SketchConstraint): string[] {
   return [...(c.pts ?? []).map((p) => p.e), ...(c.curves ?? [])];
 }
@@ -1022,6 +1143,7 @@ export function addForUser(
 export function constraintName(c: SketchConstraint): string {
   if (c.type === "dim") return `${c.prop === "angle" ? "angle" : (c.prop ?? "size")} dimension`;
   if (c.type === "fix") return "lock";
+  if (c.type === "pattern") return "pattern link";
   return c.type;
 }
 

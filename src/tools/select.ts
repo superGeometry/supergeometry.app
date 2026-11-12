@@ -1,9 +1,9 @@
 import { circleAxis } from "./slots";
 import { isTouchDevice } from "../device";
 import { BODY_COLORS, BODY_OPACITY, bodyColor } from "../doc/types";
-import type { DeleteGeomFeature, FreeformFeature, EdgeRef, ExtrudeSource, FaceRef, ImageFeature, PlaneDef, PlaneFeature, SketchFeature, Vec3 } from "../doc/types";
+import type { DeleteGeomFeature, EdgeLink, FreeformFeature, EdgeRef, ExtrudeSource, FaceRef, ImageFeature, PlaneDef, PlaneFeature, SketchFeature, Vec3 } from "../doc/types";
 import { arrangement } from "../sketch/regions";
-import { projectPolyline } from "../sketch/edit";
+import { projectPolyline, uid } from "../sketch/edit";
 import type { MenuRow, ToolItem } from "../ui/ui";
 import type { ToolPointer } from "../view/input";
 import { add, cross, dot, len, norm, originOnPlane, planeY, scale, sub } from "../geom";
@@ -1079,17 +1079,25 @@ export class SelectTool implements Tool {
       if (!onPlane(a, norm(n))) return app.ui.toast("Those edges aren't on one plane");
       plane = { origin: a, normal: norm(n), xDir: u };
     }
+    // Linked: each curve follows its edge when the body changes (Unlink in the sketch, tapping it).
+    const links: EdgeLink[] = [];
     const entities = infos.flatMap(({ b, e, s }) => {
       const g = b!.edgeGroups.find((x) => x.edge === s.edge);
       if (!g) return [];
       const ps: Vec3[] = [];
       for (let k = g.start; k < g.start + g.count; k++) if ((k - g.start) % 2 === 0 || k === g.start + g.count - 1) ps.push([b!.edgePositions[k * 3], b!.edgePositions[k * 3 + 1], b!.edgePositions[k * 3 + 2]]);
       const ent = projectPolyline(ps, plane!, e!.type);
-      return ent ? [ent] : [];
+      if (!ent) return [];
+      const ref = edgeRefOf(app, s);
+      if (!ref?.steps?.length) return [ent];
+      const id = `ref-${uid()}`;
+      links.push({ id, edge: ref });
+      return [{ ...ent, id }];
     });
     const attachedTo = fi >= 0 ? faceRefOf(app, { body: infos[0].s.body, face: fi }) : undefined;
-    const sk: SketchFeature = { ...app.store.newIdentity("sketch"), type: "sketch", plane, ...(attachedTo ? { attachedTo } : {}), entities };
+    const sk: SketchFeature = { ...app.store.newIdentity("sketch"), type: "sketch", plane, ...(attachedTo ? { attachedTo } : {}), entities, ...(links.length ? { links } : {}) };
     app.store.add(sk);
+    if (links.length) app.ui.toast("Linked: the curves follow the edges when the body changes (tap one to unlink it)");
     this.openSketch(sk.id, "select");
   }
 
@@ -1099,6 +1107,7 @@ export class SelectTool implements Tool {
     const f = b?.faces[s.face];
     if (!b || !f?.plane) return;
     const plane = f.plane;
+    const links: EdgeLink[] = [];
     const entities = b.edges.flatMap((e, i) => {
       const on = [e.start, e.end, e.mid].every((p) => Math.abs((p[0] - f.center[0]) * f.normal[0] + (p[1] - f.center[1]) * f.normal[1] + (p[2] - f.center[2]) * f.normal[2]) < 1e-5);
       if (!on) return [];
@@ -1106,9 +1115,15 @@ export class SelectTool implements Tool {
       const pts: Vec3[] = [];
       for (let k = g.start; k < g.start + g.count; k++) if ((k - g.start) % 2 === 0 || k === g.start + g.count - 1) pts.push([b.edgePositions[k * 3], b.edgePositions[k * 3 + 1], b.edgePositions[k * 3 + 2]]);
       const ent = projectPolyline(pts, plane, e.type);
-      return ent ? [ent] : [];
+      if (!ent) return [];
+      // Linked: it follows the face's edge when the body changes.
+      const ref = edgeRefOf(this.app, { body: s.body, edge: i });
+      if (!ref?.steps?.length) return [ent];
+      const id = `ref-${uid()}`;
+      links.push({ id, edge: ref });
+      return [{ ...ent, id }];
     });
-    const sk: SketchFeature = { ...this.app.store.newIdentity("sketch"), type: "sketch", plane, attachedTo: faceRefOf(this.app, s)!, entities };
+    const sk: SketchFeature = { ...this.app.store.newIdentity("sketch"), type: "sketch", plane, attachedTo: faceRefOf(this.app, s)!, entities, ...(links.length ? { links } : {}) };
     this.app.store.add(sk);
     this.openSketch(sk.id, then);
   }

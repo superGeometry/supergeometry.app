@@ -36,6 +36,7 @@ import { SelectTool } from "./tools/select";
 import { BooleanOp } from "./tools/booleanOp";
 import { sketchesUsed } from "./tools/featureOp";
 import { SketchTool } from "./tools/sketch";
+import { definedCurves } from "./sketch/constraints";
 import { bodiesOf, edgeRefOf, faceRefOf, sameSel, sourcesOf, type AppContext, type Sel, type Tool } from "./tools/tool";
 import { setupRightColumn } from "./ui/panels";
 import type { ToolItem } from "./ui/ui";
@@ -576,12 +577,27 @@ export class App implements AppContext {
     this.view.setImages(features.filter((f): f is ImageFeature => f.type === "image" && !f.suppressed && !f.rolledBack && shown(f.id)));
   }
 
+  /** The sketch being edited: which curves its constraints hold completely (worked out once per change). */
+  private definedCache: { entities: unknown; constraints: unknown; defined: Set<string> | undefined; all: boolean } | null = null;
+
+  private definedOf(s: SketchFeature): Set<string> | undefined {
+    const c = this.definedCache;
+    if (c && c.entities === s.entities && c.constraints === s.constraints) return c.defined;
+    const r = definedCurves(s.entities, s.constraints ?? []);
+    const all = !!r?.all && s.entities.some((e) => !e.construction);
+    // Just became fully defined: say so (the curves have turned green).
+    if (all && c && !c.all) this.ui.toast("Sketch fully defined");
+    this.definedCache = { entities: s.entities, constraints: s.constraints, defined: r?.defined, all };
+    return r?.defined;
+  }
+
   private refreshSketches(features: readonly Feature[] = this.store.doc.features): void {
     const hidden = new Set(this.store.doc.hidden);
     const iso = this.isolatedWithSketches();
     const sketches = features
       .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && !f.rolledBack && ((!hidden.has(f.id) && (!iso || iso.includes(f.id))) || f.id === this.tool.activeSketch))
-      .map((s) => ({ ...s, entities: this.solved.get(s) ?? s.entities, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }));
+      .map((s) => ({ ...s, entities: this.solved.get(s) ?? s.entities, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }))
+      .map((s) => (s.id === this.tool.activeSketch ? { ...s, defined: this.definedOf(s) } : s));
     // Drawn but not made into anything yet: shown through bodies, and a tap on it finds it there
     // (a pocket sketched on a plane through the middle of a body is inside it).
     const used = new Set(features.filter((f) => !f.suppressed && !f.rolledBack).flatMap(sketchesUsed));

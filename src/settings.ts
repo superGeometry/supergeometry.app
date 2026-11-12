@@ -36,6 +36,8 @@ export interface Settings {
   showConstraints: boolean;
   /** Sketch: add Horizontal/Vertical/Coincident automatically while drawing. */
   autoConstrain: boolean;
+  /** Sketch: when a constraint joins two things, the first or the last picked stays put (the anchored one). */
+  sketchAnchor: "first" | "last";
   /** Sketch: draw the constraint badges (H, V, ∥, dimensions…) on the geometry. */
   showConstraintGlyphs: boolean;
   /** Bumped when defaults change for everyone (see the constructor). */
@@ -73,6 +75,7 @@ const DEFAULTS: Settings = {
   // constraints themselves are in the card of what's selected.
   showConstraints: false,
   autoConstrain: true,
+  sketchAnchor: "first",
   showConstraintGlyphs: true,
   // On by default on touch screens (phones, tablets, headsets).
   numpad: isTouchDevice,

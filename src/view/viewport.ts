@@ -124,7 +124,7 @@ export interface PickOptions {
 }
 
 /** A sketch as drawn: its own curves plus the face outline it sits on (if any). */
-export type SketchView = SketchFeature & { boundary?: SketchEntity[] };
+export type SketchView = SketchFeature & { boundary?: SketchEntity[]; /** The sketch being edited: its curves the constraints hold completely (drawn green). */ defined?: ReadonlySet<string> };
 
 /** The three origin planes, addressable like construction planes. */
 export const ORIGIN_PLANES: Record<string, PlaneDef> = { XY: GROUND, XZ: FRONT, YZ: RIGHT };
@@ -779,11 +779,13 @@ export class Viewport {
       const dashed: number[] = [];
       // Curves that follow a body's edge: in their own colour (they aren't the sketch's to move).
       const linked: number[] = [];
+      // In the sketch being edited, curves its constraints hold completely: green.
+      const held: number[] = [];
       // Offsets of the face's edge (linked to it): drawn and tapped like the sketch's own curves.
       for (const e of [...s.entities, ...(s.boundary ?? []).filter((b) => b.id.startsWith("lnk-"))]) {
         for (const poly of entityPolylines(e)) {
           const pts = poly.map((p) => new Vector3(p[0], p[1], 0).applyMatrix4(m));
-          const into = e.construction ? dashed : e.id.startsWith("ref-") ? linked : solid;
+          const into = e.construction ? dashed : e.id.startsWith("ref-") ? linked : active && s.defined?.has(e.id) ? held : solid;
           for (let i = 0; i < pts.length - 1; i++) into.push(...pts[i].toArray(), ...pts[i + 1].toArray());
           this.curveLines.push({ sketch: s.id, entity: e.id, pts });
         }
@@ -793,6 +795,13 @@ export class Viewport {
         const mat = this.lineMaterial(active ? 0xffffff : COLORS.sketch, active ? 2.2 : 1.6, !onTop);
         this.sketchMats.push(mat);
         const l = new LineSegments2(new LineSegmentsGeometry().setPositions(solid), mat);
+        l.renderOrder = 2;
+        this.sketchGroup.add(l);
+      }
+      if (held.length) {
+        const mat = this.lineMaterial(0x5fd38a, 2.2, !onTop);
+        this.sketchMats.push(mat);
+        const l = new LineSegments2(new LineSegmentsGeometry().setPositions(held), mat);
         l.renderOrder = 2;
         this.sketchGroup.add(l);
       }
