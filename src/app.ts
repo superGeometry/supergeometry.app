@@ -369,6 +369,7 @@ export class App implements AppContext {
     // A section on screen is the one to remember (a deleted one is forgotten).
     if (s) this.lastSection = null;
     this.view.setSection(s ? sectionPlane(s) : null);
+    this.view.setSectionStyle(s?.flat ? "flat" : s?.only ? "only" : "normal");
   }
 
   get pins(): PinDef[] {

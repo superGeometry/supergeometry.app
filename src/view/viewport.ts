@@ -295,7 +295,8 @@ export class Viewport {
     this.grid.lockedStep = s.gridStep;
     this.axesGroup.visible = s.showAxes;
     this.cam.animate = s.animateCamera;
-    this.cam.setOrtho(s.ortho);
+    // A 2D section is always seen straight on, without perspective.
+    this.cam.setOrtho(s.ortho || (this.sectionStyle === "flat" && !!this.clip));
     const xray = s.shader === "xray";
     for (const m of this.allBodyMats()) {
       // A see-through body (Transparency) is seen through in every view; while a
@@ -317,8 +318,18 @@ export class Viewport {
 
   private applyAnalysis(): void {
     const s = settings.value;
+    // A 2D section's lines are light (on the dark background), a 3D model's dark (on its grey faces).
+    this.edgeMat.color.set(this.sectionStyle === "flat" && this.clip ? 0xd8dbe2 : COLORS.edge);
+    if (this.sectionStyle === "flat" && this.clip) {
+      const m = (this.flatMat ??= new MeshBasicMaterial({ color: (this.scene.background as Color).clone(), polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+      m.clippingPlanes = [this.clip];
+      m.needsUpdate = true;
+      for (const b of this.bodies.values()) b.mesh.material = m;
+      this.dirty = true;
+      return;
+    }
     if (s.analysis === "none") {
-      for (const [id, b] of this.bodies) if (b.mesh.material === this.anaMat) b.mesh.material = this.matsFor(id).body;
+      for (const [id, b] of this.bodies) if (b.mesh.material === this.anaMat || b.mesh.material === this.flatMat) b.mesh.material = this.matsFor(id).body;
       return;
     }
     const m = (this.anaMat ??= analysisMaterial());
@@ -491,15 +502,29 @@ export class Viewport {
   private applyHidden(): void {
     for (const [id, b] of this.bodies) {
       const vis = !this.hiddenIds.has(id);
-      b.mesh.visible = vis && settings.value.shader !== "wireframe";
-      b.cap.visible = vis && !!this.clip && settings.value.shader === "shaded";
+      // Section only: the cut faces alone (and their outline), the rest of the model gone.
+      const only = this.sectionStyle === "only" && !!this.clip;
+      b.mesh.visible = vis && settings.value.shader !== "wireframe" && !only;
+      b.cap.visible = vis && !!this.clip && (settings.value.shader === "shaded" || only);
       for (const sm of b.capStencil) sm.visible = b.cap.visible;
       if (b.outline) b.outline.visible = vis && !!this.clip;
-      b.edges.visible = vis && (settings.value.showEdges || settings.value.shader === "wireframe");
-      b.hidden.visible = vis && (settings.value.showHiddenEdges || settings.value.shader === "wireframe");
+      b.edges.visible = vis && !only && (settings.value.showEdges || settings.value.shader === "wireframe" || this.sectionStyle === "flat");
+      b.hidden.visible = vis && !only && (settings.value.showHiddenEdges || settings.value.shader === "wireframe");
     }
     this.dirty = true;
   }
+
+  /** How a section shows: the model cut (normal), the cut faces alone (only), or flat like a drawing, the edges beyond it drawn (flat). */
+  private sectionStyle: "normal" | "only" | "flat" = "normal";
+
+  setSectionStyle(style: "normal" | "only" | "flat"): void {
+    if (this.sectionStyle === style) return;
+    this.sectionStyle = style;
+    this.applySettings();
+  }
+
+  /** The bodies' faces in a 2D section: the background's colour, unlit (they only hide the edges behind). */
+  private flatMat: MeshBasicMaterial | null = null;
 
   private visibleBodies(): BodyView[] {
     return [...this.bodies.entries()].filter(([id]) => !this.hiddenIds.has(id)).map(([, b]) => b);

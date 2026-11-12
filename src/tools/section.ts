@@ -12,6 +12,10 @@ export interface SectionState {
   flipped: boolean;
   /** Cut from a face: how far inside it the cut starts (a hair, so the face shows the cut); a plane placed there goes on the face. */
   inset?: number;
+  /** Only the cut faces shown, the rest of the model gone. */
+  only?: boolean;
+  /** 2D: seen straight on, flat like a drawing, the edges beyond the cut drawn. */
+  flat?: boolean;
 }
 
 export interface SectionHost extends AppContext {
@@ -92,11 +96,38 @@ export class SectionTool implements Tool {
       items: [
         { type: "number", label: "Offset", value: s.offset, kind: "length", onInput: (v) => this.setOffset(v) },
         { type: "button", label: "Flip", icon: "flip", onClick: () => (this.app.setSection({ ...s, flipped: !this.app.section!.flipped }), this.showControls()) },
+        { type: "toggle", label: "Section only", value: !!s.only, onChange: (v) => this.restyle({ only: v || undefined, flat: v ? undefined : s.flat }) },
+        {
+          type: "toggle",
+          label: "2D section",
+          value: !!s.flat,
+          onChange: (v) => {
+            this.restyle({ flat: v || undefined, only: v ? undefined : s.only });
+            if (v) this.lookAtCut();
+          },
+        },
+        { type: "button", label: "Normal to Section", icon: "normal", onClick: () => this.lookAtCut() },
         { type: "button", label: "Place Plane", icon: "plane", onClick: () => this.placePlane() },
       ],
       actions: [{ id: "delete", label: "Delete Section", icon: "trash", run: () => (this.app.setSection(null), this.handle?.dispose(), (this.handle = null), this.askForPlane()) }],
       onDone: () => this.app.setTool(null),
     });
+  }
+
+  private restyle(patch: Partial<SectionState>): void {
+    const s = this.app.section;
+    if (!s) return;
+    this.app.setSection({ ...s, ...patch });
+    this.showControls();
+  }
+
+  /** Look straight at the cut, from the side that's cut away. */
+  private lookAtCut(): void {
+    const s = this.app.section;
+    if (!s) return;
+    const p = sectionPlane(s);
+    this.app.view.cam.lookAlong(p.normal, p.xDir);
+    this.app.view.fitAll();
   }
 
   /** A construction plane where the cut is now (to sketch on, split with...). */
