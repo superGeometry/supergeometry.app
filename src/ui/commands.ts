@@ -235,6 +235,8 @@ export const SHORTCUTS: [string, [string, string][]][] = [
     "Edit",
     [
       ["X or Ctrl + F", "Search commands"],
+      ["Ctrl + Shift + S", "Select Through (pick what's behind)"],
+      ["Tab / B / F / E / A", "While box-selecting: what it takes"],
       ["Ctrl + Z / Ctrl + Shift + Z", "Undo / Redo"],
       ["Ctrl + S", "Save"],
       ["Delete", "Delete what's picked"],

@@ -1082,6 +1082,13 @@ export class App implements AppContext {
       this.redo();
       return;
     }
+    // Select Through: pick what's behind the faces in front.
+    if (mod && e.shiftKey && k === "s") {
+      e.preventDefault();
+      this.view.setSelectThrough(!this.view.selectThrough);
+      this.ui.toast(this.view.selectThrough ? "Select Through on: edges and sketches behind the faces can be picked" : "Select Through off");
+      return;
+    }
     if (mod && k === "s") {
       e.preventDefault();
       this.save();

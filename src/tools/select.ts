@@ -126,7 +126,7 @@ export class SelectTool implements Tool {
     const under = this.app.view.pick(p.x, p.y, { edgeTolPx: p.tol });
     if (hit.entity.startsWith("bnd-")) return under;
     // A sketch curve behind a body (seen through it) doesn't win over the body in front.
-    if (under && (under.kind === "face" || under.kind === "edge" || under.kind === "vertex")) {
+    if (under && !this.app.view.selectThrough && (under.kind === "face" || under.kind === "edge" || under.kind === "vertex")) {
       const eye = this.app.view.cam.camera.position.toArray() as Vec3;
       const far = (q: Vec3) => Math.hypot(q[0] - eye[0], q[1] - eye[1], q[2] - eye[2]);
       if (far(under.point) < far(hit.point) - this.app.view.cam.worldPerPixel(this.app.view.height) * 2) return under;
@@ -134,8 +134,34 @@ export class SelectTool implements Tool {
     return hit;
   }
 
+  /** Chosen from the list of overlapping faces: the next tap's hit. */
+  private chosenHit: ReturnType<SelectTool["pickAt"]> | null = null;
+
   tap(p: ToolPointer, count: number): void {
-    let hit = this.tapHit(p);
+    const forced = this.chosenHit;
+    this.chosenHit = null;
+    let hit = forced ?? this.tapHit(p);
+    // Faces of several bodies in the same place (a bolt flush with the flange
+    // it cuts): which one, from a list by the pointer.
+    if (!forced && hit?.kind === "face" && count < 2 && !this.app.view.selectThrough) {
+      const all = this.app.view.facesAt(p.x, p.y);
+      if (all.length > 1) {
+        const r = this.app.view.canvas.getBoundingClientRect();
+        const name = (b: string) => this.app.store.doc.names[b] ?? this.app.view.body(b)?.name ?? b;
+        this.app.ui.menu(
+          r.left + p.x,
+          r.top + p.y,
+          all.map((h) => ({
+            label: `${h.kind === "face" ? name(h.body) : ""} – face`,
+            run: () => {
+              this.chosenHit = h;
+              this.tap(p, count);
+            },
+          })),
+        );
+        return;
+      }
+    }
     // A finger on a thin shape (a ruler's tick, a letter) is always on its
     // outline too: one tap takes the shape under it (to extrude); a double
     // tap opens the sketch to edit. (A mouse can aim for one or the other.)
@@ -194,24 +220,106 @@ export class SelectTool implements Tool {
     }
   }
 
-  /** Window selection: bodies entirely inside the box. */
+  /** What a box takes (Tab while dragging cycles; B, F, E pick one, A all). */
+  private boxKind: "all" | "body" | "face" | "edge" = "all";
+  private boxing = false;
+
+  private boxHint(): void {
+    const name = { all: "everything", body: "bodies", face: "faces", edge: "edges" }[this.boxKind];
+    this.app.ui.setHint(`Box: ${name} - Tab for the next kind (B bodies, F faces, E edges, A all). Left to right takes what's inside, right to left what it touches.`);
+  }
+
+  /**
+   * Box selection. Dragged left to right it takes what's wholly inside; right
+   * to left, whatever it touches. Bodies, faces or edges (Tab while dragging).
+   */
   box(a: { x: number; y: number }, b: { x: number; y: number }, final: boolean, add: boolean): void {
-    if (!final) return;
+    if (!final) {
+      if (!this.boxing) ((this.boxing = true), this.boxHint());
+      return;
+    }
+    this.boxing = false;
+    this.app.ui.setHint(null);
+    const kind = this.boxKind;
+    this.boxKind = "all";
+    const touching = b.x < a.x;
     const x0 = Math.min(a.x, b.x);
     const x1 = Math.max(a.x, b.x);
     const y0 = Math.min(a.y, b.y);
     const y1 = Math.max(a.y, b.y);
-    const inside = this.app.view.bodyList.filter((body) => {
-      if (this.app.view.isHidden(body.id)) return false;
-      for (let i = 0; i < body.positions.length; i += 3 * Math.max(1, Math.floor(body.positions.length / 3 / 400))) {
-        const s = this.app.view.toScreen([body.positions[i], body.positions[i + 1], body.positions[i + 2]]);
-        if (!s || s[0] < x0 || s[0] > x1 || s[1] < y0 || s[1] > y1) return false;
+    const view = this.app.view;
+    const inBox = (x: number, y: number, z: number) => {
+      const s = view.toScreen([x, y, z]);
+      return !!s && s[0] >= x0 && s[0] <= x1 && s[1] >= y0 && s[1] <= y1;
+    };
+    // Points (some of them, on a big mesh): all inside, or any (touching).
+    const takes = (count: number, at: (i: number) => [number, number, number]) => {
+      const step = Math.max(1, Math.floor(count / 400));
+      for (let i = 0; i < count; i += step) {
+        const p = at(i);
+        const inside = inBox(p[0], p[1], p[2]);
+        if (touching && inside) return true;
+        if (!touching && !inside) return false;
       }
-      return true;
-    });
-    const picked: Sel[] = inside.map((body) => ({ kind: "body", body: body.id }));
-    const base = add ? this.app.selection.filter((s) => s.kind === "body") : [];
+      return !touching && count > 0;
+    };
+    // Touching: what's under points spread over the box counts too (a box in
+    // the middle of a big face has none of its corners inside).
+    const under = new Set<string>();
+    if (touching)
+      for (let i = 0; i <= 6; i++)
+        for (let j = 0; j <= 6; j++)
+          for (const h of view.facesAt(x0 + ((x1 - x0) * i) / 6, y0 + ((y1 - y0) * j) / 6)) if (h.kind === "face") under.add(`${h.body}|${h.face}`), under.add(h.body);
+    // An edge crossing the box (no point of it inside): its pieces on screen cut a side.
+    const crosses = (p: number[], q: number[]) => {
+      const side = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number) => {
+        const d = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx);
+        if (Math.abs(d) < 1e-12) return false;
+        const t = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / d;
+        const u = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / d;
+        return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+      };
+      return side(p[0], p[1], q[0], q[1], x0, y0, x1, y0) || side(p[0], p[1], q[0], q[1], x1, y0, x1, y1) || side(p[0], p[1], q[0], q[1], x1, y1, x0, y1) || side(p[0], p[1], q[0], q[1], x0, y1, x0, y0);
+    };
+    const picked: Sel[] = [];
+    for (const body of view.bodyList) {
+      if (view.isHidden(body.id)) continue;
+      const P = body.positions;
+      const vertex = (v: number): [number, number, number] => [P[3 * v], P[3 * v + 1], P[3 * v + 2]];
+      if (kind === "all" || kind === "body") {
+        if (under.has(body.id) || takes(P.length / 3, vertex)) picked.push({ kind: "body", body: body.id });
+      } else if (kind === "face") {
+        for (const g of body.faceGroups) if (under.has(`${body.id}|${g.face}`) || takes(g.count, (i) => vertex(body.indices[g.start + i]))) picked.push({ kind: "face", body: body.id, face: g.face });
+      } else {
+        const E = body.edgePositions;
+        const pt = (i: number): [number, number, number] => [E[3 * i], E[3 * i + 1], E[3 * i + 2]];
+        for (const g of body.edgeGroups) {
+          let hit = takes(g.count, (i) => pt(g.start + i));
+          // (Edge points come in pairs: each pair a piece of the edge.)
+          for (let i = g.start; touching && !hit && i + 1 < g.start + g.count; i += 2) {
+            const p = view.toScreen(pt(i));
+            const q = view.toScreen(pt(i + 1));
+            if (p && q && crosses(p, q)) hit = true;
+          }
+          if (hit) picked.push({ kind: "edge", body: body.id, edge: g.edge });
+        }
+      }
+    }
+    const k = picked[0]?.kind ?? (kind === "all" ? "body" : kind);
+    const base = add ? this.app.selection.filter((s) => s.kind === k) : [];
     this.app.setSelection([...base, ...picked.filter((s) => !base.some((x) => sameSel(x, s)))]);
+  }
+
+  /** Keys while a box is being dragged: which kind it takes. */
+  dragKey(e: KeyboardEvent): boolean {
+    if (!this.boxing) return false;
+    const order = ["all", "body", "face", "edge"] as const;
+    const k = e.key.toLowerCase();
+    if (k === "tab") this.boxKind = order[(order.indexOf(this.boxKind) + (e.shiftKey ? 3 : 1)) % 4];
+    else if (k === "b" || k === "f" || k === "e" || k === "a") this.boxKind = ({ b: "body", f: "face", e: "edge", a: "all" } as const)[k];
+    else return false;
+    this.boxHint();
+    return true;
   }
 
   /**
@@ -243,6 +351,7 @@ export class SelectTool implements Tool {
   }
 
   key(e: KeyboardEvent): boolean {
+    if (this.boxing && this.dragKey(e)) return true;
     const k = e.key.toLowerCase();
     if (k === "escape" && (this.app.selection.length || this.pending)) {
       this.pending = null;

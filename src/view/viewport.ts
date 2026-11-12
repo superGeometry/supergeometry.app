@@ -297,7 +297,8 @@ export class Viewport {
     this.cam.animate = s.animateCamera;
     // A 2D section is always seen straight on, without perspective.
     this.cam.setOrtho(s.ortho || (this.sectionStyle === "flat" && !!this.clip));
-    const xray = s.shader === "xray";
+    // Select Through shows what's behind (X-ray), since that's what it picks.
+    const xray = s.shader === "xray" || this.selectThrough;
     for (const m of this.allBodyMats()) {
       // A see-through body (Transparency) is seen through in every view; while a
       // new solid is being sized from a sketch, everything is a little see-through.
@@ -311,6 +312,14 @@ export class Viewport {
     }
     this.applyAnalysis();
     this.applyHidden();
+  }
+
+  /** Select Through (Ctrl+Shift+S): picking ignores the faces in front. */
+  selectThrough = false;
+
+  setSelectThrough(on: boolean): void {
+    this.selectThrough = on;
+    this.applySettings();
   }
 
   /** Zebra stripes / curvature map (Display modes): every body wears it while on. */
@@ -1284,7 +1293,8 @@ export class Viewport {
     const visibleBodies = bodies && settings.value.shader !== "wireframe";
     const meshes = visibleBodies ? this.visibleBodies().map((b) => b.mesh) : [];
     const faceHit = this.raycaster.intersectObjects(meshes, false).find((h) => !this.clip || this.clip.distanceToPoint(h.point) >= 0);
-    const faceDist = faceHit ? faceHit.distance : Infinity;
+    // Select Through: edges, corners and sketches behind the front faces can be picked.
+    const faceDist = faceHit && !this.selectThrough ? faceHit.distance : Infinity;
     const near = this.cam.distance * 1e-3;
 
     if (bodies && vertices) {
@@ -1504,7 +1514,7 @@ export class Viewport {
 
   /** Nothing drawn lies in front of this point (a few pixels' slack). Moves the ray. */
   private uncovered(p: Vector3): boolean {
-    if (settings.value.shader === "wireframe") return true;
+    if (settings.value.shader === "wireframe" || this.selectThrough) return true;
     const q = this.toScreen(p);
     if (!q) return false;
     this.setRay(q[0], q[1]);

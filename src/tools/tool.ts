@@ -281,6 +281,7 @@ export function viewMenu(app: AppContext, x: number, y: number, head: (MenuRow |
     ...head,
     ...(head.length ? (["-"] as const) : []),
     { label: "Zoom to Fit", shortcut: "F", run: () => app.view.fitAll() },
+    { label: "Select Through", shortcut: "Ctrl+Shift+S", checked: app.view.selectThrough, run: () => app.view.setSelectThrough(!app.view.selectThrough) },
     flip("showGrid", "Show Grid"),
     flip("showAxes", "Show World Axes"),
     flip("showEdges", "Show Edges"),

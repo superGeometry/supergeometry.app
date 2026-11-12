@@ -1283,6 +1283,12 @@ body.sketching .right-btn.sketch-only {
 #marquee[hidden] {
   display: none;
 }
+/* Right to left: takes what it touches. */
+#marquee.touching {
+  border-style: dashed;
+  background: rgba(61, 200, 120, 0.1);
+  border-color: #3dc878;
+}
 
 #pins {
   position: fixed;

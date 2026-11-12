@@ -225,6 +225,8 @@ export class InputRouter {
           height: `${Math.abs(b.y - a.y)}px`,
         });
         this.marquee.hidden = false;
+        // Right to left takes whatever it touches: drawn dashed.
+        this.marquee.classList.toggle("touching", b.x < a.x);
         this.handler.box?.(a, b, false, this.modifiers);
         return;
       }
