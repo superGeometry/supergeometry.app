@@ -760,7 +760,8 @@ export interface DrawingDetail {
 export interface DrawingMark {
   id: string;
   view: string;
-  kind: "center" | "line";
+  /** cross: an intersection mark - where two edges would meet (a corner rounded off), `c`, from the near ends `a` and `b`. */
+  kind: "center" | "line" | "cross";
   c?: [number, number];
   r?: number;
   a?: [number, number];

@@ -29,6 +29,7 @@ import {
   noteSVG,
   sectionSpec,
   sheetSize,
+  spacedOffset,
   specOf,
   VIEW_SPECS,
 } from "../src/bim/drawingSheet";
@@ -449,6 +450,23 @@ check("they sit on the rectangle around the view", spots.every((s) => s.y === 0 
   }
 }
 
+// Intersection mark: both edges drawn on to where they'd meet, 2 mm past it.
+{
+  const pl = { id: "front", x: 0, y: 0, s: 1, box: [[0, 0], [10, 10]] as [[number, number], [number, number]] };
+  const svgX = markSVG({ id: "x", view: "front", kind: "cross", c: [0, 0], a: [0, 5], b: [5, 0] }, pl, 0.25);
+  check("an intersection mark: two lines past the corner", svgX.includes("M0 5L0 -2") && svgX.includes("M5 0L-2 0"), svgX);
+}
+// Equal spacing: a dimension dragged near the standard step from a parallel one snaps to it; far off, it stays.
+{
+  const pl = { id: "front", x: 0, y: 0, s: 1, box: [[0, 0], [100, 100]] as [[number, number], [number, number]] };
+  const first = { id: "d1", view: "front", kind: "length", a: [0, 50], b: [40, 50], offset: 10 } as const;
+  const near7 = spacedOffset({ ...first, id: "d2", a: [0, 50], b: [80, 50], offset: 16.2 }, [first], pl);
+  check("near the next step out: snapped to it", Math.abs(near7 - 17) < 1e-9, String(near7));
+  const inLine = spacedOffset({ ...first, id: "d2", a: [50, 50], b: [80, 50], offset: 10.8 }, [first], pl);
+  check("near its line: in line with it", Math.abs(inLine - 10) < 1e-9, String(inLine));
+  const free = spacedOffset({ ...first, id: "d2", a: [0, 50], b: [80, 50], offset: 13.5 }, [first], pl);
+  check("between: left where it was put", free === 13.5, String(free));
+}
 if (failed) {
   console.log(`${failed} failed`);
   process.exit(1);

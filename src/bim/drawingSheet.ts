@@ -1242,6 +1242,19 @@ export function markSVG(m: DrawingMark, p: Placed, width: number, color = "#000"
     ].map(([x, y]) => line(C, [C[0] + x * e, C[1] + y * e]));
     return `<path d="${arms.join("")}" ${style}${m.r * p.s > 4 ? ` stroke-dasharray="1.5 1 6 1"` : ""}/>`;
   }
+  if (m.kind === "cross" && m.c && m.a && m.b) {
+    // Each edge drawn on, thin, to where they meet and a little past it.
+    const C = toPaper(p, m.c);
+    let d = "";
+    for (const end of [m.a, m.b]) {
+      const E = toPaper(p, end);
+      const L = Math.hypot(C[0] - E[0], C[1] - E[1]);
+      if (L < 1e-6) continue;
+      const u = [(C[0] - E[0]) / L, (C[1] - E[1]) / L];
+      d += line(E, [C[0] + u[0] * 2, C[1] + u[1] * 2]);
+    }
+    return `<path d="${d}" ${style}/>`;
+  }
   if (m.kind === "line" && m.a && m.b) {
     const A = toPaper(p, m.a);
     const B = toPaper(p, m.b);
@@ -1634,6 +1647,40 @@ function onArc(e: { a: [number, number]; m: [number, number]; b: [number, number
 export const annId = (kind: string) => `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 /** Where a new length dimension goes: off its edge, away from the middle of its view. */
+/**
+ * A straight dimension's offset, snapped (within `snap` mm on the paper) so its
+ * line is in line with a parallel one of the same view, or the standard step
+ * (DIM_STEP) out or in from it: dimensions stacked evenly.
+ */
+export function spacedOffset(d: DrawingDim, others: DrawingDim[], p: Placed, snap = 1.5): number {
+  if (!d.b || d.kind === "angle" || d.r !== undefined) return d.offset;
+  const frame = (x: DrawingDim) => {
+    const A = toPaper(p, x.a);
+    const B = toPaper(p, x.b!);
+    const L = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
+    const u: [number, number] = [(B[0] - A[0]) / L, (B[1] - A[1]) / L];
+    return { A, u, n: [u[1], -u[0]] as [number, number] };
+  };
+  const me = frame(d);
+  const base = me.A[0] * me.n[0] + me.A[1] * me.n[1];
+  const at = base + d.offset;
+  let best: number | null = null;
+  for (const x of others) {
+    if (x.id === d.id || x.view !== d.view || !x.b || x.kind === "angle" || x.r !== undefined) continue;
+    const o = frame(x);
+    const dot = o.u[0] * me.u[0] + o.u[1] * me.u[1];
+    if (Math.abs(Math.abs(dot) - 1) > 1e-6) continue;
+    // Its line, measured along this one's normal.
+    const sign = o.n[0] * me.n[0] + o.n[1] * me.n[1] > 0 ? 1 : -1;
+    const line = sign * (o.A[0] * o.n[0] + o.A[1] * o.n[1] + x.offset);
+    for (const c of [line, line + DIM_STEP, line - DIM_STEP]) if (Math.abs(c - at) < snap && (best === null || Math.abs(c - at) < Math.abs(best - at))) best = c;
+  }
+  if (best === null) return d.offset;
+  const off = best - base;
+  // (Never on what it measures.)
+  return Math.abs(off) < 2 ? d.offset : off;
+}
+
 export function outward(p: Placed, a: [number, number], b: [number, number]): number {
   const A = toPaper(p, a);
   const B = toPaper(p, b);

@@ -45,6 +45,7 @@ import {
   SHEETS,
   type Ent,
   sheetSize,
+  spacedOffset,
   specOf,
   toPaper,
   VIEW_NAMES,
@@ -73,7 +74,8 @@ type ToolId =
   | "projection"
   | "center"
   | "cline"
-  | "clineLines";
+  | "clineLines"
+  | "cross";
 const TOOL_HINT: Record<ToolId, string> = {
   arcAngle: "Tap an arc for the angle it goes round",
   minmax: "Tap a point, an edge or a circle, then another: the distance between them (nearest; Max in the bar for the farthest)",
@@ -93,6 +95,7 @@ const TOOL_HINT: Record<ToolId, string> = {
   center: "Tap a circle or an arc for its centre mark",
   cline: "Tap a point, then another: a centreline through them",
   clineLines: "Tap a straight edge, then the one opposite it: the centreline between them",
+  cross: "Tap a straight edge, then another: a mark where they'd meet (a rounded corner's sharp corner)",
 };
 
 type P2 = [number, number];
@@ -613,7 +616,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
       if (img) next.images = o.images.map((m) => (m === img ? { ...m, x: img.x + dx, y: img.y + dy } : m));
       if (dim) {
         const p = layout.views.find((v) => v.id === dim.view);
-        if (p) Object.assign(next, withDim(o, movedDim(dim, p, q, [dx, dy])));
+        if (p) Object.assign(next, withDim(o, movedDim(dim, p, q, [dx, dy], dimsOf(o))));
       }
     }
     draft = next;
@@ -667,7 +670,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
    * along (back in the middle when near it); an angle's arc through q; a
    * circle's leader towards q.
    */
-  const movedDim = (d: DrawingDim, p: Layout["views"][number], q: [number, number], by: [number, number]): DrawingDim => {
+  const movedDim = (d: DrawingDim, p: Layout["views"][number], q: [number, number], by: [number, number], others: DrawingDim[] = []): DrawingDim => {
     if (d.kind === "angle" && d.c) {
       const c = toPaper(p, d.c);
       return { ...d, offset: Math.max(3, Math.hypot(q[0] - c[0], q[1] - c[1])) };
@@ -686,7 +689,9 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     let slide = (d.slide ?? 0) + by[0] * u[0] + by[1] * u[1];
     if (Math.abs(slide) < 2) slide = 0;
     // Never across what it measures (it flips side instead of sitting on it).
-    return { ...d, offset: Math.abs(offset) < 2 ? 2 * (Math.sign(offset) || Math.sign(d.offset) || 1) : offset, slide: slide || undefined };
+    const moved = { ...d, offset: Math.abs(offset) < 2 ? 2 * (Math.sign(offset) || Math.sign(d.offset) || 1) : offset, slide: slide || undefined };
+    // In line with a parallel dimension, or evenly spaced from it.
+    return { ...moved, offset: spacedOffset(moved, others, p) };
   };
 
   // ---- The dimension and note tools
@@ -792,7 +797,8 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
         return edge(edgeAt(views, layout, q, tol, "line"));
       case "lineLine":
       case "angle":
-      case "clineLines": {
+      case "clineLines":
+      case "cross": {
         const h = linePick(q, view);
         return h ? lineOf(h.view, h.a, h.b) : "";
       }
@@ -910,7 +916,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
       if (len2(sub2(a, b)) < 1e-6) return (app.ui.toast("That point is on the edge"), step(TOOL_HINT.pointLine));
       addDim({ id: annId("dim"), view: hit.view, kind: "distance", a, b, offset: outward(placedOf(hit.view), a, b) });
       showHint(TOOL_HINT.pointLine);
-    } else if (tool === "lineLine" || tool === "angle" || tool === "clineLines") {
+    } else if (tool === "lineLine" || tool === "angle" || tool === "clineLines" || tool === "cross") {
       const hit = linePick(q, view);
       if (!hit) return again("Tap a straight edge");
       if (!picks.length) return (picks.push({ view: hit.view, p: foot(fromPaper(placedOf(hit.view), q), hit.a, hit.b), line: hit.line }), step("Now tap the second edge"));
@@ -920,6 +926,14 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
       const u2 = unit2(sub2(hit.b, hit.a));
       const parallel = Math.abs(cross2(u1, u2)) < PARALLEL;
       picks = [];
+      if (tool === "cross") {
+        if (parallel) return (app.ui.toast("Those edges are parallel: they don't meet"), step(TOOL_HINT.cross));
+        const t = cross2(sub2(hit.a, l1.a), u2) / cross2(u1, u2);
+        const c: P2 = [l1.a[0] + u1[0] * t, l1.a[1] + u1[1] * t];
+        const nearer = (l: { a: P2; b: P2 }): P2 => (len2(sub2(l.a, c)) < len2(sub2(l.b, c)) ? l.a : l.b);
+        addMark({ id: annId("mark"), view: hit.view, kind: "cross", c, a: nearer(l1), b: nearer(hit) });
+        return showHint(TOOL_HINT.cross);
+      }
       if (tool === "angle") {
         if (parallel) return (app.ui.toast("Those edges are parallel: they make no angle"), step(TOOL_HINT.angle));
         // Where they meet, and a point on each the side tapped.
@@ -1565,12 +1579,13 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
       button("Overall sizes", o.overall ? "eye" : "eyeOff", () => set(o.overall ? { overall: false } : { overall: true, overallDims: back() }), { on: o.overall, sub: true });
       button("Arrange", "align", arrange, { sub: true });
     }
-    const markTools: ToolId[] = ["center", "cline", "clineLines"];
+    const markTools: ToolId[] = ["center", "cline", "clineLines", "cross"];
     button("Centrelines", "lineDashed", () => ((open = open === "marks" ? null : "marks"), renderTools()), { on: open === "marks" || (!!tool && markTools.includes(tool)) });
     if (open === "marks") {
       pick("center", "Centre Mark", "axis");
       pick("cline", "2-Point Centreline", "lineDashed");
       pick("clineLines", "2-Line Centreline", "splitLine");
+      pick("cross", "Intersection Mark", "close");
     }
     button("Note", "text", () => startTool(tool === "note" ? null : "note"), { on: tool === "note" });
     button("Image", "image", () => void addImage());
