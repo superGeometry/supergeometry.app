@@ -2386,12 +2386,44 @@ export class SplitOp extends FeatureOp<SplitFeature> {
 
   constructor(app: AppContext, body: string, existing?: SplitFeature, plane?: PlaneDef) {
     super(app, { ...app.store.newIdentity("split"), type: "split", body, plane: plane ?? { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] } }, existing);
-    this.plane = existing?.plane ?? plane ?? null;
-    this.slots = [planeSlot(app, "Split with", () => this.plane, (p) => ((this.plane = p), (this.feature.plane = p)))];
+    this.plane = existing && !existing.noPlane ? existing.plane : (plane ?? null);
+    const f = this.feature;
+    const first = planeSlot(app, "Split with", () => this.plane, (p) => ((this.plane = p), (f.plane = p), (f.noPlane = undefined)));
+    // More planes at once (a body cut in slices).
+    const more = planeSlot(app, "More planes", () => f.planes?.at(-1) ?? null, (p) => (f.planes = [...(f.planes ?? []), p]));
+    const own = (b: string) => b === f.id || b.startsWith(`${f.id}:`);
+    const tools: Slot = {
+      label: "Split with bodies",
+      multi: true,
+      describe: () => (f.tools?.length ? `${f.tools.length} bod${f.tools.length > 1 ? "ies" : "y"}` : "Optional - tap bodies to cut along"),
+      filled: () => true,
+      pick: { profiles: false, planes: false, axes: false },
+      shows: () => (f.tools ?? []).map((b) => ({ kind: "body" as const, body: b })),
+      rejectHint: "Tap another body",
+      accept: (hit) => {
+        const b = hit.kind === "face" || hit.kind === "edge" || hit.kind === "vertex" ? hit.body : null;
+        if (!b || b === f.body || own(b)) return false;
+        const t = f.tools ?? [];
+        f.tools = t.includes(b) ? t.filter((x) => x !== b) : [...t, b];
+        if (!f.tools.length) f.tools = undefined;
+        f.noPlane = !this.plane || undefined;
+        return true;
+      },
+    };
+    this.slots = [
+      first,
+      { ...more, multi: true, describe: () => (f.planes?.length ? `${f.planes.length} more` : "Optional - tap more planes or flat faces"), filled: () => true },
+      tools,
+    ];
+  }
+
+  /** A plane, or a body to cut along, is enough. */
+  protected ready(): boolean {
+    return !!this.plane || !!this.feature.tools?.length;
   }
 
   protected hint(): string {
-    return "The body is cut in two where the plane crosses it.";
+    return "The body is cut where the planes, and the surfaces of the bodies picked, cross it. Those bodies stay as they are.";
   }
 
   protected items(): PanelItem[] {

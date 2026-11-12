@@ -337,6 +337,12 @@ export interface SplitFeature extends FeatureBase {
   type: "split";
   body: string;
   plane: PlaneDef;
+  /** More planes to cut along at once. */
+  planes?: PlaneDef[];
+  /** Bodies it's cut with, along their surfaces (they stay as they are). */
+  tools?: string[];
+  /** Cut only with the tools: `plane` isn't one. */
+  noPlane?: boolean;
 }
 
 /** Construction plane. Optionally follows a face (offset along its normal). */

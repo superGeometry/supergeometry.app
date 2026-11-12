@@ -1419,6 +1419,18 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "split": {
       const body = need(bodies, f.body);
+      // Several planes, or bodies, at once: every piece they cut it into. The
+      // biggest stays the body; the others are new ones.
+      if (f.planes?.length || f.tools?.length || f.noPlane) {
+        const planes = [...(f.noPlane ? [] : [f.plane]), ...(f.planes ?? [])];
+        const tools = (f.tools ?? []).filter((t) => t !== f.body).map((t) => need(bodies, t));
+        if (!planes.length && !tools.length) throw new Error("Pick a plane or a body to split it with");
+        const pieces = splitAll(body, planes, tools);
+        if (pieces.length < 2) throw new Error("Nothing it's split with cuts through the body");
+        bodies.set(f.body, pieces[0]);
+        pieces.slice(1).forEach((p, k) => bodies.set(k ? `${f.id}:${k + 1}` : f.id, p));
+        return;
+      }
       const half = halfSpace(f.plane, body);
       let a: Shape3D | null = null, b: Shape3D | null = null;
       try {
@@ -3104,6 +3116,41 @@ function transform(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {
 }
 
 /** Solid filling the positive side of a plane, big enough to contain `body`. */
+/** A body cut by planes and other bodies' surfaces at once (OpenCascade's Splitter): the pieces, biggest first. */
+function splitAll(body: Shape3D, planes: PlaneDef[], tools: Shape3D[]): Shape3D[] {
+  const oc = getOC();
+  const sp = new oc.BRepAlgoAPI_Splitter();
+  const args = new oc.NCollection_List_TopoDS_Shape();
+  const list = new oc.NCollection_List_TopoDS_Shape();
+  const progress = new oc.Message_ProgressRange();
+  try {
+    args.Append(body.wrapped);
+    const bb = body.boundingBox;
+    for (const plane of planes) {
+      // A sheet of the plane wider than the body.
+      const L = (Math.hypot(bb.width, bb.height, bb.depth) + dist(bb.center as Vec3, plane.origin)) * 2 + 10;
+      const x = plane.xDir;
+      const y = cross(plane.normal, x);
+      const corner = (u: number, v: number): Vec3 => add(plane.origin, add(scale(x, u * L), scale(y, v * L)));
+      list.Append(makePolygon([corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]).wrapped);
+    }
+    for (const t of tools) list.Append(t.wrapped);
+    sp.SetArguments(args);
+    sp.SetTools(list);
+    sp.SetFuzzyValue(1e-5);
+    sp.Build(progress);
+    if (!sp.IsDone()) throw new Error("It couldn't be split with those");
+    const pieces = subShapes(cast(sp.Shape()) as Shape3D, "SOLID").map((x) => cast(x) as Shape3D);
+    const vol = pieces.map((p) => Math.abs(volumeOf(p)));
+    return pieces.map((p, i) => ({ p, v: vol[i] })).filter((x) => x.v > 1e-9).sort((a, b) => b.v - a.v).map((x) => x.p);
+  } finally {
+    sp.delete();
+    args.delete();
+    list.delete();
+    progress.delete();
+  }
+}
+
 function halfSpace(plane: PlaneDef, body: Shape3D): Shape3D {
   const bb = body.boundingBox;
   const L = (Math.hypot(bb.width, bb.height, bb.depth) + dist(bb.center as Vec3, plane.origin)) * 2 + 10;
