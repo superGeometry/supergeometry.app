@@ -973,7 +973,29 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
     }
 
     case "extrude": {
-      if (Math.abs(f.distance) < 1e-6) throw new Error("Distance is zero");
+      const ext = f.extent ?? "distance";
+      if (ext === "distance" && Math.abs(f.distance) < 1e-6) throw new Error("Distance is zero");
+      if (ext === "to" && f.symmetric) throw new Error("Up to works one way only - switch Sides back to One side");
+      if (ext === "to" && !f.to?.face && !f.to?.plane) throw new Error("Pick the face or plane it goes up to");
+      // Where it starts: at the shape, or `start` from it along its normal.
+      const startFaces = () => {
+        const src = sourceFaces(f.source, ctx);
+        return f.start ? src.map(({ face, normal }) => ({ face: face.clone().translate(scale(normal, f.start!)) as Face, normal })) : src;
+      };
+      // Up to: the face (where it is now) or the plane it stops at.
+      const upTo = ext === "to" ? extrudeTarget(f.to!, ctx) : null;
+      // How far: the distance, or far enough to come out of everything (the way the distance's sign says, or towards the target).
+      let distance = f.distance;
+      if (ext === "through" && !ctx.bodies.size) throw new Error("Through all goes through the bodies there are - there are none yet: set a Distance");
+      if (ext !== "distance") {
+        const src = startFaces();
+        const reach = reachOf(ctx, src.map((s) => s.face as unknown as Shape3D), upTo?.shape);
+        const n = src[0]?.normal ?? [0, 0, 1];
+        const c = src[0]?.face.center.toTuple() as Vec3 | undefined;
+        const way = upTo && c ? Math.sign(dot(sub(upTo.point, c), n)) || 1 : Math.sign(f.distance) || 1;
+        distance = way * reach;
+      }
+      const plain = ext === "distance" && !f.start && !f.draft;
       // Pushing/pulling a face of its own body offsets it: the neighbouring faces
       // extend along their own surfaces (a round side stays round).
       const tapered = f.taper !== undefined && Math.abs(f.taper - 1) > 1e-9;
@@ -984,7 +1006,8 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         // is split by the face's outline into a disc and a ring round it (the
         // ring was refused as "a shape with a hole", and each piece would have
         // shrunk towards its own middle).
-        const src = sourceFaces(f.source, ctx);
+        if (ext !== "distance" || f.draft) throw new Error("Taper end % works with a set distance and no draft - set Taper end back to 100%");
+        const src = startFaces();
         const parts = mergedFaces(src.map((s) => s.face), src[0]?.normal ?? [0, 0, 1]).map((face) => ({ face, normal: src[0].normal })).map(({ face, normal }) => {
           // (replicad's outerWire() and innerWires() free the face they're asked
           // of: they're asked of copies.)
@@ -994,19 +1017,19 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           const k = Math.max(0.002, f.taper!);
           // Straight-edged shapes: flat sides (a loft makes them curved surfaces,
           // and then nothing that needs a flat face - sketch on it, move it - works).
-          const flat = taperedPrism(face, c, normal, k, f.distance);
+          const flat = taperedPrism(face, c, normal, k, distance);
           if (flat) return flat;
-          const w1 = w0.clone().scale(k, c).translate(scale(normal, f.distance));
+          const w1 = w0.clone().scale(k, c).translate(scale(normal, distance));
           try {
             return loft([w0, w1], { ruled: true }) as Shape3D;
           } catch {
             throw new Error("This shape can't be tapered");
           }
         });
-        combine(f.id, f.mode, f.target, fuseAll(parts), f.distance < 0, ctx);
+        combine(f.id, f.mode, f.target, fuseAll(parts), distance < 0, ctx);
         return;
       }
-      if (f.source.kind === "face" && f.mode !== "new" && f.target === f.source.face.body && !f.symmetric) {
+      if (plain && f.source.kind === "face" && f.mode !== "new" && f.mode !== "intersect" && f.target === f.source.face.body && !f.symmetric) {
         const body = need(bodies, f.target);
         const face = resolveFace(body, f.source.face);
         const d = f.mode === "cut" ? -Math.abs(f.distance) : f.mode === "join" ? Math.abs(f.distance) : f.distance;
@@ -1030,10 +1053,14 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         }
       }
       // Symmetric: from `distance` behind the shape to `distance` in front.
-      const parts = sourceFaces(f.source, ctx).map(({ face, normal }) =>
-        f.symmetric ? basicFaceExtrusion(face.clone().translate(scale(normal, -f.distance)), new Vector(normal).multiply(2 * f.distance)) : basicFaceExtrusion(face, new Vector(normal).multiply(f.distance)),
-      );
-      const solid = fuseAll(parts);
+      const parts = startFaces().map(({ face, normal }) => {
+        const straight = f.symmetric ? basicFaceExtrusion(face.clone().translate(scale(normal, -distance)), new Vector(normal).multiply(2 * distance)) : basicFaceExtrusion(face, new Vector(normal).multiply(distance));
+        // Draft: the sides lean from the shape's own plane (both ways from it, symmetric).
+        return f.draft ? drafted(straight, scale(normal, Math.sign(distance) || 1), face.center.toTuple() as Vec3, f.draft) : straight;
+      });
+      let solid = fuseAll(parts);
+      // Up to: what goes past the face or plane is cut off.
+      if (upTo) solid = trimmedTo(solid, upTo, startFaces()[0]?.face.center.toTuple() as Vec3);
       // Auto: other bodies the extrusion runs into get cut through. Drawn on
       // its own (no body it belongs to), it then only cuts - no new body.
       if (f.mode === "auto") {
@@ -1046,7 +1073,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         }
         if (hit.length && !f.target) return;
       }
-      combine(f.id, f.mode, f.target, solid, f.distance < 0, ctx);
+      combine(f.id, f.mode, f.target, solid, distance < 0, ctx);
       return;
     }
 
@@ -2551,6 +2578,18 @@ function combine(id: string, mode: string, target: string | undefined, solid: Sh
     }
     return;
   }
+  // Intersect: only what's in both stays - of the body named, or (none named) of every body it overlaps.
+  if (m === "intersect") {
+    const hits = target ? [target] : overlapping(solid, ctx);
+    if (!hits.length) throw new Error("It overlaps no body - Intersect keeps only what's in both");
+    for (const hit of hits) {
+      const out = fuzzyBoolean("common", need(ctx.bodies, hit), solid);
+      if (isEmpty(out)) ctx.bodies.delete(hit);
+      else ctx.bodies.set(hit, out);
+      ctx.freeforms.delete(hit);
+    }
+    return;
+  }
   if (!target && m === "join") target = touching(solid, ctx)[0];
   if (m === "new" || !target) {
     ctx.bodies.set(id, solid);
@@ -2933,6 +2972,107 @@ function halfSpace(plane: PlaneDef, body: Shape3D): Shape3D {
   const face = makePolygon([corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]);
   return basicFaceExtrusion(face, new Vector(plane.normal).multiply(L));
 }
+
+/** What an extrusion goes up to: the face as it is now (a flat one: its whole plane), or a plane; and a point on it. */
+function extrudeTarget(to: { face?: FaceRef; plane?: PlaneDef }, ctx: Ctx): { shape: Shape3D; point: Vec3; plane?: PlaneDef } {
+  if (to.face) {
+    const face = resolveFace(need(ctx.bodies, to.face.body), to.face);
+    // A flat face: its whole plane (an extrusion wider than the face still stops there).
+    if (face.geomType === "PLANE") {
+      const point = face.center.toTuple() as Vec3;
+      const normal = norm(face.normalAt().toTuple() as Vec3);
+      return { shape: face as unknown as Shape3D, point, plane: { origin: point, normal, xDir: xDirFor(normal) } };
+    }
+    return { shape: face as unknown as Shape3D, point: face.center.toTuple() as Vec3 };
+  }
+  const plane = to.plane!;
+  return { shape: makeVertex(plane.origin) as unknown as Shape3D, point: plane.origin, plane };
+}
+
+/** Far enough to come out of every body, the shapes and the target: twice everything's span. */
+function reachOf(ctx: Ctx, shapes: Shape3D[], extra?: Shape3D): number {
+  const lo: Vec3 = [Infinity, Infinity, Infinity];
+  const hi: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const s of [...ctx.bodies.values(), ...shapes, ...(extra ? [extra] : [])]) {
+    const [a, b] = s.boundingBox.bounds;
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k], a[k]);
+      hi[k] = Math.max(hi[k], b[k]);
+    }
+  }
+  if (!Number.isFinite(lo[0])) return 1000;
+  return Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 2 + 10;
+}
+
+/** An extrusion stopped at its target: a plane cuts off what's beyond it; a round face splits it and the part at the shape stays. */
+function trimmedTo(solid: Shape3D, to: { shape: Shape3D; point: Vec3; plane?: PlaneDef }, from: Vec3): Shape3D {
+  if (to.plane) {
+    // The half beyond the plane (away from the shape) goes.
+    const n = dot(sub(from, to.plane.origin), to.plane.normal) > 0 ? scale(to.plane.normal, -1) : to.plane.normal;
+    const beyond = halfSpace({ ...to.plane, normal: n, xDir: xDirFor(n) }, solid);
+    const out = fuzzyBoolean("cut", solid, beyond);
+    if (isEmpty(out)) throw new Error("Nothing is left before that face or plane - it's behind the shape");
+    return out;
+  }
+  const oc = getOC();
+  const sp = new oc.BRepAlgoAPI_Splitter();
+  const args = new oc.NCollection_List_TopoDS_Shape();
+  const tools = new oc.NCollection_List_TopoDS_Shape();
+  const progress = new oc.Message_ProgressRange();
+  try {
+    args.Append(solid.wrapped);
+    tools.Append(to.shape.wrapped);
+    sp.SetArguments(args);
+    sp.SetTools(tools);
+    sp.Build(progress);
+    if (!sp.IsDone()) throw new Error("It couldn't be stopped at that face");
+    const pieces = subShapes(cast(sp.Shape()) as Shape3D, "SOLID").map((x) => cast(x) as Shape3D);
+    if (pieces.length < 2) throw new Error("It doesn't run all the way across that face - pick a face it passes through whole, or a plane");
+    // The piece the shape starts from: the one nearest it.
+    const at = makeVertex(from) as unknown as Shape3D;
+    const d = pieces.map((p) => measureDistanceBetween(p, at));
+    const best = Math.min(...d);
+    return fuseAll(pieces.filter((_, i) => d[i] <= best + 1e-6));
+  } finally {
+    sp.delete();
+    args.delete();
+    tools.delete();
+    progress.delete();
+  }
+}
+
+/** A straight extrusion's sides leaned `deg` degrees in (a draft) towards its far end along `dir`, hinged on the plane through `origin`. */
+function drafted(solid: Shape3D, dir: Vec3, origin: Vec3, deg: number): Shape3D {
+  const oc = getOC();
+  const n = norm(dir);
+  const d = new oc.gp_Dir(n[0], n[1], n[2]);
+  const at = new oc.gp_Pnt(origin[0], origin[1], origin[2]);
+  const pln = new oc.gp_Pln(at, d);
+  const mk = new oc.BRepOffsetAPI_DraftAngle(solid.wrapped);
+  const progress = new oc.Message_ProgressRange();
+  const fail = "These sides can't lean that far - try a smaller draft angle";
+  try {
+    for (const face of solid.faces) {
+      // The ends stay as they are; every side leans.
+      if (face.geomType === "PLANE" && Math.abs(dot(norm(face.normalAt().toTuple() as Vec3), n)) > 0.999) continue;
+      mk.Add(oc.TopoDS.Face(face.wrapped), d, (DRAFT_SIGN * deg * Math.PI) / 180, pln, true);
+      if (!mk.AddDone()) throw new Error(fail);
+    }
+    mk.Build(progress);
+    if (!mk.IsDone()) throw new Error(fail);
+    const out = cast(mk.Shape());
+    if (!isShape3D(out) || !shapeValid(out)) throw new Error(fail);
+    return out;
+  } finally {
+    mk.delete();
+    pln.delete();
+    at.delete();
+    d.delete();
+    progress.delete();
+  }
+}
+/** Which way OpenCascade's draft angle leans (checked in tests: a positive draft narrows the far end). */
+const DRAFT_SIGN = 1;
 
 /** Each sketch as it was last made (see the sketch step). */
 const sketchWas = new Map<string, { text: string; state: SketchState }>();

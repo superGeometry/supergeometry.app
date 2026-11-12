@@ -24,16 +24,18 @@ import { isTouchDevice } from "../device";
 import { CopyToggle, copyMode, linkMode } from "./copyToggle";
 import { detachFreeformCopy, freeformBodies } from "../doc/freeformCopies";
 
-type Mode = "auto" | "new" | "join" | "cut";
+type Mode = "auto" | "new" | "join" | "cut" | "intersect";
 const MODES = [
   { id: "auto", label: "Auto" },
   { id: "new", label: "New body" },
   { id: "join", label: "Add" },
   { id: "cut", label: "Cut" },
+  { id: "intersect", label: "Intersect" },
 ];
 
-function modeChoice(get: () => Mode, set: (m: Mode) => void, rerender: () => void): PanelItem {
-  return { type: "choice", options: MODES, value: get(), onChange: (m) => (set(m as Mode), rerender()) };
+/** The result choice; `plain`: without Intersect (a tool that only adds, cuts or stands alone). */
+function modeChoice<M extends Mode>(get: () => M, set: (m: M) => void, rerender: () => void, plain = false): PanelItem {
+  return { type: "choice", options: plain ? MODES.filter((m) => m.id !== "intersect") : MODES, value: get(), onChange: (m) => (set(m as M), rerender()) };
 }
 
 // ------------------------------------------------------------------ extrude
@@ -71,6 +73,7 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     super(app, { ...app.store.newIdentity("extrude", label), type: "extrude", source, distance: opts.distance ?? 0, mode, target: targetOf(app, source) }, existing);
     this.frame = sourceFrame(app, this.feature.source);
     this.handle = new Handle(app.view, "arrow");
+    if (this.feature.extent === "to") this.slots = [this.upToSlot()];
     if (source.kind === "face") {
       const k = faceIndexOf(app, source.face);
       if (k !== null) this.thick = oppositeFace(app, source.face.body, k);
@@ -176,6 +179,8 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
 
   protected hint(): string {
     if (this.offsetsFace()) return "Drag the arrow or type a distance to push or pull the face. The faces around it follow.";
+    if (this.feature.extent === "through") return "It goes through every body in its way. Flip direction turns it the other way.";
+    if (this.feature.extent === "to") return "It stops at the face or plane picked (a round face too).";
     return "Drag the arrow or type a distance to make it 3D. A negative distance cuts into the body.";
   }
 
@@ -184,8 +189,10 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     const distance = this.num("Distance", "distance", "length", { onInput: (v) => this.setDistance(v), inBox: true });
     // (No Join / Cut / New or taper: those make it an extrusion.)
     if (this.offsetsFace()) return [distance];
+    const ext = this.feature.extent ?? "distance";
     return [
-      distance,
+      ...(ext === "distance" ? [distance] : []),
+      ...this.extentItems(),
       // One side, or both ways from the shape (the distance each side).
       {
         type: "choice" as const,
@@ -219,6 +226,7 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
       // Every shape in the sketch at once (a scale, lettering: hundreds of them,
       // far too many to tap) - holes stay holes.
       ...(src.kind === "profile" && !this.existing ? [{ type: "button" as const, label: "All shapes", onClick: () => this.allShapes() }] : []),
+      ...this.startDraftItems(),
       // Lean the sides in towards a smaller end (a spire, a pyramid) - no angle to work out.
       // How big the far end is, in % of the shape: 100 none, 0 to a point. A
       // value box: type it, or press on it and drag left / right.
@@ -242,6 +250,94 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
     ];
   }
 
+  /**
+   * Where it ends (a set distance, through everything, or up to a face or
+   * plane), where it starts, and how much its sides lean (a draft).
+   */
+  private extentItems(): PanelItem[] {
+    const f = this.feature;
+    const ext = f.extent ?? "distance";
+    return [
+      {
+        type: "choice" as const,
+        label: "Ends",
+        options: [
+          { id: "distance", label: "Distance" },
+          { id: "through", label: "Through all" },
+          { id: "to", label: "Up to" },
+        ],
+        value: ext,
+        onChange: (id: string) => this.setExtent(id as "distance" | "through" | "to"),
+      },
+      // Through all: which way (the arrow's).
+      ...(ext === "through"
+        ? [{ type: "button" as const, label: "Flip direction", onClick: () => ((f.distance = -(f.distance || 1)), this.onDraftChanged(), this.render(), this.update()) }]
+        : []),
+    ];
+  }
+
+  /** Where it starts (from the shape, along its normal) and how far its sides lean. */
+  private startDraftItems(): PanelItem[] {
+    const f = this.feature;
+    return [
+      this.num("Start", "start", "length", { onInput: (v) => ((f.start = v || undefined), this.onDraftChanged(), this.update()) }),
+      this.num("Draft angle", "draft", "angle", { onInput: (v) => ((f.draft = v || undefined), this.update()) }),
+    ];
+  }
+
+  private setExtent(ext: "distance" | "through" | "to"): void {
+    const f = this.feature;
+    f.extent = ext === "distance" ? undefined : ext;
+    if (ext !== "to") f.to = undefined;
+    // Up to: a face or plane to pick (the next tap takes it).
+    this.slots = ext === "to" ? [this.upToSlot()] : [];
+    this.active = ext === "to" && !f.to ? 0 : -1;
+    if (ext === "to" && f.symmetric) f.symmetric = undefined;
+    if (ext === "distance" && !f.distance) f.distance = lastExtrude.distance;
+    this.onDraftChanged();
+    this.render();
+    this.update();
+  }
+
+  /** Up to: any face of a body (flat or round), or a plane. */
+  private upToSlot(): Slot {
+    let shown: Sel | null = null;
+    let name = this.feature.to?.face ? "Face" : this.feature.to?.plane ? "Plane" : "";
+    const take = (to: { face?: FaceRef; plane?: PlaneDef }, label: string, sel: Sel | null) => {
+      this.feature.to = to;
+      name = label;
+      shown = sel;
+    };
+    return {
+      label: "Up to",
+      describe: () => (this.feature.to ? name || "Face" : "Tap a face or a plane"),
+      filled: () => !!(this.feature.to?.face || this.feature.to?.plane),
+      originPlanes: true,
+      rejectHint: "Tap a face of a body, or a plane",
+      pick: { profiles: false, edges: false, planes: true },
+      presets: [
+        ...["XY", "XZ", "YZ"].map((id) => ({ label: id, apply: () => take({ plane: this.app.view.planeOf(id)! }, `${id} plane`, null) })),
+        ...this.app.view.construction.planes.map((c) => ({ label: c.name, apply: () => take({ plane: c.plane }, c.name, null) })),
+      ],
+      shows: () => (shown ? [shown] : []),
+      accept: (hit) => {
+        if (hit.kind === "plane") {
+          const p = this.app.view.planeOf(hit.id);
+          if (!p) return false;
+          take({ plane: p }, ["XY", "XZ", "YZ"].includes(hit.id) ? `${hit.id} plane` : "Plane", { kind: "plane", id: hit.id });
+          return true;
+        }
+        if (hit.kind === "face") {
+          const ref = faceRefOf(this.app, hit);
+          if (!ref) return false;
+          take({ face: ref }, "Face", { kind: "face", body: hit.body, face: hit.face });
+          return true;
+        }
+        return false;
+      },
+    };
+  }
+
   private allShapes(): void {
     const src = this.feature.source;
     if (src.kind !== "profile") return;
@@ -257,7 +353,9 @@ export class ExtrudeOp extends FeatureOp<ExtrudeFeature> {
   }
 
   protected ready(): boolean {
-    return this.feature.distance !== 0;
+    const ext = this.feature.extent ?? "distance";
+    if (ext === "to") return !!(this.feature.to?.face || this.feature.to?.plane);
+    return ext === "through" || this.feature.distance !== 0;
   }
 
   exit(): void {
@@ -2292,7 +2390,7 @@ export class ConnectOp extends FeatureOp<ConnectFeature> {
   protected items(): PanelItem[] {
     const f = this.feature;
     return [
-      modeChoice(() => f.mode, (m) => (f.mode = m), () => (this.render(), this.update())),
+      modeChoice(() => f.mode, (m) => (f.mode = m), () => (this.render(), this.update()), true),
       // Without a guide it bows out by Bend; with one, the guide can be let go again.
       ...(f.guide
         ? [{ type: "button" as const, label: "No guide", icon: "close" as const, onClick: () => ((f.guide = undefined), this.render(), this.update()) }]

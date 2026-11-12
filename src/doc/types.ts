@@ -164,7 +164,7 @@ export interface ExtrudeFeature extends FeatureBase {
   source: ExtrudeSource;
   distance: number;
   /** auto: join `target` when distance > 0, cut it when < 0; new body without a target. */
-  mode: "auto" | "new" | "join" | "cut";
+  mode: "auto" | "new" | "join" | "cut" | "intersect";
   target?: string;
   /**
    * How big the far end is, as a fraction of the shape (1 or missing: straight
@@ -173,6 +173,17 @@ export interface ExtrudeFeature extends FeatureBase {
   taper?: number;
   /** Both ways from the shape: `distance` each side (a boss through its middle plane). */
   symmetric?: boolean;
+  /**
+   * Where it ends: `distance` (missing too), through everything there is
+   * (`distance` only gives the way: its sign), or up to `to` - a face (flat or
+   * round, followed as its body changes) or a plane.
+   */
+  extent?: "distance" | "through" | "to";
+  to?: { face?: FaceRef; plane?: PlaneDef };
+  /** It starts this far from the shape, along its normal (missing: at the shape). */
+  start?: number;
+  /** Degrees the sides lean in (negative: out) towards the far end - a draft, as for a mould. */
+  draft?: number;
 }
 
 export interface EdgeFeature extends FeatureBase {
@@ -234,7 +245,7 @@ export interface AxisRef {
 
 export type PathRef = { kind: "sketch"; sketch: string; entities: string[] } | { kind: "edges"; edges: EdgeRef[] };
 
-type BodyMode = "auto" | "new" | "join" | "cut";
+type BodyMode = "auto" | "new" | "join" | "cut" | "intersect";
 
 export interface RevolveFeature extends FeatureBase {
   type: "revolve";
