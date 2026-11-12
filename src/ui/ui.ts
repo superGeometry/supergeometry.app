@@ -122,6 +122,10 @@ export interface HistoryHandlers {
   /** Switch several steps off (true) or on. */
   suppress(ids: string[], off: boolean): void;
   askName(title: string, current: string): Promise<string | null>;
+  /** The breakpoint after this step (the later ones off), or none (null). */
+  breakAfter?(id: string | null): void;
+  /** Flatten the history into the bodies as they are. */
+  merge?(): void;
 }
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -652,7 +656,7 @@ export class UI {
    * A window of fields; resolves with their values, or null (Cancel / Esc / X).
    * `action`: a button at the top (e.g. New Variable); it resolves with the values too, and ACTION set.
    */
-  dialog(title: string, fields: { key: string; label: string; value: string; placeholder?: string }[], note?: string, action?: { label: string; icon: IconName }): Promise<Record<string, string> | null> {
+  dialog(title: string, fields: { key: string; label: string; value: string; placeholder?: string; /** A tick box: value "1" ticked, "" not. */ check?: boolean }[], note?: string, action?: { label: string; icon: IconName }): Promise<Record<string, string> | null> {
     return new Promise((resolve) => {
       const back = el("div", "dialog-back");
       const box = el("form", "dialog");
@@ -666,7 +670,7 @@ export class UI {
       x.addEventListener("click", () => close(null));
       head.append(x);
       box.append(head);
-      const values = () => Object.fromEntries(fields.map((f, i) => [f.key, inputs[i].value]));
+      const values = () => Object.fromEntries(fields.map((f, i) => [f.key, f.check ? (inputs[i].checked ? "1" : "") : inputs[i].value]));
       if (action) {
         const a = el("button", "text-btn dialog-action");
         a.type = "button";
@@ -680,6 +684,15 @@ export class UI {
       const list = el("div", "dialog-list");
       box.append(list);
       const inputs = fields.map((f) => {
+        if (f.check) {
+          const l = el("label", "dialog-check");
+          const i = document.createElement("input");
+          i.type = "checkbox";
+          i.checked = !!f.value;
+          l.append(i, el("span", "", f.label));
+          list.append(l);
+          return i;
+        }
         const l = el("label", "dialog-field");
         l.append(el("span", "field-label", f.label));
         const i = document.createElement("input");
@@ -711,7 +724,7 @@ export class UI {
       back.append(box);
       back.addEventListener("pointerdown", (e) => e.target === back && close(null));
       document.body.append(back);
-      inputs[0]?.focus();
+      (inputs.find((i) => i.type !== "checkbox") ?? ok).focus();
     });
   }
 
@@ -1430,7 +1443,19 @@ export class UI {
     const groupOf = new Map<string, HistoryGroup>();
     for (const g of h.groups) for (const id of g.steps) if (ids.has(id)) groupOf.set(id, g);
     const started = new Set<string>();
+    const firstBack = features.find((f) => f.rolledBack)?.id;
     for (const f of features) {
+      // The breakpoint: a bar above the steps it switched off, and its Remove.
+      if (f.id === firstBack) {
+        const bar = el("li", "history-break");
+        bar.append(el("span", "history-break-label", "Breakpoint - the steps below are off"));
+        const rm = el("button", "text-btn history-break-remove", "Remove");
+        rm.type = "button";
+        rm.title = "Remove the breakpoint: every step on again";
+        rm.addEventListener("click", () => h.breakAfter?.(null));
+        bar.append(rm);
+        this.historyList.append(bar);
+      }
       const g = groupOf.get(f.id);
       if (g && !started.has(g.id)) {
         started.add(g.id);
@@ -1452,6 +1477,7 @@ export class UI {
       const err = errors.find((e) => e.featureId === f.id);
       if (err) li.classList.add("error");
       if (f.suppressed) li.classList.add("suppressed");
+      if (f.rolledBack) li.classList.add("rolled-back");
       if (f.id === activeId) li.classList.add("active");
       const name = el("button", "history-name", f.name);
       if (BETA_TYPES.has(f.type)) name.append(betaTag());
@@ -1510,6 +1536,9 @@ export class UI {
           { label: "Edit", run: () => h.edit(f.id) },
           ...(looks ? [{ label: hid ? "Show" : "Hide", run: () => h.toggleHidden!(f.id) }] : []),
           { label: f.suppressed ? "Enable" : "Suppress", run: () => h.toggle(f.id) },
+          ...(h.breakAfter ? [{ label: "Insert Breakpoint After", run: () => h.breakAfter!(f.id) }] : []),
+          ...(h.breakAfter && firstBack ? [{ label: "Remove Breakpoint", run: () => h.breakAfter!(null) }] : []),
+          ...(h.merge ? ["-" as const, { label: "Merge History…", run: () => h.merge!() }] : []),
           "-",
           { label: "Delete", shortcut: "Del", run: () => h.remove(f.id) },
         ]);

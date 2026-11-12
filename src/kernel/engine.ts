@@ -781,6 +781,8 @@ export function debugBodies(): Map<string, Shape3D> {
 
 async function run(features: Feature[], saved = false) {
   useSafeBooleans();
+  // Steps after the History's breakpoint: off, like suppressed ones.
+  if (features.some((f) => f.rolledBack)) features = features.map((f) => (f.rolledBack && !f.suppressed ? { ...f, suppressed: true } : f));
   const errors: FeatureError[] = [];
   const notes: FeatureError[] = [];
   let ctx: Ctx = fork({ bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map() });

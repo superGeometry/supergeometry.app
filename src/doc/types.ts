@@ -90,6 +90,11 @@ interface FeatureBase {
   /** Suppressed features are skipped during regeneration. */
   suppressed?: boolean;
   /**
+   * After the History's breakpoint: off until the breakpoint is removed (the
+   * model as it was there). These steps are kept last; new ones go before them.
+   */
+  rolledBack?: boolean;
+  /**
    * Parametric values: field path → expression (e.g. "distance": "depth*2").
    * The number at that path is recomputed from the expression on every change.
    */

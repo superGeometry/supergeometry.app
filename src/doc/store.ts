@@ -188,6 +188,8 @@ export class DocStore {
     const before = this.transientBase ?? pack(this.doc);
     const next = unpack(pack(this.doc));
     mutate(next);
+    // With a breakpoint: what's after it stays last, so a new step goes in at the breakpoint.
+    if (next.features.some((f) => f.rolledBack)) next.features = [...next.features.filter((f) => !f.rolledBack), ...next.features.filter((f) => f.rolledBack)];
     this.problems = resolveDoc(next);
     const wasLive = this.transientBase !== null;
     this.transientBase = null;

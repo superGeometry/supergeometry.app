@@ -5399,3 +5399,33 @@ html[data-screen="phone"] .bim-props {
 .shortcuts-row .cmd-key {
   justify-self: start;
 }
+
+/* History: the breakpoint and the steps after it */
+.history-break {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 4px 8px;
+  border-top: 2px solid var(--accent);
+  color: var(--accent);
+  font-size: 12px;
+  list-style: none;
+}
+.history-break-label {
+  flex: 1;
+}
+.history-break-remove {
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.history-item.rolled-back {
+  opacity: 0.4;
+}
+.dialog-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  cursor: pointer;
+}

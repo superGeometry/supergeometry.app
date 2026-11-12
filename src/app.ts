@@ -572,18 +572,18 @@ export class App implements AppContext {
     // Isolating: only what's isolated (or was made since) shows.
     const shown = (id: string) => !hidden.has(id) && (!this.isolated || this.isolated.includes(id));
     this.view.setConstruction(r.planes.filter((p) => shown(p.id)), r.axes.filter((a) => shown(a.id)));
-    this.view.setImages(features.filter((f): f is ImageFeature => f.type === "image" && !f.suppressed && shown(f.id)));
+    this.view.setImages(features.filter((f): f is ImageFeature => f.type === "image" && !f.suppressed && !f.rolledBack && shown(f.id)));
   }
 
   private refreshSketches(features: readonly Feature[] = this.store.doc.features): void {
     const hidden = new Set(this.store.doc.hidden);
     const iso = this.isolatedWithSketches();
     const sketches = features
-      .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && ((!hidden.has(f.id) && (!iso || iso.includes(f.id))) || f.id === this.tool.activeSketch))
+      .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && !f.rolledBack && ((!hidden.has(f.id) && (!iso || iso.includes(f.id))) || f.id === this.tool.activeSketch))
       .map((s) => ({ ...s, entities: this.solved.get(s) ?? s.entities, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }));
     // Drawn but not made into anything yet: shown through bodies, and a tap on it finds it there
     // (a pocket sketched on a plane through the middle of a body is inside it).
-    const used = new Set(features.filter((f) => !f.suppressed).flatMap(sketchesUsed));
+    const used = new Set(features.filter((f) => !f.suppressed && !f.rolledBack).flatMap(sketchesUsed));
     this.view.setSketches(sketches, this.tool.activeSketch, new Set(sketches.filter((s) => !used.has(s.id)).map((s) => s.id)));
   }
 
@@ -618,7 +618,7 @@ export class App implements AppContext {
     // preview rebuilt the whole list - 5 ms for 200 steps, far more on a phone).
     const doc = this.store.doc;
     const shown = JSON.stringify([
-      doc.features.map((f) => [f.id, f.name, f.type, f.suppressed ? 1 : 0, f.type === "sketch" ? (f.log ?? 0) : 0]),
+      doc.features.map((f) => [f.id, f.name, f.type, f.suppressed ? 1 : 0, f.rolledBack ? 1 : 0, f.type === "sketch" ? (f.log ?? 0) : 0]),
       this.result?.errors ?? [],
       this.tool.editingId ?? this.tool.activeSketch ?? null,
       [...warnings],
@@ -649,7 +649,88 @@ export class App implements AppContext {
           for (const f of d.features) if (ids.includes(f.id)) f.suppressed = off || undefined;
         }),
       askName: async (title, current) => (await this.ui.dialog(title, [{ key: "name", label: "Name", value: current }]))?.name.trim() || null,
+      breakAfter: (id) => this.breakAfter(id),
+      merge: () => void this.mergeHistory(),
     }, warnings);
+  }
+
+  /**
+   * The History's breakpoint: the steps after `id` off (the model as it was
+   * there) until it's removed (null). New steps go in at the breakpoint.
+   */
+  private breakAfter(id: string | null): void {
+    if (this.tool !== this.selectTool) this.setTool(null);
+    const at = id ? this.store.features.findIndex((f) => f.id === id) : Infinity;
+    const later = id ? this.store.features.length - 1 - at : 0;
+    if (id && !later) return void this.ui.toast("It's the last step - there's nothing after it to roll back");
+    this.store.commit((d) => {
+      d.features.forEach((f, i) => {
+        if (i > at) f.rolledBack = true;
+        else delete f.rolledBack;
+      });
+    });
+    this.ui.toast(id ? `Rolled back to here: ${later} later step${later === 1 ? "" : "s"} off until you remove the breakpoint` : "Breakpoint removed: every step is on again");
+  }
+
+  /**
+   * Merge: the history flattened into the bodies as they are now (each kept
+   * as its exact shape, its name, colour and material kept). Sketches and
+   * variables can stay; every other step goes. Undo takes it back.
+   */
+  private async mergeHistory(): Promise<void> {
+    const bodies = this.view.bodyList;
+    if (!bodies.length) return void this.ui.toast("There are no bodies yet - nothing to merge into");
+    const off = this.store.features.filter((f) => f.rolledBack || f.suppressed).length;
+    const v = await this.ui.dialog(
+      "Merge history",
+      [
+        { key: "sketches", label: "Keep the sketches", value: "1", check: true },
+        { key: "variables", label: "Keep the variables", value: "1", check: true },
+      ],
+      `Every step becomes the bodies as they are now: they can't be edited by their steps any more.${off ? ` The ${off} step${off === 1 ? "" : "s"} switched off or after the breakpoint go too.` : ""} Undo takes it back.`,
+    );
+    if (!v) return;
+    if (this.tool !== this.selectTool) this.setTool(null);
+    const features = this.store.doc.features.filter((f) => !f.rolledBack);
+    const made: Feature[] = [];
+    const renamed = new Map<string, string>();
+    for (const b of bodies) {
+      const blob = await this.kernel.export(features, "step", [b.id]);
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      // The body keeps its id where it can be a step's (names, colours, folders stay with it).
+      const id = /^[\w-]+$/.test(b.id) && !made.some((m) => m.id === b.id) ? b.id : this.store.newIdentity("import").id;
+      if (id !== b.id) renamed.set(b.id, id);
+      const name = this.store.doc.names[b.id] ?? b.name;
+      made.push({ id, name, type: "import", format: "step", fileName: `${name}.step`, data: btoa(bin) });
+    }
+    const keepSketches = !!v.sketches;
+    const keepVars = !!v.variables;
+    this.store.commit((d) => {
+      const sketches = keepSketches
+        ? d.features.flatMap((f): Feature[] => {
+            if (f.type !== "sketch" || f.rolledBack) return [];
+            // Nothing left to follow: a merged body has no steps to point at.
+            const s: SketchFeature = { ...f, attachedTo: undefined, outlineOffsets: undefined, links: undefined };
+            s.constraints = s.constraints?.filter((c) => !/"(ref|lnk)-/.test(JSON.stringify(c)));
+            if (!keepVars) delete s.exprs;
+            return [s];
+          })
+        : [];
+      d.features = [...made, ...sketches];
+      if (!keepVars) d.variables = [];
+      d.historyGroups = undefined;
+      const re = (id: string) => renamed.get(id) ?? id;
+      const reKeys = <T,>(r: Record<string, T> | undefined) => (r ? Object.fromEntries(Object.entries(r).map(([k, x]) => [re(k), x])) : r);
+      d.names = reKeys(d.names)!;
+      d.colors = reKeys(d.colors);
+      d.opacity = reKeys(d.opacity);
+      d.materials = reKeys(d.materials);
+      d.hidden = d.hidden.map(re);
+      d.folders = d.folders?.map((f) => ({ ...f, items: f.items.map(re) }));
+    });
+    this.ui.toast(`History merged: ${made.length} bod${made.length === 1 ? "y" : "ies"}${keepSketches ? ", the sketches kept" : ""}`);
   }
 
   /** What a History step works on: its bodies (made or changed), sketches, and the edges it names. */
