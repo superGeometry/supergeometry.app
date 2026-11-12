@@ -135,14 +135,33 @@ export async function insertImage(app: AppContext, plane: PlaneDef = GROUND): Pr
 }
 
 /** Create a named variable (optionally from a field's current value); returns its name. */
+/**
+ * One new variable. "Add Another" at the top makes it and opens a fresh one
+ * (a window needs twenty: the dialog had to be reopened from the card each time).
+ */
 export async function createVariable(app: AppContext, value = ""): Promise<string | null> {
+  let made: string | null = null;
+  for (;;) {
+    const r = await createOne(app, value);
+    if (r.name) made = r.name;
+    if (!r.another) return made;
+    // A bad name or value: the next window lets it be typed again.
+    value = r.name ? "" : value;
+  }
+}
+
+async function createOne(app: AppContext, value: string): Promise<{ name: string | null; another: boolean }> {
   const list = app.store.doc.variables;
   const note = list.length ? `Existing: ${list.map((v) => `${v.name} = ${v.expr}`).join(", ")}` : "Use variables in any field, e.g. width*2 or wall + 1mm.";
   const v = await app.ui.dialog("Create Variable", [
     { key: "name", label: "Name", value: "", placeholder: "width" },
     { key: "expr", label: "Value", value, placeholder: "40 or 1.5in or depth/2" },
-  ], note);
-  if (!v) return null;
+  ], note, { label: "Add Another", icon: "variableNew" });
+  if (!v) return { name: null, another: false };
+  return { name: makeVariable(app, list, v), another: !!v[DIALOG_ACTION] };
+}
+
+function makeVariable(app: AppContext, list: AppContext["store"]["doc"]["variables"], v: Record<string, string>): string | null {
   const name = v.name.trim();
   // (A variable called sin or pi hid the function: sin(30) stopped working.)
   if (!/^[a-z_][a-z0-9_]*$/i.test(name) || /^(mm|cm|m|in|ft|deg|pi|sqrt|abs|sin|cos|tan)$/i.test(name)) {

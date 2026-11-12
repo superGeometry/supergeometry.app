@@ -339,6 +339,7 @@ if (existsSync(handFile)) {
   };
   await compare({}, "as drawn");
   await compare({ W: "900 mm", H: "1200 mm" }, "smaller");
+  await compare({ W: "900", H: "1800" }, "typed on the model's tags in the app");
   await compare({ W: "1600 mm", H: "2300 mm", F: "90 mm", S: "80 mm" }, "door-height, wider frame");
   await compare({ g: "6 mm", cav: "18 mm", SD: "100 mm" }, "thicker panes");
 }

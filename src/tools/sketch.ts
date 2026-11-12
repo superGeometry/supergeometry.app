@@ -169,6 +169,25 @@ function describePieces(es: SketchEntity[]): string {
 
 const memory = { arc: "3pt" as "3pt" | "center", circle: "center" as "center" | "2pt" | "3pt", corner: "round" as "round" | "chamfer", textFont: "roboto", trim: "cut" as "cut" | "join", offsetMode: "chain" as "edge" | "chain", pattern: "patternLinear" as "patternLinear" | "patternCircular", rect: "diagonal" as "diagonal" | "center" | "3pt", spline: "fit" as "fit" | "control" | "draw", sides: 6, fillet: 2, offset: 2, textSize: storedTextSize(), textAlign: "left" as TextAlign };
 
+/**
+ * The way each tool draws (Rectangle: Center, Diagonal...) survives a reload:
+ * a window drawn all by centre rectangles came back to Diagonal halfway through.
+ */
+const VARIANTS: Record<string, readonly string[]> = { rect: ["diagonal", "center", "3pt"], circle: ["center", "2pt", "3pt"], arc: ["3pt", "center"], spline: ["fit", "control", "draw"], corner: ["round", "chamfer"], trim: ["cut", "join"] };
+try {
+  const saved = JSON.parse(localStorage.getItem("sg.sketchVariants") ?? "{}") as Record<string, string>;
+  for (const [k, v] of Object.entries(saved)) if (VARIANTS[k]?.includes(v)) (memory as unknown as Record<string, string>)[k] = v;
+} catch {
+  /* nothing saved, or no storage */
+}
+function storeVariants(): void {
+  try {
+    localStorage.setItem("sg.sketchVariants", JSON.stringify(Object.fromEntries(Object.keys(VARIANTS).map((k) => [k, (memory as unknown as Record<string, string>)[k]]))));
+  } catch {
+    /* private window: just this session */
+  }
+}
+
 /** The text size survives a reload (a ruler's 3.5 mm numbers came back at 10 mm after one). */
 function storedTextSize(): number {
   try {
@@ -485,7 +504,7 @@ export class SketchTool implements Tool {
         if (best && info?.plane) {
           this.plane = originOnPlane({ origin: info.plane.origin, normal: info.plane.normal, xDir });
           this.attachedTo = { body: best.body, center: info.center, normal: info.normal, area: info.area, ...(info.step ? { step: info.step } : {}), ...(info.curve ? { curve: info.curve } : {}) };
-          this.app.ui.toast("Sketching on the face in front of you");
+          this.app.ui.toast("Sketching on the face in front of you (Other plane: in the tools)");
         } else if (view.construction.planes.some((c) => Math.abs(dot(c.plane.normal, normal)) > 0.9999)) {
           // Planes of the project's own face this way (a blade's tip plane,
           // seen from the top): pick one in the card, not the origin plane.
@@ -498,7 +517,27 @@ export class SketchTool implements Tool {
         }
       }
     }
-    if (this.phase === "plane") {
+    if (this.phase === "plane") this.showPlaneChoice();
+    else this.beginDrawing();
+  }
+
+  /**
+   * A new sketch, nothing drawn yet: another plane than the one it started on
+   * (seen square-on, the face in front was taken - the side plane through the
+   * origin was a trip to the Views menu away).
+   */
+  private choosePlane(): void {
+    this.plane = null;
+    this.attachedTo = undefined;
+    this.onPlane = undefined;
+    // The face's outline came with a preview of the sketch on it: not on the new plane.
+    if (this.pending) ((this.pending = null), void this.app.preview([...this.app.store.features]));
+    this.phase = "plane";
+    this.showPlaneChoice();
+  }
+
+  private showPlaneChoice(): void {
+    {
       this.app.view.setOriginPlanesVisible(true);
       this.app.ui.setHint("Tap a plane or a flat face to draw on.");
       // The three origin planes as buttons too: in a 3D view they overlap near
@@ -523,7 +562,7 @@ export class SketchTool implements Tool {
         ],
       });
       this.updateMenu();
-    } else this.beginDrawing();
+    }
   }
 
   exit(): void {
@@ -1059,9 +1098,12 @@ export class SketchTool implements Tool {
     });
     const icons: Partial<Record<Kind, string>> = { rect: "rect", trim: "trim", arc: "arc", circle: "circle", fillet: "sketchFillet" };
     const variant = <T extends string>(kind: Kind, key: "rect" | "spline" | "trim" | "arc" | "circle" | "corner", options: [T, string][]): ToolItem[] =>
-      options.map(([v, l]) => ({ id: `${kind}-${v}`, label: l, icon: icons[kind] ?? "spline", active: memory[key] === v, run: () => (((memory as unknown as Record<string, string>)[key] = v), this.setKind(kind)) }) as ToolItem);
+      options.map(([v, l]) => ({ id: `${kind}-${v}`, label: l, icon: icons[kind] ?? "spline", active: memory[key] === v, run: () => (((memory as unknown as Record<string, string>)[key] = v), storeVariants(), this.setKind(kind)) }) as ToolItem);
+    // A new sketch with nothing in it yet can still go on another plane.
+    const fresh = !this.sketchId && !this.entities.length;
     app.ui.setTools([
       exit,
+      ...(fresh ? [{ id: "replane", label: "Other plane", icon: "plane", run: () => this.choosePlane() } as ToolItem] : []),
       { id: "---1", label: "", icon: "line" },
       t("select", "Select", "pointer", "V"),
       t("line", "Line", "line", "L"),
