@@ -7,6 +7,7 @@ import opencascade from "replicad-opencascadejs";
 import { getOC, makeBox, measureVolume, setOC, type Shape3D } from "replicad";
 import { debugBodies, regenerate, shapeValid } from "../src/kernel/engine";
 import { arrangement, regionRef } from "../src/sketch/regions";
+import { arcSpine, gentle } from "../src/freeform/connect";
 import type { Feature, PlaneDef, Vec3 } from "../src/doc/types";
 
 setOC(await (opencascade as unknown as () => Promise<any>)());
@@ -226,15 +227,68 @@ check("Cut: the bridge's ends are cut out of both cubes", !r.errors && !r.bad &&
       const [ta, tb] = [topOf("A", true), topOf("B", false)];
       for (const mode of ["join", "cut"] as const) {
         r = await build([...fs, connect(ta, tb, mode)]);
-        // (A triangle's sharp corners: a few of these can't be made yet - then it
-        // says so in words, and never leaves a torn or broken body behind.)
-        const hard = na === "a triangle" || nb === "a triangle";
         const sound = !r.errors && !r.bad && r.ids.length === (mode === "join" ? 1 : 2);
-        const refused = !!r.errors && !/invalid|open edges/.test(r.bad) && r.ids.length === 2;
-        const pieces = !r.errors && !/invalid|open edges/.test(r.bad) && mode === "cut";
-        check(`${na} up to ${nb}, ${mode}`, sound || (hard && (refused || pieces)), `${r.errors}${r.bad} ${r.ids}`);
+        check(`${na} up to ${nb}, ${mode}`, sound, `${r.errors}${r.bad} ${r.ids}`);
       }
+      // As a body of its own it only touches the two it joins: turning tighter
+      // than it is wide, its inner side ran back down into the body it left
+      // (folded through itself - hidden once joined, but no sound solid).
+      r = await build([...fs, connect(ta, tb, "new")]);
+      const [A0, B0, br] = ["A", "B", "cn"].map((k) => debugBodies().get(k) as Shape3D);
+      const into = br ? [A0, B0].map((x) => Math.abs(measureVolume(br.intersect(x as any) as Shape3D))) : [NaN];
+      const whole = br ? Math.abs(measureVolume(br)) : NaN;
+      check(`${na} up to ${nb}, a body of its own: reaches into neither body`, !r.errors && !r.bad && Math.max(...into) < whole * 1e-4, `${r.errors}${r.bad} ${into.map((v) => v.toFixed(2))} of ${whole.toFixed(0)}`);
     }
+}
+
+// Two wide plates close together, one a little to the side of the other: no
+// bridge that turns with its curve fits between them (it would have to turn
+// tighter than it is wide). Its outline slides along the curve instead.
+{
+  const fs = [...box("A", 100, 100, 10, [0, 0, 0]), ...box("B", 100, 100, 10, [5, 0, 30])];
+  const ends = [face("A", [0, 0, 10], [0, 0, 1], 10000), face("B", [5, 0, 30], [0, 0, -1], 10000)];
+  r = await build([...fs, connect(ends[0], ends[1], "new")]);
+  const own = r.ids.includes("cn") ? vol("cn") : NaN;
+  // (Sliding: the area times the way up, whatever the way sideways.)
+  check("two wide plates 20 apart, 5 to the side: a bridge of its own, 100 x 100 all the way", !r.errors && !r.bad && Math.abs(own - 200000) < 200, `${r.errors}${r.bad} ${own.toFixed(0)}`);
+  r = await build([...fs, connect(ends[0], ends[1], "join")]);
+  check("...joined: one body, the plates and what's between", !r.errors && !r.bad && r.ids.length === 1 && Math.abs(vol("A") - 400000) < 400, `${r.errors}${r.bad} ${r.ids} ${r.ids[0] && vol(r.ids[0]).toFixed(0)}`);
+  r = await build([...fs, connect(ends[0], ends[1], "cut", { size: 0.5 })]);
+  check("...cut at half size: a pocket in each plate", !r.errors && !r.bad && r.ids.length === 2 && vol("A") < 100000 - 1000 && vol("B") < 100000 - 1000, `${r.errors}${r.bad} ${r.ids}`);
+  // Further to the side, and the upper plate leaning 10 degrees: still joined.
+  const lean = (10 * Math.PI) / 180;
+  const n: Vec3 = [Math.sin(lean), 0, Math.cos(lean)];
+  const es = [{ id: "r", kind: "rect", center: [0, 0], w: 60, h: 60, rotation: 0 }];
+  const leaning: Feature[] = [
+    ...box("A", 60, 60, 10, [0, 0, 0]),
+    { id: "sB", name: "sB", type: "sketch", plane: { origin: [15, 0, 40], xDir: [Math.cos(lean), 0, -Math.sin(lean)], normal: n }, entities: es } as Feature,
+    { id: "B", name: "B", type: "extrude", source: { kind: "profile", sketch: "sB", regions: arrangement(es as any).regions.map(regionRef) }, distance: 10, mode: "new" } as Feature,
+  ];
+  r = await build([...leaning, connect(face("A", [0, 0, 10], [0, 0, 1], 3600), face("B", [15, 0, 40], [-n[0], 0, -n[2]], 3600), "join")]);
+  check("a 60 x 60 top to a plate above it, 15 to the side and leaning 10 degrees: joined", !r.errors && !r.bad && r.ids.length === 1 && vol("A") > 72000 + 3600 * 25, `${r.errors}${r.bad} ${r.ids} ${r.ids[0] && vol(r.ids[0]).toFixed(0)}`);
+}
+
+// The two-arc curve: from one middle to the other, leaving and arriving
+// square, and turning as little as can be (two faces 40 up and 45 across:
+// arcs of 20.1 mm, where the plain curve turns in 13.4).
+{
+  const c = arcSpine([0, 0, 0], [0, 0, 1], [45, 0, 40], [0, 0, -1])!;
+  const d = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const dir = (t: number) => { const [p, q] = [c(t - 1e-5), c(t + 1e-5)]; const L = d(p, q); return [(q[0] - p[0]) / L, (q[1] - p[1]) / L, (q[2] - p[2]) / L]; };
+  const [t0, t1, tm] = [dir(1e-5), dir(1 - 1e-5), dir(0.5)];
+  check("two arcs: from A's middle to B's, straight out of one and straight into the other", d(c(0), [0, 0, 0]) < 1e-9 && d(c(1), [45, 0, 40]) < 1e-9 && t0[2] > 0.99999 && t1[2] > 0.99999, `${c(0)} ${c(1)} ${t0} ${t1}`);
+  // Each arc's radius from three points on it.
+  const radius = (ta: number, tb: number, tc: number) => { const [A, B, C] = [c(ta), c(tb), c(tc)]; const [a, b, cc] = [d(B, C), d(A, C), d(A, B)]; const s = (a + b + cc) / 2; return (a * b * cc) / (4 * Math.sqrt(Math.max(1e-18, s * (s - a) * (s - b) * (s - cc)))); };
+  const [r1, r2] = [radius(0.05, 0.25, 0.45), radius(0.55, 0.75, 0.95)];
+  check("...each arc turns in 20.1 mm, and they meet going the same way", Math.abs(r1 - 20.139) < 0.01 && Math.abs(r2 - 20.139) < 0.01 && Math.abs(tm[0] - 0.9931) < 0.01, `${r1.toFixed(3)} ${r2.toFixed(3)} ${tm.map((x) => x.toFixed(4))}`);
+  // An outline 16.67 wide towards the turn fits the arcs (20.1 > 1.1 x 16.67), one 19 wide doesn't.
+  const ring = (w: number): Vec3[] => [[w, -10, 0], [w - 30, -10, 0], [w - 20, 20, 0]];
+  check("...a triangle reaching 16.7 towards the turn fits them; one reaching 19 would fold", gentle(c, { a: ring(16.67), b: ring(16.67) }) && !gentle(c, { a: ring(19), b: ring(19) }));
+  // An arch (both faces up): the outline is checked as the curve has turned it - at the top, its side towards the other face.
+  const arch = arcSpine([0, 0, 0], [0, 0, 1], [30, 0, 0], [0, 0, 1])!;
+  const wide = (w: number): Vec3[] => [[w, -5, 0], [-w, -5, 0], [-w, 5, 0], [w, 5, 0]];
+  check("...an arch 30 across (a half circle of 15): 13 wide each way fits, 14 doesn't", gentle(arch, { a: wide(13), b: wide(13) }) && !gentle(arch, { a: wide(14), b: wide(14) }));
+  check("...none where B is straight behind A", arcSpine([0, 0, 0], [0, 0, 1], [0, 0, -10], [0, 0, -1]) === null);
 }
 
 process.exit(failed ? 1 : 0);
