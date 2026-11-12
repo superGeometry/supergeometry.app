@@ -1,0 +1,1951 @@
+{
+ "doc": {
+  "format": "super",
+  "version": 2,
+  "name": "Passive window",
+  "features": [
+   {
+    "id": "sketch-mwddihfe-fw20",
+    "name": "Sketch 01",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "entities": [
+     {
+      "id": "vg07w71l",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1230,
+      "h": 1480,
+      "rotation": 0
+     },
+     {
+      "id": "imvq0ryq",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1070,
+      "h": 1320,
+      "rotation": 0
+     }
+    ],
+    "constraints": [
+     {
+      "id": "yp1xq5fv",
+      "type": "dim",
+      "curves": [
+       "vg07w71l"
+      ],
+      "prop": "w",
+      "value": 1230,
+      "expr": "W"
+     },
+     {
+      "id": "mpjr1tcg",
+      "type": "dim",
+      "curves": [
+       "vg07w71l"
+      ],
+      "prop": "h",
+      "value": 1480,
+      "expr": "H"
+     },
+     {
+      "id": "460rb9r1",
+      "type": "dim",
+      "curves": [
+       "imvq0ryq"
+      ],
+      "prop": "w",
+      "value": 1070,
+      "expr": "W - 2*F"
+     },
+     {
+      "id": "h6vc1x84",
+      "type": "dim",
+      "curves": [
+       "imvq0ryq"
+      ],
+      "prop": "h",
+      "value": 1320,
+      "expr": "H - 2*F"
+     }
+    ],
+    "log": [
+     {
+      "op": "Rectangle",
+      "n": 2
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwddjx4j-uvny",
+    "name": "Extrude 01",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwddihfe-fw20",
+     "regions": [
+      {
+       "c": [
+        0,
+        0
+       ],
+       "a": 408000,
+       "k": [
+        "imvq0ryq",
+        "vg07w71l"
+       ],
+       "s": [
+        2,
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 120,
+    "mode": "auto",
+    "exprs": {
+     "distance": "D"
+    }
+   },
+   {
+    "id": "plane-mwddkt1e-6vb1",
+    "name": "Plane 01",
+    "type": "plane",
+    "kind": "offset",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "offset": 28,
+    "exprs": {
+     "offset": "D - SD"
+    }
+   },
+   {
+    "id": "sketch-mwddpyd3-5pmv",
+    "name": "Sketch 02",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      -28,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "onPlane": "plane-mwddkt1e-6vb1",
+    "entities": [
+     {
+      "id": "w6nrjmz9",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1118,
+      "h": 1368,
+      "rotation": 0
+     },
+     {
+      "id": "y57ddmh9",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1030,
+      "h": 1280,
+      "rotation": 0
+     }
+    ],
+    "constraints": [
+     {
+      "id": "wu0roiaf",
+      "type": "dim",
+      "curves": [
+       "w6nrjmz9"
+      ],
+      "prop": "w",
+      "value": 1118,
+      "expr": "Ws + 2*c"
+     },
+     {
+      "id": "idzahp2i",
+      "type": "dim",
+      "curves": [
+       "w6nrjmz9"
+      ],
+      "prop": "h",
+      "value": 1368,
+      "expr": "Hs + 2*c"
+     },
+     {
+      "id": "87d9l12w",
+      "type": "dim",
+      "curves": [
+       "y57ddmh9"
+      ],
+      "prop": "w",
+      "value": 1030,
+      "expr": "W - 2*F - 40"
+     },
+     {
+      "id": "m21le53z",
+      "type": "dim",
+      "curves": [
+       "y57ddmh9"
+      ],
+      "prop": "h",
+      "value": 1280,
+      "expr": "H - 2*F - 40"
+     }
+    ],
+    "log": [
+     {
+      "op": "Rectangle",
+      "n": 2
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwddqc1m-c77m",
+    "name": "Extrude 02",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwddpyd3-5pmv",
+     "regions": [
+      {
+       "c": [
+        0,
+        0
+       ],
+       "a": 211024,
+       "k": [
+        "w6nrjmz9",
+        "y57ddmh9"
+       ],
+       "s": [
+        2,
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 92,
+    "mode": "cut",
+    "exprs": {
+     "distance": "SD"
+    }
+   },
+   {
+    "id": "plane-mwddr5w4-i7c5",
+    "name": "Plane 02",
+    "type": "plane",
+    "kind": "offset",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "offset": 15,
+    "exprs": {
+     "offset": "ins"
+    }
+   },
+   {
+    "id": "plane-mwddrgu3-b4f4",
+    "name": "Plane 03",
+    "type": "plane",
+    "kind": "offset",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "offset": 33,
+    "exprs": {
+     "offset": "D - SD + sl"
+    }
+   },
+   {
+    "id": "plane-mwddrobz-u8kh",
+    "name": "Plane 04",
+    "type": "plane",
+    "kind": "offset",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "offset": 47.5,
+    "exprs": {
+     "offset": "-yG - 3"
+    }
+   },
+   {
+    "id": "plane-mwddroel-4wt1",
+    "name": "Plane 05",
+    "type": "plane",
+    "kind": "offset",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "offset": 50.5,
+    "exprs": {
+     "offset": "-yG"
+    }
+   },
+   {
+    "id": "plane-mwddrxzj-n9mg",
+    "name": "Plane 06",
+    "type": "plane",
+    "kind": "offset",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "offset": 54.5,
+    "exprs": {
+     "offset": "-yG + g"
+    }
+   },
+   {
+    "id": "plane-mwddry2r-i1rh",
+    "name": "Plane 07",
+    "type": "plane",
+    "kind": "offset",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "offset": 120,
+    "exprs": {
+     "offset": "D"
+    }
+   },
+   {
+    "id": "plane-mwddry5h-9nmq",
+    "name": "Plane 08",
+    "type": "plane",
+    "kind": "offset",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "offset": 132,
+    "exprs": {
+     "offset": "D + 12"
+    }
+   },
+   {
+    "id": "sketch-mwddslq9-r3s9",
+    "name": "Sketch 03",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      -15,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "onPlane": "plane-mwddr5w4-i7c5",
+    "entities": [
+     {
+      "id": "abzt4z94",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1200,
+      "h": 1450,
+      "rotation": 0
+     },
+     {
+      "id": "mf5zttyj",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1148,
+      "h": 1398,
+      "rotation": 0
+     }
+    ],
+    "constraints": [
+     {
+      "id": "iet3irxm",
+      "type": "dim",
+      "curves": [
+       "abzt4z94"
+      ],
+      "prop": "w",
+      "value": 1200,
+      "expr": "W - 2*ins"
+     },
+     {
+      "id": "5ho4qx2h",
+      "type": "dim",
+      "curves": [
+       "abzt4z94"
+      ],
+      "prop": "h",
+      "value": 1450,
+      "expr": "H - 2*ins"
+     },
+     {
+      "id": "9c42g6sc",
+      "type": "dim",
+      "curves": [
+       "mf5zttyj"
+      ],
+      "prop": "w",
+      "value": 1148,
+      "expr": "Ws + 2*c + 2*ins"
+     },
+     {
+      "id": "8m7d7avz",
+      "type": "dim",
+      "curves": [
+       "mf5zttyj"
+      ],
+      "prop": "h",
+      "value": 1398,
+      "expr": "Hs + 2*c + 2*ins"
+     }
+    ],
+    "log": [
+     {
+      "op": "Rectangle",
+      "n": 2
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwddsvxo-t0ia",
+    "name": "Extrude 03",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwddslq9-r3s9",
+     "regions": [
+      {
+       "c": [
+        0,
+        0
+       ],
+       "a": 135096,
+       "k": [
+        "abzt4z94",
+        "mf5zttyj"
+       ],
+       "s": [
+        2,
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 90,
+    "mode": "cut",
+    "exprs": {
+     "distance": "D - 2*ins"
+    }
+   },
+   {
+    "id": "extrude-mwdduw0o-heou",
+    "name": "Extrude 04",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwddslq9-r3s9",
+     "regions": [
+      {
+       "c": [
+        0,
+        0
+       ],
+       "a": 135096,
+       "k": [
+        "abzt4z94",
+        "mf5zttyj"
+       ],
+       "s": [
+        2,
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 90,
+    "mode": "new",
+    "exprs": {
+     "distance": "D - 2*ins"
+    }
+   },
+   {
+    "id": "sketch-mwddvopd-z6d7",
+    "name": "Sketch 04",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      -28,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "onPlane": "plane-mwddkt1e-6vb1",
+    "entities": [
+     {
+      "id": "wwm6715i",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1102,
+      "h": 1352,
+      "rotation": 0
+     },
+     {
+      "id": "l1qhhonu",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1078,
+      "h": 1328,
+      "rotation": 0
+     }
+    ],
+    "constraints": [
+     {
+      "id": "wjiuop5z",
+      "type": "dim",
+      "curves": [
+       "wwm6715i"
+      ],
+      "prop": "w",
+      "value": 1102,
+      "expr": "Ws - 8"
+     },
+     {
+      "id": "y3qel2rh",
+      "type": "dim",
+      "curves": [
+       "wwm6715i"
+      ],
+      "prop": "h",
+      "value": 1352,
+      "expr": "Hs - 8"
+     },
+     {
+      "id": "ffnpw9ib",
+      "type": "dim",
+      "curves": [
+       "l1qhhonu"
+      ],
+      "prop": "w",
+      "value": 1078,
+      "expr": "W - 2*F + 8"
+     },
+     {
+      "id": "9in2swzo",
+      "type": "dim",
+      "curves": [
+       "l1qhhonu"
+      ],
+      "prop": "h",
+      "value": 1328,
+      "expr": "H - 2*F + 8"
+     }
+    ],
+    "log": [
+     {
+      "op": "Rectangle",
+      "n": 2
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwddvukh-umnd",
+    "name": "Extrude 05",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwddvopd-z6d7",
+     "regions": [
+      {
+       "c": [
+        0,
+        0
+       ],
+       "a": 58320,
+       "k": [
+        "l1qhhonu",
+        "wwm6715i"
+       ],
+       "s": [
+        2,
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 5,
+    "mode": "new",
+    "exprs": {
+     "distance": "sl"
+    }
+   },
+   {
+    "id": "sketch-mwddywqs-pbqi",
+    "name": "Sketch 05",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      -33,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "onPlane": "plane-mwddrgu3-b4f4",
+    "entities": [
+     {
+      "id": "aibwgb5g",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1110,
+      "h": 1360,
+      "rotation": 0
+     },
+     {
+      "id": "csp9952x",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 970,
+      "h": 1220,
+      "rotation": 0
+     }
+    ],
+    "log": [
+     {
+      "op": "Rectangle",
+      "n": 2
+     },
+     {
+      "op": "Constraint",
+      "n": 2
+     },
+     {
+      "op": "Edit",
+      "n": 1
+     }
+    ],
+    "constraints": [
+     {
+      "id": "iftr5mso",
+      "type": "dim",
+      "curves": [
+       "csp9952x"
+      ],
+      "prop": "w",
+      "value": 970,
+      "expr": "Ws - 2*S"
+     },
+     {
+      "id": "0g8qp376",
+      "type": "dim",
+      "curves": [
+       "csp9952x"
+      ],
+      "prop": "h",
+      "value": 1220,
+      "expr": "Hs - 2*S"
+     },
+     {
+      "id": "nt07cke9",
+      "type": "dim",
+      "curves": [
+       "aibwgb5g"
+      ],
+      "prop": "h",
+      "value": 1360,
+      "expr": "Hs"
+     },
+     {
+      "id": "pjdufpx8",
+      "type": "dim",
+      "curves": [
+       "aibwgb5g"
+      ],
+      "prop": "w",
+      "value": 1110,
+      "expr": "Ws"
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwde2kfo-k5oy",
+    "name": "Extrude 06",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwddywqs-pbqi",
+     "regions": [
+      {
+       "c": [
+        0,
+        0
+       ],
+       "a": 326200,
+       "k": [
+        "aibwgb5g",
+        "csp9952x"
+       ],
+       "s": [
+        2,
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 87,
+    "mode": "new",
+    "exprs": {
+     "distance": "SD - sl"
+    }
+   },
+   {
+    "id": "sketch-mwde3f2u-cm20",
+    "name": "Sketch 06",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      -47.5,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "onPlane": "plane-mwddrobz-u8kh",
+    "entities": [
+     {
+      "id": "kxipv0tb",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1010,
+      "h": 1260,
+      "rotation": 0
+     },
+     {
+      "id": "ae2x42a3",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 930,
+      "h": 1180,
+      "rotation": 0
+     }
+    ],
+    "constraints": [
+     {
+      "id": "8uk09d9r",
+      "type": "dim",
+      "curves": [
+       "kxipv0tb"
+      ],
+      "prop": "w",
+      "value": 1010,
+      "expr": "Wg + 2*gap"
+     },
+     {
+      "id": "k8umamp1",
+      "type": "dim",
+      "curves": [
+       "kxipv0tb"
+      ],
+      "prop": "h",
+      "value": 1260,
+      "expr": "Hg + 2*gap"
+     },
+     {
+      "id": "l3m4w33q",
+      "type": "dim",
+      "curves": [
+       "ae2x42a3"
+      ],
+      "prop": "w",
+      "value": 930,
+      "expr": "Ws - 2*S - 40"
+     },
+     {
+      "id": "v7sn0kna",
+      "type": "dim",
+      "curves": [
+       "ae2x42a3"
+      ],
+      "prop": "h",
+      "value": 1180,
+      "expr": "Hs - 2*S - 40"
+     }
+    ],
+    "log": [
+     {
+      "op": "Rectangle",
+      "n": 2
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwde3nvu-pi6r",
+    "name": "Extrude 07",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwde3f2u-cm20",
+     "regions": [
+      {
+       "c": [
+        0,
+        0
+       ],
+       "a": 175200,
+       "k": [
+        "ae2x42a3",
+        "kxipv0tb"
+       ],
+       "s": [
+        2,
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 58,
+    "mode": "cut",
+    "exprs": {
+     "distance": "G + 6"
+    }
+   },
+   {
+    "id": "sketch-mwde4bzp-y2do",
+    "name": "Sketch 07",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      -50.5,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "onPlane": "plane-mwddroel-4wt1",
+    "entities": [
+     {
+      "id": "6ij1ux2q",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1000,
+      "h": 1250,
+      "rotation": 0
+     }
+    ],
+    "constraints": [
+     {
+      "id": "ig0r3pat",
+      "type": "dim",
+      "curves": [
+       "6ij1ux2q"
+      ],
+      "prop": "w",
+      "value": 1000,
+      "expr": "Wg"
+     },
+     {
+      "id": "1as9g93s",
+      "type": "dim",
+      "curves": [
+       "6ij1ux2q"
+      ],
+      "prop": "h",
+      "value": 1250,
+      "expr": "Hg"
+     }
+    ],
+    "log": [
+     {
+      "op": "Rectangle",
+      "n": 1
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwde4eog-odxp",
+    "name": "Extrude 08",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwde4bzp-y2do",
+     "regions": [
+      {
+       "c": [
+        0,
+        0
+       ],
+       "a": 1250000,
+       "k": [
+        "6ij1ux2q"
+       ],
+       "s": [
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 4,
+    "mode": "new",
+    "exprs": {
+     "distance": "g"
+    }
+   },
+   {
+    "id": "transform-mwde4svm-ny0z",
+    "name": "Pattern 01",
+    "type": "transform",
+    "bodies": [
+     "extrude-mwde4eog-odxp"
+    ],
+    "copy": false,
+    "op": {
+     "kind": "linear",
+     "dir": [
+      0,
+      1,
+      0
+     ],
+     "spacing": -24,
+     "count": 3
+    },
+    "exprs": {
+     "op.spacing": "-(g + cav)"
+    }
+   },
+   {
+    "id": "sketch-mwde5pxh-p61j",
+    "name": "Sketch 08",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      -54.5,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "onPlane": "plane-mwddrxzj-n9mg",
+    "entities": [
+     {
+      "id": "uacdh0sd",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 1000,
+      "h": 1250,
+      "rotation": 0
+     },
+     {
+      "id": "vy9jzpos",
+      "kind": "rect",
+      "center": [
+       0,
+       0
+      ],
+      "w": 976,
+      "h": 1226,
+      "rotation": 0
+     }
+    ],
+    "constraints": [
+     {
+      "id": "q3cvgn4m",
+      "type": "dim",
+      "curves": [
+       "uacdh0sd"
+      ],
+      "prop": "w",
+      "value": 1000,
+      "expr": "Wg"
+     },
+     {
+      "id": "b14izow5",
+      "type": "dim",
+      "curves": [
+       "uacdh0sd"
+      ],
+      "prop": "h",
+      "value": 1250,
+      "expr": "Hg"
+     },
+     {
+      "id": "ub36e3y4",
+      "type": "dim",
+      "curves": [
+       "vy9jzpos"
+      ],
+      "prop": "w",
+      "value": 976,
+      "expr": "Wg - 2*sp"
+     },
+     {
+      "id": "8wesls7h",
+      "type": "dim",
+      "curves": [
+       "vy9jzpos"
+      ],
+      "prop": "h",
+      "value": 1226,
+      "expr": "Hg - 2*sp"
+     }
+    ],
+    "log": [
+     {
+      "op": "Rectangle",
+      "n": 2
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwde5t1g-eid5",
+    "name": "Extrude 09",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwde5pxh-p61j",
+     "regions": [
+      {
+       "c": [
+        0,
+        0
+       ],
+       "a": 53424,
+       "k": [
+        "uacdh0sd",
+        "vy9jzpos"
+       ],
+       "s": [
+        2,
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 20,
+    "mode": "new",
+    "exprs": {
+     "distance": "cav"
+    }
+   },
+   {
+    "id": "transform-mwde68mn-wnb7",
+    "name": "Pattern 02",
+    "type": "transform",
+    "bodies": [
+     "extrude-mwde5t1g-eid5"
+    ],
+    "copy": false,
+    "op": {
+     "kind": "linear",
+     "dir": [
+      0,
+      1,
+      0
+     ],
+     "spacing": -24,
+     "count": 2
+    },
+    "exprs": {
+     "op.spacing": "-(g + cav)"
+    }
+   },
+   {
+    "id": "sketch-mwde871g-18o8",
+    "name": "Sketch 09",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "xDir": [
+      0,
+      1,
+      0
+     ],
+     "normal": [
+      1,
+      0,
+      0
+     ]
+    },
+    "entities": [
+     {
+      "id": "pix2y4xc",
+      "kind": "line",
+      "a": [
+       -29.99999908255364,
+       2.103966938755593e-13
+      ],
+      "b": [
+       0,
+       1.0848392263544263e-13
+      ]
+     },
+     {
+      "id": "3h6xbmx8",
+      "kind": "line",
+      "a": [
+       0,
+       1.1014548457037074e-13
+      ],
+      "b": [
+       69.99999750010765,
+       -11.999999999999394
+      ]
+     },
+     {
+      "id": "hp8sqp4n",
+      "kind": "line",
+      "a": [
+       69.99999750010765,
+       -11.999999999999403
+      ],
+      "b": [
+       69.99999750010765,
+       -39.99999999999943
+      ]
+     },
+     {
+      "id": "n86wrm4l",
+      "kind": "line",
+      "a": [
+       69.99999750010765,
+       -39.999999999999474
+      ],
+      "b": [
+       -29.99999908255364,
+       -39.99999999999953
+      ]
+     },
+     {
+      "id": "6jxcfiii",
+      "kind": "line",
+      "a": [
+       -29.99999908255364,
+       -39.99999999999961
+      ],
+      "b": [
+       -29.99999908255364,
+       3.059613644017121e-13
+      ]
+     },
+     {
+      "id": "ih8dauiw",
+      "kind": "rect",
+      "center": [
+       58,
+       -37
+      ],
+      "w": 6,
+      "h": 6,
+      "rotation": 0
+     }
+    ],
+    "constraints": [
+     {
+      "id": "dg1zufqj",
+      "type": "fix",
+      "pts": [
+       {
+        "e": "pix2y4xc",
+        "p": "b"
+       }
+      ],
+      "at": [
+       0,
+       0
+      ]
+     },
+     {
+      "id": "80hakq5m",
+      "type": "horizontal",
+      "curves": [
+       "pix2y4xc"
+      ]
+     },
+     {
+      "id": "xu0lrg48",
+      "type": "coincident",
+      "pts": [
+       {
+        "e": "pix2y4xc",
+        "p": "b"
+       },
+       {
+        "e": "3h6xbmx8",
+        "p": "a"
+       }
+      ]
+     },
+     {
+      "id": "gyk37bfg",
+      "type": "coincident",
+      "pts": [
+       {
+        "e": "3h6xbmx8",
+        "p": "b"
+       },
+       {
+        "e": "hp8sqp4n",
+        "p": "a"
+       }
+      ]
+     },
+     {
+      "id": "nvvvnczb",
+      "type": "vertical",
+      "curves": [
+       "hp8sqp4n"
+      ]
+     },
+     {
+      "id": "at03smcb",
+      "type": "coincident",
+      "pts": [
+       {
+        "e": "hp8sqp4n",
+        "p": "b"
+       },
+       {
+        "e": "n86wrm4l",
+        "p": "a"
+       }
+      ]
+     },
+     {
+      "id": "8vetaxg4",
+      "type": "horizontal",
+      "curves": [
+       "n86wrm4l"
+      ]
+     },
+     {
+      "id": "0pewlx1b",
+      "type": "coincident",
+      "pts": [
+       {
+        "e": "n86wrm4l",
+        "p": "b"
+       },
+       {
+        "e": "6jxcfiii",
+        "p": "a"
+       }
+      ]
+     },
+     {
+      "id": "z4cbdzk8",
+      "type": "coincident",
+      "pts": [
+       {
+        "e": "6jxcfiii",
+        "p": "b"
+       },
+       {
+        "e": "pix2y4xc",
+        "p": "a"
+       }
+      ]
+     },
+     {
+      "id": "mk56t88x",
+      "type": "vertical",
+      "curves": [
+       "6jxcfiii"
+      ]
+     },
+     {
+      "id": "rg25693v",
+      "type": "dim",
+      "curves": [
+       "hp8sqp4n"
+      ],
+      "prop": "length",
+      "value": 28
+     },
+     {
+      "id": "kkoawpc3",
+      "type": "dim",
+      "curves": [
+       "6jxcfiii"
+      ],
+      "prop": "length",
+      "value": 40
+     },
+     {
+      "id": "c1rfehz8",
+      "type": "dim",
+      "curves": [
+       "ih8dauiw"
+      ],
+      "prop": "w",
+      "value": 6
+     },
+     {
+      "id": "i8xpir6m",
+      "type": "dim",
+      "curves": [
+       "ih8dauiw"
+      ],
+      "prop": "h",
+      "value": 6
+     }
+    ],
+    "log": [
+     {
+      "op": "Line",
+      "n": 5
+     },
+     {
+      "op": "Constraint",
+      "n": 1
+     },
+     {
+      "op": "Edit",
+      "n": 1
+     },
+     {
+      "op": "Constraint",
+      "n": 1
+     },
+     {
+      "op": "Edit",
+      "n": 1
+     },
+     {
+      "op": "Rectangle",
+      "n": 1
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwde9bgh-1agc",
+    "name": "Extrude 10",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwde871g-18o8",
+     "regions": [
+      {
+       "c": [
+        16.453723900536097,
+        -21.723476289431737
+       ],
+       "a": 3543.999878305789,
+       "k": [
+        "3h6xbmx8",
+        "6jxcfiii",
+        "hp8sqp4n",
+        "ih8dauiw",
+        "n86wrm4l",
+        "pix2y4xc"
+       ],
+       "s": [
+        0.5,
+        0.4999999999999989,
+        0.5,
+        2.499999999999986,
+        0.30999998955094116,
+        0.5
+       ]
+      }
+     ]
+    },
+    "distance": 655,
+    "mode": "new",
+    "symmetric": true,
+    "exprs": {
+     "distance": "W/2 + ov"
+    }
+   },
+   {
+    "id": "transform-mwde9u9b-k0hp",
+    "name": "Move 01",
+    "type": "transform",
+    "bodies": [
+     "extrude-mwde9bgh-1agc"
+    ],
+    "copy": false,
+    "op": {
+     "kind": "move",
+     "translate": [
+      0,
+      0,
+      -740
+     ],
+     "rotate": {
+      "origin": [
+       -1.0335167065601458e-14,
+       31.355222239652743,
+       -25.76790477989641
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "angle": 0
+     }
+    },
+    "exprs": {
+     "op.translate.2": "-H/2"
+    }
+   },
+   {
+    "id": "sketch-mwdeannf-mdvv",
+    "name": "Sketch 10",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      -120,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "onPlane": "plane-mwddry2r-i1rh",
+    "entities": [
+     {
+      "id": "vd7igkq9",
+      "kind": "circle",
+      "center": [
+       520,
+       0
+      ],
+      "radius": 20
+     }
+    ],
+    "constraints": [
+     {
+      "id": "t990nhg9",
+      "type": "dim",
+      "curves": [
+       "vd7igkq9"
+      ],
+      "prop": "diameter",
+      "value": 40
+     },
+     {
+      "id": "v80wfaji",
+      "type": "fix",
+      "pts": [
+       {
+        "e": "vd7igkq9",
+        "p": "c"
+       }
+      ],
+      "at": [
+       520,
+       0
+      ],
+      "atExpr": [
+       "Ws/2 - S/2",
+       null
+      ]
+     }
+    ],
+    "log": [
+     {
+      "op": "Circle",
+      "n": 1
+     },
+     {
+      "op": "Constraint",
+      "n": 1
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwdef4fe-ox5u",
+    "name": "Extrude 11",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwdeannf-mdvv",
+     "regions": [
+      {
+       "c": [
+        519.9999999999993,
+        -1.3278280897365963e-15
+       ],
+       "a": 1255.7400812187443,
+       "k": [
+        "vd7igkq9"
+       ],
+       "s": [
+        0.5
+       ]
+      }
+     ]
+    },
+    "distance": 12,
+    "mode": "new"
+   },
+   {
+    "id": "sketch-mwdeg1gi-pnmp",
+    "name": "Sketch 11",
+    "type": "sketch",
+    "plane": {
+     "origin": [
+      0,
+      -132,
+      0
+     ],
+     "xDir": [
+      1,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "onPlane": "plane-mwddry5h-9nmq",
+    "entities": [
+     {
+      "id": "2q0xby8t",
+      "kind": "rect",
+      "center": [
+       520,
+       -50
+      ],
+      "w": 22,
+      "h": 130,
+      "rotation": 0
+     }
+    ],
+    "constraints": [
+     {
+      "id": "2pwqhp85",
+      "type": "dim",
+      "curves": [
+       "2q0xby8t"
+      ],
+      "prop": "w",
+      "value": 22
+     },
+     {
+      "id": "5y7cyrbi",
+      "type": "dim",
+      "curves": [
+       "2q0xby8t"
+      ],
+      "prop": "h",
+      "value": 130
+     },
+     {
+      "id": "puib8onf",
+      "type": "fix",
+      "pts": [
+       {
+        "e": "2q0xby8t",
+        "p": "c"
+       }
+      ],
+      "at": [
+       520,
+       -50
+      ],
+      "atExpr": [
+       "Ws/2 - S/2",
+       null
+      ]
+     }
+    ],
+    "log": [
+     {
+      "op": "Rectangle",
+      "n": 1
+     }
+    ]
+   },
+   {
+    "id": "extrude-mwdegcip-c3kh",
+    "name": "Extrude 12",
+    "type": "extrude",
+    "source": {
+     "kind": "profile",
+     "sketch": "sketch-mwdeg1gi-pnmp",
+     "regions": [
+      {
+       "c": [
+        520,
+        -50
+       ],
+       "a": 2860,
+       "k": [
+        "2q0xby8t"
+       ],
+       "s": [
+        2
+       ]
+      }
+     ]
+    },
+    "distance": 14,
+    "mode": "join"
+   }
+  ],
+  "variables": [
+   {
+    "name": "W",
+    "expr": "1230"
+   },
+   {
+    "name": "H",
+    "expr": "1480"
+   },
+   {
+    "name": "D",
+    "expr": "120"
+   },
+   {
+    "name": "F",
+    "expr": "80"
+   },
+   {
+    "name": "R",
+    "expr": "20"
+   },
+   {
+    "name": "c",
+    "expr": "4"
+   },
+   {
+    "name": "S",
+    "expr": "70"
+   },
+   {
+    "name": "SD",
+    "expr": "92"
+   },
+   {
+    "name": "sl",
+    "expr": "5"
+   },
+   {
+    "name": "g",
+    "expr": "4"
+   },
+   {
+    "name": "cav",
+    "expr": "20"
+   },
+   {
+    "name": "G",
+    "expr": "3*g + 2*cav"
+   },
+   {
+    "name": "e",
+    "expr": "15"
+   },
+   {
+    "name": "gap",
+    "expr": "5"
+   },
+   {
+    "name": "sp",
+    "expr": "12"
+   },
+   {
+    "name": "ins",
+    "expr": "15"
+   },
+   {
+    "name": "ov",
+    "expr": "40"
+   },
+   {
+    "name": "Ws",
+    "expr": "W - 2*F + 2*R"
+   },
+   {
+    "name": "Hs",
+    "expr": "H - 2*F + 2*R"
+   },
+   {
+    "name": "Wg",
+    "expr": "Ws - 2*S + 2*e"
+   },
+   {
+    "name": "Hg",
+    "expr": "Hs - 2*S + 2*e"
+   },
+   {
+    "name": "yG",
+    "expr": "-D + (SD - sl + G)/2"
+   }
+  ],
+  "views": [],
+  "units": "mm",
+  "hidden": [
+   "sketch-mwddihfe-fw20",
+   "sketch-mwddpyd3-5pmv",
+   "sketch-mwddslq9-r3s9",
+   "sketch-mwddvopd-z6d7",
+   "sketch-mwddywqs-pbqi",
+   "sketch-mwde3f2u-cm20",
+   "sketch-mwde4bzp-y2do",
+   "sketch-mwde5pxh-p61j",
+   "sketch-mwde871g-18o8",
+   "sketch-mwdeannf-mdvv",
+   "sketch-mwdeg1gi-pnmp"
+  ],
+  "pins": [],
+  "names": {}
+ },
+ "parts": {
+  "frame": "extrude-mwddjx4j-uvny",
+  "core": "extrude-mwdduw0o-heou",
+  "seal": "extrude-mwddvukh-umnd",
+  "sash": "extrude-mwde2kfo-k5oy",
+  "pane1": "extrude-mwde4eog-odxp",
+  "pane2": "transform-mwde4svm-ny0z:extrude-mwde4eog-odxp:0",
+  "pane3": "transform-mwde4svm-ny0z:extrude-mwde4eog-odxp:1",
+  "spacer1": "extrude-mwde5t1g-eid5",
+  "spacer2": "transform-mwde68mn-wnb7:extrude-mwde5t1g-eid5:0",
+  "sill": "extrude-mwde9bgh-1agc",
+  "handle": "extrude-mwdef4fe-ox5u"
+ }
+}

@@ -955,7 +955,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
   const { bodies } = ctx;
   switch (f.type) {
     case "sketch": {
-      const plane = f.attachedTo ? followFace(f, bodies) : f.plane;
+      const plane = f.attachedTo ? followFace(f, bodies) : f.onPlane ? followPlane(f, ctx) : f.plane;
       // On a face, the face outline takes part in regions: a line across the face splits it.
       const outline = f.attachedTo ? faceBoundary(f.attachedTo, plane, bodies) : [];
       // Offsets of the outline, made from it as it is now (they follow the face).
@@ -3352,6 +3352,16 @@ function faceBoundary(ref: FaceRef, plane: PlaneDef, bodies: Bodies): SketchEnti
 }
 
 /** A sketch drawn on a face moves with that face when earlier features change. */
+/** A sketch drawn on a construction plane: where that plane is now (moved along it, or turned with it). */
+function followPlane(f: SketchFeature, ctx: Ctx): PlaneDef {
+  const p = ctx.planes.get(f.onPlane!)?.plane;
+  if (!p) return f.plane;
+  const n = norm(p.normal);
+  if (Math.abs(dot(n, norm(f.plane.normal))) < 0.9999) return { origin: p.origin, normal: p.normal, xDir: p.xDir };
+  // The same way round: the sketch's own origin and X kept, moved onto the plane.
+  return { ...f.plane, origin: add(f.plane.origin, scale(n, dot(n, sub(p.origin, f.plane.origin)))) };
+}
+
 function followFace(f: SketchFeature, bodies: Bodies): PlaneDef {
   const ref = f.attachedTo!;
   const body = bodies.get(ref.body);

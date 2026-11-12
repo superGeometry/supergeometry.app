@@ -264,6 +264,12 @@ export class SketchTool implements Tool {
   private sketchId: string | null;
   private plane: PlaneDef | null;
   private attachedTo?: FaceRef;
+  /** The construction plane it's drawn on (the sketch follows it). */
+  private onPlane?: string;
+  /** A construction plane of the project (not an origin plane): the sketch is linked to it. */
+  private linkPlane(id: string): void {
+    this.onPlane = this.app.store.find(id)?.type === "plane" ? id : undefined;
+  }
   private pts: Vec2[] = [];
   private cursor: Snap | null = null;
   private dragging = false;
@@ -272,6 +278,8 @@ export class SketchTool implements Tool {
   private lenExpr: { v: number; text: string } | null = null;
   /** A size typed into the card as a variable ("bore", "wall*2"): kept on its dimension, so it follows the variable. */
   private lockExprs: Record<string, { v: number; text: string }> = {};
+  /** The first point's X / Y typed with a variable (a centre held there, following it). */
+  private firstExprs: ({ v: number; text: string } | undefined)[] = [];
   private selected = new Set<string>();
   private construction = false;
   private edit: {
@@ -336,11 +344,12 @@ export class SketchTool implements Tool {
 
   constructor(
     private app: AppContext,
-    opts: { sketchId?: string; plane?: PlaneDef; attachedTo?: FaceRef; kind?: Kind } = {},
+    opts: { sketchId?: string; plane?: PlaneDef; attachedTo?: FaceRef; onPlane?: string; kind?: Kind } = {},
   ) {
     this.sketchId = opts.sketchId ?? null;
     this.plane = opts.sketchId ? (app.sketchPlane(opts.sketchId) ?? null) : (opts.plane ?? null);
     this.attachedTo = opts.attachedTo;
+    this.onPlane = opts.onPlane;
     this.phase = this.plane ? "draw" : "plane";
     if (opts.sketchId) this.kind = "select";
     // Started by its key (L, C, R…): that drawing tool, once the plane is picked.
@@ -498,6 +507,7 @@ export class SketchTool implements Tool {
         const pl = this.app.view.planeOf(id);
         if (!pl || this.phase !== "plane") return;
         this.plane = pl;
+        this.linkPlane(id);
         this.app.ui.showPanel(null);
         this.beginDrawing();
       };
@@ -837,6 +847,29 @@ export class SketchTool implements Tool {
     this.distDim.set(w(a), w(b));
   }
 
+  /** The lock holding this one point where it is, if any. */
+  private heldAt(pr: PointRef): SketchConstraint | undefined {
+    return this.constraints.find((c) => c.type === "fix" && c.pts?.length === 1 && !c.curves?.length && c.pts[0].e === pr.e && c.pts[0].p === pr.p);
+  }
+
+  /** A point's X or Y typed (with a variable it follows it): it's locked there. */
+  private placePoint(pr: PointRef, i: 0 | 1, v: number, expr: string | null): void {
+    const owner = this.entities.find((x) => x.id === pr.e);
+    const p = owner && pointOf(owner, pr.p);
+    if (!p) return;
+    const old = this.heldAt(pr);
+    const at: Vec2 = old?.at ? [old.at[0], old.at[1]] : [p[0], p[1]];
+    at[i] = v;
+    const atExpr = [...(old?.atExpr ?? [null, null])];
+    atExpr[i] = expr;
+    const c: SketchConstraint = { id: old?.id ?? uid(), type: "fix", pts: [pr], at, ...(atExpr.some((x) => x) ? { atExpr } : {}) };
+    const res = addStrict(this.entities, this.constraints.filter((x) => x !== old), [c]);
+    if (!res.ok) return this.refused();
+    this.commit(res.result.entities, res.constraints);
+    if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
+    this.updatePanel();
+  }
+
   /** Upsert the Distance constraint of the selection; the first-picked side stays put. */
   private setDistance(value: number, expr?: string): void {
     const curves = this.pickedCurves();
@@ -979,7 +1012,7 @@ export class SketchTool implements Tool {
   private fetchOutline(): void {
     if (this.sketchId || !this.attachedTo || !this.plane) return;
     this.pending ??= this.app.store.newIdentity("sketch");
-    const f: SketchFeature = { ...this.pending, type: "sketch", plane: this.plane, attachedTo: this.attachedTo, entities: [], constraints: [] };
+    const f: SketchFeature = { ...this.pending, type: "sketch", plane: this.plane, attachedTo: this.attachedTo, onPlane: this.onPlane, entities: [], constraints: [] };
     void this.app.preview([...this.app.store.features, f]);
   }
 
@@ -1180,8 +1213,24 @@ export class SketchTool implements Tool {
   }
 
   private setHint(extra?: string): void {
-    const hint = this.phase === "plane" ? "Tap a plane or a flat face to draw on." : extra ?? hintOf(this.kind);
+    const hint = this.phase === "plane" ? "Tap a plane or a flat face to draw on." : extra ?? this.stepHint() ?? hintOf(this.kind);
     this.app.ui.setHint(hint);
+  }
+
+  /**
+   * What's next once a shape's first point is down ("Tap the centre, then a
+   * corner" stayed up after the centre was tapped: had it taken?).
+   */
+  private stepHint(): string | undefined {
+    if (this.pts.length !== 1) return undefined;
+    const typed = isTouchDevice ? "or type it in Values" : "or type it";
+    const k = this.kind;
+    if (k === "rect" && memory.rect === "center") return `Centre placed. Now tap a corner, ${typed}.`;
+    if (k === "rect" && memory.rect === "diagonal") return `First corner placed. Now tap the opposite corner, ${typed}.`;
+    if (k === "circle" && memory.circle === "center") return `Centre placed. Now tap a point on the edge, ${typed}.`;
+    if (k === "polygon") return `Centre placed. Now tap a corner, ${typed}.`;
+    if (k === "ellipse") return `Centre placed. Now tap the end of one axis, ${typed}.`;
+    return undefined;
   }
 
   private toggleConstruction(): void {
@@ -1237,6 +1286,7 @@ export class SketchTool implements Tool {
             label: i ? "Y" : "X",
             value: Math.round(this.pts[0][i] * 100) / 100,
             kind: "length" as const,
+            onExpr: (text: string) => (this.firstExprs[i] = text && isExpression(text) ? { v: evaluate(text, "length") ?? NaN, text } : undefined),
             onInput: (v: number) => {
               this.pts[0] = i ? [this.pts[0][0], v] : [v, this.pts[0][1]];
               // Typed: no longer on what it snapped to.
@@ -1409,12 +1459,35 @@ export class SketchTool implements Tool {
       case "select":
         if (selCount === 1) return this.showSizePanel();
         // Points only: what can be done with them - join, lock, a distance...
-        if (selCount === 0 && this.selPts.length)
+        if (selCount === 0 && this.selPts.length) {
+          // One point: where it is, typed (with a variable it follows it - a
+          // handle's centre at "Ws/2 - S/2"). Typed, it's locked there.
+          const pr = this.selPts[0];
+          const owner = this.entities.find((x) => x.id === pr.e);
+          const at = this.selPts.length === 1 && owner ? pointOf(owner, pr.p) : null;
+          const held = this.heldAt(pr);
+          let typed: string | null = null;
+          const xy: PanelItem[] = at
+            ? ([0, 1] as const).map((i) => ({
+                type: "number" as const,
+                label: i ? "Y" : "X",
+                value: Math.round((held?.at ?? at)[i] * 1e6) / 1e6,
+                kind: "length" as const,
+                expr: held?.atExpr?.[i] ?? undefined,
+                onExpr: (x: string) => (typed = x),
+                onInput: (v: number) => {
+                  const t = typed && isExpression(typed) ? typed : null;
+                  typed = null;
+                  this.placePoint(pr, i, v, t);
+                },
+              }))
+            : [];
           return ui.showPanel({
             title: this.selPts.length === 1 ? "Point" : `${this.selPts.length} points`,
-            items: [...this.constraintChips(), ...this.deleteConstraintsItem()],
+            items: [...xy, ...this.constraintChips(), ...this.deleteConstraintsItem()],
             onDone: () => this.clearSelection(),
           });
+        }
         if (selCount > 1) {
           // Two lines: the angle of the second picked against the first.
           const [l1, l2] = this.pickedCurves();
@@ -1600,6 +1673,7 @@ export class SketchTool implements Tool {
     this.cursor = s;
     this.dragging = true;
     this.updatePanel();
+    this.setHint();
     return true;
   }
 
@@ -2451,6 +2525,7 @@ export class SketchTool implements Tool {
     if (!hit) return;
     if (hit.kind === "plane") {
       this.plane = this.app.view.planeOf(hit.id)!;
+      this.linkPlane(hit.id);
     } else if (hit.kind === "face") {
       const info = this.app.view.body(hit.body)?.faces[hit.face];
       if (!info?.plane) return this.app.ui.toast("Pick a flat face");
@@ -3012,6 +3087,15 @@ export class SketchTool implements Tool {
           if (settings.value.autoConstrain && centred && this.startRef) {
             cs.push({ id: uid(), type: "coincident", pts: [{ e: e.id, p: "c" }, this.startRef] });
           } else if (centred && e.kind !== "rect") cs.push(...this.snapKeeps(this.startSnap, { e: e.id, p: "c" }));
+          // The centre's X / Y typed with a variable (a handle at "Ws/2 - S/2"):
+          // held there, and it follows the variable (it was worked out once and forgotten).
+          const c0 = this.pts[0];
+          const atExpr = [0, 1].map((i) => {
+            const x = this.firstExprs[i];
+            return x && Math.abs(x.v - c0[i]) < 1e-9 ? x.text : null;
+          });
+          if (centred && atExpr.some((x) => x)) cs.push({ id: uid(), type: "fix", pts: [{ e: e.id, p: "c" }], at: [c0[0], c0[1]], atExpr });
+          this.firstExprs = [];
           // An arc between two points it was tapped on stays joined to them (it
           // came loose when its radius was typed: nothing tied its ends).
           if (e.kind === "arc" && memory.arc === "3pt" && settings.value.autoConstrain) {
@@ -3029,6 +3113,7 @@ export class SketchTool implements Tool {
         if (e && e.kind !== "arc") return this.shapeClosed();
       }
     }
+    if (k === "rect" || k === "circle" || k === "polygon" || k === "ellipse") this.setHint();
     this.updatePanel();
     this.refreshPreview();
   }
@@ -3723,7 +3808,7 @@ export class SketchTool implements Tool {
     if (this.sketchId && this.sketch) {
       store.update(this.sketchId, patch);
     } else {
-      const f: SketchFeature = { ...(this.pending ?? store.newIdentity("sketch")), type: "sketch", plane: this.plane!, attachedTo: this.attachedTo, ...patch };
+      const f: SketchFeature = { ...(this.pending ?? store.newIdentity("sketch")), type: "sketch", plane: this.plane!, attachedTo: this.attachedTo, onPlane: this.onPlane, ...patch };
       store.add(f);
       this.sketchId = f.id;
     }
@@ -4416,7 +4501,7 @@ export class SketchTool implements Tool {
       const link = { id: uid(), distance: memory.offset, at: this.edit.offsetAt };
       // (Nothing drawn on it yet: the sketch is made with the offset in it - one step.)
       if (!this.sketchId) {
-        const f: SketchFeature = { ...(this.pending ?? this.app.store.newIdentity("sketch")), type: "sketch", plane: this.plane!, attachedTo: this.attachedTo, entities: [], constraints: [], outlineOffsets: [link] };
+        const f: SketchFeature = { ...(this.pending ?? this.app.store.newIdentity("sketch")), type: "sketch", plane: this.plane!, attachedTo: this.attachedTo, onPlane: this.onPlane, entities: [], constraints: [], outlineOffsets: [link] };
         this.app.store.add(f);
         this.sketchId = f.id;
       } else {

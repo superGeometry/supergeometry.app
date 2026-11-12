@@ -916,7 +916,7 @@ export class SelectTool implements Tool {
     const plane = app.view.planeOf(s.id);
     const isFeature = !!app.store.find(s.id);
     return [
-      { id: "sketch", label: "Sketch", icon: "sketch", shortcut: "S", run: () => plane && (app.setSelection([]), app.setTool(new SketchTool(app, { plane }))) },
+      { id: "sketch", label: "Sketch", icon: "sketch", shortcut: "S", run: () => plane && (app.setSelection([]), app.setTool(new SketchTool(app, { plane, onPlane: isFeature ? s.id : undefined }))) },
       { id: "plane", label: "Plane – Offset", icon: "plane", run: () => plane && app.setTool(new PlaneOp(app, plane, undefined)) },
       { id: "split", label: "Split Body", icon: "split", disabled: !app.view.bodyList.length, why: "Needs a body", run: () => plane && this.splitWith(plane) },
       { id: "delete", label: "Delete", icon: "trash", shortcut: "Del", disabled: !isFeature, why: "Origin planes can't be deleted", run: () => (app.store.remove(s.id), app.setSelection([])) },

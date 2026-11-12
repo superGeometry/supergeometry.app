@@ -80,9 +80,18 @@ export function axisSlot(app: AppContext, label: string, get: () => AxisRef | nu
   };
 }
 
-export function planeSlot(app: AppContext, label: string, get: () => PlaneDef | null, set: (p: PlaneDef, face?: FaceRef) => void): Slot {
+export function planeSlot(
+  app: AppContext,
+  label: string,
+  get: () => PlaneDef | null,
+  set: (p: PlaneDef, face?: FaceRef) => void,
+  // `named`: what's in it already, by name (a plane being edited: "XZ plane",
+  // not "Plane"). `skip`: construction planes it can't be (a plane can't be
+  // made from itself, nor from one made after it).
+  opts: { named?: string; skip?: (planeId: string) => boolean } = {},
+): Slot {
   let shown: Sel | null = null;
-  let name = "";
+  let name = opts.named ?? "";
   return {
     label,
     describe: () => (get() ? name || "Plane" : "Tap a plane, flat face or sketched shape"),
@@ -95,15 +104,15 @@ export function planeSlot(app: AppContext, label: string, get: () => PlaneDef | 
     // a thin sheet among the bodies, easy to miss with a finger).
     presets: [
       ...["XY", "XZ", "YZ"].map((id) => ({ label: id, apply: () => ((name = `${id} plane`), (shown = null), set(app.view.planeOf(id)!)) })),
-      ...app.view.construction.planes.map((c) => ({ label: c.name, apply: () => ((name = c.name), (shown = null), set(c.plane)) })),
+      ...app.view.construction.planes.filter((c) => !opts.skip?.(c.id)).map((c) => ({ label: c.name, apply: () => ((name = c.name), (shown = null), set(c.plane)) })),
     ],
     shows: () => (shown ? [shown] : []),
     accept(hit) {
       if (hit.kind === "plane") {
         const p = app.view.planeOf(hit.id);
-        if (!p) return false;
+        if (!p || opts.skip?.(hit.id)) return false;
         set(p);
-        name = ["XY", "XZ", "YZ"].includes(hit.id) ? `${hit.id} plane` : "Plane";
+        name = ["XY", "XZ", "YZ"].includes(hit.id) ? `${hit.id} plane` : (app.view.construction.planes.find((c) => c.id === hit.id)?.name ?? "Plane");
         shown = { kind: "plane", id: hit.id };
         return true;
       }
@@ -111,7 +120,7 @@ export function planeSlot(app: AppContext, label: string, get: () => PlaneDef | 
         const info = app.view.body(hit.body)?.faces[hit.face];
         if (!info?.plane) return false;
         set(info.plane, faceRefOf(app, hit) ?? undefined);
-        name = "Face";
+        name = faceOfName(app, hit.body);
         shown = { kind: "face", body: hit.body, face: hit.face };
         return true;
       }
@@ -128,6 +137,12 @@ export function planeSlot(app: AppContext, label: string, get: () => PlaneDef | 
       return false;
     },
   };
+}
+
+/** "Face of Body 3": which body a face is on, by the name it has in Items. */
+export function faceOfName(app: AppContext, body: string): string {
+  const n = app.store.doc.names?.[body] ?? app.result?.bodies.find((b) => b.id === body)?.name;
+  return n ? `Face of ${n}` : "Face";
 }
 
 /** A direction: an edge, an axis, a face normal, or X/Y/Z. */

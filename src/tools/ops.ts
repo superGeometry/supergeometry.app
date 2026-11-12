@@ -11,7 +11,7 @@ import { evaluate, fmtLen } from "../units";
 import type { ToolPointer } from "../view/input";
 import { FeatureOp, type Slot } from "./featureOp";
 import { axisDrag, Handle } from "./handles";
-import { axisSlot, chainThrough, curvesSlot, directionSlot, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
+import { axisSlot, chainThrough, curvesSlot, directionSlot, faceOfName, facesSlot, pathSlot, planeSlot, pointSlot, sectionsSlot } from "./slots";
 import { edgeRefOf, faceIndexOf, faceRefOf, goneRefs, oppositeFace, sourceFrame, targetOf, type AppContext, type Sel } from "./tool";
 import { SketchTool } from "./sketch";
 import { screenClass } from "../device";
@@ -2729,6 +2729,18 @@ export class ThreadOp extends FeatureOp<ThreadFeature> {
 
 // ------------------------------------------------------------ construction
 
+/** What a plane is made from, by name: "XZ plane", "Plane 02", "Face of Body 1". */
+function baseName(app: AppContext, f: PlaneFeature): string | undefined {
+  if (f.face) return faceOfName(app, f.face.body);
+  const same = (p: PlaneDef) => len(sub(p.origin, f.plane.origin)) < 1e-6 && dot(norm(p.normal), norm(f.plane.normal)) > 1 - 1e-9;
+  const origin = ["XY", "XZ", "YZ"].find((id) => {
+    const p = app.view.planeOf(id);
+    return p && same(p);
+  });
+  if (origin) return `${origin} plane`;
+  return app.view.construction.planes.find((c) => c.id !== f.id && same(c.plane))?.name;
+}
+
 export class PlaneOp extends FeatureOp<PlaneFeature> {
   readonly id = "plane";
   private base: PlaneDef | null = null;
@@ -2736,7 +2748,14 @@ export class PlaneOp extends FeatureOp<PlaneFeature> {
   constructor(app: AppContext, base: PlaneDef | null, face: FaceRef | undefined, existing?: PlaneFeature) {
     super(app, { ...app.store.newIdentity("plane"), type: "plane", kind: "offset", plane: base ?? { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, face, offset: 10 }, existing);
     this.base = existing ? existing.plane : base;
-    this.slots = [planeSlot(app, "From", () => this.base, (p, f) => ((this.base = p), (this.feature.plane = p), (this.feature.face = f)))];
+    // Being edited: not from itself, nor from a plane made after it (that
+    // one is built from this one, or comes later in the history).
+    const at = existing ? app.store.doc.features.findIndex((x) => x.id === existing.id) : -1;
+    const skip = (id: string) => {
+      const k = app.store.doc.features.findIndex((x) => x.id === id);
+      return at >= 0 && k >= at;
+    };
+    this.slots = [planeSlot(app, "From", () => this.base, (p, f) => ((this.base = p), (this.feature.plane = p), (this.feature.face = f)), { named: existing ? baseName(app, existing) : undefined, skip })];
   }
 
   private handle: Handle | null = null;

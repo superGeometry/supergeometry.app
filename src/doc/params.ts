@@ -43,6 +43,15 @@ export function resolveDoc(doc: ProjectDoc): string[] {
     }
     if (f.type === "sketch" && f.constraints?.length) {
       for (const c of f.constraints) {
+        // A point held where X / Y were typed with a variable.
+        if (c.type === "fix" && c.at && c.atExpr)
+          c.at = c.at.map((x, i) => {
+            const e = c.atExpr![i];
+            if (!e) return x;
+            const v = evaluate(e, "length");
+            if (v === null) problems.push(`${f.name}: "${e}" can't be evaluated`);
+            return v ?? x;
+          }) as typeof c.at;
         if (!c.expr) continue;
         const v = evaluate(c.expr, c.prop === "angle" ? "angle" : "length");
         if (v === null) problems.push(`${f.name}: "${c.expr}" can't be evaluated`);

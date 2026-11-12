@@ -596,17 +596,26 @@ export class App implements AppContext {
     return r?.defined;
   }
 
+  /** Sketches hidden (after use) that were shown again: meant to be used again, so tappable through bodies. */
+  private revealed = new Set<string>();
+  private wasHidden = new Set<string>();
+
   private refreshSketches(features: readonly Feature[] = this.store.doc.features): void {
     const hidden = new Set(this.store.doc.hidden);
+    for (const id of this.wasHidden) if (!hidden.has(id)) this.revealed.add(id);
+    for (const id of hidden) this.revealed.delete(id);
+    this.wasHidden = hidden;
     const iso = this.isolatedWithSketches();
     const sketches = features
       .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && !f.rolledBack && ((!hidden.has(f.id) && (!iso || iso.includes(f.id))) || f.id === this.tool.activeSketch))
       .map((s) => ({ ...s, entities: this.solved.get(s) ?? s.entities, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }))
       .map((s) => (s.id === this.tool.activeSketch ? { ...s, defined: this.definedOf(s) } : s));
     // Drawn but not made into anything yet: shown through bodies, and a tap on it finds it there
-    // (a pocket sketched on a plane through the middle of a body is inside it).
+    // (a pocket sketched on a plane through the middle of a body is inside it). The same
+    // for one used, hidden, and shown again in Items: the pocket's sketch shown to fill
+    // the pocket with a core couldn't be tapped through the frame round it.
     const used = new Set(features.filter((f) => !f.suppressed && !f.rolledBack).flatMap(sketchesUsed));
-    this.view.setSketches(sketches, this.tool.activeSketch, new Set(sketches.filter((s) => !used.has(s.id)).map((s) => s.id)));
+    this.view.setSketches(sketches, this.tool.activeSketch, new Set(sketches.filter((s) => !used.has(s.id) || this.revealed.has(s.id)).map((s) => s.id)));
   }
 
   private refreshHighlights(): void {

@@ -138,6 +138,8 @@ export interface SketchConstraint {
   expr?: string;
   /** fix: where the point is held. pattern: the copy's offset (move), or the centre it turns round (turn). */
   at?: Vec2;
+  /** fix: X / Y of `at` typed with a variable ("Ws/2 - S/2"): the point follows it. */
+  atExpr?: (string | null)[];
   /** pattern: "turn" - the copy is the original turned `value` degrees round `at`; else moved by `at`. */
   turn?: boolean;
 }
@@ -147,6 +149,11 @@ export interface SketchFeature extends FeatureBase {
   plane: PlaneDef;
   /** When drawn on a body face, the sketch follows that face when it moves. */
   attachedTo?: FaceRef;
+  /**
+   * Drawn on a construction plane (its id): the sketch follows the plane when
+   * it moves - its offset typed again, or driven by a variable.
+   */
+  onPlane?: string;
   entities: SketchEntity[];
   constraints?: SketchConstraint[];
   /**

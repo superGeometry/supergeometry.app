@@ -63,7 +63,10 @@ export function usesOf(features: readonly Feature[]): Map<string, VarUse[]> {
     if (f.suppressed) continue;
     for (const [path, expr] of Object.entries(f.exprs ?? {})) for (const n of namesIn(expr)) add1(n, { feature: f.id, where: path, kind: kindOfPath(path), expr });
     if (f.type === "sketch")
-      for (const c of f.constraints ?? []) if (c.expr) for (const n of namesIn(c.expr)) add1(n, { feature: f.id, where: c.id, kind: c.prop === "angle" ? "angle" : "length", expr: c.expr! });
+      for (const c of f.constraints ?? []) {
+        if (c.expr) for (const n of namesIn(c.expr)) add1(n, { feature: f.id, where: c.id, kind: c.prop === "angle" ? "angle" : "length", expr: c.expr! });
+        for (const x of c.atExpr ?? []) if (x) for (const n of namesIn(x)) add1(n, { feature: f.id, where: c.id, kind: "length", expr: x });
+      }
   }
   return out;
 }
