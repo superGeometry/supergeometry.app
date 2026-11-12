@@ -66,7 +66,7 @@ import { healthOf, isHealthy, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans } from "./safeBooleans";
-import { measureArea as trueArea, measureVolume, normalOnEdge, surfaceAt, volumeProperties } from "./ocFree";
+import { areaProperties, measureArea as trueArea, measureVolume, normalOnEdge, surfaceAt, volumeProperties } from "./ocFree";
 import { loftInLine } from "./loftAlign";
 import { railLoft } from "./loftRails";
 import { edgeOrigins, edgeSteps, faceAliases, faceOrigins, faceSteps, inheritTags, oldEdgeSteps, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
@@ -853,6 +853,10 @@ async function run(features: Feature[], saved = false) {
               if (!b || out.freeforms.has(id)) continue;
               const c = deepCopy(b);
               inheritTags(b, c);
+              // (The same shape: its volume is known - a big body's, measured
+              // again on every step's copy, was a quarter of a small cut's time.)
+              const v = volumes.get(b);
+              if (v !== undefined) volumes.set(c, v);
               copies.set(id, c);
               out.bodies.set(id, c);
             }
@@ -1762,13 +1766,16 @@ function affineThen(m: Affine, n: Affine): Affine {
 }
 const scaleAbout = (c: Vec3, k: Vec3): Affine => [k[0], 0, 0, c[0] * (1 - k[0]), 0, k[1], 0, c[1] * (1 - k[1]), 0, 0, k[2], c[2] * (1 - k[2])];
 
+/** The affine map that a point map `f` is (it must be one). */
+function affineFrom(f: (p: Vec3) => Vec3): Affine {
+  const o = f([0, 0, 0]);
+  const cols = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((e) => sub(f(e as Vec3), o));
+  return [0, 1, 2].flatMap((r) => [cols[0][r], cols[1][r], cols[2][r], o[r]]);
+}
+
 /** The affine map of a move/scale/mirror step (null for patterns). */
 function opAffine(op: Extract<Feature, { type: "transform" }>["op"]): Affine | null {
-  const fromPoints = (f: (p: Vec3) => Vec3): Affine => {
-    const o = f([0, 0, 0]);
-    const cols = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((e) => sub(f(e as Vec3), o));
-    return [0, 1, 2].flatMap((r) => [cols[0][r], cols[1][r], cols[2][r], o[r]]);
-  };
+  const fromPoints = affineFrom;
   switch (op.kind) {
     case "move": {
       const r = op.rotate && Math.abs(op.rotate.angle) > 1e-9 ? op.rotate : null;
@@ -3110,6 +3117,22 @@ function transform(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {
         break;
       }
     }
+    // Moved without changing shape: its mesh can be this body's, moved.
+    const rigid = (k: number): Affine | null => {
+      if (op.kind === "move" || op.kind === "mirror") return opAffine(op);
+      if (op.kind === "linear") return affineFrom((p) => add(p, scale(norm(op.dir), op.spacing * (k + 1))));
+      if (op.kind === "circular") {
+        const ax = resolveAxis(op.axis, ctx);
+        const full = Math.abs(Math.abs(op.angle) - 360) < 1e-6;
+        const step = op.angle / (full ? op.count : Math.max(1, op.count - 1));
+        return affineFrom((p) => rotateAbout(p, ax.origin, ax.dir, step * (k + 1)));
+      }
+      return null;
+    };
+    results.forEach((s, k) => {
+      const m = rigid(k);
+      if (m) movedFrom.set(s, { from: new WeakRef(body), m, flip: op.kind === "mirror" });
+    });
     const isPattern = op.kind === "linear" || op.kind === "circular";
     // A freeform stays rebuildable through moves, scales and mirrors (copies too).
     const ff = ctx.freeforms.get(id);
@@ -3620,9 +3643,10 @@ function faceCagePoints(cage: { verts: Vec3[]; faces: [number, number, number, n
 }
 
 function faceInfo(face: Face): FaceInfo {
-  const center = face.center.toTuple() as Vec3;
+  // (Middle and area from one measuring: each face of every body shown was measured twice.)
+  const { area, center } = areaProperties(face);
   const normal = norm(face.normalAt().toTuple() as Vec3);
-  const info: FaceInfo = { center, normal, area: measureArea(face), type: face.geomType };
+  const info: FaceInfo = { center, normal, area, type: face.geomType };
   if (face.geomType === "PLANE") info.plane = { origin: center, normal, xDir: xDirFor(normal) };
   if (face.geomType === "CYLINDRE") {
     const cy = cylinderOf(face);
@@ -3857,7 +3881,43 @@ function resolveEdge(body: Shape3D, ref: EdgeRef, rounding = false): Edge {
 // ------------------------------------------------------------------- meshing
 
 /** The triangles and edge lines of a body, as the view shows them. */
+/**
+ * Bodies that are another body moved, turned or mirrored (a Move step, a
+ * pattern's copies): their mesh is that body's, moved the same way - meshed
+ * again, a fan's rotated casing took 3 s, and a pattern meshed every copy.
+ * (The faces and edges come in the same order: the shape is the same.)
+ */
+// (The body it was moved from held weakly: a chain of moves mustn't keep every earlier body alive.)
+const movedFrom = new WeakMap<Shape3D, { from: WeakRef<Shape3D>; m: Affine; flip: boolean }>();
+function movedMesh(shape: Shape3D) {
+  const mv = movedFrom.get(shape);
+  const was = mv?.from.deref();
+  const src = was && (meshCache.get(was) ?? drawMeshes.get(was));
+  if (!mv || !src) return null;
+  const { m, flip } = mv;
+  const at = (a: Float32Array, normal: boolean) => {
+    const out = new Float32Array(a.length);
+    for (let i = 0; i < a.length; i += 3) {
+      const [x, y, z] = [a[i], a[i + 1], a[i + 2]];
+      for (let r = 0; r < 3; r++) out[i + r] = m[r * 4] * x + m[r * 4 + 1] * y + m[r * 4 + 2] * z + (normal ? 0 : m[r * 4 + 3]);
+    }
+    return out;
+  };
+  let triangles = src.indices;
+  if (flip) {
+    // Mirrored: each triangle the other way round, or it faces inward.
+    triangles = new Uint32Array(src.indices);
+    for (let i = 0; i < triangles.length; i += 3) [triangles[i + 1], triangles[i + 2]] = [triangles[i + 2], triangles[i + 1]];
+  }
+  return {
+    m: { vertices: at(src.positions, false), normals: at(src.normals, true), triangles, faceGroups: src.faceGroups },
+    e: { lines: at(src.edgePositions, false), edgeGroups: src.edgeGroups },
+  };
+}
+
 function meshLines(shape: Shape3D) {
+  const moved = movedMesh(shape);
+  if (moved) return moved;
   const bb = shape.boundingBox;
   const diag = Math.hypot(bb.width, bb.height, bb.depth) || 1;
   // (Never finer than 1/50 000 of its size: a 100 m arc at 0.1 mm is millions of triangles.)
@@ -4029,7 +4089,9 @@ function guardEdit(before: Shape3D | undefined, after: Shape3D, mayPart: boolean
   }
   // A lump inside out among the others: the cut went wrong.
   // (One solid: the body itself - its volume, worked out once.)
-  const signed = solids.length === 1 && after instanceof Solid ? [volumeOf(after)] : solids.map((x) => measureVolume(cast(x) as Shape3D));
+  // (Or a group holding that one solid and nothing else, as a cut gives back: the same volume, likely known already.)
+  const one = solids.length === 1 && (after instanceof Solid || [...iterTopo(after.wrapped, "face")].length === [...iterTopo(solids[0], "face")].length);
+  const signed = one ? [volumeOf(after)] : solids.map((x) => measureVolume(cast(x) as Shape3D));
   if (solids.length > 1 && signed.some((v) => v < 0) && signed.some((v) => v > 0)) throw new Error("That edit would damage the body - try a different value");
   // Crumbs: lumps far smaller than the rest (left between coincident faces).
   const vols = signed.map((v) => Math.abs(v));

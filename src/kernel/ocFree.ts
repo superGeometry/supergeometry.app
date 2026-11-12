@@ -107,6 +107,20 @@ export function measureArea(s: Measurable): number {
   }
 }
 
+/** A face's area and its middle (centre of area), measured once - at the plain fineness (for showing, not for checks). */
+export function areaProperties(f: Face): { area: number; center: Vec3 } {
+  const oc = getOC();
+  const p = new oc.GProp_GProps();
+  oc.BRepGProp.SurfaceProperties(f.wrapped, p, false, false);
+  const c = p.CentreOfMass();
+  try {
+    return { area: p.Mass(), center: [c.X(), c.Y(), c.Z()] };
+  } finally {
+    c.delete();
+    p.delete();
+  }
+}
+
 /** Volume and centre of mass, to a millionth. */
 export function volumeProperties(s: Shape3D): { volume: number; centerOfMass: Vec3 } {
   const p = props(s, "volume");
