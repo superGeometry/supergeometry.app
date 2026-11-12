@@ -658,7 +658,10 @@ export interface DrawingOptions {
   views?: { front?: boolean; top?: boolean; side?: boolean; iso?: boolean };
   /** The bodies drawn (missing: every body shown). */
   bodies?: string[];
-  titleBlock?: "none" | "border" | "simple" | "table";
+  /** simple / table (with the parts list) / block (with a revision table): a block in the corner; horizontal: a strip along the bottom; vertical: a column down the right, with a revision table. */
+  titleBlock?: "none" | "border" | "simple" | "table" | "block" | "horizontal" | "vertical";
+  /** The revision table (Block and Vertical title blocks). */
+  revisions?: DrawingRevision[];
   dateFormat?: "iso" | "dmy" | "mdy";
   units?: "mm" | "cm" | "m" | "in";
   /** Decimals shown in dimensions. */
@@ -816,6 +819,14 @@ export interface DrawingNote {
   text: string;
   /** What it points at: a point on a view (that view's coordinates), its leader drawn to it. */
   to?: { view: string; p: [number, number] };
+}
+
+/** A row of a drawing's revision table. */
+export interface DrawingRevision {
+  rev: string;
+  note?: string;
+  date?: string;
+  by?: string;
 }
 
 /** The title block: who made it, for whom, which revision. */

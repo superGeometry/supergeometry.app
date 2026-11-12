@@ -431,6 +431,24 @@ const apart = spots.every((a, i) => spots.every((b, j) => i === j || Math.hypot(
 check("balloons for parts close together are spread apart", apart, JSON.stringify(spots.map((s) => [s.x, s.y])));
 check("they sit on the rectangle around the view", spots.every((s) => s.y === 0 || s.x === 0 || s.x === 100 || s.y === 100));
 
+// Title blocks: a strip along the bottom, a column down the right (the views keep off them), a block with a revision table.
+{
+  const tdoc = emptyDoc();
+  for (const tb of ["horizontal", "vertical", "block"] as const) {
+    tdoc.drawing = { size: "A3", titleBlock: tb, revisions: [{ rev: "A", note: "First issue", date: "2026-11-12", by: "SG" }] };
+    const o = drawingOptions(tdoc);
+    const lay = layoutSheet(views, o, 2);
+    const [W, H] = sheetSize(o);
+    const clear = lay.views.every((p) => {
+      const r = extent(p);
+      return tb === "horizontal" ? r.y1 <= H - 10 - 26 : tb === "vertical" ? r.x1 <= W - 10 - 60 : true;
+    });
+    const out = drawingSVG({ doc: tdoc, views, parts, date: new Date(2026, 10, 12) }).svg;
+    check(`${tb} title block: drawn, views clear of it, fits`, clear && lay.fits && out.includes("Drawing number"), JSON.stringify(lay.views.map(extent)));
+    if (tb !== "horizontal") check(`${tb}: the revision table`, out.includes("First issue") && out.includes(">Description<"));
+  }
+}
+
 if (failed) {
   console.log(`${failed} failed`);
   process.exit(1);

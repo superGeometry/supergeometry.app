@@ -27,6 +27,7 @@ import {
   annId,
   drawingOptions,
   drawingSVG,
+  dateText,
   edgeAt,
   extent,
   fromPaper,
@@ -1727,6 +1728,9 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
           ["border", "Border only"],
           ["simple", "Simple"],
           ["table", "With parts list"],
+          ["block", "Block with revisions"],
+          ["horizontal", "Horizontal"],
+          ["vertical", "Vertical with revisions"],
         ],
         (v) => set({ titleBlock: v as Opts["titleBlock"] }),
       ),
@@ -1756,6 +1760,35 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     info("revision", "Revision");
     info("author", "Created by");
     info("company", "Owner");
+    // The revision table (Block and Vertical title blocks).
+    if (o.titleBlock === "block" || o.titleBlock === "vertical") {
+      const revs = el("div", "bim-props-revs");
+      o.revisions.forEach((r, i) => {
+        const line = el("div", "bim-props-rev");
+        line.append(el("span", "", [r.rev, r.note, r.date, r.by].filter(Boolean).join(" · ")));
+        const x = el("button", "text-btn", "Remove");
+        x.addEventListener("click", () => set({ revisions: o.revisions.filter((_, j) => j !== i) }));
+        line.append(x);
+        revs.append(line);
+      });
+      const add = el("button", "text-btn", "Add revision");
+      add.addEventListener("click", async () => {
+        const next = String.fromCharCode(65 + Math.min(25, o.revisions.length));
+        const v = await app.ui.dialog("Add a revision", [
+          { key: "rev", label: "Revision", value: next },
+          { key: "note", label: "Description", value: "", placeholder: "What changed" },
+          { key: "date", label: "Date", value: dateText(new Date(), o.dateFormat) },
+          { key: "by", label: "By", value: store.doc.info?.author ?? "" },
+        ]);
+        if (!v || !v.rev.trim()) return;
+        const r = { rev: v.rev.trim(), note: v.note.trim() || undefined, date: v.date.trim() || undefined, by: v.by.trim() || undefined };
+        set({ revisions: [...o.revisions, r] });
+        // The title block's revision is the latest one.
+        store.commit((d) => (d.info = { ...(d.info ?? {}), revision: r.rev }));
+      });
+      revs.append(add);
+      row("Revisions", revs);
+    }
 
     section("Dimensions");
     row(

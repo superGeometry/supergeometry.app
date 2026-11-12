@@ -69,6 +69,7 @@ export function drawingOptions(doc: ProjectDoc) {
     views: { front: o.views?.front ?? true, top: o.views?.top ?? true, side: o.views?.side ?? true, iso: o.views?.iso ?? o.iso ?? true },
     bodies: o.bodies,
     titleBlock: o.titleBlock ?? "table",
+    revisions: o.revisions ?? [],
     dateFormat: o.dateFormat ?? "iso",
     units: o.units ?? (appUnits === "ft" ? "in" : appUnits),
     precision: o.precision ?? 2,
@@ -250,6 +251,28 @@ const FRAME = 10;
 export const TB_W = 180;
 const TB_H = 36;
 const ROW = 6;
+/** Vertical title block: its width. */
+const VB_W = 60;
+/** Horizontal title block: the height of a row of it (two rows on a narrow sheet). */
+const HB_ROW = 13;
+const stripRows = (W: number) => (W - FRAME - FRAME_L < 330 ? 2 : 1);
+/** Rows of the revision table, with its header (an empty one while there are none). */
+const revRows = (o: Opts) => Math.max(1, o.revisions.length) + 1;
+
+/**
+ * The room the title block leaves the views: the drawing area's right and
+ * bottom edges (a strip or a column takes its side) and the height of the
+ * block in the corner (0: none).
+ */
+export function sheetRoom(o: Opts, parts: number, W: number, H: number): { R: number; B: number; cornerH: number } {
+  const R = W - FRAME;
+  const B = H - FRAME;
+  if (o.titleBlock === "horizontal") return { R, B: B - HB_ROW * stripRows(W) - 2, cornerH: 0 };
+  if (o.titleBlock === "vertical") return { R: R - VB_W - 2, B, cornerH: 0 };
+  const cornerH =
+    o.titleBlock === "table" ? TB_H + (parts ? ROW * (listRows(parts, H) + 1) : 0) : o.titleBlock === "simple" ? TB_H : o.titleBlock === "block" ? TB_H + ROW * revRows(o) : 0;
+  return { R, B, cornerH };
+}
 /** Room for dimensions around the orthographic views, and between them. */
 const DIM = 14;
 const GAP = 22;
@@ -301,10 +324,11 @@ export function extent(p: Placed): { x0: number; y0: number; x1: number; y1: num
 /** Where each view goes, and at which scale: the largest standard scale at which they fit. Views moved by hand stay moved. */
 export function layoutSheet(views: Map<string, ProjectedView>, o: Opts, parts: number): Layout {
   const [W, H] = sheetSize(o);
-  const R = W - FRAME;
-  const B = H - FRAME;
+  const room = sheetRoom(o, parts, W, H);
+  const R = room.R;
+  const B = room.B;
   const T = FRAME;
-  const blockH = o.titleBlock === "table" ? TB_H + (parts ? ROW * (listRows(parts, H) + 1) : 0) + 2 : o.titleBlock === "simple" ? TB_H + 2 : 0;
+  const blockH = room.cornerH ? room.cornerH + 2 : 0;
   const corner = { x0: R - TB_W, y0: B - blockH };
   const side = o.angle === "first" ? "left" : "right";
   const first = o.angle === "first";
@@ -716,9 +740,7 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
   // drawn over them.
   const placed = new Map(L.views.map((p) => [p.id, p]));
   if (!L.fits) {
-    const R = W - FRAME;
-    const B = H - FRAME;
-    const blockH = o.titleBlock === "table" ? TB_H + (parts.length ? ROW * (listRows(parts.length, H) + 1) : 0) : o.titleBlock === "simple" ? TB_H : 0;
+    const { R, B, cornerH: blockH } = sheetRoom(o, parts.length, W, H);
     const area = blockH
       ? `M${FRAME_L} ${FRAME}H${R}V${f(B - blockH)}H${R - TB_W}V${B}H${FRAME_L}Z`
       : `M${FRAME_L} ${FRAME}H${R}V${B}H${FRAME_L}Z`;
@@ -838,9 +860,10 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
     }
   // Where balloons can't go: off the frame, on the title block, on another view or balloon.
   const taken: [number, number][] = [];
-  const block = o.titleBlock === "table" ? TB_H + (parts.length ? ROW * (listRows(parts.length, L.H) + 1) : 0) : o.titleBlock === "simple" ? TB_H : 0;
+  const room = sheetRoom(o, parts.length, L.W, L.H);
+  const block = room.cornerH;
   const freeFor = (host: Placed) => (x: number, y: number) => {
-    if (x < FRAME_L + 4.5 || y < FRAME + 4.5 || x > L.W - FRAME - 4.5 || y > L.H - FRAME - 4.5) return false;
+    if (x < FRAME_L + 4.5 || y < FRAME + 4.5 || x > room.R - 4.5 || y > room.B - 4.5) return false;
     if (block && x > L.W - FRAME - TB_W - 4.5 && y > L.H - FRAME - block - 4.5) return false;
     for (const p of L.views) {
       if (p === host) continue;
@@ -896,7 +919,9 @@ export function drawingSVG(data: SheetData): { svg: string; layout: Layout } {
   if (!L.fits) out.push(`</g>`);
 
   // ---- Title block (ISO 7200), and the parts list above it.
-  if (o.titleBlock === "simple" || o.titleBlock === "table") out.push(titleBlock(o, doc.info ?? {}, data.date, L, o.titleBlock === "table" ? parts : []));
+  if (o.titleBlock === "simple" || o.titleBlock === "table" || o.titleBlock === "block") out.push(titleBlock(o, doc.info ?? {}, data.date, L, o.titleBlock === "table" ? parts : []));
+  else if (o.titleBlock === "horizontal") out.push(stripBlock(o, doc.info ?? {}, data.date, L));
+  else if (o.titleBlock === "vertical") out.push(columnBlock(o, doc.info ?? {}, data.date, L));
   out.push(`</svg>`);
   return { svg: out.join("\n"), layout: L };
 }
@@ -1288,6 +1313,7 @@ function titleBlock(o: Opts, info: ProjectInfo, date: Date, L: Layout, parts: Pa
     }
     out.push(`<path d="M${f(tbx)} ${f(hy)}L${f(tbx + TB_W)} ${f(hy)}" ${line}/>`);
   }
+  if (o.titleBlock === "block") out.push(revisionTable(o, tbx, tby - ROW * revRows(o), [["Rev.", 15], ["Description", 105], ["Date", 30], ["By", 30]], 2.6));
   out.push(`<rect x="${f(tbx)}" y="${f(tby)}" width="${TB_W}" height="${TB_H}" fill="#fff" stroke="#000" stroke-width="0.7"/>`);
   const cell = (x: number, y: number, w: number, h: number, label: string, value: string, size = 3) => {
     out.push(`<rect x="${f(tbx + x)}" y="${f(tby + y)}" width="${w}" height="${h}" ${line}/>`);
@@ -1314,6 +1340,112 @@ function titleBlock(o: Opts, info: ProjectInfo, date: Date, L: Layout, parts: Pa
     x += w;
   }
   return out.join("\n");
+}
+
+/** The revision table: a header and a row for each revision, from (x, y) down. */
+function revisionTable(o: Opts, x: number, y: number, cols: [string, number][], size: number): string {
+  const out: string[] = [];
+  const w = cols.reduce((a, c) => a + c[1], 0);
+  const n = revRows(o);
+  out.push(`<rect x="${f(x)}" y="${f(y)}" width="${f(w)}" height="${ROW * n}" fill="#fff" stroke="#000" stroke-width="0.35"/>`);
+  const rows = [cols.map((c) => c[0]), ...o.revisions.map((r) => [r.rev, r.note ?? "", r.date ?? "", r.by ?? ""])];
+  rows.forEach((r, i) => {
+    const ry = y + i * ROW;
+    if (i) out.push(`<path d="M${f(x)} ${f(ry)}H${f(x + w)}" stroke="#000" stroke-width="${i === 1 ? 0.35 : 0.18}"/>`);
+    let cx = x;
+    cols.forEach(([, cw], c) => {
+      out.push(text(cx + 1.2, ry + ROW - 1.8, fit(r[c] ?? "", cw - 2.4, size), size, i ? {} : { weight: "bold" }));
+      cx += cw;
+    });
+  });
+  if (n > rows.length) out.push(`<path d="M${f(x)} ${f(y + ROW)}H${f(x + w)}" stroke="#000" stroke-width="0.35"/>`);
+  let cx = x;
+  for (const [, cw] of cols.slice(0, -1)) {
+    cx += cw;
+    out.push(`<path d="M${f(cx)} ${f(y)}V${f(y + ROW * n)}" stroke="#000" stroke-width="0.18"/>`);
+  }
+  return out.join("\n");
+}
+
+/** A title block's fields: label and value. */
+function blockFields(o: Opts, info: ProjectInfo, date: Date, L: Layout): Record<string, [string, string]> {
+  return {
+    owner: ["Owner", info.company ?? ""],
+    title: ["Title", o.title],
+    by: ["Created by", info.author ?? ""],
+    date: ["Date of issue", dateText(date, o.dateFormat)],
+    units: ["Units", o.units],
+    scale: ["Scale", scaleLabel(L.scale)],
+    projection: ["Projection", ""],
+    size: ["Size", o.size],
+    number: ["Drawing number", info.number ?? ""],
+    rev: ["Rev.", info.revision ?? ""],
+    sheet: ["Sheet", "1/1"],
+  };
+}
+type BlockRow = { h: number; cells: [string, number?][] };
+
+/** Cells of a title block laid out in rows: each row's fields and widths (a field without one takes what's left). */
+function blockCells(o: Opts, info: ProjectInfo, date: Date, L: Layout, x0: number, y0: number, w: number, rows: BlockRow[], line: number): string {
+  const out: string[] = [];
+  const F = blockFields(o, info, date, L);
+  let y = y0;
+  for (const r of rows) {
+    const fixed = r.cells.reduce((a, c) => a + (c[1] ?? 0), 0);
+    const free = r.cells.filter((c) => c[1] === undefined).length;
+    // (Too wide for the sheet: all of them narrower.)
+    const k = fixed > w - 20 * free ? (w - 20 * free) / fixed : 1;
+    let x = x0;
+    for (const [key, cw] of r.cells) {
+      const cwid = cw === undefined ? (w - fixed * k) / Math.max(1, free) : cw * k;
+      const [label, value] = F[key];
+      out.push(`<rect x="${f(x)}" y="${f(y)}" width="${f(cwid)}" height="${r.h}" stroke="#000" stroke-width="0.35" fill="none"/>`);
+      out.push(text(x + 1.2, y + 2.6, label, 1.8, { fill: "#444" }));
+      const size = key === "title" ? Math.min(5, r.h * 0.33) : value.length > 8 ? 2.4 : 3;
+      if (value) out.push(text(x + 1.2, y + r.h - 2, fit(value, cwid - 2.4, size), size));
+      if (key === "projection") out.push(projectionSymbol(x + cwid / 2, y + r.h / 2 + 1.5, o.angle, 0.35));
+      x += cwid;
+    }
+    y += r.h;
+  }
+  out.push(`<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${f(y - y0)}" fill="none" stroke="#000" stroke-width="${line}"/>`);
+  return out.join("\n");
+}
+
+/** Horizontal title block: a strip along the bottom of the frame (two rows on a narrow sheet). */
+function stripBlock(o: Opts, info: ProjectInfo, date: Date, L: Layout): string {
+  const x0 = FRAME_L;
+  const w = L.W - FRAME - FRAME_L;
+  const two = stripRows(L.W) === 2;
+  const rest: [string, number?][] = [["by", 30], ["date", 25], ["units", 12], ["scale", 18], ["projection", 22], ["size", 15], ["number", 33], ["rev", 13], ["sheet", 12]];
+  const rows: BlockRow[] = two
+    ? [
+        { h: HB_ROW, cells: [["owner", 50], ["title"]] },
+        { h: HB_ROW, cells: rest },
+      ]
+    : [{ h: HB_ROW, cells: [["owner", 45], ["title"], ...rest] }];
+  const y0 = L.H - FRAME - HB_ROW * rows.length;
+  return `<rect x="${f(x0)}" y="${f(y0)}" width="${f(w)}" height="${HB_ROW * rows.length}" fill="#fff"/>` + blockCells(o, info, date, L, x0, y0, w, rows, 0.7);
+}
+
+/** Vertical title block: a column down the right of the frame, the revision table at its top. */
+function columnBlock(o: Opts, info: ProjectInfo, date: Date, L: Layout): string {
+  const x0 = L.W - FRAME - VB_W;
+  const B = L.H - FRAME;
+  const rows: BlockRow[] = [
+    { h: 12, cells: [["owner"]] },
+    { h: 16, cells: [["title"]] },
+    { h: 10, cells: [["by"]] },
+    { h: 10, cells: [["date", 30], ["units", 15], ["size"]] },
+    { h: 12, cells: [["scale", 26], ["projection"]] },
+    { h: 12, cells: [["number", 34], ["rev", 13], ["sheet"]] },
+  ];
+  const h = rows.reduce((a, r) => a + r.h, 0);
+  return (
+    `<rect x="${f(x0)}" y="${FRAME}" width="${VB_W}" height="${f(B - FRAME)}" fill="#fff" stroke="#000" stroke-width="0.7"/>` +
+    revisionTable(o, x0, FRAME, [["Rev.", 9], ["Description", 25], ["Date", 15], ["By", 11]], 2.2) +
+    blockCells(o, info, date, L, x0, B - h, VB_W, rows, 0.7)
+  );
 }
 
 /** Text cut to fit a width (a rough width per letter for a sans-serif). */
