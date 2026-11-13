@@ -24,6 +24,7 @@
 
 import { isCoarse, screenClass } from "../device";
 import { settings } from "../settings";
+import { toDisplay, UNIT_LABEL, units } from "../units";
 import { icons, type IconName } from "./icons";
 import { el, usable, type ToolItem, type UI } from "./ui";
 
@@ -602,7 +603,7 @@ export class Wheel implements WheelHandle {
     const opt = (label: string, run: () => void, on?: boolean, sub?: string, icon?: IconName): ToolItem => ({ id: `opt-panel-${k++}`, label, icon: icon ?? (on ? "check" : "pointer"), sub, active: on, run });
     const sectors: Sector[] = [];
     const more: Cell[] = p.actions.filter((a) => !a.disabled).map((item) => ({ item }));
-    let values = 0;
+    const valueCells: Cell[] = [];
     for (const it of p.items) {
       if (it.type === "choice") {
         const now = it.options.find((o) => o.id === it.value);
@@ -622,7 +623,22 @@ export class Wheel implements WheelHandle {
         const item: ToolItem = { id: `panel-btn-${k++}`, label: it.label, icon: it.icon ?? "pointer", run: it.onClick };
         if (it.primary) sectors.push({ id: item.id, label: it.label, icon: item.icon, cells: [], item, mark: true });
         else more.push({ item });
-      } else values++;
+      } else if (it.type === "number" || it.type === "slider") {
+        // A value: set by steps fanned out from it, the value itself as its second line (no window to type in).
+        const len = it.type === "number" && (it.kind ?? "length") === "length";
+        const scale = len ? ({ mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8 } as const)[units()] : 1;
+        const small = it.type === "slider" ? (it.step ?? (it.max - it.min) / 100) : scale;
+        const show = it.type === "slider" ? (it.show?.(it.value) ?? String(it.value)) : len ? `${+(toDisplay(it.value)).toFixed(3)} ${UNIT_LABEL[units()]}` : String(+it.value.toFixed(3));
+        const set = (d: number) => () => {
+          let v = it.value + d;
+          if (it.type === "slider") v = Math.min(it.max, Math.max(it.min, v));
+          else if (it.min !== undefined) v = Math.max(it.min, v);
+          if (it.type === "number" && it.kind === "int") v = Math.round(v);
+          it.onInput(v);
+        };
+        const steps = [-10, -1, 1, 10].map((n) => opt(`${n > 0 ? "+" : "−"}${Math.abs(n) === 10 ? (it.type === "slider" ? "more" : "10") : it.type === "slider" ? "" : "1"}`.replace(/^([+−])$/, "$1 a little"), set(n * small), false, undefined, n > 0 ? "move" : "close"));
+        valueCells.push({ item: { id: `value-${k++}`, label: it.label, icon: "numpad", sub: show, children: steps } });
+      }
     }
     // Room on the ring: past six of its own, the rest of the window's switches and buttons go under More.
     while (sectors.length > 6) {
@@ -630,11 +646,7 @@ export class Wheel implements WheelHandle {
       more.unshift(...(s.item ? [{ item: s.item }] : s.cells));
     }
     if (more.length) sectors.push({ id: "more", label: "More", icon: "more", cells: more, mark: false });
-    if (values) {
-      const shown = document.body.classList.contains("panel-shown");
-      const item: ToolItem = { id: "opt-values", label: "Values", icon: "numpad", sub: shown ? "Shown" : `${values} to type`, active: shown, run: () => ui.showPanelWindow(!shown) };
-      sectors.push({ id: "values", label: "Values", icon: "numpad", cells: [], item, on: shown, mark: false });
-    }
+    if (valueCells.length) sectors.push({ id: "values", label: "Values", icon: "numpad", cells: valueCells, mark: false });
     if (p.cancel) sectors.push({ id: "cancel", label: "Cancel", icon: "close", cells: [], item: { id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: p.cancel }, mark: false });
     if (p.done) sectors.push({ id: "done", label: "Done", icon: "check", cells: [], item: { id: "done", label: "Done", icon: "check", shortcut: "Enter", run: p.done }, mark: false });
     // (Only Done or Cancel: nothing to set - no wheel; the tool's own ways to finish stay.)
