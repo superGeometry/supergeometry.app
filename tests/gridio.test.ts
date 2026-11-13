@@ -7,7 +7,7 @@ import { block, bodies, check, circle, cylinder, done, extrude, health, rect, sk
 import { build, faceRef, near, say } from "./grid";
 import { exportBodies } from "../src/kernel/engine";
 import { deepCopy } from "../src/kernel/health";
-import { meshEdgeLines, meshFaces } from "../src/kernel/meshing";
+import { meshEdgeLines, meshFaces, meshOff } from "../src/kernel/meshing";
 import type { Feature, PlaneDef } from "../src/doc/types";
 
 type Got = Awaited<ReturnType<typeof build>>;
@@ -261,6 +261,9 @@ const brought = (bytes: Uint8Array, format: "stl" | "step" = "stl"): Feature => 
   const moved = { id: "M", name: "M", type: "transform", bodies: ["A"], copy: false, op: { kind: "move", translate: [7, -3, 11], rotate: { origin: [0, 0, 0], axis: [0, 0, 1], angle: 30 } } } as unknown as Feature;
   const g = await build([...block("A", 40, 30, 20), hole, extrude("hc", hole, -20, "cut", { target: "A" }), fillet, moved]);
   const body = bodies().get("A")!;
+  // (Shown, the body keeps none of the view's triangles: left on, they stayed in the kernel for good.)
+  const bare = body.faces.every((f) => !f.triangulation());
+  meshFaces(body, 0.05, 0.25);
   const copy = deepCopy(body);
   const at = (s: Shape3D) => [...s.faces.map((f) => [...(f.center.toTuple() as number[]), f.geomType]), ...s.edges.map((e) => [...(e.pointAt(0.5).toTuple() as number[]), e.geomType])];
   const [a, b] = [at(body), at(copy)];
@@ -268,7 +271,9 @@ const brought = (bytes: Uint8Array, format: "stl" | "step" = "stl"): Feature => 
   say(sound(g) && order && body.faces.length === copy.faces.length, "a copy of a body: the same faces and edges, in the same order", `${g.errors.join(" | ")} ${g.unsound} ${body.faces.length}/${copy.faces.length} faces`);
   const hb = health(body), hc = health(copy);
   say(near(hb.volume, hc.volume, 1e-12) && hc.valid && hc.solids === hb.solids && !hc.openEdges && copy.constructor === body.constructor, "...the same volume to the last digit, sound, the same kind of shape", `${hb.volume} / ${hc.volume}, ${copy.constructor.name}`);
-  say(!copy.faces.some((f) => body.faces.some((x) => x.isSame(f))) && copy.faces.every((f) => !f.triangulation()) && body.faces.some((f) => !!f.triangulation()), "...its own faces, none of the first's triangles (which the first keeps)", `${copy.faces.filter((f) => f.triangulation()).length} meshed faces on the copy`);
+  say(!copy.faces.some((f) => body.faces.some((x) => x.isSame(f))) && copy.faces.every((f) => !f.triangulation()) && body.faces.every((f) => !!f.triangulation()), "...its own faces, none of the first's triangles", `${copy.faces.filter((f) => f.triangulation()).length} meshed faces on the copy, ${body.faces.filter((f) => f.triangulation()).length} on the first`);
+  meshOff(body);
+  say(bare && body.faces.every((f) => !f.triangulation()), "a body that was shown keeps none of the view's triangles (nor one whose mesh was taken off)", `${bare}`);
   // A cut on the copy leaves the first as it was.
   (copy as any).cut(makeCylinder(2, 100, [10, 5, -50], [0, 0, 1]));
   say(near(health(body).volume, hb.volume, 1e-12), "...and what is done to it leaves the first alone", `${health(body).volume}`);

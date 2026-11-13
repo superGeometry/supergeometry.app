@@ -150,6 +150,22 @@ export function meshEdgeLines(shape: Shape3D, tolerance: number, angularToleranc
 }
 
 /**
+ * A body's triangles taken off it again, once whoever asked for them has
+ * them. Left on, they stay for as long as the kernel holds the body - and the
+ * tool that made a body holds it for good (release.ts): every shape ever
+ * shown kept its mesh. Nothing reads them later: each edit works on a copy
+ * of the body, which has none, and a face that wants its own asks for them.
+ */
+export function meshOff(shape: Shape3D): void {
+  meshedAt.delete(shape);
+  try {
+    (getOC() as any).BRepTools.Clean(shape.wrapped, true);
+  } catch {
+    // Left as they are.
+  }
+}
+
+/**
  * One face's own triangles, for what wants points on it: its corners (x, y, z
  * each) and which three make each triangle. Made for that face alone when it
  * has none yet (`size`: its body's, which says how fine) - the whole body used

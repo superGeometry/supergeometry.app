@@ -69,7 +69,7 @@ import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossi
 import { useSafeBooleans, withoutInternals } from "./safeBooleans";
 import { useReleases } from "./release";
 import { areaProperties, measureArea as trueArea, measureVolume, normalOnEdge, surfaceAt, volumeProperties } from "./ocFree";
-import { binarySTL, faceTriangles, meshEdgeLines, meshFaces, type FaceMesh } from "./meshing";
+import { binarySTL, faceTriangles, meshEdgeLines, meshFaces, meshOff, type FaceMesh } from "./meshing";
 import { loftInLine } from "./loftAlign";
 import { railLoft } from "./loftRails";
 import { edgeOrigins, edgeSteps, faceAliases, faceOrigins, faceSteps, inheritTags, oldEdgeSteps, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
@@ -4259,6 +4259,7 @@ function meshLines(shape: Shape3D) {
   const angularTolerance = 0.25;
   const m = meshFaces(shape, tolerance, angularTolerance);
   const e = meshEdgeLines(shape, tolerance, angularTolerance);
+  meshOff(shape);
   // A face made freeform is many patches, smooth across the lines between
   // them: those lines aren't edges to show or pick (drawn as nothing).
   const made = edgeSteps(shape);

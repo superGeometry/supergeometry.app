@@ -1,7 +1,7 @@
 // Health checks for solids, shared by the engine's edit guard and the repair tool.
 
 import { cast, getOC, measureArea, type Edge, type Shape3D } from "replicad";
-import { meshFaces } from "./meshing";
+import { meshFaces, meshOff } from "./meshing";
 
 /** OpenCascade's own check (self-crossing faces, bad edges…). */
 const validCache = new WeakMap<Shape3D, boolean>();
@@ -156,6 +156,7 @@ function countHairThin(s: Shape3D): number {
 /** A solid's volume counted from a mesh of it (coarse, so the view's own finer mesh still gets made). */
 export function meshVolume(s: Shape3D, size: number): number {
   const m = meshFaces(s, size * 1e-3, 0.3);
+  meshOff(s);
   const p = m.vertices;
   const t = m.triangles;
   let v = 0;
