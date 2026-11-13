@@ -570,6 +570,7 @@ export class SketchTool implements Tool {
   }
 
   exit(): void {
+    this.app.wheel.cover(false);
     this.regionArrow?.handle.dispose();
     this.regionArrow = null;
     // A fillet being sized is kept (before the constraint UI goes away).
@@ -1083,6 +1084,8 @@ export class SketchTool implements Tool {
 
   private updateMenu(): void {
     const app = this.app;
+    // With the tool wheel on, it holds these tools (by what they are for) once there is a plane to draw on.
+    app.wheel.cover(this.phase === "plane" ? false : "sketch");
     const exit: ToolItem = { id: "exit", label: "Exit Sketch", icon: "exit", shortcut: "Esc", pulse: this.exitPulse, run: () => app.setTool(null) };
     if (this.phase === "plane") {
       app.ui.setTools([exit]);

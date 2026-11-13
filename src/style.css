@@ -5467,10 +5467,11 @@ html[data-screen="phone"] .bim-props {
 
 /* ------------------------------------------------------------- tool wheel */
 /* An experiment beside the tool column (More → Tool wheel): the tools in a
-   ring round the pointer. While it stands in for the column, the column steps
-   aside (the bottom bar stays: it also shows what is on). */
-body.wheel-select #toolbar {
-  display: none;
+   ring round the pointer, or kept where it was dragged to. While it stands in
+   for a column (the selection tool's, the sketch's), the column steps aside
+   (the bottom bar stays: it also shows what is on). */
+body.wheel-covers #toolbar {
+  display: none !important;
 }
 #wheel {
   position: fixed;
@@ -5492,9 +5493,19 @@ body.wheel-select #toolbar {
 #wheel.slide {
   transition: transform 0.14s ease-out;
 }
+/* Dragged by its middle: it keeps up with the pointer. */
+#wheel.dragging {
+  transition: none;
+}
+/* Kept somewhere and folded: only the middle shows. */
+#wheel.folded .wheel-ring,
+#wheel.folded .wheel-fan {
+  display: none;
+}
 .wheel-body,
 .wheel-ring,
 .wheel-fan,
+.wheel-mid,
 .wheel-items {
   position: absolute;
   left: 0;
@@ -5533,7 +5544,8 @@ circle.wheel-plate {
 .wheel-sector.own {
   fill: rgba(30, 38, 54, 0.97);
 }
-.wheel-cell.on {
+.wheel-cell.on,
+.wheel-sector.on {
   fill: #223250;
 }
 .wheel-sector.open {
@@ -5548,17 +5560,30 @@ circle.wheel-plate {
 .wheel-sector.dim.hot {
   fill: rgba(40, 43, 49, 0.9);
 }
-/* The middle: a tap closes the wheel (what's picked stays picked). */
+/* The middle: the handle. Dragged, the wheel goes with it and stays where it
+   is put; a tap closes the wheel (kept somewhere: folds it to just this). */
 .wheel-hub {
-  fill: rgba(20, 22, 26, 0.35);
+  fill: rgba(20, 22, 26, 0.45);
   stroke: rgba(255, 255, 255, 0.16);
   stroke-width: 1px;
   pointer-events: all;
   touch-action: none;
-  cursor: pointer;
+  cursor: grab;
 }
 .wheel-hub.hot {
-  fill: rgba(20, 22, 26, 0.75);
+  fill: rgba(20, 22, 26, 0.8);
+}
+#wheel.dragging .wheel-hub {
+  cursor: grabbing;
+  fill: #2f4c7e;
+}
+#wheel.folded .wheel-hub {
+  fill: rgba(31, 33, 37, 0.95);
+  stroke: rgba(120, 165, 255, 0.55);
+  stroke-width: 1.5px;
+}
+#wheel.folded .wheel-hub.hot {
+  fill: #2f4c7e;
 }
 /* Just up: the second tap of a double tap still reaches the model. */
 #wheel.fresh .wheel-hub,
@@ -5634,15 +5659,15 @@ circle.wheel-plate {
   border-radius: 50%;
   background: var(--accent);
 }
-.wheel-item.wheel-close {
+.wheel-item.wheel-grip {
   left: 0;
   top: 0;
-  color: var(--muted);
-  opacity: 0.7;
+  color: var(--text);
+  opacity: 0.8;
 }
-.wheel-item.wheel-close svg {
-  width: 13px;
-  height: 13px;
+.wheel-item.wheel-grip svg {
+  width: 20px;
+  height: 20px;
 }
 /* The name of what's pointed at, just outside the wheel there. */
 .wheel-tip {

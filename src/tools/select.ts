@@ -54,7 +54,7 @@ export class SelectTool implements Tool {
   enter(): void {
     this.live = true;
     // With the tool wheel on, it stands in for this tool's column.
-    this.app.wheel.cover(true);
+    this.app.wheel.cover("model", () => this.wheelExtras());
     this.refresh();
   }
 
@@ -159,10 +159,14 @@ export class SelectTool implements Tool {
     if (this.app.selection.length ? !p.add && !this.pending : !hadPick && !dismissed) this.openWheel(p);
   }
 
-  /** The tool wheel round a point of the view (held: under a finger still down, which can slide to a tool). */
-  private openWheel(p: { x: number; y: number; type: ToolPointer["type"] }, held = false): void {
+  /**
+   * The tool wheel round a point of the view (held: under a finger still down,
+   * which can slide to a tool; summon: asked for, so one kept somewhere and
+   * folded unfolds).
+   */
+  private openWheel(p: { x: number; y: number; type: ToolPointer["type"] }, held = false, summon = false): void {
     const r = this.app.view.canvas.getBoundingClientRect();
-    this.app.wheel.open(r.left + p.x, r.top + p.y, { type: p.type, held, extras: () => this.wheelExtras() });
+    this.app.wheel.open(r.left + p.x, r.top + p.y, { type: p.type, held, summon });
   }
 
   /** What the right-click menu holds beside the tools (the wheel takes its place): for the wheel's top sector. */
@@ -403,7 +407,7 @@ export class SelectTool implements Tool {
       if (s && !picked && s.kind !== "curve" && s.kind !== "point") this.app.setSelection([s]);
       this.lastTap = p;
       // (A finger or pen held still brought it up: it can slide to a tool and lift there.)
-      return this.openWheel(p, p.type !== "mouse");
+      return this.openWheel(p, p.type !== "mouse", true);
     }
     const rows: (MenuRow | "-")[] = [];
     if (this.app.selection.length) {
@@ -428,10 +432,11 @@ export class SelectTool implements Tool {
   key(e: KeyboardEvent): boolean {
     if (this.boxing && this.dragKey(e)) return true;
     const k = e.key.toLowerCase();
-    // The tool wheel at the pointer (or away again), for what's picked now.
+    // The tool wheel at the pointer (or away again), for what's picked now. (Kept somewhere: folded, or unfolded.)
     if (k === "q" && this.app.wheel.on && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      if (this.app.wheel.isOpen) this.app.wheel.close();
-      else this.openWheel(this.lastHover ? { x: this.lastHover.x, y: this.lastHover.y, type: "mouse" } : { x: this.app.view.width / 2, y: this.app.view.height / 2, type: "mouse" });
+      const r = this.app.view.canvas.getBoundingClientRect();
+      const at = this.lastHover ?? { x: this.app.view.width / 2, y: this.app.view.height / 2 };
+      this.app.wheel.toggle(r.left + at.x, r.top + at.y, { type: "mouse", summon: true });
       return true;
     }
     if (k === "escape" && (this.app.selection.length || this.pending)) {
@@ -491,14 +496,18 @@ export class SelectTool implements Tool {
         ? `${this.pending.label}: tap ${this.pending.accepts.map((k) => withArticle(label({ kind: k } as Sel, 1))).join(" or ")}`
         : sel.length === 0
           ? this.app.wheel.on
-            ? this.app.store.features.length
-              ? "Tap the model to pick part of it, or an empty spot for the tool wheel."
-              : "Tap an empty spot for the tool wheel, then Sketch: draw a shape and pull it into 3D."
+            ? this.app.wheel.kept
+              ? this.app.store.features.length
+                ? "Pick a tool on the wheel, or tap the model: the wheel shows what the pick offers."
+                : "Sketch, on the wheel, is where to start: draw a shape, then pull it into 3D."
+              : this.app.store.features.length
+                ? "Tap the model to pick part of it, or an empty spot for the tool wheel."
+                : "Tap an empty spot for the tool wheel, then Sketch: draw a shape and pull it into 3D."
             : this.app.store.features.length
               ? "Pick a tool, or tap the model to select part of it."
               : "Tap Sketch to start: draw a shape, then pull it into 3D."
-          : // (The tool wheel on: no column to turn to - how to bring the wheel up for what's picked.)
-            this.armedHint() + (this.app.wheel.on ? (isTouchDevice ? " Press and hold for the tool wheel." : " Right-click (or Q) for the tool wheel.") : ""),
+          : // (The tool wheel on, up at the pointer and closed: no column to turn to - how to bring it up for what's picked.)
+            this.armedHint() + (this.app.wheel.on && !this.app.wheel.kept ? (isTouchDevice ? " Press and hold for the tool wheel." : " Right-click (or Q) for the tool wheel.") : ""),
     );
     const first = sel[0];
     if (!first) return;

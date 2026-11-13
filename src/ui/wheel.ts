@@ -7,24 +7,45 @@
 // side of the ring; a tap on one runs it. A tool with kinds of its own (Plane,
 // Colour…) opens them in place of the fan; the group brings its list back.
 //
+// Its middle is a handle: dragged, the wheel goes where it is put and is kept
+// there - it then stays up, showing what the pick offers, instead of coming up
+// at the pointer (a tap on the middle folds it to just the handle, two let it
+// go back to the pointer). In a sketch it is the sketch's wheel, always kept:
+// the drawing tools by what they are for.
+//
 // It holds exactly what the column and the bottom bar hold - the same
 // ToolItems, by the same rule (only what can be used now) - so the keys, the
 // search box and the column itself (wheel off) go on working as they did.
 
-import { isCoarse } from "../device";
+import { isCoarse, screenClass } from "../device";
 import { settings } from "../settings";
 import { icons, type IconName } from "./icons";
 import { el, usable, type ToolItem, type UI } from "./ui";
+
+/** Whose column it stands in for: the selection tool's, or the sketch's. */
+export type WheelLayout = "model" | "sketch";
+
+/** More for the model wheel's top sector, beside what the column and the bar hold: for what's picked, and for the view. */
+export type WheelExtras = () => { own: ToolItem[]; view: ToolItem[] };
 
 /** What a tool sees of the wheel. */
 export interface WheelHandle {
   /** Switched on (More → Tool wheel). */
   readonly on: boolean;
+  /** Up now: round the pointer, or at the place it is kept. */
   readonly isOpen: boolean;
-  /** The selection tool is the one in use (the wheel stands in for its column), or no longer. */
-  cover(on: boolean): void;
-  /** Bring it up round a point of the page. */
+  /** It has a place of its own on the screen and stays up there (dragged there by its middle; in a sketch, always). */
+  readonly kept: boolean;
+  /**
+   * Which tool's column it stands in for from now on: the selection tool's
+   * ("model": what's picked, or the main tools), the sketch's (its tools by
+   * what they are for), or none (false: the column shows as ever).
+   */
+  cover(layout: WheelLayout | false, extras?: WheelExtras): void;
+  /** Bring it up round a point of the page. (Kept somewhere, it is up already: `summon` unfolds it.) */
   open(x: number, y: number, opts?: WheelOpen): void;
+  /** Up at the point, or away again (kept somewhere: folded, or unfolded). */
+  toggle(x: number, y: number, opts?: WheelOpen): void;
   close(): void;
   /** Did the press now being handled close an open wheel? (A tap on an empty spot then only closes it.) */
   takeDismissed(): boolean;
@@ -34,8 +55,8 @@ export interface WheelOpen {
   type?: "mouse" | "pen" | "touch";
   /** Opened under a finger still down (press and hold): it can slide to a tool and lift there. */
   held?: boolean;
-  /** More for the top sector, beside what the column and the bar hold: for what's picked, and for the view. */
-  extras?: () => { own: ToolItem[]; view: ToolItem[] };
+  /** Asked for (right-click, Q): a kept wheel that is folded unfolds. */
+  summon?: boolean;
 }
 
 export interface WheelHost {
@@ -44,7 +65,7 @@ export interface WheelHost {
 }
 
 interface Metrics {
-  /** The middle: a tap there closes the wheel. */
+  /** The middle: the handle. */
   hub: number;
   /** The ring of groups: from, to. */
   r0: number;
@@ -66,6 +87,8 @@ const PART_GAP = 9;
 const BOX = 440;
 const SVG = "http://www.w3.org/2000/svg";
 const TAU = Math.PI * 2;
+/** Where the wheel is kept, per kind of screen (as the tool card's place is). */
+const SPOTS = "sg-wheel-spot";
 
 /** The top sector: what's picked (its own tools), and the view's. */
 const OWN = "own";
@@ -83,6 +106,22 @@ const GROUP_OF: Record<string, string> = {
   deselect: OWN, wholePattern: OWN, color: OWN, opacity: OWN, delete: OWN, deleteBody: OWN,
 };
 
+/**
+ * The sketch's wheel, clockwise from the top: Exit, then the tools by what
+ * they are for down the right (their fans open away from the screen's edge
+ * the wheel starts at), and the rest - the line type, Normal to Sketch, a tool
+ * not named here - under More; Delete and Select on the left, a tap each.
+ */
+const SKETCH: ({ tool: string; label?: string } | { id: string; label: string; icon: IconName; tools: string[] })[] = [
+  { tool: "exit", label: "Exit" },
+  { id: "draw", label: "Draw", icon: "line", tools: ["line", "arc", "spline", "rect", "circle", "ellipse", "polygon", "text"] },
+  { id: "modify", label: "Modify", icon: "trim", tools: ["fillet", "trim", "extend", "split", "align", "offset", "project"] },
+  { id: "transform", label: "Transform", icon: "transform", tools: ["move", "rotate", "scale", "mirror", "pattern"] },
+  { id: "more", label: "More", icon: "more", tools: [] },
+  { tool: "delete" },
+  { tool: "select" },
+];
+
 interface Cell {
   item: ToolItem;
   /** A new part of the list starts here. */
@@ -93,11 +132,13 @@ interface Sector {
   label: string;
   icon: IconName;
   cells: Cell[];
-  /** A group that is a tool itself (Sketch, with nothing picked): a tap runs it. */
+  /** A place on the ring that is a tool itself (Sketch with nothing picked; Exit, Select, Delete in a sketch): a tap runs it. */
   item?: ToolItem;
+  /** That tool is the one in use. */
+  on?: boolean;
   /** Nothing in it now: why. */
   why?: string;
-  /** The tool most likely next (or one that is on) is in it. */
+  /** The tool most likely next (or the one in use, or one that is on) is in it. */
   mark: boolean;
 }
 interface Placed extends Cell {
@@ -115,7 +156,16 @@ const CELL = 100;
 
 const notSep = (it: ToolItem) => !it.id.startsWith("---");
 const kidsOf = (it: ToolItem) => usable(it.children ?? []).filter(notSep);
+/** A tap opens its kinds - not one that starts with the kind used last and shows them once it's the tool in use. */
+const opens = (it: ToolItem) => kidsOf(it).length > 0 && !(it.variantsWhenActive && !it.active && !!it.run);
+const marked = (cells: Cell[]) => cells.some((c) => !!c.item.active || !!c.item.pulse);
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/** Everything a ring shows, as text: the same again needs no drawing again. */
+function signature(sectors: Sector[]): string {
+  const tool = (it: ToolItem): unknown[] => [it.id, it.label, it.icon, it.sub, !!it.active, !!it.pulse, it.swatch, it.shortcut, kidsOf(it).map(tool)];
+  return JSON.stringify(sectors.map((s) => [s.id, s.label, s.icon, !!s.on, s.mark, s.why, s.item && tool(s.item), s.cells.map((c) => [!!c.gap, tool(c.item)])]));
+}
 
 /** A piece of a ring, from r0 to r1 and a0 to a1 (clockwise, 0 to the right), a gap of `gap` px kept round it. */
 function wedge(r0: number, r1: number, a0: number, a1: number, gap = 2): string {
@@ -196,18 +246,25 @@ export class Wheel implements WheelHandle {
   private readonly body = el("div", "wheel-body");
   private readonly ringBox = el("div", "wheel-ring");
   private readonly fanBox = el("div", "wheel-fan");
+  private readonly hubBox = el("div", "wheel-mid");
   private readonly ringSvg = svgBox();
   private readonly fanSvg = svgBox();
+  private readonly hubSvg = svgBox();
   private readonly ringItems = el("div", "wheel-items");
   private readonly fanItems = el("div", "wheel-items");
   private readonly tip = el("div", "wheel-tip");
-  private hubEl: SVGElement | null = null;
+  private readonly hubEl = document.createElementNS(SVG, "circle");
   private ringEls: SVGElement[] = [];
   private fanEls: SVGElement[] = [];
 
   private m = FINE;
+  /** Whose column it stands in for now (null: no one's - the column shows). */
+  private layout: WheelLayout | null = null;
+  private extras: WheelExtras | null = null;
   private sectors: Sector[] = [];
-  /** What's picked, as the top sector names it ("" nothing): the wheel goes when that changes under it. */
+  /** What the ring was last drawn from. */
+  private sig = "";
+  /** What's picked, as the top sector names it ("" nothing): a wheel up at the pointer goes when that changes under it. */
   private pick = "";
   private fan: Placed[] = [];
   /** The group whose tools are fanned out (-1: none), and the tools opened inside it (Plane › …). */
@@ -215,24 +272,32 @@ export class Wheel implements WheelHandle {
   private trail: ToolItem[] = [];
   private hot = NONE;
   private up = false;
-  private covering = false;
   private dismissed = false;
-  private extras: WheelOpen["extras"] | null = null;
 
-  /** The middle, on the page. */
+  /** Where it is kept, by layout: the middle as fractions of the page's width and height. */
+  private spots: Partial<Record<WheelLayout, [number, number]>> = {};
+  /** Kept, and folded to just its middle (until the page is loaded again). */
+  private folded: Record<WheelLayout, boolean> = { model: false, sketch: screenClass() === "phone" };
+  /** Where it belongs (px): where it was put, or where it came up. */
+  private home = { x: 0, y: 0 };
+  /** The middle, on the page (off its home while a fan needs the room). */
   private cx = 0;
   private cy = 0;
+  private slid = false;
   /** Where the pointer is, and where it was when the wheel came up. */
   private px = 0;
   private py = 0;
   private from = { x: 0, y: 0 };
   /** Not moved since it came up: what's under the pointer doesn't count yet. */
-  private still = true;
+  private still = false;
   /** The wheel slid under a pointer that stayed put: nothing changes until it moves from here. */
   private hold: { x: number; y: number } | null = null;
   private type: "mouse" | "pen" | "touch" = "mouse";
   /** The pointer pressed on the wheel (it may slide to a tool and let go there). */
   private pressed: number | null = null;
+  /** Pressed on the middle: the wheel goes with it once it moves. */
+  private grab: { dx: number; dy: number; moved: boolean } | null = null;
+  private hubTapAt = -Infinity;
   /** Opened under a finger still down: its next move makes it the pressed one. */
   private adopt = false;
   private adopted = false;
@@ -248,23 +313,30 @@ export class Wheel implements WheelHandle {
   /** When the wheel last slid to bring a fan on the screen. */
   private slidAt = -Infinity;
   /**
-   * Just up: the second tap of a double tap (the whole body) still goes to the
-   * model - through the middle, or through all of it when it had to open off
-   * the pointer (which is then on one of its pieces).
+   * Just up at the pointer: the second tap of a double tap (the whole body)
+   * still goes to the model - through the middle, or through all of it when
+   * it had to open off the pointer (which is then on one of its pieces).
    */
   private fresh: "" | "hub" | "all" = "";
   private switchTimer = 0;
   private drillTimer = 0;
   private freshTimer = 0;
+  private leaveTimer = 0;
+  private tipTimer = 0;
   private refreshing = false;
 
   constructor(private host: WheelHost) {
     this.root.id = "wheel";
     this.root.hidden = true;
     this.tip.hidden = true;
+    this.hubEl.setAttribute("class", "wheel-hub");
+    const grip = el("div", "wheel-item wheel-grip");
+    grip.innerHTML = icons.move;
+    this.hubSvg.append(this.hubEl);
+    this.hubBox.append(this.hubSvg, grip);
     this.fanBox.append(this.fanSvg, this.fanItems);
     this.ringBox.append(this.ringSvg, this.ringItems);
-    this.body.append(this.fanBox, this.ringBox);
+    this.body.append(this.fanBox, this.ringBox, this.hubBox);
     this.root.append(this.body, this.tip);
     document.body.append(this.root);
     document.addEventListener("pointerdown", this.onDown, true);
@@ -272,10 +344,15 @@ export class Wheel implements WheelHandle {
     document.addEventListener("pointerup", this.onUp, true);
     document.addEventListener("pointercancel", this.onCancel, true);
     window.addEventListener("keydown", this.onKey, true);
-    // Scrolling zooms the view: the wheel is out of its way.
-    window.addEventListener("wheel", () => this.close(), { capture: true, passive: true });
-    window.addEventListener("resize", () => this.close());
-    window.addEventListener("blur", () => this.close());
+    // Scrolling zooms the view: the wheel is out of its way (kept somewhere, its fan is).
+    window.addEventListener("wheel", () => this.away(), { capture: true, passive: true });
+    window.addEventListener("blur", () => this.away());
+    window.addEventListener("resize", () => {
+      if (!this.up) return;
+      if (!this.kept) return this.hide();
+      this.home = this.homeNow();
+      this.rest();
+    });
     this.root.addEventListener("contextmenu", (e) => e.preventDefault());
     host.ui.onTools = () => this.itemsChanged();
     settings.onChange(() => this.sync());
@@ -290,16 +367,32 @@ export class Wheel implements WheelHandle {
     return this.up;
   }
 
-  cover(on: boolean): void {
-    this.covering = on;
-    this.sync();
-    if (!on) this.close();
+  get kept(): boolean {
+    return this.layout === "sketch" || (this.layout === "model" && !!this.spots.model);
   }
 
-  /** The column steps aside while the wheel stands in for it. */
+  private get isFolded(): boolean {
+    return !!this.layout && this.kept && this.folded[this.layout];
+  }
+
+  cover(layout: WheelLayout | false, extras?: WheelExtras): void {
+    const next = layout || null;
+    if (extras) this.extras = extras;
+    // (The sketch says so each time it sets its tools: the same again is nothing new.)
+    if (next === this.layout) return;
+    this.hide();
+    this.layout = next;
+    if (!extras) this.extras = null;
+    this.loadSpots();
+    this.sync();
+  }
+
+  /** The column steps aside while the wheel stands in for it; a kept wheel is up whenever it does. */
   private sync(): void {
-    document.body.classList.toggle("wheel-select", this.on && this.covering);
-    if (!this.on) this.close();
+    const covers = this.on && this.layout !== null;
+    document.body.classList.toggle("wheel-covers", covers);
+    if (!covers) return this.hide();
+    if (this.kept && !this.up) this.showKept();
   }
 
   takeDismissed(): boolean {
@@ -308,14 +401,100 @@ export class Wheel implements WheelHandle {
     return d;
   }
 
+  // ------------------------------------------------------------------ places
+
+  private loadSpots(): void {
+    try {
+      this.spots = JSON.parse(localStorage.getItem(SPOTS) ?? "{}")?.[screenClass()] ?? {};
+    } catch {
+      this.spots = {};
+    }
+  }
+
+  private saveSpots(): void {
+    try {
+      const all = JSON.parse(localStorage.getItem(SPOTS) ?? "{}") ?? {};
+      all[screenClass()] = this.spots;
+      localStorage.setItem(SPOTS, JSON.stringify(all));
+    } catch {
+      // private window: not remembered
+    }
+  }
+
+  /** Where a kept wheel belongs on the page as it is now. */
+  private homeNow(): { x: number; y: number } {
+    // (The sketch's wheel, never moved: where the model's is kept, if it is.)
+    const s = this.layout === "sketch" ? (this.spots.sketch ?? this.spots.model) : this.spots.model;
+    if (s) return { x: s[0] * innerWidth, y: s[1] * innerHeight };
+    // Never put anywhere: where the tool column is - at the left, beside Items when that is open
+    // (folded, its middle is at the edge; unfolded, the ring is clear of it).
+    const items = document.getElementById("items");
+    const left = items?.classList.contains("open") && innerWidth > 720 ? items.getBoundingClientRect().right : 0;
+    return { x: left + 8 + (this.isFolded ? this.m.r0 : this.m.r1), y: innerHeight / 2 };
+  }
+
+  /** A kept wheel at its home, as near it as keeps it whole on the screen (folded: just its middle). */
+  private rest(): void {
+    const M = 6;
+    const r = this.isFolded ? this.m.r0 : this.m.r1;
+    this.cx = clamp(this.home.x, r + M, Math.max(r + M, innerWidth - r - M));
+    this.cy = clamp(this.home.y, r + M, Math.max(r + M, innerHeight - r - M));
+    this.slid = false;
+    this.place();
+  }
+
+  private place(): void {
+    this.root.style.transform = `translate(${Math.round(this.cx)}px, ${Math.round(this.cy)}px)`;
+  }
+
+  /** Folded to just the middle (the handle), or whole again. */
+  private fold(on: boolean): void {
+    if (!this.layout) return;
+    this.folded[this.layout] = on;
+    this.root.classList.toggle("folded", on);
+    if (on) this.shut();
+    this.unpoint();
+    this.root.classList.add("slide");
+    this.home = this.homeNow();
+    this.rest();
+  }
+
+  /** Let go where it was dragged to: it is kept there from now on. */
+  private drop(): void {
+    const layout = this.layout;
+    if (!layout) return;
+    const was = this.kept;
+    this.home = { x: this.cx, y: this.cy };
+    this.spots[layout] = [this.cx / innerWidth, this.cy / innerHeight];
+    this.saveSpots();
+    if (was) return;
+    // Up at the pointer until now: from here on it stays where it was put.
+    this.settle();
+    this.still = false;
+    this.root.classList.add("kept");
+    this.host.ui.toast("The wheel stays here now. Tap its middle to fold it away - twice, and it comes up at the pointer again.");
+  }
+
+  /** The model's wheel no longer kept anywhere: it comes up at the pointer again. */
+  private letGo(): void {
+    delete this.spots.model;
+    this.saveSpots();
+    this.folded.model = false;
+    this.hide();
+    this.host.ui.toast("The wheel comes up at the pointer again: tap the model, or an empty spot.");
+  }
+
   // ---------------------------------------------------------------- content
 
-  /** The ring: the top sector, then the main groups in the column's order - each with what it holds now. */
   private content(): { sectors: Sector[]; pick: string } {
+    return this.layout === "sketch" ? this.sketchContent() : this.modelContent();
+  }
+
+  /** The model's ring: the top sector, then the main groups in the column's order - each with what it holds now. */
+  private modelContent(): { sectors: Sector[]; pick: string } {
     const { column, bar } = this.host.ui.shown();
     const main = this.host.mainTools();
     const shown = usable(column).filter(notSep);
-    const marked = (cells: Cell[]) => cells.some((c) => !!c.item.active || !!c.item.pulse);
     let groups: Sector[];
     let own: Cell[] = [];
     if (shown.length > 0 && shown.every((it) => main.some((g) => g.id === it.id))) {
@@ -355,6 +534,40 @@ export class Wheel implements WheelHandle {
     return { sectors: [top, ...groups], pick };
   }
 
+  /** The sketch's ring: its tools by what they are for (see SKETCH). */
+  private sketchContent(): { sectors: Sector[]; pick: string } {
+    const { column, bar } = this.host.ui.shown();
+    const tools = usable(column).filter(notSep);
+    const byId = new Map(tools.map((t) => [t.id, t]));
+    const placed = new Set<string>();
+    const sectors: Sector[] = [];
+    for (const spec of SKETCH) {
+      if ("tool" in spec) {
+        const it = byId.get(spec.tool);
+        if (!it) continue;
+        placed.add(it.id);
+        sectors.push({ id: it.id, label: spec.label ?? it.label, icon: it.icon, cells: [], item: it, on: !!it.active, mark: !!it.pulse });
+        continue;
+      }
+      const cells = spec.tools.flatMap((id): Cell[] => {
+        const it = byId.get(id);
+        if (!it) return [];
+        placed.add(id);
+        return [{ item: it }];
+      });
+      sectors.push({ id: spec.id, label: spec.label, icon: spec.icon, cells, mark: false });
+    }
+    // More: what isn't named above (Other plane, a tool added since), then the bottom bar's (the line type, Normal to Sketch).
+    const more = sectors.find((s) => s.id === "more" && !s.item);
+    if (more) {
+      const rest = tools.filter((t) => !placed.has(t.id)).map((item): Cell => ({ item }));
+      more.cells = [...rest, ...usable(bar).filter(notSep).map((item, i): Cell => ({ item, gap: i === 0 && rest.length > 0 }))];
+    }
+    for (const s of sectors) if (!s.item) s.mark = marked(s.cells);
+    // (A category with nothing in it has no place on the ring.)
+    return { sectors: sectors.filter((s) => s.item || s.cells.length), pick: "" };
+  }
+
   /** The tools shown in a group's fan: its own, or those of a tool opened inside it. */
   private cellsOf(i: number, trail: ToolItem[]): Cell[] {
     const s = this.sectors[i];
@@ -371,12 +584,14 @@ export class Wheel implements WheelHandle {
   // ------------------------------------------------------------ open / close
 
   open(x: number, y: number, opts: WheelOpen = {}): void {
-    if (!this.on) return;
-    this.close();
-    this.extras = opts.extras ?? null;
+    if (!this.on || this.layout !== "model") return;
+    // Kept somewhere: it is up already, with what's picked (asked for by name, it unfolds).
+    if (this.kept) return void (opts.summon && this.folded.model && this.fold(false));
+    this.hide();
     const { sectors, pick } = this.content();
     if (!sectors.some((s) => s.cells.length || s.item)) return;
     this.sectors = sectors;
+    this.sig = signature(sectors);
     this.pick = pick;
     this.type = opts.type ?? "mouse";
     this.m = this.type === "touch" || isCoarse ? COARSE : FINE;
@@ -390,12 +605,13 @@ export class Wheel implements WheelHandle {
     const [t, b] = innerHeight >= reach.t + reach.b + 2 * M ? [reach.t, reach.b] : [ring, ring];
     this.cx = clamp(x, l + M, Math.max(l + M, innerWidth - r - M));
     this.cy = clamp(y, t + M, Math.max(t + M, innerHeight - b - M));
+    this.home = { x: this.cx, y: this.cy };
     this.px = this.from.x = x;
     this.py = this.from.y = y;
     this.still = true;
     this.hold = null;
-    this.drawRing();
-    this.showFan(-1);
+    this.root.classList.remove("kept", "folded", "slide", "dragging");
+    this.draw();
     this.place();
     this.root.hidden = false;
     this.up = true;
@@ -409,6 +625,35 @@ export class Wheel implements WheelHandle {
     }
   }
 
+  /** A kept wheel comes up at its place, with what there is now. */
+  private showKept(): void {
+    const { sectors, pick } = this.content();
+    this.sectors = sectors;
+    this.sig = signature(sectors);
+    this.pick = pick;
+    this.type = isCoarse ? "touch" : "mouse";
+    this.m = isCoarse ? COARSE : FINE;
+    this.still = false;
+    this.hold = null;
+    this.adopt = this.adopted = false;
+    this.settle();
+    this.root.classList.remove("slide", "dragging");
+    this.root.classList.add("kept");
+    this.root.classList.toggle("folded", this.isFolded);
+    this.draw();
+    this.home = this.homeNow();
+    this.rest();
+    this.root.hidden = false;
+    this.up = true;
+  }
+
+  toggle(x: number, y: number, opts: WheelOpen = {}): void {
+    if (!this.on || !this.layout) return;
+    if (this.kept) return this.fold(!this.isFolded);
+    if (this.up) this.hide();
+    else this.open(x, y, opts);
+  }
+
   /** No longer just up: every piece takes the pointer. */
   private settle(): void {
     clearTimeout(this.freshTimer);
@@ -416,16 +661,27 @@ export class Wheel implements WheelHandle {
     this.root.classList.remove("fresh", "fresh-all");
   }
 
+  /** Away: one up at the pointer goes; one kept somewhere stays, its fan put away. */
   close(): void {
+    if (this.kept) this.shut();
+    else this.hide();
+  }
+
+  private away(): void {
+    if (this.up) this.close();
+  }
+
+  /** Off the screen altogether. */
+  private hide(): void {
     if (!this.up) return;
     this.up = false;
     this.root.hidden = true;
-    clearTimeout(this.switchTimer);
-    clearTimeout(this.drillTimer);
+    this.clearTimers();
     this.settle();
-    this.root.classList.remove("slide");
+    this.root.classList.remove("slide", "dragging");
     this.tip.hidden = true;
     this.pressed = null;
+    this.grab = null;
     this.adopt = false;
     this.hot = NONE;
     this.openSector = -1;
@@ -433,11 +689,27 @@ export class Wheel implements WheelHandle {
     this.fan = [];
   }
 
-  private place(): void {
-    this.root.style.transform = `translate(${Math.round(this.cx)}px, ${Math.round(this.cy)}px)`;
+  private clearTimers(): void {
+    clearTimeout(this.switchTimer);
+    clearTimeout(this.drillTimer);
+    clearTimeout(this.leaveTimer);
+    clearTimeout(this.tipTimer);
   }
 
-  /** The column or the bar was given new tools while the wheel is up (the model rebuilt): it shows them. */
+  /** Put the fan away, if one is out. */
+  private shut(): void {
+    if (this.openSector >= 0) this.showFan(-1);
+  }
+
+  /** Nothing pointed at any more (what was is redrawn, or gone). */
+  private unpoint(): void {
+    this.elOf(this.hot)?.classList.remove("hot");
+    this.hot = NONE;
+    this.tip.hidden = true;
+    this.clearTimers();
+  }
+
+  /** The column or the bar was given new tools while the wheel is up: it shows them. */
   private itemsChanged(): void {
     if (!this.up || this.refreshing) return;
     this.refreshing = true;
@@ -445,12 +717,34 @@ export class Wheel implements WheelHandle {
       this.refreshing = false;
       if (!this.up) return;
       const { sectors, pick } = this.content();
-      // What's picked changed under it (deleted, deselected by a key): it goes.
-      if (pick !== this.pick) return this.close();
+      // Up at the pointer, and what's picked changed under it (deleted, deselected by a key): it goes.
+      if (!this.kept && pick !== this.pick) return this.hide();
+      this.pick = pick;
       const open = this.sectors[this.openSector]?.id;
+      const sig = signature(sectors);
+      const same = sig === this.sig;
       this.sectors = sectors;
+      this.sig = sig;
+      const at = sectors.findIndex((s) => s.id === open && s.cells.length > 0);
+      // The tools opened inside a tool (Plane › …), found again among the new ones.
+      const trail: ToolItem[] = [];
+      let from = at >= 0 ? sectors[at].cells.map((c) => c.item) : [];
+      for (const t of this.trail) {
+        const it = from.find((x) => x.id === t.id);
+        if (!it) break;
+        trail.push(it);
+        from = kidsOf(it);
+      }
+      if (same && trail.length === this.trail.length) {
+        // Nothing looks different (the model rebuilt, the same tools made again): only what a tap runs is new.
+        this.trail = trail;
+        const fresh = fanLayout(this.cellsOf(this.openSector, trail), this.midOf(this.openSector), this.m);
+        if (fresh.length === this.fan.length) this.fan = fresh;
+        return;
+      }
+      this.unpoint();
       this.drawRing();
-      this.showFan(sectors.findIndex((s) => s.id === open && s.cells.length > 0));
+      this.showFan(at, at >= 0 ? trail : []);
     });
   }
 
@@ -476,6 +770,15 @@ export class Wheel implements WheelHandle {
     return d;
   }
 
+  /** The whole wheel anew: the middle, the ring, no fan. */
+  private draw(): void {
+    this.hubEl.setAttribute("r", String(this.m.hub));
+    this.hot = NONE;
+    this.tip.hidden = true;
+    this.drawRing();
+    this.showFan(-1);
+  }
+
   private drawRing(): void {
     const m = this.m;
     const step = TAU / this.sectors.length;
@@ -490,19 +793,11 @@ export class Wheel implements WheelHandle {
     this.ringEls = this.sectors.map((s, i) => {
       const mid = this.midOf(i);
       const dim = !s.cells.length && !s.item;
-      const p = path(`wheel-cell wheel-sector${dim ? " dim" : ""}${i === 0 ? " own" : ""}`, wedge(m.r0, m.r1, mid - step / 2, mid + step / 2, 3));
+      const p = path(`wheel-cell wheel-sector${dim ? " dim" : ""}${i === 0 ? " own" : ""}${s.on ? " on" : ""}`, wedge(m.r0, m.r1, mid - step / 2, mid + step / 2, 3));
       this.ringSvg.append(p);
-      this.ringItems.append(this.item(s, s.label, `sector${dim ? " dim" : ""}${s.mark ? " mark" : ""}`, (m.r0 + m.r1) / 2 + 1, mid));
+      this.ringItems.append(this.item(s, s.label, `sector${dim ? " dim" : ""}${s.mark ? " mark" : ""}${s.on ? " on" : ""}`, (m.r0 + m.r1) / 2 + 1, mid));
       return p;
     });
-    const hub = document.createElementNS(SVG, "circle");
-    hub.setAttribute("class", "wheel-hub");
-    hub.setAttribute("r", String(m.hub));
-    this.ringSvg.append(hub);
-    this.hubEl = hub;
-    const x = el("div", "wheel-item wheel-close");
-    x.innerHTML = icons.close;
-    this.ringItems.append(x);
   }
 
   /** Fan out a group's tools (-1: none), or the tools of a tool opened inside it. */
@@ -527,7 +822,6 @@ export class Wheel implements WheelHandle {
     }
     this.fanEls = this.fan.map((c) => {
       const it = c.item;
-      const kids = kidsOf(it).length > 0;
       const p = path(`wheel-cell${it.active ? " on" : ""}`, wedge(c.r0, c.r1, c.a0, c.a1));
       this.fanSvg.append(p);
       const rm = (c.r0 + c.r1) / 2;
@@ -536,11 +830,16 @@ export class Wheel implements WheelHandle {
       const up = Math.abs(Math.sin(mid));
       const across = Math.abs(Math.cos(mid));
       const width = (up * (c.a1 - c.a0) * rm + across * (c.r1 - c.r0)) / (up + across) - 4;
-      this.fanItems.append(this.item(it, kids ? `${it.label} ›` : it.label, `${it.active ? "on" : ""}${it.pulse ? " mark" : ""}`, rm, mid, width));
+      this.fanItems.append(this.item(it, kidsOf(it).length ? `${it.label} ›` : it.label, `${it.active ? "on" : ""}${it.pulse ? " mark" : ""}`, rm, mid, width));
       return p;
     });
     if (this.fan.length && !calm()) this.fanBox.animate([{ opacity: 0, transform: "scale(0.9)" }, { opacity: 1, transform: "none" }], { duration: 90, easing: "ease-out" });
-    this.fit();
+    if (this.fan.length) this.fit();
+    // A kept wheel that slid for the fan goes back to its place once the fan is away.
+    else if (this.kept && this.slid && this.up) {
+      this.root.classList.add("slide");
+      this.rest();
+    }
   }
 
   /** How far the wheel reaches each way from its middle, with every group's fan out. */
@@ -567,7 +866,6 @@ export class Wheel implements WheelHandle {
 
   /** A fan that would run off the screen: the wheel slides to bring it on. */
   private fit(): void {
-    if (!this.fan.length) return;
     let x0 = -this.m.r1;
     let x1 = this.m.r1;
     let y0 = -this.m.r1;
@@ -589,6 +887,7 @@ export class Wheel implements WheelHandle {
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
     this.cx += dx;
     this.cy += dy;
+    this.slid = true;
     if (this.up) this.root.classList.add("slide");
     this.place();
     // The pointer stayed put and the wheel moved: what's under it now counts once it moves
@@ -627,6 +926,18 @@ export class Wheel implements WheelHandle {
     this.say(a, r, it.label, { sub: it.sub, key: it.shortcut, beta: it.beta });
   }
 
+  /** What the middle is for, said under the wheel once the pointer rests on it. */
+  private sayHub(): void {
+    const text = this.isFolded
+      ? "Click to unfold · drag to move"
+      : !this.kept
+        ? "Drag to keep it somewhere · click to close"
+        : this.layout === "model"
+          ? "Drag to move · click to fold · twice: back at the pointer"
+          : "Drag to move · click to fold";
+    this.say(Math.PI / 2, (this.isFolded ? this.m.r0 : this.reach()) + 8, text);
+  }
+
   // ---------------------------------------------------------------- pointer
 
   /** What's at a point of the page: by its distance and direction from the middle (no looking at the page). */
@@ -636,6 +947,7 @@ export class Wheel implements WheelHandle {
     const r = Math.hypot(dx, dy);
     const m = this.m;
     if (r < m.r0) return HUB;
+    if (this.isFolded) return NONE;
     const a = Math.atan2(dy, dx);
     if (r <= m.r1 + m.gap / 2) {
       const n = this.sectors.length;
@@ -675,22 +987,29 @@ export class Wheel implements WheelHandle {
     this.elOf(this.hot)?.classList.remove("hot");
     this.hot = hit;
     this.elOf(hit)?.classList.add("hot");
-    clearTimeout(this.switchTimer);
-    clearTimeout(this.drillTimer);
+    this.clearTimers();
     if (hit >= CELL) {
       const c = this.fan[hit - CELL];
       this.sayTool(c.item, (c.a0 + c.a1) / 2, this.reach() + 8);
       // Resting on a tool with kinds of its own opens them (a tap does at once).
-      if (kidsOf(c.item).length && this.type !== "touch") this.drillTimer = window.setTimeout(() => this.hot === hit && this.drill(hit - CELL, true), 280);
+      if (opens(c.item) && !c.item.variantsWhenActive && this.type !== "touch") this.drillTimer = window.setTimeout(() => this.hot === hit && this.drill(hit - CELL, true), 280);
       return;
     }
-    if (hit < SECTOR) return void (this.tip.hidden = true);
+    this.tip.hidden = true;
+    if (hit === NONE) {
+      // Off a kept wheel: its fan goes away after a moment (one up at the pointer is closed as a whole).
+      if (this.kept && this.openSector >= 0 && this.pressed === null) this.leaveTimer = window.setTimeout(() => this.hot === NONE && this.shut(), 500);
+      return;
+    }
+    if (hit === HUB) {
+      this.tipTimer = window.setTimeout(() => this.hot === HUB && !this.grab?.moved && this.sayHub(), 700);
+      return;
+    }
     const i = hit - SECTOR;
     const s = this.sectors[i];
     const mid = this.midOf(i);
     if (!s.cells.length && !s.item) return this.say(mid, this.m.r1 + 8, s.why ?? `${s.label} has nothing here`, { why: true });
     if (s.item) this.sayTool(s.item, mid, this.m.r1 + 8);
-    else this.tip.hidden = true;
     if (i === this.openSector) {
       // Back from a tool's kinds to the group's own list.
       if (this.trail.length) this.showFan(i);
@@ -718,13 +1037,12 @@ export class Wheel implements WheelHandle {
     item.run?.();
   }
 
-  /** A tap (or a press let go) on the middle, a group or a tool. */
+  /** A tap (or a press let go) on a group or a tool. */
   private activate(hit: number): void {
-    if (hit === HUB) return this.close();
     if (hit >= CELL) {
       const c = this.fan[hit - CELL];
       if (!c) return;
-      if (kidsOf(c.item).length) return this.drill(hit - CELL, false);
+      if (opens(c.item)) return this.drill(hit - CELL, false);
       if (performance.now() < this.guardUntil) return;
       return this.run(c.item);
     }
@@ -735,8 +1053,17 @@ export class Wheel implements WheelHandle {
     if (!s.cells.length) return this.say(this.midOf(i), this.m.r1 + 8, s.why ?? `${s.label} has nothing here`, { why: true });
     // A group with one tool, its fan already showing: a tap on the group runs it.
     const only = s.cells.length === 1 ? s.cells[0].item : null;
-    if (only && this.openAtPress === i && !this.trail.length && !kidsOf(only).length) return this.run(only);
+    if (only && this.openAtPress === i && !this.trail.length && !opens(only)) return this.run(only);
     if (this.openSector !== i || this.trail.length) this.showFan(i);
+  }
+
+  /** A tap on the middle: one up at the pointer closes; one kept somewhere folds or unfolds - twice, the model's is let go. */
+  private hubTap(): void {
+    if (!this.kept) return this.hide();
+    const now = performance.now();
+    if (this.layout === "model" && now - this.hubTapAt < 400) return this.letGo();
+    this.hubTapAt = now;
+    this.fold(!this.isFolded);
   }
 
   private onDown = (e: PointerEvent): void => {
@@ -748,12 +1075,24 @@ export class Wheel implements WheelHandle {
     // sliding or growing into place on the page) - unless something lying over the wheel was pressed.
     const hit = this.hitAt(e.clientX, e.clientY);
     const target = e.target as Element;
-    const mine = hit !== NONE && (this.root.contains(target) || target.tagName === "CANVAS");
+    const onView = target.tagName === "CANVAS";
+    const mine = hit !== NONE && (this.root.contains(target) || onView);
     const through = this.fresh === "all" || (this.fresh === "hub" && hit === HUB);
     if (!mine || through) {
-      // A press anywhere else closes it, and goes on to what was pressed (the model: a tap picks, a drag turns the view).
-      this.dismissed = true;
-      this.close();
+      if (!this.kept) {
+        // A press anywhere else closes it, and goes on to what was pressed (the model: a tap picks, a drag turns the view).
+        this.dismissed = true;
+        this.hide();
+        return;
+      }
+      // Kept somewhere, it stays: the press only puts its fan away. A finger's is spent on that
+      // (nothing hovers a fan away for a finger, and a tap meant to close it would draw a point).
+      if (this.openSector < 0) return;
+      this.shut();
+      if (e.pointerType === "touch" && onView) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       return;
     }
     e.preventDefault();
@@ -768,11 +1107,27 @@ export class Wheel implements WheelHandle {
     this.pressHit = hit;
     this.pressFan = this.fanCount;
     this.pressAt = { x: e.clientX, y: e.clientY };
+    // The middle is the handle: the wheel goes with a press that moves; one that doesn't is a tap on it.
+    this.grab = hit === HUB ? { dx: e.clientX - this.cx, dy: e.clientY - this.cy, moved: false } : null;
     this.track(e.clientX, e.clientY);
   };
 
   private onMove = (e: PointerEvent): void => {
     if (!this.up) return;
+    const g = this.grab;
+    if (g && this.pressed === e.pointerId) {
+      if (!g.moved) {
+        if (Math.hypot(e.clientX - this.pressAt.x, e.clientY - this.pressAt.y) < 6) return;
+        g.moved = true;
+        this.shut();
+        this.unpoint();
+        this.root.classList.remove("slide");
+        this.root.classList.add("dragging");
+      }
+      this.home = { x: e.clientX - g.dx, y: e.clientY - g.dy };
+      this.rest();
+      return;
+    }
     if (this.adopt && e.pointerType !== "mouse") {
       this.adopt = false;
       this.adopted = true;
@@ -780,7 +1135,9 @@ export class Wheel implements WheelHandle {
       this.openAtPress = this.openSector;
     }
     // (A finger only counts while it is down on the wheel.)
-    if (e.pointerType === "touch" && this.pressed !== e.pointerId) return;
+    if (e.pointerType === "touch") {
+      if (this.pressed !== e.pointerId) return;
+    } else this.type = e.pointerType === "pen" ? "pen" : "mouse";
     this.track(e.clientX, e.clientY);
   };
 
@@ -790,12 +1147,21 @@ export class Wheel implements WheelHandle {
     if (this.adopt && e.pointerType !== "mouse") return void (this.adopt = false);
     if (this.pressed !== e.pointerId) return;
     this.pressed = null;
+    const g = this.grab;
+    this.grab = null;
+    if (g) {
+      e.preventDefault();
+      this.root.classList.remove("dragging");
+      if (g.moved) this.drop();
+      else this.hubTap();
+      return;
+    }
     // A tap is for what it came down on (a group tapped near the screen's edge slides the
     // wheel to fit its fan - what's under the finger then is not what was tapped); a press
     // that slid somewhere is for where it was let go.
     const tap = !this.adopted && Math.hypot(e.clientX - this.pressAt.x, e.clientY - this.pressAt.y) < 10;
     const hit = tap ? this.pressHit : this.hitAt(e.clientX, e.clientY);
-    if (hit === NONE || (hit === HUB && this.adopted)) return;
+    if (hit === NONE || hit === HUB) return;
     if (tap && hit >= CELL && this.pressFan !== this.fanCount) return;
     // (Not kept from the view: a finger that came down on it, and was held for the wheel, is let go of there too.)
     e.preventDefault();
@@ -803,13 +1169,19 @@ export class Wheel implements WheelHandle {
   };
 
   private onCancel = (e: PointerEvent): void => {
-    if (this.pressed === e.pointerId) this.pressed = null;
+    if (this.pressed === e.pointerId) {
+      this.pressed = null;
+      if (this.grab?.moved) this.drop();
+      this.grab = null;
+      this.root.classList.remove("dragging");
+    }
     this.adopt = false;
   };
 
   private onKey = (e: KeyboardEvent): void => {
     if (!this.up || e.key !== "Escape") return;
-    // Esc closes the wheel only: what's picked stays picked.
+    // Esc closes the wheel only (kept somewhere: its fan), and what's picked stays picked. With no fan out, Esc is the app's.
+    if (this.kept && this.openSector < 0) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     this.close();
@@ -834,15 +1206,18 @@ export class Wheel implements WheelHandle {
     return out;
   }
 
-  /** The wheel as it is now: where each group and each fanned-out tool is on the page (to point and tap at). */
+  /** The wheel as it is now: where its middle, each group and each fanned-out tool is on the page (to point and tap at). */
   describe() {
     const at = (r: number, a: number) => ({ x: Math.round(this.cx + r * Math.cos(a)), y: Math.round(this.cy + r * Math.sin(a)) });
     const m = this.m;
     return {
       on: this.on,
       open: this.up,
+      layout: this.layout,
+      kept: this.kept,
       ...(this.up
         ? {
+            folded: this.isFolded,
             center: { x: Math.round(this.cx), y: Math.round(this.cy) },
             group: this.sectors[this.openSector]?.id ?? null,
             inside: this.trail.map((t) => t.label),
@@ -851,10 +1226,11 @@ export class Wheel implements WheelHandle {
               label: s.label,
               ...at((m.r0 + m.r1) / 2, this.midOf(i)),
               ...(s.item ? { runs: s.item.label } : {}),
+              ...(s.on ? { inUse: true } : {}),
               ...(s.cells.length || s.item ? {} : { off: s.why }),
-              tools: s.cells.map((c) => c.item.label),
+              tools: s.cells.map((c) => c.item.label + (c.item.active ? " *" : "")),
             })),
-            fan: this.fan.map((c) => ({ id: c.item.id, label: c.item.label, ...at((c.r0 + c.r1) / 2, (c.a0 + c.a1) / 2), ...(kidsOf(c.item).length ? { opens: kidsOf(c.item).map((k) => k.label) } : {}) })),
+            fan: this.fan.map((c) => ({ id: c.item.id, label: c.item.label, ...at((c.r0 + c.r1) / 2, (c.a0 + c.a1) / 2), ...(c.item.active ? { inUse: true } : {}), ...(kidsOf(c.item).length ? { opens: kidsOf(c.item).map((k) => k.label) } : {}) })),
             tip: this.tip.hidden ? null : this.tip.textContent,
           }
         : {}),
