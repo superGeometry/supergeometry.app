@@ -1415,6 +1415,10 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         },
         () => shellByOffset(body, faces, t),
         ...(faces.length ? [1 + 1e-4, 1 + 1e-3].map((k) => () => shellByOffset(body, faces, t * k)) : []),
+        // ...and the hollow put together from what is cut out of the body, each
+        // cut-out grown on its own: where two of them are closer than two walls
+        // (a pocket 1.7 mm from a hole, 1 mm walls) offsetting the whole body fails.
+        () => shellByOffset(body, faces, t, true),
       ];
       let out: Shape3D | null = null;
       let rough: Shape3D | null = null;
@@ -2779,32 +2783,73 @@ function hollowInside(body: Shape3D, shell: Shape3D, kept: Face[], t: number): b
 }
 
 /**
+ * A shape offset by `by` (outward, or inward when negative) as a solid: with
+ * sharp corners where its offset faces meet, else round ones. Null: no go.
+ */
+function offsetSolid(off: any, shape: Shape3D, by: number): Shape3D | null {
+  const oc = getOC();
+  for (const join of [oc.GeomAbs_JoinType.GeomAbs_Intersection, oc.GeomAbs_JoinType.GeomAbs_Arc]) {
+    const progress = new oc.Message_ProgressRange();
+    try {
+      off.PerformByJoin(shape.wrapped, by, 1e-6, oc.BRepOffset_Mode.BRepOffset_Skin, true, false, join, false, progress);
+      if (!off.IsDone()) continue;
+      let got = cast(off.Shape());
+      // It can come back as a closed shell: make that a solid. (Asked of the
+      // shape itself - class names are renamed in the app's build, so a
+      // constructor.name test never matched there and the cut came out null.)
+      if (got.wrapped.ShapeType() === oc.TopAbs_ShapeEnum.TopAbs_SHELL) got = makeSolid([got as never]);
+      if (Math.abs(measureVolume(got as Shape3D)) > 0) return got as Shape3D;
+    } catch (err) {
+      if (isFault(err)) throw err;
+    } finally {
+      progress.delete();
+    }
+  }
+  return null;
+}
+
+/**
+ * A body brought in by t all round, worked out from what is cut out of it:
+ * the box round the body brought in by t, less every lump of what the box
+ * holds besides the body (a pocket's room, a hole's) grown by t. The same
+ * shape as the body offset inward - which OpenCascade gives up on when the
+ * offsets of two cut-outs run into each other (a pocket and a hole less than
+ * two walls apart). Grown one by one and joined, they just overlap.
+ */
+function innerByCutouts(off: any, body: Shape3D, t: number): Shape3D | null {
+  const [lo, hi] = body.boundingBox.bounds as [Vec3, Vec3];
+  if ([0, 1, 2].some((k) => hi[k] - lo[k] <= 2 * t)) return null;
+  const room = makeBox([lo[0] + t, lo[1] + t, lo[2] + t], [hi[0] - t, hi[1] - t, hi[2] - t]) as Shape3D;
+  const beside = fuzzyBoolean("cut", makeBox(lo, hi) as Shape3D, body);
+  if (isEmpty(beside)) return room;
+  const lumps = subShapes(beside, "SOLID").map((x) => cast(x) as Shape3D);
+  if (!lumps.length || lumps.length > 60) return null;
+  const grown: Shape3D[] = [];
+  for (const lump of lumps) {
+    const g = offsetSolid(off, lump, t);
+    if (!g) return null;
+    grown.push(g);
+  }
+  const inner = fuzzyBoolean("cut", room, fuseAll(grown));
+  if (isEmpty(inner) || !(Math.abs(measureVolume(inner)) > 0)) return null;
+  // Held to what it is for: nowhere nearer the body's skin than t (a lump that
+  // didn't grow all the way round - one ending in a knife edge - would leave the wall thin there).
+  const clear = Math.min(...subShapes(body, "SHELL").map((skin) => measureDistanceBetween(inner, cast(skin) as AnyShape)));
+  return clear >= t * (1 - 1e-3) ? inner : null;
+}
+
+/**
  * Shell without BRepOffsetAPI_MakeThickSolid: body − (body offset inward by t)
  * leaves a closed skin; each removed flat face then gets a hole cut through
- * it (its outline shrunk by t, pushed through the skin).
+ * it (its outline shrunk by t, pushed through the skin). `cutouts`: the body
+ * offset inward is put together from what is cut out of it (innerByCutouts).
  */
-function shellByOffset(body: Shape3D, faces: Face[], t: number): Shape3D | null {
+function shellByOffset(body: Shape3D, faces: Face[], t: number, cutouts = false): Shape3D | null {
   const oc = getOC();
   const off = new oc.BRepOffsetAPI_MakeOffsetShape();
   try {
     const src = unify(body);
-    let inner: Shape3D | null = null;
-    for (const join of [oc.GeomAbs_JoinType.GeomAbs_Intersection, oc.GeomAbs_JoinType.GeomAbs_Arc]) {
-      try {
-        off.PerformByJoin(src.wrapped, -t, 1e-6, oc.BRepOffset_Mode.BRepOffset_Skin, true, false, join, false, new oc.Message_ProgressRange());
-        if (off.IsDone()) {
-          let got = cast(off.Shape());
-          // It can come back as a closed shell: make that a solid. (Asked of the
-          // shape itself - class names are renamed in the app's build, so a
-          // constructor.name test never matched there and the cut came out null.)
-          if (got.wrapped.ShapeType() === oc.TopAbs_ShapeEnum.TopAbs_SHELL) got = makeSolid([got as never]);
-          inner = got as Shape3D;
-        }
-        if (inner && Math.abs(measureVolume(inner)) > 0) break;
-      } catch {
-        inner = null;
-      }
-    }
+    const inner = cutouts ? innerByCutouts(off, src, t) : offsetSolid(off, src, -t);
     if (!inner) return null;
     const tol = sizeOf(body) * 1e-6;
     // The openings: the hollow's own floor behind each opened face, carried on

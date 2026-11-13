@@ -94,7 +94,19 @@ const close: [string, Feature[], (t: number) => number | null][] = [
   [
     "a hole 1.7 mm from a pocket",
     [...cutIn("h", [circle("c", 20, 15, 5)], 20), ...cutIn("p", [rect("r", 26, 5, 36, 12)], 8)],
-    (t) => (t === 0.5 ? 2368.2 : null),
+    // Half a millimetre: walls round both, clear of each other (worked out by hand). At 1 and 1.5 the
+    // hole's tube and the pocket's walls run into each other: the tube (5 + t), the pocket grown by t
+    // (corners sharp), less what the two share - the corner of the grown pocket inside the tube, 8 high.
+    (t) => {
+      if (t === 0.5) return 2368.2;
+      if (t > 2) return null;
+      const [r, a, b] = [5 + t, 6 - t, 3 - t];
+      const F = (u: number) => (u / 2) * Math.sqrt(r * r - u * u) + ((r * r) / 2) * Math.asin(u / r);
+      const u1 = Math.sqrt(r * r - a * a);
+      const shared = u1 > b ? F(u1) - F(b) - a * (u1 - b) : 0;
+      const hollow = room(t).area * room(t).high - Math.PI * r * r * room(t).high - (10 + 2 * t) * (7 + 2 * t) * 8 + shared * 8;
+      return 24000 - 25 * Math.PI * 20 - 560 - hollow;
+    },
   ],
 ];
 for (const [name, extra, right] of close) {
@@ -106,12 +118,36 @@ for (const [name, extra, right] of close) {
     const want = right(t);
     if (name.startsWith("a hole 1.7")) {
       if (t === 0.5) say(sound(g) && near(g.vol.A, 2368.2, 2e-4), `${name}, shelled ${t}: walls round both`, `${told(g)} want 2368.2`);
-      else if (t < 2.5) say(/Walls this thick don't fit/.test(g.errors.join()) && near(g.vol.A, pre.vol.A, 1e-9), `${name}, shelled ${t}: can't be built - said so, the part left as it was`, told(g));
+      // (Between one wall and two apart: the whole part offset inward fails there - it is put together from the hole and the pocket, each grown on its own.)
+      else if (t < 2.5) say(sound(g) && near(g.vol.A, want!, 1e-4), `${name}, shelled ${t}: the hole's tube and the pocket's walls run into each other`, `${told(g)} want ${want?.toFixed(2)}`);
       // (At 2.5 the two walls are one lump, and it builds again.)
       else say(sound(g) && near(g.vol.A, 10804, 2e-3), `${name}, shelled ${t}: their walls one lump`, `${told(g)} want about 10804`);
       continue;
     }
     say(sound(g) && want !== null && near(g.vol.A, want, 3e-4), `${name}, shelled ${t}`, `${told(g)} want ${want?.toFixed(1)}`);
+  }
+}
+
+// More cut-outs closer than two walls, their walls one lump with sharp inside corners (each grown by t,
+// what they share counted once): two pockets side by side, and a row of hole, hole, pocket.
+{
+  const pockets = [...A, ...cutIn("p", [rect("r", 5, 5, 15, 25)], 8), ...cutIn("q", [rect("r", 16.5, 5, 26.5, 25)], 8)];
+  for (const t of [1, 1.5]) {
+    await build(pockets);
+    const g = await build([...pockets, shell("A", [faceRef("A", (n) => n[2] < -0.99)], t)]);
+    const want = 20800 - (room(t).area * room(t).high - (21.5 + 2 * t) * (20 + 2 * t) * 8);
+    say(sound(g) && near(g.vol.A, want, 1e-4), `two pockets 1.5 mm apart, shelled ${t}: one wall between them`, `${told(g)} want ${want.toFixed(2)}`);
+  }
+  const row = [...A, ...cutIn("h", [circle("c", 10, 15, 4)], 20), ...cutIn("g", [circle("c", 19.2, 15, 4)], 20), ...cutIn("p", [rect("r", 24.4, 8, 34, 22)], 8)];
+  {
+    const t = 1;
+    await build(row);
+    const g = await build([...row, shell("A", [faceRef("A", (n) => n[2] < -0.99)], t)]);
+    // Two tubes of 5 (their middles 9.2 apart), the pocket grown to 11.6 x 16, and the bit of the second tube inside it.
+    const tubes = twoDiscs(5, 9.2);
+    const hollow = room(t).area * room(t).high - tubes * room(t).high - 11.6 * 16 * 8 + beyond(5, 4.2) * 8;
+    const want = 24000 - 2 * Math.PI * 16 * 20 - 9.6 * 14 * 8 - hollow;
+    say(sound(g) && near(g.vol.A, want, 1e-4), `a hole 1.2 mm from a hole 1.2 mm from a pocket, shelled ${t}: all three walls one lump`, `${told(g)} want ${want.toFixed(2)}`);
   }
 }
 
