@@ -27,14 +27,17 @@ import { settings } from "../settings";
 import { evaluate, toDisplay, UNIT_LABEL, units } from "../units";
 import { numpadInput, openNumpad } from "./numpad";
 import { icons, type IconName } from "./icons";
-import { el, usable, type ToolItem, type UI } from "./ui";
+import { el, usable, type PanelItem, type ToolItem, type UI } from "./ui";
 
 /**
  * What it shows: the selection tool's column ("model"), the sketch's, or -
  * the second wheel, always on the screen - the Settings ("settings"), or -
  * the third, up while a tool has a window - the tool's options ("options").
  */
-export type WheelLayout = "model" | "sketch" | "settings" | "options";
+export type WheelLayout = "model" | "sketch" | "freeform" | "settings" | "options";
+
+/** What the tool wheel stands in for now (the Options wheel leaves to it what it shows). */
+let toolsLayout: WheelLayout | null = null;
 
 /** More for the model wheel's top sector, beside what the column holds for what's picked (Reveal in Items). */
 export type WheelExtras = () => ToolItem[];
@@ -50,9 +53,10 @@ export interface WheelHandle {
   /**
    * What it shows from now on: the selection tool's column ("model": what's
    * picked, or the main tools), the sketch's (its tools by what they are
-   * for), or nothing (false: another tool's own column and window show).
+   * for), a freeform shape's (what its card offers, by what it does), or
+   * nothing (false: another tool's own column and window show).
    */
-  cover(layout: "model" | "sketch" | false, extras?: WheelExtras): void;
+  cover(layout: "model" | "sketch" | "freeform" | false, extras?: WheelExtras): void;
   /** Bring it up round a point of the page. (Kept somewhere, it is up already: `summon` unfolds it.) */
   open(x: number, y: number, opts?: WheelOpen): void;
   /** Up at the point, or away again (kept somewhere: folded, or unfolded). */
@@ -136,8 +140,6 @@ const SKETCH: ({ tool: string; label?: string } | { id: string; label: string; i
   { id: "draw", label: "Draw", icon: "line", tools: ["line", "arc", "spline", "rect", "circle", "ellipse", "polygon", "text"] },
   { id: "modify", label: "Modify", icon: "trim", tools: ["fillet", "trim", "extend", "split", "align", "offset", "project"] },
   { id: "transform", label: "Transform", icon: "transform", tools: ["move", "rotate", "scale", "mirror", "pattern"] },
-  // Filled from what's selected (its card's constraints) and the constraint switches.
-  { id: "constrain", label: "Constrain", icon: "constraints", tools: [] },
   { id: "more", label: "More", icon: "more", tools: [] },
   { tool: "delete" },
   { tool: "select" },
@@ -306,7 +308,7 @@ export class Wheel implements WheelHandle {
   /** Where it is kept, by layout: the middle as fractions of the page's width and height. */
   private spots: Partial<Record<WheelLayout, [number, number]>> = {};
   /** Kept, and folded to just its middle (until the page is loaded again). */
-  private folded: Record<WheelLayout, boolean> = { model: false, sketch: screenClass() === "phone", settings: true, options: true };
+  private folded: Record<WheelLayout, boolean> = { model: false, sketch: screenClass() === "phone", freeform: screenClass() === "phone", settings: true, options: true };
   /** Where it belongs (px): where it was put, or where it came up. */
   private home = { x: 0, y: 0 };
   /** The middle, on the page (off its home while a fan needs the room). */
@@ -399,7 +401,7 @@ export class Wheel implements WheelHandle {
     this.root.addEventListener("contextmenu", (e) => e.preventDefault());
     if (kind === "tools") host.ui.onTools = () => this.itemsChanged();
     // (The tool's window opened, closed or changed: the Options wheel comes, goes, or shows what it holds now.)
-    if (kind === "tools") host.ui.onPanel = () => this.layout === "sketch" && this.itemsChanged();
+    if (kind === "tools") host.ui.onPanel = () => this.layout === "freeform" && this.itemsChanged();
     if (kind === "options") {
       const before = host.ui.onPanel;
       host.ui.onPanel = () => (before?.(), this.sync(), this.itemsChanged());
@@ -422,16 +424,17 @@ export class Wheel implements WheelHandle {
   }
 
   get kept(): boolean {
-    return this.layout === "sketch" || this.layout === "settings" || this.layout === "options" || (this.layout === "model" && !!this.spots.model);
+    return this.layout === "sketch" || this.layout === "freeform" || this.layout === "settings" || this.layout === "options" || (this.layout === "model" && !!this.spots.model);
   }
 
   private get isFolded(): boolean {
     return !!this.layout && this.kept && this.folded[this.layout];
   }
 
-  cover(layout: "model" | "sketch" | false, extras?: WheelExtras): void {
+  cover(layout: "model" | "sketch" | "freeform" | false, extras?: WheelExtras): void {
     if (this.kind !== "tools") return;
     const next = layout || null;
+    toolsLayout = next;
     if (extras) this.extras = extras;
     // (The sketch says so each time it sets its tools: the same again is nothing new.)
     if (next === this.layout) return;
@@ -448,7 +451,7 @@ export class Wheel implements WheelHandle {
       // (On at all: the right column keeps only Fit, Screenshot and History - the rest is on the Settings wheel.)
       document.body.classList.toggle("wheel-ui", this.on);
       // (While another tool is open it stands in for nothing: the tool's own column and bar stay.)
-      document.body.classList.toggle("wheel-covers", this.on && (this.layout === "model" || this.layout === "sketch"));
+      document.body.classList.toggle("wheel-covers", this.on && (this.layout === "model" || this.layout === "sketch" || this.layout === "freeform"));
     }
     if (this.kind === "options") {
       // Up only while the open tool has a window with something to set; the window itself then stays out of sight.
@@ -480,7 +483,7 @@ export class Wheel implements WheelHandle {
     try {
       const all = JSON.parse(localStorage.getItem(SPOTS) ?? "{}") ?? {};
       // (Both wheels keep their places here: each writes only its own.)
-      const mine: WheelLayout[] = this.kind === "tools" ? ["model", "sketch"] : [this.kind];
+      const mine: WheelLayout[] = this.kind === "tools" ? ["model", "sketch", "freeform"] : [this.kind];
       const spots = { ...(all[screenClass()] ?? {}) };
       for (const k of mine) {
         if (this.spots[k]) spots[k] = this.spots[k];
@@ -584,7 +587,7 @@ export class Wheel implements WheelHandle {
   // ---------------------------------------------------------------- content
 
   private content(): { sectors: Sector[]; pick: string } {
-    return this.layout === "sketch" ? this.sketchContent() : this.layout === "settings" ? this.settingsContent() : this.layout === "options" ? this.optionsContent() : this.modelContent();
+    return this.layout === "sketch" ? this.sketchContent() : this.layout === "freeform" ? this.freeformContent() : this.layout === "settings" ? this.settingsContent() : this.layout === "options" ? this.optionsContent() : this.modelContent();
   }
 
   /**
@@ -627,9 +630,12 @@ export class Wheel implements WheelHandle {
     // ("opt-": set right there, the wheel stays open showing it.)
     const opt = (label: string, run: () => void, on?: boolean, sub?: string, icon?: IconName): ToolItem => ({ id: `opt-panel-${k++}`, label, icon: icon ?? (on ? "check" : "pointer"), sub, active: on, run });
     const sectors: Sector[] = [];
-    const more: Cell[] = p.actions.filter((a) => !a.disabled).map((item) => ({ item }));
+    // (A freeform shape: its wheel has the rest - here only the values to set.)
+    const ff = toolsLayout === "freeform";
+    const more: Cell[] = ff ? [] : p.actions.filter((a) => !a.disabled).map((item) => ({ item }));
     const valueCells: Cell[] = [];
     for (const it of p.items) {
+      if (ff && it.type !== "number" && it.type !== "slider") continue;
       if (it.type === "choice") {
         const now = it.options.find((o) => o.id === it.value);
         const cells = it.options.map((o): Cell => ({ item: opt(o.label, () => it.onChange(o.id), o.id === it.value) }));
@@ -680,8 +686,8 @@ export class Wheel implements WheelHandle {
     }
     if (more.length) sectors.push({ id: "more", label: "More", icon: "more", cells: more, mark: false });
     if (valueCells.length) sectors.push({ id: "values", label: "Values", icon: "numpad", cells: valueCells, mark: false });
-    if (p.cancel) sectors.push({ id: "cancel", label: "Cancel", icon: "close", cells: [], item: { id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: p.cancel }, mark: false });
-    if (p.done) sectors.push({ id: "done", label: "Done", icon: "check", cells: [], item: { id: "done", label: "Done", icon: "check", shortcut: "Enter", run: p.done }, mark: false });
+    if (p.cancel && !ff) sectors.push({ id: "cancel", label: "Cancel", icon: "close", cells: [], item: { id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: p.cancel }, mark: false });
+    if (p.done && !ff) sectors.push({ id: "done", label: "Done", icon: "check", cells: [], item: { id: "done", label: "Done", icon: "check", shortcut: "Enter", run: p.done }, mark: false });
     // (Only Done or Cancel: nothing to set - no wheel; the tool's own ways to finish stay.)
     return { sectors: sectors.some((s) => s.id !== "done" && s.id !== "cancel") ? sectors : [], pick: "" };
   }
@@ -802,22 +808,61 @@ export class Wheel implements WheelHandle {
     return { sectors: [top, ...groups], pick };
   }
 
-  /** The sketch's Constrain group: the selection's constraints, then the switches for constraints. */
-  private constrainCells(): Cell[] {
+  /**
+   * A freeform shape's wheel: what its card offers, by what it does, each
+   * group in the same place every time (greyed, saying why, while nothing
+   * picked fits it) - Done at the top, Select all and Cancel a tap each. The
+   * values to type stay on the Options wheel.
+   */
+  private freeformContent(): { sectors: Sector[]; pick: string } {
+    const p = this.host.ui.panelContent();
+    if (!p) return { sectors: [], pick: "" };
     let k = 0;
-    const id = () => `opt-cons-${k++}`;
-    const chips = (this.host.ui.panelContent()?.items ?? []).flatMap((it) => (it.type === "chips" ? it.chips : []));
-    const fits: Cell[] = chips.map((c) => ({ item: { id: id(), label: c.label, icon: c.on ? "check" : "constraints", active: !!c.on, sub: c.title, run: () => c.onClick() } }));
-    const v = settings.value;
-    const flip = (key: "autoConstrain" | "showConstraintGlyphs") => () => settings.set(key, !settings.value[key]);
-    const switches: ToolItem[] = [
-      { id: id(), label: "Auto constrain", icon: v.autoConstrain ? "check" : "close", sub: v.autoConstrain ? "On" : "Off", active: v.autoConstrain, run: flip("autoConstrain") },
-      { id: id(), label: "Show constraints", icon: v.showConstraintGlyphs ? "check" : "close", sub: v.showConstraintGlyphs ? "On" : "Off", active: v.showConstraintGlyphs, run: flip("showConstraintGlyphs") },
-      { id: id(), label: "Stays put", icon: "pointer", sub: v.sketchAnchor === "last" ? "Last picked" : "First picked", run: () => settings.set("sketchAnchor", settings.value.sketchAnchor === "last" ? "first" : "last") },
-    ];
-    // (Nothing selected: a hint where its constraints would be.)
-    const none: Cell[] = fits.length ? [] : [{ item: { id: id(), label: "Pick lines or points", icon: "pointer", sub: "their constraints show here", disabled: true, why: "Tap lines or points in the sketch first" } }];
-    return [...fits, ...none, ...switches.map((item, i): Cell => ({ item, gap: i === 0 }))];
+    // ("opt-": set right there, the fan stays showing it; a button that changes the shape closes it.)
+    const opt = (label: string, run: () => void, on?: boolean, sub?: string, icon?: IconName): ToolItem => ({ id: `opt-ff-${k++}`, label, icon: icon ?? (on ? "check" : "pointer"), sub, active: on, run });
+    const act = (label: string, run: () => void, icon?: IconName): ToolItem => ({ id: `ff-${k++}`, label, icon: icon ?? "pointer", run });
+    const cells: Record<string, Cell[]> = { shape: [], holes: [], move: [], symmetry: [], solid: [], more: [] };
+    const choice = (it: Extract<PanelItem, { type: "choice" }>) => it.options.map((o): Cell => ({ item: opt(o.label, () => it.onChange(o.id), o.id === it.value) }));
+    for (const it of p.items) {
+      if (it.type === "button") {
+        const to = /^(Extrude face|Inset|Extend surface|Add edge loop|Bridge faces)/.test(it.label) ? "shape" : /^(Fill hole|Bridge holes|Connect edges|Delete face)/.test(it.label) ? "holes" : /^Fill to a plane/.test(it.label) ? "solid" : "more";
+        cells[to].push({ item: act(it.label, it.onClick, it.icon) });
+      } else if (it.type === "choice") {
+        const ids = it.options.map((o) => o.id);
+        if (ids.includes("move") && ids.includes("turn")) cells.move.push(...choice(it));
+        else if (ids.includes("up") && ids.includes("down")) cells.solid.unshift(...choice(it));
+        else if (it.label === "Mirror across") cells.symmetry.push(...choice(it));
+        else cells.more.push({ item: { id: `ff-kinds-${k++}`, label: it.label ?? "Kind", icon: "more", sub: it.options.find((o) => o.id === it.value)?.label, children: choice(it).map((c) => c.item) } });
+      } else if (it.type === "toggle") {
+        const to = it.label === "Symmetry" ? "symmetry" : "more";
+        cells[to].unshift({ item: opt(it.label, () => it.onChange(!it.value), it.value, it.value ? "On" : "Off", it.value ? "check" : "close") });
+      } else if (it.type === "slot") {
+        cells.more.push({ item: opt(it.label, it.onClick, it.active, it.value, it.filled ? "check" : "pointer") });
+      } else if (it.type === "chips") {
+        for (const c of it.chips) cells.more.push({ item: opt(c.label, c.onClick, !!c.on) });
+      }
+    }
+    let selectAll: ToolItem | undefined;
+    for (const a of p.actions) {
+      if (a.disabled) continue;
+      if (a.id === "all") selectAll = a;
+      else if (a.id === "refine") cells.shape.push({ item: a });
+      else cells.more.push({ item: a });
+    }
+    const group = (id: string, label: string, icon: IconName, why: string): Sector => ({ id, label, icon, cells: cells[id], why: cells[id].length ? undefined : why, mark: false });
+    const sectors: Sector[] = [];
+    if (p.done) sectors.push({ id: "done", label: "Done", icon: "check", cells: [], item: { id: "ff-done", label: "Done", icon: "check", shortcut: "Enter", run: p.done }, mark: true });
+    sectors.push(
+      group("shape", "Shape", "extrude", "Pick faces, edges or points to shape"),
+      group("holes", "Holes", "fill", "Pick a hole's rim, two borders, or faces"),
+      group("move", "Move", "move", "Pick points, edges or faces to move them"),
+      group("symmetry", "Symmetry", "mirror", "Not while the shape is being placed or set up"),
+      group("solid", "Solid", "shell", "A closed shape is solid already"),
+    );
+    if (cells.more.length) sectors.push(group("more", "More", "more", ""));
+    if (selectAll) sectors.push({ id: "select", label: "Select all", icon: "pointer", cells: [], item: selectAll, mark: false });
+    if (p.cancel) sectors.push({ id: "cancel", label: "Cancel", icon: "close", cells: [], item: { id: "ff-cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: p.cancel }, mark: false });
+    return { sectors, pick: "" };
   }
 
   /** The sketch's ring: its tools by what they are for (see SKETCH). */
@@ -843,10 +888,6 @@ export class Wheel implements WheelHandle {
       });
       sectors.push({ id: spec.id, label: spec.label, icon: spec.icon, cells, mark: false });
     }
-    // Constrain: the constraints that fit what's selected (as its card has them, one tap each - the
-    // fan stays, showing them set), then how constraints are made and shown.
-    const constrain = sectors.find((s) => s.id === "constrain");
-    if (constrain) constrain.cells = this.constrainCells();
     // More: what isn't named above (Other plane, a tool added since), then the bottom bar's (the line
     // type, Normal to Sketch) and the constraints column on or off. (Settings are on their own wheel.)
     const more = sectors.find((s) => s.id === "more" && !s.item);

@@ -255,6 +255,8 @@ export class FreeformTool implements Tool {
 
   /** Show the cage and the shape, ready to edit. */
   private startEditing(): void {
+    // Its own tool wheel: what the card offers, by what it does (the values stay on the Options wheel).
+    this.app.wheel.cover("freeform");
     // A new box, cylinder or sphere: its size and rows in the card first.
     if (!this.existing && this.primKind && this.primKind !== "plane") {
       const prim = this.primKind;
@@ -301,6 +303,7 @@ export class FreeformTool implements Tool {
 
   exit(): void {
     this.gone = true;
+    this.app.wheel.cover(false);
     const view = this.app.view;
     view.setOriginPlanesVisible(false);
     // (A sprite's geometry is shared by every sprite: only taken off, not disposed.)
