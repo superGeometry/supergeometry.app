@@ -100,6 +100,14 @@ const SVG = "http://www.w3.org/2000/svg";
 const TAU = Math.PI * 2;
 /** Where the wheel is kept, per kind of screen (as the tool card's place is). */
 const SPOTS = "sg-wheel-spot";
+/** The tools last run from the model's wheel, shown under View (most recent first). */
+const RECENT = "sg-wheel-recent";
+const RECENT_MAX = 3;
+
+/** Every tool that runs, in a tree of them (groups and families opened). */
+function leaves(items: ToolItem[]): ToolItem[] {
+  return items.flatMap((it) => (it.children?.length ? leaves(it.children) : it.run ? [it] : []));
+}
 
 /** The top sector: what's picked (its own tools), and the view's. */
 const OWN = "own";
@@ -112,8 +120,8 @@ const GROUP_OF: Record<string, string> = {
   editFreeform: "freeform", fillHole: "freeform", thicken: "freeform",
   planePerp: "construct", planeEdge: "construct",
   moveBody: "transform", moveVertex: "transform", patl: "transform", patc: "transform", copySketch: "transform", align: "transform",
-  offsetFromEdge: "tools",
-  drawing: "bim", material: "bim",
+  offsetFromEdge: "modify",
+  drawing: "more", material: "more",
   deselect: OWN, wholePattern: OWN, color: OWN, opacity: OWN, delete: OWN, deleteBody: OWN,
 };
 
@@ -128,6 +136,8 @@ const SKETCH: ({ tool: string; label?: string } | { id: string; label: string; i
   { id: "draw", label: "Draw", icon: "line", tools: ["line", "arc", "spline", "rect", "circle", "ellipse", "polygon", "text"] },
   { id: "modify", label: "Modify", icon: "trim", tools: ["fillet", "trim", "extend", "split", "align", "offset", "project"] },
   { id: "transform", label: "Transform", icon: "transform", tools: ["move", "rotate", "scale", "mirror", "pattern"] },
+  // Filled from what's selected (its card's constraints) and the constraint switches.
+  { id: "constrain", label: "Constrain", icon: "constraints", tools: [] },
   { id: "more", label: "More", icon: "more", tools: [] },
   { tool: "delete" },
   { tool: "select" },
@@ -389,7 +399,11 @@ export class Wheel implements WheelHandle {
     this.root.addEventListener("contextmenu", (e) => e.preventDefault());
     if (kind === "tools") host.ui.onTools = () => this.itemsChanged();
     // (The tool's window opened, closed or changed: the Options wheel comes, goes, or shows what it holds now.)
-    if (kind === "options") host.ui.onPanel = () => (this.sync(), this.itemsChanged());
+    if (kind === "tools") host.ui.onPanel = () => this.layout === "sketch" && this.itemsChanged();
+    if (kind === "options") {
+      const before = host.ui.onPanel;
+      host.ui.onPanel = () => (before?.(), this.sync(), this.itemsChanged());
+    }
     // (A setting changed: the mode itself, or what Settings shows - the unit, the numpad on or off.)
     settings.onChange(() => (this.sync(), this.itemsChanged()));
     if (kind !== "tools") {
@@ -778,8 +792,32 @@ export class Wheel implements WheelHandle {
     const pick = shown.find((it) => it.id === "deselect")?.sub ?? "";
     own = [...own, ...(this.extras?.() ?? []).map((item) => ({ item }))];
     const view = usable(bar).filter(notSep).map((item, i): Cell => ({ item, gap: i === 0 && own.length > 0 }));
-    const top: Sector = { id: OWN, label: pick || "View", icon: pick ? "pointer" : "eye", cells: [...own, ...view], mark: marked(view) };
+    // Nothing picked: the tools run last, after the view's (a picked thing's own come first instead).
+    const all = pick ? [] : leaves(main);
+    const recent = this.recent
+      .map((id) => all.find((t) => t.id === id))
+      .filter((t): t is ToolItem => !!t && !t.disabled && !view.some((c) => c.item.id === t.id))
+      .map((item, i): Cell => ({ item, gap: i === 0 }));
+    const top: Sector = { id: OWN, label: pick || "View", icon: pick ? "pointer" : "eye", cells: [...own, ...view, ...recent], mark: marked(view) };
     return { sectors: [top, ...groups], pick };
+  }
+
+  /** The sketch's Constrain group: the selection's constraints, then the switches for constraints. */
+  private constrainCells(): Cell[] {
+    let k = 0;
+    const id = () => `opt-cons-${k++}`;
+    const chips = (this.host.ui.panelContent()?.items ?? []).flatMap((it) => (it.type === "chips" ? it.chips : []));
+    const fits: Cell[] = chips.map((c) => ({ item: { id: id(), label: c.label, icon: c.on ? "check" : "constraints", active: !!c.on, sub: c.title, run: () => c.onClick() } }));
+    const v = settings.value;
+    const flip = (key: "autoConstrain" | "showConstraintGlyphs") => () => settings.set(key, !settings.value[key]);
+    const switches: ToolItem[] = [
+      { id: id(), label: "Auto constrain", icon: v.autoConstrain ? "check" : "close", sub: v.autoConstrain ? "On" : "Off", active: v.autoConstrain, run: flip("autoConstrain") },
+      { id: id(), label: "Show constraints", icon: v.showConstraintGlyphs ? "check" : "close", sub: v.showConstraintGlyphs ? "On" : "Off", active: v.showConstraintGlyphs, run: flip("showConstraintGlyphs") },
+      { id: id(), label: "Stays put", icon: "pointer", sub: v.sketchAnchor === "last" ? "Last picked" : "First picked", run: () => settings.set("sketchAnchor", settings.value.sketchAnchor === "last" ? "first" : "last") },
+    ];
+    // (Nothing selected: a hint where its constraints would be.)
+    const none: Cell[] = fits.length ? [] : [{ item: { id: id(), label: "Pick lines or points", icon: "pointer", sub: "their constraints show here", disabled: true, why: "Tap lines or points in the sketch first" } }];
+    return [...fits, ...none, ...switches.map((item, i): Cell => ({ item, gap: i === 0 }))];
   }
 
   /** The sketch's ring: its tools by what they are for (see SKETCH). */
@@ -805,6 +843,10 @@ export class Wheel implements WheelHandle {
       });
       sectors.push({ id: spec.id, label: spec.label, icon: spec.icon, cells, mark: false });
     }
+    // Constrain: the constraints that fit what's selected (as its card has them, one tap each - the
+    // fan stays, showing them set), then how constraints are made and shown.
+    const constrain = sectors.find((s) => s.id === "constrain");
+    if (constrain) constrain.cells = this.constrainCells();
     // More: what isn't named above (Other plane, a tool added since), then the bottom bar's (the line
     // type, Normal to Sketch) and the constraints column on or off. (Settings are on their own wheel.)
     const more = sectors.find((s) => s.id === "more" && !s.item);
@@ -1433,6 +1475,27 @@ export class Wheel implements WheelHandle {
     }
   }
 
+  /** The tools last run from the model's wheel (ids, newest first): shown under View. */
+  private recent: string[] = (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(RECENT) ?? "[]");
+      return Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, RECENT_MAX) : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  /** A main tool was run: first among the recent ones. */
+  private remember(item: ToolItem): void {
+    if (this.kind !== "tools" || this.layout !== "model" || !leaves(this.host.mainTools()).some((t) => t.id === item.id)) return;
+    this.recent = [item.id, ...this.recent.filter((x) => x !== item.id)].slice(0, RECENT_MAX);
+    try {
+      localStorage.setItem(RECENT, JSON.stringify(this.recent));
+    } catch {
+      // (Not kept: just this visit's.)
+    }
+  }
+
   private run(item: ToolItem): void {
     // A switch or a choice on the Settings wheel is set right there: the fan stays, showing it set.
     if (item.id.startsWith("opt-") && !item.id.endsWith("-more")) {
@@ -1441,6 +1504,7 @@ export class Wheel implements WheelHandle {
       return;
     }
     this.close();
+    this.remember(item);
     item.run?.();
   }
 

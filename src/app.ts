@@ -907,43 +907,101 @@ export class App implements AppContext {
       // An empty project: Sketch pulses - that's where to start.
       { id: "sketch", label: "Sketch", icon: "sketch", shortcut: "S", pulse: this.store.features.length === 0, run: () => this.setTool(new SketchTool(this)) },
       {
-        // Smooth shapes from a control cage.
-        id: "freeform",
-        label: "Freeform",
-        icon: "freeform",
+        // A shape from a sketch's: pulled, turned, swept, lofted.
+        id: "create",
+        label: "Create",
+        icon: "extrude",
         children: [
-          ...(["box", "sphere", "cylinder", "plane"] as const).map((k) => ({
-            id: `ff-${k}`,
-            label: { box: "Box", sphere: "Sphere", cylinder: "Cylinder", plane: "Surface (plane)" }[k],
-            icon: "freeform" as const,
-            run: () => this.setTool(new FreeformTool(this, { primitive: k })),
-          })),
-          // A flat face of a body made smooth (its edges stay put).
-          {
-            id: "faceFreeform",
-            beta: true,
-            label: "Freeform Face",
-            icon: "freeform" as const,
-            sub: "a face of a body",
-            run: wait("Freeform Face (tap a flat face)", ["face"], () => {
-              const s = this.selection[0];
-              if (s?.kind !== "face" || !this.view.body(s.body)?.faces[s.face]?.plane) return void this.ui.toast("Freeform Face works on flat faces for now");
-              const t = faceFreeformTool(this, s);
-              if (t) this.setTool(t);
-            }),
-          },
-          // A smooth bridge between two faces.
-          { id: "connect", label: "Connect", icon: "freeform" as const, sub: "two faces", beta: true, run: () => this.setTool(new ConnectOp(this, this.selection.filter((s) => s.kind === "face").slice(0, 2))) },
+          { id: "extrude", label: "Extrude", icon: "extrude", run: wait("Extrude", ["profile", "face"], () => src() && this.setTool(new ExtrudeOp(this, src()!))) },
+          { id: "revolve", label: "Revolve", icon: "revolve", run: wait("Revolve", ["profile", "face"], () => src() && this.setTool(new RevolveOp(this, src()!))) },
+          { id: "sweep", label: "Sweep", icon: "sweep", run: wait("Sweep", ["profile", "face"], () => src() && this.setTool(new SweepOp(this, src()!))) },
+          { id: "loft", label: "Loft", icon: "loft", run: wait("Loft", ["profile", "face"], () => this.setTool(new LoftOp(this, sourcesOf(this, this.selection).flatMap((s): ExtrudeSource[] => (s.kind === "profile" ? s.regions.map((r) => ({ ...s, regions: [r] })) : [s])), this.selection))) },
         ],
       },
       {
-        id: "insert",
-        label: "Insert",
-        icon: "insert",
+        // A body changed where it is: edges, faces, walls, details.
+        id: "modify",
+        label: "Modify",
+        icon: "fillet",
         children: [
-          { id: "image", label: "Image", icon: "image", run: () => void insertImage(this).then((f) => f && this.setTool(new ImageOp(this, f))) },
-          { id: "file", label: "File", icon: "file", sub: "STEP, STL, OBJ, 3MF, DXF, SVG", run: () => void insertFile(this) },
-          { id: "project", label: "Project", icon: "file", sub: ".super", run: () => void insertFile(this) },
+          { id: "fillet", label: "Fillet", icon: "fillet", run: wait("Fillet", ["edge"], () => this.setTool(new EdgeOp(this, "fillet", this.selection.flatMap((s) => (s.kind === "edge" ? [edgeRefOf(this, s)!] : []))))) },
+          { id: "chamfer", label: "Chamfer", icon: "chamfer", run: wait("Chamfer", ["edge"], () => this.setTool(new EdgeOp(this, "chamfer", this.selection.flatMap((s) => (s.kind === "edge" ? [edgeRefOf(this, s)!] : []))))) },
+          { id: "shell", label: "Shell", icon: "shell", run: wait("Shell", ["face", "body"], () => {
+            const s = this.selection[0];
+            const faces = this.selection.flatMap((x) => (x.kind === "face" ? [faceRefOf(this, x)!] : []));
+            this.setTool(new ShellOp(this, bodiesOf([s])[0], faces));
+          }) },
+          { id: "offsetFace", label: "Offset Face", icon: "offsetFace", run: wait("Offset Face", ["face"], () => src() && this.setTool(new ExtrudeOp(this, src()!))) },
+          { id: "offsetEdge", label: "Offset Edge", icon: "offsetEdge", run: () => {
+            const s = this.selection.find((x) => x.kind === "edge");
+            this.setTool(new OffsetEdgeOp(this, s?.kind === "edge" ? s : undefined));
+          } },
+          { id: "thread", label: "Thread", icon: "thread", run: wait("Thread (tap a round face or its rim)", ["face", "edge"], () => this.startThread()) },
+          { id: "wrap", label: "Wrap & Emboss", icon: "wrap", beta: true, run: wait("Wrap & Emboss (tap a sketch's shape)", ["profile"], () => src() && this.setTool(new WrapOp(this, src()!))) },
+          // Holes filled, surfaces closed, broken bodies mended.
+          {
+            id: "fix",
+            label: "Fix",
+            icon: "check",
+            children: [
+              { id: "fillNetwork", label: "Fill", icon: "fill", sub: "a surface over curves", run: () => this.setTool(new FillOp(this, this.pickedCurves())) },
+              { id: "fillToPlane", label: "Fill to Plane", icon: "fill", run: wait("Fill to Plane (tap the surface)", ["body", "face", "edge"], () => this.setTool(new FillToPlaneOp(this, bodiesOf(this.selection)[0]))) },
+              {
+                id: "repair",
+                label: "Repair Body",
+                icon: "check",
+                run: wait("Repair Body", ["body", "face", "edge"], () => {
+                  const ids = bodiesOf(this.selection);
+                  if (!ids.length) return;
+                  this.store.add({ ...this.store.newIdentity("repair"), type: "repair", bodies: ids });
+                  this.ui.toast("Repair added to History - it notes what it fixed");
+                }),
+              },
+            ],
+          },
+          { id: "replace", label: "Replace Face", icon: "replaceFace", disabled: true, why: SOON },
+        ],
+      },
+      {
+        // Bodies together, apart, or cut in two.
+        id: "combine",
+        label: "Combine",
+        icon: "union",
+        children: [
+          { id: "union", label: "Union", icon: "union", run: wait("Union (double-tap bodies)", ["body"], () => this.selectTool.refresh()) },
+          { id: "subtract", label: "Subtract", icon: "subtract", run: () => this.setTool(new BooleanOp(this, "subtract")) },
+          { id: "intersect", label: "Intersect", icon: "intersect", run: () => this.setTool(new BooleanOp(this, "intersect")) },
+          { id: "split", label: "Split Body", icon: "split", run: wait("Split Body", ["body", "face"], () => this.setTool(new SplitOp(this, bodiesOf(this.selection)[0]))) },
+        ],
+      },
+      {
+        id: "transform",
+        label: "Transform",
+        icon: "transform",
+        children: [
+          // Moved: freely, along a line, round an axis.
+          {
+            id: "moveKinds",
+            label: "Move",
+            icon: "move",
+            children: [
+              { id: "move", label: "Move/Rotate", icon: "move", shortcut: "M", run: transform("move", "Move/Rotate") },
+              { id: "translate", label: "Translate", icon: "translate", run: transform("translate", "Translate") },
+              { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: transform("rotate", "Rotate Around Axis") },
+            ],
+          },
+          { id: "scale", label: "Scale", icon: "scale", run: wait("Scale", ["body", "face", "edge"], () => this.setTool(new ScaleOp(this, false, bodies()))) },
+          { id: "mirror", label: "Mirror", icon: "mirror", run: transform("mirror", "Mirror") },
+          {
+            id: "pattern",
+            label: "Pattern",
+            icon: "patternLinear",
+            children: [
+              { id: "linear", label: "Linear", icon: "patternLinear", run: transform("linear", "Pattern – Linear") },
+              { id: "circular", label: "Circular", icon: "patternCircular", run: transform("circular", "Pattern – Circular") },
+            ],
+          },
+          { id: "align", label: "Align", icon: "align", disabled: true, why: SOON },
         ],
       },
       {
@@ -994,85 +1052,68 @@ export class App implements AppContext {
             }) },
             ],
           },
+          { id: "proje", label: "Project as Edge", icon: "projectEdge", beta: true, run: wait("Project as Edge (tap a sketch's shape)", ["profile"], () => src() && this.setTool(new ImprintOp(this, { source: src()! }))) },
         ],
       },
       {
-        id: "transform",
-        label: "Transform",
-        icon: "transform",
+        // Smooth shapes from a control cage.
+        id: "freeform",
+        label: "Freeform",
+        icon: "freeform",
         children: [
-          { id: "move", label: "Move/Rotate", icon: "move", shortcut: "M", run: transform("move", "Move/Rotate") },
-          { id: "scale", label: "Scale", icon: "scale", run: wait("Scale", ["body", "face", "edge"], () => this.setTool(new ScaleOp(this, false, bodies()))) },
-          { id: "translate", label: "Translate", icon: "translate", run: transform("translate", "Translate") },
+          ...(["box", "sphere", "cylinder", "plane"] as const).map((k) => ({
+            id: `ff-${k}`,
+            label: { box: "Box", sphere: "Sphere", cylinder: "Cylinder", plane: "Surface (plane)" }[k],
+            icon: "freeform" as const,
+            run: () => this.setTool(new FreeformTool(this, { primitive: k })),
+          })),
+          // A flat face of a body made smooth (its edges stay put).
           {
-            id: "pattern",
-            label: "Pattern",
-            icon: "patternLinear",
-            children: [
-              { id: "linear", label: "Linear", icon: "patternLinear", run: transform("linear", "Pattern – Linear") },
-              { id: "circular", label: "Circular", icon: "patternCircular", run: transform("circular", "Pattern – Circular") },
-            ],
-          },
-          { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: transform("rotate", "Rotate Around Axis") },
-          { id: "align", label: "Align", icon: "align", disabled: true, why: SOON },
-          { id: "mirror", label: "Mirror", icon: "mirror", run: transform("mirror", "Mirror") },
-        ],
-      },
-      {
-        id: "tools",
-        label: "Tools",
-        icon: "tools",
-        children: [
-          { id: "offsetFace", label: "Offset Face", icon: "offsetFace", run: wait("Offset Face", ["face"], () => src() && this.setTool(new ExtrudeOp(this, src()!))) },
-          { id: "fillet", label: "Fillet", icon: "fillet", run: wait("Fillet", ["edge"], () => this.setTool(new EdgeOp(this, "fillet", this.selection.flatMap((s) => (s.kind === "edge" ? [edgeRefOf(this, s)!] : []))))) },
-          { id: "chamfer", label: "Chamfer", icon: "chamfer", run: wait("Chamfer", ["edge"], () => this.setTool(new EdgeOp(this, "chamfer", this.selection.flatMap((s) => (s.kind === "edge" ? [edgeRefOf(this, s)!] : []))))) },
-          { id: "offsetEdge", label: "Offset Edge", icon: "offsetEdge", run: () => {
-            const s = this.selection.find((x) => x.kind === "edge");
-            this.setTool(new OffsetEdgeOp(this, s?.kind === "edge" ? s : undefined));
-          } },
-          { id: "extrude", label: "Extrude", icon: "extrude", run: wait("Extrude", ["profile", "face"], () => src() && this.setTool(new ExtrudeOp(this, src()!))) },
-          { id: "shell", label: "Shell", icon: "shell", run: wait("Shell", ["face", "body"], () => {
-            const s = this.selection[0];
-            const faces = this.selection.flatMap((x) => (x.kind === "face" ? [faceRefOf(this, x)!] : []));
-            this.setTool(new ShellOp(this, bodiesOf([s])[0], faces));
-          }) },
-          { id: "loft", label: "Loft", icon: "loft", run: wait("Loft", ["profile", "face"], () => this.setTool(new LoftOp(this, sourcesOf(this, this.selection).flatMap((s): ExtrudeSource[] => (s.kind === "profile" ? s.regions.map((r) => ({ ...s, regions: [r] })) : [s])), this.selection))) },
-          { id: "union", label: "Union", icon: "union", run: wait("Union (double-tap bodies)", ["body"], () => this.selectTool.refresh()) },
-          { id: "subtract", label: "Subtract", icon: "subtract", run: () => this.setTool(new BooleanOp(this, "subtract")) },
-          { id: "intersect", label: "Intersect", icon: "intersect", run: () => this.setTool(new BooleanOp(this, "intersect")) },
-          { id: "split", label: "Split Body", icon: "split", run: wait("Split Body", ["body", "face"], () => this.setTool(new SplitOp(this, bodiesOf(this.selection)[0]))) },
-          { id: "fillToPlane", label: "Fill to Plane", icon: "fill", run: wait("Fill to Plane (tap the surface)", ["body", "face", "edge"], () => this.setTool(new FillToPlaneOp(this, bodiesOf(this.selection)[0]))) },
-          { id: "fillNetwork", label: "Fill", icon: "fill", sub: "a surface over curves", run: () => this.setTool(new FillOp(this, this.pickedCurves())) },
-          { id: "revolve", label: "Revolve", icon: "revolve", run: wait("Revolve", ["profile", "face"], () => src() && this.setTool(new RevolveOp(this, src()!))) },
-          { id: "thread", label: "Thread", icon: "thread", run: wait("Thread (tap a round face or its rim)", ["face", "edge"], () => this.startThread()) },
-          { id: "sweep", label: "Sweep", icon: "sweep", run: wait("Sweep", ["profile", "face"], () => src() && this.setTool(new SweepOp(this, src()!))) },
-          {
-            id: "repair",
-            label: "Repair Body",
-            icon: "check",
-            run: wait("Repair Body", ["body", "face", "edge"], () => {
-              const ids = bodiesOf(this.selection);
-              if (!ids.length) return;
-              this.store.add({ ...this.store.newIdentity("repair"), type: "repair", bodies: ids });
-              this.ui.toast("Repair added to History - it notes what it fixed");
+            id: "faceFreeform",
+            beta: true,
+            label: "Freeform Face",
+            icon: "freeform" as const,
+            sub: "a face of a body",
+            run: wait("Freeform Face (tap a flat face)", ["face"], () => {
+              const s = this.selection[0];
+              if (s?.kind !== "face" || !this.view.body(s.body)?.faces[s.face]?.plane) return void this.ui.toast("Freeform Face works on flat faces for now");
+              const t = faceFreeformTool(this, s);
+              if (t) this.setTool(t);
             }),
           },
-          { id: "replace", label: "Replace Face", icon: "replaceFace", disabled: true, why: SOON },
-          { id: "proje", label: "Project as Edge", icon: "projectEdge", beta: true, run: wait("Project as Edge (tap a sketch's shape)", ["profile"], () => src() && this.setTool(new ImprintOp(this, { source: src()! }))) },
-          { id: "wrap", label: "Wrap & Emboss", icon: "wrap", beta: true, run: wait("Wrap & Emboss (tap a sketch's shape)", ["profile"], () => src() && this.setTool(new WrapOp(this, src()!))) },
+          // A smooth bridge between two faces.
+          { id: "connect", label: "Connect", icon: "freeform" as const, sub: "two faces", beta: true, run: () => this.setTool(new ConnectOp(this, this.selection.filter((s) => s.kind === "face").slice(0, 2))) },
         ],
       },
       {
-        // The project as a building information model: real materials, and
-        // from them the technical sheet and the drawings.
-        id: "bim",
-        label: "BIM",
-        icon: "bim",
+        // Less often: a file or picture brought in, and the project as a building model.
+        id: "more",
+        label: "More",
+        icon: "more",
         children: [
-          { id: "bimMaterials", label: "Materials", icon: "bim", sub: "a real material for each body", run: () => this.setTool(new BimTool(this)) },
-          { id: "bimSheet", label: "Technical Sheet", icon: "sheet", sub: "parts list, masses, data", run: () => void openSheet(this) },
-          { id: "bimDrawings", label: "Drawings", icon: "drawing", sub: "views with dimensions", run: () => void openDrawing(this) },
-          { id: "bimAssemblies", label: "Assemblies", icon: "assembly", sub: "parts placed and joined", run: () => this.ui.toast("Assemblies are being built - after Drawings") },
+          {
+            id: "insert",
+            label: "Insert",
+            icon: "insert",
+            children: [
+              { id: "image", label: "Image", icon: "image", run: () => void insertImage(this).then((f) => f && this.setTool(new ImageOp(this, f))) },
+              { id: "file", label: "File", icon: "file", sub: "STEP, STL, OBJ, 3MF, DXF, SVG", run: () => void insertFile(this) },
+              { id: "project", label: "Project", icon: "file", sub: ".super", run: () => void insertFile(this) },
+            ],
+          },
+          {
+            // The project as a building information model: real materials, and
+            // from them the technical sheet and the drawings.
+            id: "bim",
+            label: "BIM",
+            icon: "bim",
+            children: [
+              { id: "bimMaterials", label: "Materials", icon: "bim", sub: "a real material for each body", run: () => this.setTool(new BimTool(this)) },
+              { id: "bimSheet", label: "Technical Sheet", icon: "sheet", sub: "parts list, masses, data", run: () => void openSheet(this) },
+              { id: "bimDrawings", label: "Drawings", icon: "drawing", sub: "views with dimensions", run: () => void openDrawing(this) },
+              { id: "bimAssemblies", label: "Assemblies", icon: "assembly", sub: "parts placed and joined", run: () => this.ui.toast("Assemblies are being built - after Drawings") },
+            ],
+          },
         ],
       },
     ];
