@@ -2157,7 +2157,7 @@ export class ImageOp extends FeatureOp<ImageFeature> {
   }
 
   protected hint(): string {
-    return "Drag the arrows to place the image. Set its width and how see-through it is in the card.";
+    return "Drag the arrows to place the image. Set its width and how see-through it is on the Options wheel (the sliders icon).";
   }
 
   protected items(): PanelItem[] {

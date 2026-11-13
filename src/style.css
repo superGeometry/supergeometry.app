@@ -5597,8 +5597,9 @@ body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"
 .wheel-root.slide {
   transition: transform 0.14s ease-out;
 }
-/* The Options wheel is up: the tool's window stays out of sight until Values on the wheel brings it back. */
-body.wheel-options:not(.panel-shown) #panel {
+/* The Options wheel is up: the tool's window stays out of sight - unless it holds a text
+   box to type into (a sketch's Text: the words themselves can't be set from the wheel). */
+body.wheel-options:not(.panel-shown) #panel:not(:has(.text-input)) {
   display: none !important;
 }
 /* (Touches on it are never the page panning: the <svg>s themselves say so, not only their shapes.) */

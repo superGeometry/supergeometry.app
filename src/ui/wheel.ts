@@ -455,7 +455,9 @@ export class Wheel implements WheelHandle {
     }
     if (this.kind === "options") {
       // Up only while the open tool has a window with something to set; the window itself then stays out of sight.
-      const has = this.on && this.host.ui.panelOpen && this.content().sectors.length > 0;
+      // (Not while the window holds a text box to type into - a sketch's Text: the window shows, with all of it.)
+      const typing = !!document.querySelector("#panel .text-input");
+      const has = this.on && this.host.ui.panelOpen && !typing && this.content().sectors.length > 0;
       document.body.classList.toggle("wheel-options", has);
       if (!has) return this.hide();
     }
@@ -651,9 +653,9 @@ export class Wheel implements WheelHandle {
         const cells = it.chips.map((c): Cell => ({ item: opt(c.glyph ? `${c.glyph} ${c.label}` : c.label, c.onClick, !!c.on) }));
         sectors.push({ id: `chips-${k++}`, label: it.label ?? "Add", icon: "constraints", cells, mark: false });
       } else if (it.type === "button") {
+        // A tap each, on the ring (where to sketch: XY, XZ, YZ…); past the room there, under More.
         const item: ToolItem = { id: `panel-btn-${k++}`, label: it.label, icon: it.icon ?? "pointer", run: it.onClick };
-        if (it.primary) sectors.push({ id: item.id, label: it.label, icon: item.icon, cells: [], item, mark: true });
-        else more.push({ item });
+        sectors.push({ id: item.id, label: it.label, icon: item.icon, cells: [], item, mark: !!it.primary });
       } else if (it.type === "number" || it.type === "slider") {
         // A value: set by steps fanned out from it, the value itself as its second line (no window to type in).
         const len = it.type === "number" && (it.kind ?? "length") === "length";
@@ -685,7 +687,10 @@ export class Wheel implements WheelHandle {
       more.unshift(...(s.item ? [{ item: s.item }] : s.cells));
     }
     if (more.length) sectors.push({ id: "more", label: "More", icon: "more", cells: more, mark: false });
-    if (valueCells.length) sectors.push({ id: "values", label: "Values", icon: "numpad", cells: valueCells, mark: false });
+    // Only values to set (a new shape's size): each its own place on the ring, its steps fanning out
+    // from it - not one lone Values group on a whole ring.
+    if (!sectors.length && valueCells.length <= 8) for (const c of valueCells) sectors.push({ id: c.item.id, label: c.item.label, icon: "numpad", cells: kidsOf(c.item).map((item) => ({ item })), mark: false });
+    else if (valueCells.length) sectors.push({ id: "values", label: "Values", icon: "numpad", cells: valueCells, mark: false });
     if (p.cancel && !ff) sectors.push({ id: "cancel", label: "Cancel", icon: "close", cells: [], item: { id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: p.cancel }, mark: false });
     if (p.done && !ff) sectors.push({ id: "done", label: "Done", icon: "check", cells: [], item: { id: "done", label: "Done", icon: "check", shortcut: "Enter", run: p.done }, mark: false });
     // (Only Done or Cancel: nothing to set - no wheel; the tool's own ways to finish stay.)
