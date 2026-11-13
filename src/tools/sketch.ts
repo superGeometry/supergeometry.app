@@ -1629,6 +1629,7 @@ export class SketchTool implements Tool {
   // -------------------------------------------------------------- pointer
 
   hover(p: ToolPointer | null): void {
+    if (p) this.pen = p.type === "pen";
     if (p && this.phase === "plane") {
       // Show which plane / face / sketch a tap would pick.
       const hit = this.app.view.pick(p.x, p.y, { edges: false, vertices: false, planes: true, planesFirst: true, profiles: true, edgeTolPx: 0 });
@@ -1681,6 +1682,7 @@ export class SketchTool implements Tool {
   }
 
   down(p: ToolPointer): boolean {
+    this.pen = p.type === "pen";
     if (this.phase !== "draw") return false;
     // The extrude arrow of a tapped shape, grabbed: only now does Extrude start
     // (the sketch closes), and this same drag sizes it.
@@ -3088,7 +3090,8 @@ export class SketchTool implements Tool {
         // The outline closed: the drawing tool lets go (Select), so the next drag turns the view.
         if (closes || (this.pts.length > 1 && samePt(pt, start))) return this.shapeClosed();
         // Touch: its length in a box right away, for the numpad.
-        if (settings.value.numpad && this.locks.len === undefined) queueMicrotask(() => this.showLineBox(id));
+        // (A pen too, numpad or not: tap the line's end, then type its length.)
+        if ((settings.value.numpad || this.pen) && this.locks.len === undefined) queueMicrotask(() => this.showLineBox(id));
       }
       this.pts.push(pt);
       this.locks = {};
@@ -3672,12 +3675,18 @@ export class SketchTool implements Tool {
   }
 
   private lineDim: DimWidget | null = null;
+  /** The last pointer was a pen (it hovers: see showLineDim). */
+  private pen = false;
 
   /** Length of the line being drawn: dimension line with arrows + a box you can type into. */
   private showLineDim(a: Vec2, b: Vec2): void {
     const plane = this.plane!;
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (len < 1e-9) return this.hideLineDim();
+    // A pen hovering on to the next point: the box of the line just placed
+    // stays to type in (it went the moment the pen moved) - the next line's
+    // length is typed once it's placed, the same way.
+    if (this.pen && this.kind === "line" && this.lineBox && !this.dragging) return this.hideLineDim();
     // The next line is under way: only its length shows - the box of the line
     // before goes (unless something was typed into it).
     if (this.lineBox && !this.lineBox.edited) this.closeLineBox();
