@@ -922,6 +922,29 @@ export class UI {
     return this.panelSpec !== null;
   }
 
+  /** Called when the tool's window opens, closes or is drawn again (the Options wheel follows it). */
+  onPanel: (() => void) | null = null;
+
+  /** What the tool's window holds now: its parts in order, Done and Cancel, its own actions. */
+  panelContent(): { title: string; items: PanelItem[]; actions: ToolItem[]; done?: () => void; cancel?: () => void } | null {
+    const spec = this.panelSpec;
+    if (!spec) return null;
+    const items: PanelItem[] = [
+      ...(spec.fields ?? []).map((f): PanelItem => ({ type: "number", label: f.label, value: f.value, kind: f.kind ?? (f.integer ? "int" : f.unit ? "length" : "number"), min: f.min, onInput: f.onInput })),
+      ...(spec.items ?? []),
+    ];
+    return { title: spec.title, items, actions: spec.actions ?? [], done: spec.onDone, cancel: spec.onCancel };
+  }
+
+  /**
+   * With the Options wheel up the tool's window stays out of sight; Values on
+   * the wheel brings it back for typing (and again puts it away).
+   */
+  showPanelWindow(on: boolean): void {
+    document.body.classList.toggle("panel-shown", on);
+    if (on) this.panel.classList.remove("folded");
+  }
+
   showPanel(spec: ValuePanel | null): void {
     this.panelSpec = spec;
     this.panelVersion++;
@@ -932,8 +955,11 @@ export class UI {
     // Closed: next time it's placed afresh (and whole). Folded stays folded
     // (a sketch closes and reopens its card for each thing tapped) until
     // another tool starts: unfoldPanel.
+    // (After this, the Options wheel shows what the window holds now.)
+    queueMicrotask(() => this.onPanel?.());
     if (!spec) {
       this.panelWarning = null;
+      document.body.classList.remove("panel-shown");
       return void (this.panelSide = -1);
     }
     // A short list, like a right-click menu: each value with its box after the

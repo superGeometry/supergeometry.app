@@ -29,9 +29,10 @@ import { el, usable, type ToolItem, type UI } from "./ui";
 
 /**
  * What it shows: the selection tool's column ("model"), the sketch's, or -
- * the second wheel, always on the screen - the Settings ("settings").
+ * the second wheel, always on the screen - the Settings ("settings"), or -
+ * the third, up while a tool has a window - the tool's options ("options").
  */
-export type WheelLayout = "model" | "sketch" | "settings";
+export type WheelLayout = "model" | "sketch" | "settings" | "options";
 
 /** More for the model wheel's top sector, beside what the column holds for what's picked (Reveal in Items). */
 export type WheelExtras = () => ToolItem[];
@@ -293,7 +294,7 @@ export class Wheel implements WheelHandle {
   /** Where it is kept, by layout: the middle as fractions of the page's width and height. */
   private spots: Partial<Record<WheelLayout, [number, number]>> = {};
   /** Kept, and folded to just its middle (until the page is loaded again). */
-  private folded: Record<WheelLayout, boolean> = { model: false, sketch: screenClass() === "phone", settings: true };
+  private folded: Record<WheelLayout, boolean> = { model: false, sketch: screenClass() === "phone", settings: true, options: true };
   /** Where it belongs (px): where it was put, or where it came up. */
   private home = { x: 0, y: 0 };
   /** The middle, on the page (off its home while a fan needs the room). */
@@ -348,11 +349,11 @@ export class Wheel implements WheelHandle {
    */
   constructor(
     private host: WheelHost,
-    private readonly kind: "tools" | "settings" = "tools",
+    private readonly kind: "tools" | "settings" | "options" = "tools",
   ) {
-    this.root.id = kind === "settings" ? "wheel-settings" : "wheel";
+    this.root.id = kind === "tools" ? "wheel" : `wheel-${kind}`;
     this.root.classList.add("wheel-root");
-    if (kind === "settings") this.layout = "settings";
+    if (kind !== "tools") this.layout = kind;
     this.root.hidden = true;
     this.tip.hidden = true;
     this.hubEl.setAttribute("class", "wheel-hub");
@@ -382,9 +383,11 @@ export class Wheel implements WheelHandle {
     });
     this.root.addEventListener("contextmenu", (e) => e.preventDefault());
     if (kind === "tools") host.ui.onTools = () => this.itemsChanged();
+    // (The tool's window opened, closed or changed: the Options wheel comes, goes, or shows what it holds now.)
+    if (kind === "options") host.ui.onPanel = () => (this.sync(), this.itemsChanged());
     // (A setting changed: the mode itself, or what Settings shows - the unit, the numpad on or off.)
     settings.onChange(() => (this.sync(), this.itemsChanged()));
-    if (kind === "settings") {
+    if (kind !== "tools") {
       this.loadSpots();
       // (Once the app is set up: its lists are the right column's, made after the wheels.)
       setTimeout(() => this.sync());
@@ -400,7 +403,7 @@ export class Wheel implements WheelHandle {
   }
 
   get kept(): boolean {
-    return this.layout === "sketch" || this.layout === "settings" || (this.layout === "model" && !!this.spots.model);
+    return this.layout === "sketch" || this.layout === "settings" || this.layout === "options" || (this.layout === "model" && !!this.spots.model);
   }
 
   private get isFolded(): boolean {
@@ -408,7 +411,7 @@ export class Wheel implements WheelHandle {
   }
 
   cover(layout: "model" | "sketch" | false, extras?: WheelExtras): void {
-    if (this.kind === "settings") return;
+    if (this.kind !== "tools") return;
     const next = layout || null;
     if (extras) this.extras = extras;
     // (The sketch says so each time it sets its tools: the same again is nothing new.)
@@ -427,6 +430,12 @@ export class Wheel implements WheelHandle {
       document.body.classList.toggle("wheel-ui", this.on);
       // (While another tool is open it stands in for nothing: the tool's own column and bar stay.)
       document.body.classList.toggle("wheel-covers", this.on && (this.layout === "model" || this.layout === "sketch"));
+    }
+    if (this.kind === "options") {
+      // Up only while the open tool has a window with something to set; the window itself then stays out of sight.
+      const has = this.on && this.host.ui.panelOpen && this.content().sectors.length > 0;
+      document.body.classList.toggle("wheel-options", has);
+      if (!has) return this.hide();
     }
     if (!this.on || !this.layout) return this.hide();
     if (this.kept && !this.up) this.showKept();
@@ -452,7 +461,7 @@ export class Wheel implements WheelHandle {
     try {
       const all = JSON.parse(localStorage.getItem(SPOTS) ?? "{}") ?? {};
       // (Both wheels keep their places here: each writes only its own.)
-      const mine: WheelLayout[] = this.kind === "settings" ? ["settings"] : ["model", "sketch"];
+      const mine: WheelLayout[] = this.kind === "tools" ? ["model", "sketch"] : [this.kind];
       const spots = { ...(all[screenClass()] ?? {}) };
       for (const k of mine) {
         if (this.spots[k]) spots[k] = this.spots[k];
@@ -467,14 +476,17 @@ export class Wheel implements WheelHandle {
 
   /** Where a kept wheel belongs on the page as it is now. */
   private homeNow(): { x: number; y: number } {
-    if (this.layout === "settings") {
-      const s = this.spots.settings;
+    if (this.layout === "settings" || this.layout === "options") {
+      const s = this.spots[this.layout];
       if (s) return { x: s[0] * innerWidth, y: s[1] * innerHeight };
-      // Never put anywhere: at the bottom right, beside the right-hand column (folded, just its cog).
+      // Never put anywhere: at the bottom right, beside the right-hand column (folded, just its icon) -
+      // the Options above the Settings.
       const col = document.getElementById("right-col")?.getBoundingClientRect();
       const right = col && col.width > 0 ? col.left : innerWidth;
-      const r = this.isFolded ? this.m.r0 : this.m.r1;
-      return { x: right - 8 - r, y: innerHeight - 70 - r };
+      // (Placed by the folded size: the two icons keep their places; unfolded, a wheel comes in from the edges as far as it must.)
+      const r = this.m.r0;
+      const up = this.layout === "options" ? 2 * r + 16 : 0;
+      return { x: right - 8 - r, y: innerHeight - 70 - up - r };
     }
     // (The sketch's wheel never moved: where the model's is kept, if it is.)
     const s = (this.layout && this.spots[this.layout]) ?? this.spots.model;
@@ -546,7 +558,7 @@ export class Wheel implements WheelHandle {
   // ---------------------------------------------------------------- content
 
   private content(): { sectors: Sector[]; pick: string } {
-    return this.layout === "sketch" ? this.sketchContent() : this.layout === "settings" ? this.settingsContent() : this.modelContent();
+    return this.layout === "sketch" ? this.sketchContent() : this.layout === "settings" ? this.settingsContent() : this.layout === "options" ? this.optionsContent() : this.modelContent();
   }
 
   /**
@@ -573,6 +585,60 @@ export class Wheel implements WheelHandle {
     const numpad: ToolItem = { id: "set-numpad", label: "NumPad", icon: "numpad", sub: pad ? "On" : "Off", active: pad, run: () => ui.popAt("numpad", 0, 0) };
     sectors.push({ id: "numpad", label: "NumPad", icon: "numpad", cells: [], item: numpad, on: pad, mark: false });
     return { sectors, pick: "" };
+  }
+
+  /**
+   * The Options wheel: what the open tool's window holds. Each choice fans out
+   * its options, a switch or a slot is one tap, chips fan out; numbers and
+   * sliders are typed in the window, which Values brings back. Then the
+   * window's own actions (under More), Cancel and Done.
+   */
+  private optionsContent(): { sectors: Sector[]; pick: string } {
+    const ui = this.host.ui;
+    const p = ui.panelContent();
+    if (!p) return { sectors: [], pick: "" };
+    let k = 0;
+    // ("opt-": set right there, the wheel stays open showing it.)
+    const opt = (label: string, run: () => void, on?: boolean, sub?: string, icon?: IconName): ToolItem => ({ id: `opt-panel-${k++}`, label, icon: icon ?? (on ? "check" : "pointer"), sub, active: on, run });
+    const sectors: Sector[] = [];
+    const more: Cell[] = p.actions.filter((a) => !a.disabled).map((item) => ({ item }));
+    let values = 0;
+    for (const it of p.items) {
+      if (it.type === "choice") {
+        const now = it.options.find((o) => o.id === it.value);
+        const cells = it.options.map((o): Cell => ({ item: opt(o.label, () => it.onChange(o.id), o.id === it.value) }));
+        sectors.push({ id: `choice-${k}`, label: it.label ?? now?.label ?? "Kind", icon: "more", cells, mark: false });
+      } else if (it.type === "toggle") {
+        const item = opt(it.label, () => it.onChange(!it.value), it.value, it.value ? "On" : "Off", it.value ? "check" : "close");
+        sectors.push({ id: item.id, label: it.label, icon: item.icon, cells: [], item, on: it.value, mark: false });
+      } else if (it.type === "slot") {
+        const item = opt(it.label, it.onClick, it.active, it.value, it.filled ? "check" : "pointer");
+        sectors.push({ id: item.id, label: it.label, icon: item.icon, cells: [], item, on: it.active, mark: false });
+      } else if (it.type === "chips") {
+        if (!it.chips.length) continue;
+        const cells = it.chips.map((c): Cell => ({ item: opt(c.glyph ? `${c.glyph} ${c.label}` : c.label, c.onClick, !!c.on) }));
+        sectors.push({ id: `chips-${k++}`, label: it.label ?? "Add", icon: "constraints", cells, mark: false });
+      } else if (it.type === "button") {
+        const item: ToolItem = { id: `panel-btn-${k++}`, label: it.label, icon: it.icon ?? "pointer", run: it.onClick };
+        if (it.primary) sectors.push({ id: item.id, label: it.label, icon: item.icon, cells: [], item, mark: true });
+        else more.push({ item });
+      } else values++;
+    }
+    // Room on the ring: past six of its own, the rest of the window's switches and buttons go under More.
+    while (sectors.length > 6) {
+      const s = sectors.pop()!;
+      more.unshift(...(s.item ? [{ item: s.item }] : s.cells));
+    }
+    if (more.length) sectors.push({ id: "more", label: "More", icon: "more", cells: more, mark: false });
+    if (values) {
+      const shown = document.body.classList.contains("panel-shown");
+      const item: ToolItem = { id: "opt-values", label: "Values", icon: "numpad", sub: shown ? "Shown" : `${values} to type`, active: shown, run: () => ui.showPanelWindow(!shown) };
+      sectors.push({ id: "values", label: "Values", icon: "numpad", cells: [], item, on: shown, mark: false });
+    }
+    if (p.cancel) sectors.push({ id: "cancel", label: "Cancel", icon: "close", cells: [], item: { id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: p.cancel }, mark: false });
+    if (p.done) sectors.push({ id: "done", label: "Done", icon: "check", cells: [], item: { id: "done", label: "Done", icon: "check", shortcut: "Enter", run: p.done }, mark: false });
+    // (Only Done or Cancel: nothing to set - no wheel; the tool's own ways to finish stay.)
+    return { sectors: sectors.some((s) => s.id !== "done" && s.id !== "cancel") ? sectors : [], pick: "" };
   }
 
   /** A list's window (for what the wheel can't set: a slider, a typed size), beside the wheel on the side the pointer is. */
@@ -899,7 +965,7 @@ export class Wheel implements WheelHandle {
   /** The whole wheel anew: the middle, the ring, no fan. */
   private draw(): void {
     this.hubEl.setAttribute("r", String(this.m.hub));
-    this.grip.innerHTML = this.layout === "settings" ? icons.settings : icons.move;
+    this.grip.innerHTML = this.layout === "settings" ? icons.settings : this.layout === "options" ? icons.options : icons.move;
     this.hot = NONE;
     this.tip.hidden = true;
     this.drawRing();
@@ -920,7 +986,7 @@ export class Wheel implements WheelHandle {
     this.ringEls = this.sectors.map((s, i) => {
       const mid = this.midOf(i);
       const dim = !s.cells.length && !s.item;
-      const p = path(`wheel-cell wheel-sector${dim ? " dim" : ""}${i === 0 && this.layout !== "settings" ? " own" : ""}${s.on ? " on" : ""}`, wedge(m.r0, m.r1, mid - step / 2, mid + step / 2, 3));
+      const p = path(`wheel-cell wheel-sector${dim ? " dim" : ""}${i === 0 && (this.layout === "model" || this.layout === "sketch") ? " own" : ""}${s.on ? " on" : ""}`, wedge(m.r0, m.r1, mid - step / 2, mid + step / 2, 3));
       this.ringSvg.append(p);
       this.ringItems.append(this.item(s, s.label, `sector${dim ? " dim" : ""}${s.mark ? " mark" : ""}${s.on ? " on" : ""}`, (m.r0 + m.r1) / 2 + 1, mid));
       return p;
@@ -1090,8 +1156,8 @@ export class Wheel implements WheelHandle {
   /** What the middle is for, said under the wheel once the pointer rests on it. */
   private sayHub(): void {
     const text = this.isFolded
-      ? this.layout === "settings"
-        ? "Settings: click · drag to move"
+      ? this.layout === "settings" || this.layout === "options"
+        ? `${this.layout === "settings" ? "Settings" : "Options"}: click · drag to move`
         : "Click to unfold · drag to move"
       : !this.kept
         ? "Drag to keep it somewhere · click to close"

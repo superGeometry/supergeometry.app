@@ -5548,6 +5548,10 @@ body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"
 .wheel-root.slide {
   transition: transform 0.14s ease-out;
 }
+/* The Options wheel is up: the tool's window stays out of sight until Values on the wheel brings it back. */
+body.wheel-options:not(.panel-shown) #panel {
+  display: none !important;
+}
 /* (Touches on it are never the page panning: the <svg>s themselves say so, not only their shapes.) */
 .wheel-root,
 .wheel-root svg {

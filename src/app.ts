@@ -72,6 +72,8 @@ export class App implements AppContext {
   readonly wheel = new Wheel({ ui: this.ui, mainTools: () => this.mainTools() });
   /** The Settings wheel: always on the screen while the wheel is on (folded to its cog unless opened). */
   readonly settingsWheel = new Wheel({ ui: this.ui, mainTools: () => [] }, "settings");
+  /** The Options wheel: the open tool's window as a wheel, up while there is one (folded to its icon unless opened). */
+  readonly optionsWheel = new Wheel({ ui: this.ui, mainTools: () => [] }, "options");
   private input: InputRouter;
   result: RegenResult | null = null;
   selection: Sel[] = [];
