@@ -5548,6 +5548,11 @@ body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"
 #wheel.slide {
   transition: transform 0.14s ease-out;
 }
+/* (Touches on it are never the page panning: the <svg>s themselves say so, not only their shapes.) */
+#wheel,
+#wheel svg {
+  touch-action: none;
+}
 /* Dragged by its middle: it keeps up with the pointer. */
 #wheel.dragging {
   transition: none;

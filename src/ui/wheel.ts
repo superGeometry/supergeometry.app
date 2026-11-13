@@ -359,6 +359,9 @@ export class Wheel implements WheelHandle {
     document.addEventListener("pointermove", this.onMove, true);
     document.addEventListener("pointerup", this.onUp, true);
     document.addEventListener("pointercancel", this.onCancel, true);
+    // A finger on the wheel is never the page scrolling or zooming: else a phone's browser
+    // takes it over after a few millimetres and the drag stops (pointercancel).
+    document.addEventListener("touchmove", (e) => this.pressed !== null && e.cancelable && e.preventDefault(), { capture: true, passive: false });
     window.addEventListener("keydown", this.onKey, true);
     // Scrolling zooms the view: the wheel is out of its way (kept somewhere, its fan is).
     window.addEventListener("wheel", () => this.away(), { capture: true, passive: true });
