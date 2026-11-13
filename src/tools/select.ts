@@ -48,11 +48,19 @@ export class SelectTool implements Tool {
 
   constructor(private app: AppContext) {}
 
+  /** In use (not stepped aside for another tool). */
+  private live = false;
+
   enter(): void {
+    this.live = true;
+    // With the tool wheel on, it stands in for this tool's column.
+    this.app.wheel.cover(true);
     this.refresh();
   }
 
   exit(): void {
+    this.live = false;
+    this.app.wheel.cover(false);
     this.clearHandle();
     this.app.ui.setHint(null);
     this.app.setHover(null);
@@ -138,6 +146,46 @@ export class SelectTool implements Tool {
   private chosenHit: ReturnType<SelectTool["pickAt"]> | null = null;
 
   tap(p: ToolPointer, count: number): void {
+    const wheel = this.app.wheel;
+    if (!wheel.on) return void this.pick(p, count);
+    // The tool wheel: the tap picks as ever, then the wheel comes up round it
+    // with what the pick offers - or, on an empty spot with nothing picked, the
+    // main tools. A press that closed an open wheel only closes it there.
+    const dismissed = wheel.takeDismissed();
+    const hadPick = this.app.selection.length > 0;
+    // (A list of overlapping faces is up, or another tool took over: a sketch opened, a waiting tool got its pick.)
+    if (!this.pick(p, count) || !this.live) return;
+    // Shift / Ctrl add to the pick without the wheel coming up each time; a tool still waiting for its pick keeps waiting.
+    if (this.app.selection.length ? !p.add && !this.pending : !hadPick && !dismissed) this.openWheel(p);
+  }
+
+  /** The tool wheel round a point of the view (held: under a finger still down, which can slide to a tool). */
+  private openWheel(p: { x: number; y: number; type: ToolPointer["type"] }, held = false): void {
+    const r = this.app.view.canvas.getBoundingClientRect();
+    this.app.wheel.open(r.left + p.x, r.top + p.y, { type: p.type, held, extras: () => this.wheelExtras() });
+  }
+
+  /** What the right-click menu holds beside the tools (the wheel takes its place): for the wheel's top sector. */
+  private wheelExtras(): { own: ToolItem[]; view: ToolItem[] } {
+    const app = this.app;
+    const ids = this.pickedIds();
+    const through = app.view.selectThrough;
+    return {
+      own: ids.length ? [{ id: "reveal", label: "Reveal in Items", icon: "body", run: () => app.revealInItems(ids) }] : [],
+      view: [
+        { id: "fit", label: "Zoom to Fit", icon: "fit", shortcut: "F", run: () => app.view.fitAll() },
+        { id: "selectThrough", label: "Select Through", icon: "pointer", sub: through ? "On" : "Off", active: through, shortcut: "Ctrl+Shift+S", run: () => app.view.setSelectThrough(!through) },
+      ],
+    };
+  }
+
+  /** What's picked, as rows of the Items list: bodies, planes, axes, images, sketches. */
+  private pickedIds(): string[] {
+    return [...new Set(this.app.selection.flatMap((s) => (s.kind === "body" || s.kind === "face" || s.kind === "edge" || s.kind === "vertex" ? [s.body] : s.kind === "plane" || s.kind === "axis" || s.kind === "image" ? [s.id] : s.kind === "curve" || s.kind === "point" || s.kind === "profile" ? [s.sketch] : [])))];
+  }
+
+  /** A tap on the model. False when it only put up the list of overlapping faces (the tap comes again from there). */
+  private pick(p: ToolPointer, count: number): boolean {
     const forced = this.chosenHit;
     this.chosenHit = null;
     let hit = forced ?? this.tapHit(p);
@@ -159,7 +207,7 @@ export class SelectTool implements Tool {
             },
           })),
         );
-        return;
+        return false;
       }
     }
     // A finger on a thin shape (a ruler's tick, a letter) is always on its
@@ -179,13 +227,22 @@ export class SelectTool implements Tool {
       this.app.setTool(tool);
       if (hit.kind === "curve") tool.preselect([hit.entity]);
       else tool.preselect([], [{ e: hit.entity, p: hit.p }]);
-      return;
+      return true;
     }
     // Where the tap was: Edit Freeform picks the cage element there.
     this.lastTap = p;
     let s = hitToSel(hit);
     const sel = this.app.selection;
-    if (!s) return this.app.setSelection([]);
+    if (!s) {
+      this.app.setSelection([]);
+      return true;
+    }
+    // The tool wheel is on: a shape tapped twice opens its sketch (there the
+    // first tap doesn't start Extrude, which takes the second one otherwise).
+    if (this.app.wheel.on && s.kind === "profile" && count >= 2 && !this.pending) {
+      this.openSketch(s.sketch, "select");
+      return true;
+    }
     // Double tap selects the whole body.
     if (count >= 2 && (s.kind === "face" || s.kind === "edge" || s.kind === "vertex")) s = { kind: "body", body: s.body };
     // With bodies selected, tapping another body adds it (Union/Subtract need two).
@@ -209,15 +266,18 @@ export class SelectTool implements Tool {
       const run = this.pending.run;
       this.pending = null;
       run();
-      return;
+      return true;
     }
     // A shape's region tapped (not added with Shift/Ctrl): its extrude arrow is
     // ready - at 0, so nothing is made until the arrow is dragged (or a value typed).
+    // (With the tool wheel on, the shape stays picked instead, its arrow ready
+    // all the same: the wheel comes up with everything the shape offers.)
     const now = this.app.selection;
-    if (s.kind === "profile" && !p.add && count < 2 && now.length && now.every((x) => x.kind === "profile") && now.some((x) => sameSel(x, s!))) {
+    if (!this.app.wheel.on && s.kind === "profile" && !p.add && count < 2 && now.length && now.every((x) => x.kind === "profile") && now.some((x) => sameSel(x, s!))) {
       const src = sourcesOf(this.app, now)[0];
       if (src) this.app.setTool(new ExtrudeOp(this.app, src, undefined, "auto", { distance: 0 }).markTapped());
     }
+    return true;
   }
 
   /** What a box takes (Tab while dragging cycles; B, F, E pick one, A all). */
@@ -333,6 +393,18 @@ export class SelectTool implements Tool {
       this.app.setSelection([]);
       return;
     }
+    // The tool wheel is on: it is the menu. What's under the pointer is picked
+    // first, unless it is part of the pick already (or nothing is there: then
+    // the wheel is for what's picked, wherever the pointer is).
+    if (this.app.wheel.on) {
+      const s = hitToSel(this.pickAt(p));
+      const sel = this.app.selection;
+      const picked = !!s && sel.some((x) => sameSel(x, s) || (x.kind === "body" && "body" in s && s.body === x.body));
+      if (s && !picked && s.kind !== "curve" && s.kind !== "point") this.app.setSelection([s]);
+      this.lastTap = p;
+      // (A finger or pen held still brought it up: it can slide to a tool and lift there.)
+      return this.openWheel(p, p.type !== "mouse");
+    }
     const rows: (MenuRow | "-")[] = [];
     if (this.app.selection.length) {
       for (const it of this.actions()) {
@@ -347,7 +419,7 @@ export class SelectTool implements Tool {
       }
       if (rows[rows.length - 1] === "-") rows.pop();
       // Where it is in the Items list.
-      const ids = [...new Set(this.app.selection.flatMap((s) => (s.kind === "body" || s.kind === "face" || s.kind === "edge" || s.kind === "vertex" ? [s.body] : s.kind === "plane" || s.kind === "axis" || s.kind === "image" ? [s.id] : s.kind === "curve" || s.kind === "point" || s.kind === "profile" ? [s.sketch] : [])))];
+      const ids = this.pickedIds();
       if (ids.length) rows.push("-", { label: "Reveal in Items", run: () => this.app.revealInItems(ids) });
     }
     viewMenu(this.app, p.x, p.y, rows);
@@ -356,6 +428,12 @@ export class SelectTool implements Tool {
   key(e: KeyboardEvent): boolean {
     if (this.boxing && this.dragKey(e)) return true;
     const k = e.key.toLowerCase();
+    // The tool wheel at the pointer (or away again), for what's picked now.
+    if (k === "q" && this.app.wheel.on && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (this.app.wheel.isOpen) this.app.wheel.close();
+      else this.openWheel(this.lastHover ? { x: this.lastHover.x, y: this.lastHover.y, type: "mouse" } : { x: this.app.view.width / 2, y: this.app.view.height / 2, type: "mouse" });
+      return true;
+    }
     if (k === "escape" && (this.app.selection.length || this.pending)) {
       this.pending = null;
       this.app.setSelection([]);
@@ -412,10 +490,15 @@ export class SelectTool implements Tool {
       this.pending
         ? `${this.pending.label}: tap ${this.pending.accepts.map((k) => withArticle(label({ kind: k } as Sel, 1))).join(" or ")}`
         : sel.length === 0
-          ? this.app.store.features.length
-            ? "Pick a tool, or tap the model to select part of it."
-            : "Tap Sketch to start: draw a shape, then pull it into 3D."
-          : this.armedHint(),
+          ? this.app.wheel.on
+            ? this.app.store.features.length
+              ? "Tap the model to pick part of it, or an empty spot for the tool wheel."
+              : "Tap an empty spot for the tool wheel, then Sketch: draw a shape and pull it into 3D."
+            : this.app.store.features.length
+              ? "Pick a tool, or tap the model to select part of it."
+              : "Tap Sketch to start: draw a shape, then pull it into 3D."
+          : // (The tool wheel on: no column to turn to - how to bring the wheel up for what's picked.)
+            this.armedHint() + (this.app.wheel.on ? (isTouchDevice ? " Press and hold for the tool wheel." : " Right-click (or Q) for the tool wheel.") : ""),
     );
     const first = sel[0];
     if (!first) return;

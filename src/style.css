@@ -5464,3 +5464,218 @@ html[data-screen="phone"] .bim-props {
   color: var(--muted);
   font-size: 12px;
 }
+
+/* ------------------------------------------------------------- tool wheel */
+/* An experiment beside the tool column (More → Tool wheel): the tools in a
+   ring round the pointer. While it stands in for the column, the column steps
+   aside (the bottom bar stays: it also shows what is on). */
+body.wheel-select #toolbar {
+  display: none;
+}
+#wheel {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  /* Over the panels, the right-click menu and the value boxes on the model; under windows and the numpad. */
+  z-index: 48;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+#wheel[hidden] {
+  display: none;
+}
+/* A fan that didn't fit on the screen: the wheel slides to bring it on. */
+#wheel.slide {
+  transition: transform 0.14s ease-out;
+}
+.wheel-body,
+.wheel-ring,
+.wheel-fan,
+.wheel-items {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+.wheel-svg {
+  position: absolute;
+  pointer-events: none;
+}
+/* A piece of the wheel (a group, a tool). */
+.wheel-cell {
+  fill: rgba(31, 33, 37, 0.95);
+  stroke: rgba(255, 255, 255, 0.07);
+  stroke-width: 1px;
+  pointer-events: none;
+}
+/* What takes the pointer: a see-through plate under the ring and under each
+   row of tools (the hairlines between the pieces too), and the middle. Round
+   them the model is still there to tap or turn. */
+.wheel-plate {
+  fill: transparent;
+  stroke: transparent;
+  pointer-events: all;
+  touch-action: none;
+  cursor: pointer;
+}
+circle.wheel-plate {
+  fill: none;
+  pointer-events: stroke;
+}
+.wheel-sector {
+  fill: rgba(23, 25, 29, 0.96);
+}
+.wheel-sector.own {
+  fill: rgba(30, 38, 54, 0.97);
+}
+.wheel-cell.on {
+  fill: #223250;
+}
+.wheel-sector.open {
+  fill: #26375a;
+}
+.wheel-cell.hot {
+  fill: #2f4c7e;
+}
+.wheel-sector.dim {
+  fill: rgba(23, 25, 29, 0.86);
+}
+.wheel-sector.dim.hot {
+  fill: rgba(40, 43, 49, 0.9);
+}
+/* The middle: a tap closes the wheel (what's picked stays picked). */
+.wheel-hub {
+  fill: rgba(20, 22, 26, 0.35);
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 1px;
+  pointer-events: all;
+  touch-action: none;
+  cursor: pointer;
+}
+.wheel-hub.hot {
+  fill: rgba(20, 22, 26, 0.75);
+}
+/* Just up: the second tap of a double tap still reaches the model. */
+#wheel.fresh .wheel-hub,
+#wheel.fresh-all .wheel-hub,
+#wheel.fresh-all .wheel-plate {
+  pointer-events: none;
+}
+.wheel-item {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--text);
+  text-align: center;
+  pointer-events: none;
+}
+.wheel-item svg {
+  width: 19px;
+  height: 19px;
+  flex: none;
+}
+.wheel-item .swatch {
+  width: 18px;
+  height: 18px;
+}
+.wheel-name {
+  font-size: 9.5px;
+  line-height: 10.5px;
+  max-height: 21px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  color: #c3c7cf;
+}
+.wheel-name.long {
+  font-size: 8.4px;
+  letter-spacing: -0.15px;
+}
+.wheel-item.sector svg {
+  width: 21px;
+  height: 21px;
+}
+.wheel-item.sector .wheel-name {
+  font-size: 10.5px;
+  line-height: 12px;
+  max-height: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  display: block;
+  color: var(--text);
+}
+.wheel-item.dim {
+  opacity: 0.34;
+}
+.wheel-item.on,
+.wheel-item.on .wheel-name {
+  color: #b9d4ff;
+}
+/* The tool most likely next (or one that is on) is in this group: a blue dot. */
+.wheel-item.mark::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  right: 50%;
+  margin-right: -17px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.wheel-item.wheel-close {
+  left: 0;
+  top: 0;
+  color: var(--muted);
+  opacity: 0.7;
+}
+.wheel-item.wheel-close svg {
+  width: 13px;
+  height: 13px;
+}
+/* The name of what's pointed at, just outside the wheel there. */
+.wheel-tip {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: rgba(20, 22, 26, 0.96);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  font-size: 12.5px;
+  pointer-events: none;
+}
+.wheel-tip[hidden] {
+  display: none;
+}
+.wheel-tip.why {
+  white-space: normal;
+  width: max-content;
+  max-width: 230px;
+  color: var(--muted);
+}
+.wheel-tip-sub {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.wheel-tip kbd {
+  margin-left: 0;
+}
+.wheel-tip .beta-tag {
+  margin-left: 0;
+}

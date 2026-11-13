@@ -41,6 +41,7 @@ import { bodiesOf, edgeRefOf, faceRefOf, sameSel, sourcesOf, type AppContext, ty
 import { setupRightColumn } from "./ui/panels";
 import type { ToolItem } from "./ui/ui";
 import { UI } from "./ui/ui";
+import { Wheel } from "./ui/wheel";
 import { evaluate, setUnits, setVariables } from "./units";
 import { InputRouter } from "./view/input";
 import { ViewCube } from "./view/viewcube";
@@ -67,6 +68,8 @@ export class App implements AppContext {
   readonly kernel = new KernelClient();
   readonly view: Viewport;
   readonly ui = new UI();
+  /** The tool wheel (More → Tool wheel): the tools in a ring round the pointer, beside the column. */
+  readonly wheel = new Wheel({ ui: this.ui, mainTools: () => this.mainTools() });
   private input: InputRouter;
   result: RegenResult | null = null;
   selection: Sel[] = [];
@@ -1301,6 +1304,16 @@ export class App implements AppContext {
       settings.set("showHints", !settings.value.showHints);
       paintHints();
       this.ui.refreshHint();
+    });
+    // The tool wheel (an experiment): the tools round the pointer where the model is tapped; off, the column is back.
+    const wheelState = document.getElementById("m-wheel-state")!;
+    const paintWheel = () => (wheelState.textContent = settings.value.wheel ? "On" : "Off");
+    paintWheel();
+    moreItem("m-wheel", () => {
+      settings.set("wheel", !settings.value.wheel);
+      paintWheel();
+      this.refreshTools();
+      this.ui.toast(settings.value.wheel ? "Tool wheel on: tap the model, or an empty spot, and the tools come up round the pointer" : "Tool wheel off: the tools are in the column on the left again");
     });
     // Offline mode: the app kept on this device, so it works with no connection.
     const offlineState = document.getElementById("m-offline-state")!;

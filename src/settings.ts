@@ -50,6 +50,11 @@ export interface Settings {
   showHints: boolean;
   /** Offline mode: the app's files are kept on this device (More → Offline mode). */
   offline: boolean;
+  /**
+   * The tool wheel (an experiment, More → Tool wheel): the tools come up in a
+   * ring round the pointer where the model is tapped, in place of the column.
+   */
+  wheel: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -81,6 +86,7 @@ const DEFAULTS: Settings = {
   numpad: isTouchDevice,
   showHints: true,
   offline: false,
+  wheel: false,
   version: 4,
 };
 

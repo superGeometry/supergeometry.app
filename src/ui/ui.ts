@@ -294,13 +294,22 @@ export class UI {
     }
     renderTools(this.toolbar, items, (item, btn) => this.runAndOpen(item, btn, this.toolbar, () => this.toolItems));
     this.fitToolbar();
+    this.onTools?.();
   }
 
   setBottom(items: ToolItem[]): void {
     this.bottomItems = items;
     renderTools(this.bottomLeft, items, (item, btn) => this.runAndOpen(item, btn, this.bottomLeft, () => this.bottomItems));
     this.fitToolbar();
+    this.onTools?.();
   }
+
+  /** What the column and the bottom bar hold now (the tool wheel shows the same). */
+  shown(): { column: ToolItem[]; bar: ToolItem[] } {
+    return { column: this.toolItems, bar: this.bottomItems };
+  }
+  /** Called when the column or the bottom bar is given new tools. */
+  onTools: (() => void) | null = null;
 
   /** What is offered now: the left column, the bottom bar and the open window's buttons. */
   offered(): ToolItem[] {
@@ -1644,7 +1653,7 @@ function shown(v: number, kind: FieldKind): string {
  * Only what can be used right now: tools that can't (greyed before) are left
  * out, and so are groups with nothing usable inside.
  */
-function usable(items: ToolItem[]): ToolItem[] {
+export function usable(items: ToolItem[]): ToolItem[] {
   const out: ToolItem[] = [];
   for (const item of items) {
     if (item.disabled) continue;
