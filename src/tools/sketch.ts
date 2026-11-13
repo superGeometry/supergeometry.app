@@ -1084,8 +1084,9 @@ export class SketchTool implements Tool {
 
   private updateMenu(): void {
     const app = this.app;
-    // With the tool wheel on, it holds these tools (by what they are for) once there is a plane to draw on.
-    app.wheel.cover(this.phase === "plane" ? false : "sketch");
+    // With the tool wheel on, it holds these tools (by what they are for) once there is a plane
+    // to draw on; while the plane is asked for, the column (Exit Sketch) shows, and the wheel is just its Settings.
+    app.wheel.cover(this.phase === "plane" ? "tool" : "sketch");
     const exit: ToolItem = { id: "exit", label: "Exit Sketch", icon: "exit", shortcut: "Esc", pulse: this.exitPulse, run: () => app.setTool(null) };
     if (this.phase === "plane") {
       app.ui.setTools([exit]);

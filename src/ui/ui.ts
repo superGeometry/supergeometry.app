@@ -501,7 +501,12 @@ export class UI {
     this.popover.style.top = `${Math.round(Math.max(8, Math.min(y, innerHeight - this.popover.offsetHeight - 8)))}px`;
     const away = (e: Event) => {
       if (e.type === "keydown" ? (e as KeyboardEvent).key !== "Escape" : this.popover.contains(e.target as Node)) return;
-      if (e.type === "keydown") e.stopPropagation();
+      // Esc, or a press on the model, is spent on closing it: it doesn't also step back, pick,
+      // or finish the tool that is open (a tap on empty space is a tool's Done).
+      if (e.type === "keydown" || (e.target as Element).tagName === "CANVAS") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       this.closePopover();
     };
     // (Next tick: the press that opened it doesn't close it.)
