@@ -5583,6 +5583,13 @@ body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"
   user-select: none;
   -webkit-touch-callout: none;
 }
+/* No tap flash: a phone's browser otherwise lights up the whole drawing (a
+   blue square over the wheel) on every tap; the cells show what was tapped. */
+.wheel-root,
+.wheel-root * {
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
 .wheel-root[hidden] {
   display: none;
 }
@@ -5650,16 +5657,35 @@ circle.wheel-plate {
 .wheel-sector.own {
   fill: rgba(30, 38, 54, 0.97);
 }
+/* Stronger than a shade: what is on (the tool in use, a setting that's on)
+   and what is open (the group, the tool whose row is out) get the accent -
+   a blue fill and outline, the icon and name bright - so the one picked is
+   found at a glance among icons that look alike. */
 .wheel-cell.on,
 .wheel-sector.on {
-  fill: #223250;
+  fill: #1d3a6b;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
 }
 .wheel-sector.open,
 .wheel-cell.open {
-  fill: #26375a;
+  fill: #2a57a3;
+  stroke: #8fbcff;
+  stroke-width: 2px;
 }
 .wheel-cell.hot {
-  fill: #2f4c7e;
+  fill: #3563ad;
+}
+.wheel-item.on svg {
+  color: #7fb2ff;
+}
+.wheel-item.on .wheel-name {
+  font-weight: 600;
+}
+.wheel-item.open,
+.wheel-item.open .wheel-name {
+  color: #fff;
+  font-weight: 600;
 }
 .wheel-sector.dim {
   fill: rgba(23, 25, 29, 0.86);

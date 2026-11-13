@@ -1088,6 +1088,7 @@ export class Wheel implements WheelHandle {
   /** Fan out a group's tools (-1: none), or the tools of a tool opened inside it. */
   private showFan(i: number, trail: ToolItem[] = []): void {
     this.ringEls[this.openSector]?.classList.remove("open");
+    this.ringItems.children[this.openSector]?.classList.remove("open");
     this.fanCount++;
     // (Another row of a cascade added to the same group's fan: only that row comes in.)
     const before = i === this.openSector && i >= 0 ? this.fan.length : 0;
@@ -1095,7 +1096,13 @@ export class Wheel implements WheelHandle {
     this.openSector = i;
     const built = i < 0 ? { fan: [], trail: [] } : this.buildFan(i, trail);
     this.trail = built.trail;
-    this.ringEls[i]?.classList.add("open");
+    const open = this.ringEls[i];
+    if (open) {
+      open.classList.add("open");
+      this.ringItems.children[i]?.classList.add("open");
+      // (Drawn last: its outline whole, over its neighbours'.)
+      this.ringSvg.append(open);
+    }
     if (this.hot >= CELL) {
       this.hot = NONE;
       this.tip.hidden = true;
@@ -1121,9 +1128,11 @@ export class Wheel implements WheelHandle {
       const up = Math.abs(Math.sin(mid));
       const across = Math.abs(Math.cos(mid));
       const width = (up * (c.a1 - c.a0) * rm + across * (c.r1 - c.r0)) / (up + across) - 4;
-      this.fanItems.append(this.item(it, kidsOf(it).length ? `${it.label} ›` : it.label, `${it.active ? "on" : ""}${it.pulse ? " mark" : ""}`, rm, mid, width));
+      this.fanItems.append(this.item(it, kidsOf(it).length ? `${it.label} ›` : it.label, `${it.active ? "on" : ""}${opened.has(it) ? " open" : ""}${it.pulse ? " mark" : ""}`, rm, mid, width));
       return p;
     });
+    // (What's on or open is drawn last: its outline whole, not under its neighbours'.)
+    for (const p of this.fanEls) if (p.classList.contains("on") || p.classList.contains("open")) this.fanSvg.append(p);
     if (deeper && !calm()) {
       const grow = [{ opacity: 0, transform: "scale(0.94)" }, { opacity: 1, transform: "none" }];
       for (let k = before; k < this.fan.length; k++) this.fanEls[k]?.animate(grow, { duration: 90, easing: "ease-out" });
