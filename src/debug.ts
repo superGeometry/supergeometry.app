@@ -139,6 +139,7 @@ export function installDebug(app: App): void {
 
     /** Every tool the wheel offers now, by where it is ("Tools › Fillet"): the same as sg.actions(), arranged its way. */
     wheelTools: () => app.wheel.tools(),
+    settingsWheel: () => app.settingsWheel.describe(),
 
     /** Pick things, as taps would (sg.sel builds them). */
     select(...sel: Sel[]) {

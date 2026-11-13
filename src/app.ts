@@ -70,6 +70,8 @@ export class App implements AppContext {
   readonly ui = new UI();
   /** The tool wheel (More → Tool wheel): the tools in a ring round the pointer, beside the column. */
   readonly wheel = new Wheel({ ui: this.ui, mainTools: () => this.mainTools() });
+  /** The Settings wheel: always on the screen while the wheel is on (folded to its cog unless opened). */
+  readonly settingsWheel = new Wheel({ ui: this.ui, mainTools: () => [] }, "settings");
   private input: InputRouter;
   result: RegenResult | null = null;
   selection: Sel[] = [];
@@ -297,7 +299,7 @@ export class App implements AppContext {
     // With the tool wheel on, a tool with a window of its own (the selection tool and a sketch
     // say for themselves what the wheel shows) keeps the wheel's handle: Settings stay in reach.
     // (Unless it gave way to another tool as it started: the wheel is that one's to set.)
-    if (this.tool === next && next !== this.selectTool && !(next instanceof SketchTool)) this.wheel.cover("tool");
+    if (this.tool === next && next !== this.selectTool && !(next instanceof SketchTool)) this.wheel.cover(false);
     this.updateUndo();
     // Leaving an operation drops its preview.
     if (leavingOp && next === this.selectTool) void this.regenerate();

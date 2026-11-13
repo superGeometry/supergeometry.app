@@ -29,10 +29,9 @@ import { el, usable, type ToolItem, type UI } from "./ui";
 
 /**
  * What it shows: the selection tool's column ("model"), the sketch's, or -
- * while another tool is open, whose own column and window stay - just the
- * Settings ("tool").
+ * the second wheel, always on the screen - the Settings ("settings").
  */
-export type WheelLayout = "model" | "sketch" | "tool";
+export type WheelLayout = "model" | "sketch" | "settings";
 
 /** More for the model wheel's top sector, beside what the column holds for what's picked (Reveal in Items). */
 export type WheelExtras = () => ToolItem[];
@@ -48,10 +47,9 @@ export interface WheelHandle {
   /**
    * What it shows from now on: the selection tool's column ("model": what's
    * picked, or the main tools), the sketch's (its tools by what they are
-   * for), only the Settings beside a tool that keeps its own column ("tool"),
-   * or nothing (false).
+   * for), or nothing (false: another tool's own column and window show).
    */
-  cover(layout: WheelLayout | false, extras?: WheelExtras): void;
+  cover(layout: "model" | "sketch" | false, extras?: WheelExtras): void;
   /** Bring it up round a point of the page. (Kept somewhere, it is up already: `summon` unfolds it.) */
   open(x: number, y: number, opts?: WheelOpen): void;
   /** Up at the point, or away again (kept somewhere: folded, or unfolded). */
@@ -295,7 +293,7 @@ export class Wheel implements WheelHandle {
   /** Where it is kept, by layout: the middle as fractions of the page's width and height. */
   private spots: Partial<Record<WheelLayout, [number, number]>> = {};
   /** Kept, and folded to just its middle (until the page is loaded again). */
-  private folded: Record<WheelLayout, boolean> = { model: false, sketch: screenClass() === "phone", tool: true };
+  private folded: Record<WheelLayout, boolean> = { model: false, sketch: screenClass() === "phone", settings: true };
   /** Where it belongs (px): where it was put, or where it came up. */
   private home = { x: 0, y: 0 };
   /** The middle, on the page (off its home while a fan needs the room). */
@@ -343,8 +341,18 @@ export class Wheel implements WheelHandle {
   private tipTimer = 0;
   private refreshing = false;
 
-  constructor(private host: WheelHost) {
-    this.root.id = "wheel";
+  /**
+   * The tool wheel ("tools": what a tool asks for with `cover`), or the
+   * Settings wheel ("settings"): always on the screen while the wheel is on,
+   * folded to its cog unless opened.
+   */
+  constructor(
+    private host: WheelHost,
+    private readonly kind: "tools" | "settings" = "tools",
+  ) {
+    this.root.id = kind === "settings" ? "wheel-settings" : "wheel";
+    this.root.classList.add("wheel-root");
+    if (kind === "settings") this.layout = "settings";
     this.root.hidden = true;
     this.tip.hidden = true;
     this.hubEl.setAttribute("class", "wheel-hub");
@@ -373,10 +381,14 @@ export class Wheel implements WheelHandle {
       this.rest();
     });
     this.root.addEventListener("contextmenu", (e) => e.preventDefault());
-    host.ui.onTools = () => this.itemsChanged();
+    if (kind === "tools") host.ui.onTools = () => this.itemsChanged();
     // (A setting changed: the mode itself, or what Settings shows - the unit, the numpad on or off.)
     settings.onChange(() => (this.sync(), this.itemsChanged()));
-    this.sync();
+    if (kind === "settings") {
+      this.loadSpots();
+      // (Once the app is set up: its lists are the right column's, made after the wheels.)
+      setTimeout(() => this.sync());
+    } else this.sync();
   }
 
   get on(): boolean {
@@ -388,14 +400,15 @@ export class Wheel implements WheelHandle {
   }
 
   get kept(): boolean {
-    return this.layout === "sketch" || this.layout === "tool" || (this.layout === "model" && !!this.spots.model);
+    return this.layout === "sketch" || this.layout === "settings" || (this.layout === "model" && !!this.spots.model);
   }
 
   private get isFolded(): boolean {
     return !!this.layout && this.kept && this.folded[this.layout];
   }
 
-  cover(layout: WheelLayout | false, extras?: WheelExtras): void {
+  cover(layout: "model" | "sketch" | false, extras?: WheelExtras): void {
+    if (this.kind === "settings") return;
     const next = layout || null;
     if (extras) this.extras = extras;
     // (The sketch says so each time it sets its tools: the same again is nothing new.)
@@ -409,10 +422,12 @@ export class Wheel implements WheelHandle {
 
   /** The column steps aside while the wheel stands in for it; a kept wheel is up whenever there is something for it to show. */
   private sync(): void {
-    // (On at all: the right column keeps only Fit, Screenshot and History - the rest is under Settings here.)
-    document.body.classList.toggle("wheel-ui", this.on);
-    // (Beside a tool it stands in for nothing: the tool's own column and bar stay.)
-    document.body.classList.toggle("wheel-covers", this.on && (this.layout === "model" || this.layout === "sketch"));
+    if (this.kind === "tools") {
+      // (On at all: the right column keeps only Fit, Screenshot and History - the rest is on the Settings wheel.)
+      document.body.classList.toggle("wheel-ui", this.on);
+      // (While another tool is open it stands in for nothing: the tool's own column and bar stay.)
+      document.body.classList.toggle("wheel-covers", this.on && (this.layout === "model" || this.layout === "sketch"));
+    }
     if (!this.on || !this.layout) return this.hide();
     if (this.kept && !this.up) this.showKept();
   }
@@ -436,7 +451,14 @@ export class Wheel implements WheelHandle {
   private saveSpots(): void {
     try {
       const all = JSON.parse(localStorage.getItem(SPOTS) ?? "{}") ?? {};
-      all[screenClass()] = this.spots;
+      // (Both wheels keep their places here: each writes only its own.)
+      const mine: WheelLayout[] = this.kind === "settings" ? ["settings"] : ["model", "sketch"];
+      const spots = { ...(all[screenClass()] ?? {}) };
+      for (const k of mine) {
+        if (this.spots[k]) spots[k] = this.spots[k];
+        else delete spots[k];
+      }
+      all[screenClass()] = spots;
       localStorage.setItem(SPOTS, JSON.stringify(all));
     } catch {
       // private window: not remembered
@@ -445,20 +467,22 @@ export class Wheel implements WheelHandle {
 
   /** Where a kept wheel belongs on the page as it is now. */
   private homeNow(): { x: number; y: number } {
-    // (The sketch's wheel, or the one beside a tool, never moved: where the model's is kept, if it is.)
+    if (this.layout === "settings") {
+      const s = this.spots.settings;
+      if (s) return { x: s[0] * innerWidth, y: s[1] * innerHeight };
+      // Never put anywhere: at the bottom right, beside the right-hand column (folded, just its cog).
+      const col = document.getElementById("right-col")?.getBoundingClientRect();
+      const right = col && col.width > 0 ? col.left : innerWidth;
+      const r = this.isFolded ? this.m.r0 : this.m.r1;
+      return { x: right - 8 - r, y: innerHeight - 70 - r };
+    }
+    // (The sketch's wheel never moved: where the model's is kept, if it is.)
     const s = (this.layout && this.spots[this.layout]) ?? this.spots.model;
     if (s) return { x: s[0] * innerWidth, y: s[1] * innerHeight };
     // Never put anywhere: where the tool column is - at the left, beside Items when that is open
     // (folded, its middle is at the edge; unfolded, the ring is clear of it).
     const items = document.getElementById("items");
-    let left = items?.classList.contains("open") && innerWidth > 720 ? items.getBoundingClientRect().right : 0;
-    if (this.layout === "tool") {
-      // (Beside the tool's own column, where it has one at the left, level with the handle:
-      // Extrude's other tools, Exit Measure. A phone's strip of tools along the bottom isn't in its way.)
-      const col = document.getElementById("toolbar")?.getBoundingClientRect();
-      const r = this.m.r0 + 8;
-      if (col && col.width > 0 && col.left < innerWidth / 3 && col.top < innerHeight / 2 + r && col.bottom > innerHeight / 2 - r) left = Math.max(left, col.right);
-    }
+    const left = items?.classList.contains("open") && innerWidth > 720 ? items.getBoundingClientRect().right : 0;
     return { x: left + 8 + (this.isFolded ? this.m.r0 : this.m.r1), y: innerHeight / 2 };
   }
 
@@ -481,6 +505,12 @@ export class Wheel implements WheelHandle {
     if (!this.layout) return;
     this.folded[this.layout] = on;
     this.root.classList.toggle("folded", on);
+    if (!on && this.layout === "settings") {
+      // (Unfolded: the lists as they are now - the settings may have changed from elsewhere since.)
+      this.sectors = this.content().sectors;
+      this.sig = signature(this.sectors);
+      this.drawRing();
+    }
     if (on) this.shut();
     this.unpoint();
     this.root.classList.add("slide");
@@ -516,13 +546,39 @@ export class Wheel implements WheelHandle {
   // ---------------------------------------------------------------- content
 
   private content(): { sectors: Sector[]; pick: string } {
-    return this.layout === "sketch" ? this.sketchContent() : this.layout === "tool" ? this.toolContent() : this.modelContent();
+    return this.layout === "sketch" ? this.sketchContent() : this.layout === "settings" ? this.settingsContent() : this.modelContent();
   }
 
-  /** Beside a tool: the Settings, each a place on the ring (a tap opens its list, or switches it). */
-  private toolContent(): { sectors: Sector[]; pick: string } {
-    const sectors = (this.settingsItem().children ?? []).map((it): Sector => ({ id: it.id, label: it.label, icon: it.icon, cells: [], item: it, on: !!it.active, mark: false }));
+  /**
+   * The Settings wheel: Snap to, Units, Appearance, Shaders - each fanning out
+   * its switches and choices, set with a tap right there (what only a slider or
+   * a typed value can set is under More…, in the list's window) - and NumPad.
+   */
+  private settingsContent(): { sectors: Sector[]; pick: string } {
+    const ui = this.host.ui;
+    const lists: [string, string, IconName][] = [
+      ["snap", "Snap to", "magnet"],
+      ["units", "Units", "ruler"],
+      ["appearance", "Appearance", "eye"],
+      ["display", "Shaders", "display"],
+    ];
+    const sectors = lists.map(([id, label, icon]): Sector => ({
+      id,
+      label,
+      icon,
+      cells: ui.optionItems(id, () => this.openList(id, label)),
+      mark: false,
+    }));
+    const pad = settings.value.numpad;
+    const numpad: ToolItem = { id: "set-numpad", label: "NumPad", icon: "numpad", sub: pad ? "On" : "Off", active: pad, run: () => ui.popAt("numpad", 0, 0) };
+    sectors.push({ id: "numpad", label: "NumPad", icon: "numpad", cells: [], item: numpad, on: pad, mark: false });
     return { sectors, pick: "" };
+  }
+
+  /** A list's window (for what the wheel can't set: a slider, a typed size), beside the wheel on the side the pointer is. */
+  private openList(id: string, label: string): void {
+    const out = Math.hypot(this.px - this.cx, this.py - this.cy) + 34;
+    this.host.ui.popAt(id, this.px >= this.cx ? this.cx + out : this.cx - out - 270, this.py - 28, label);
   }
 
   /** The model's ring: the top sector, then the main groups in the column's order - each with what it holds now. */
@@ -563,7 +619,7 @@ export class Wheel implements WheelHandle {
     }
     const pick = shown.find((it) => it.id === "deselect")?.sub ?? "";
     own = [...own, ...(this.extras?.() ?? []).map((item) => ({ item }))];
-    const view = [...usable(bar).filter(notSep), this.settingsItem()].map((item, i): Cell => ({ item, gap: i === 0 && own.length > 0 }));
+    const view = usable(bar).filter(notSep).map((item, i): Cell => ({ item, gap: i === 0 && own.length > 0 }));
     const top: Sector = { id: OWN, label: pick || "View", icon: pick ? "pointer" : "eye", cells: [...own, ...view], mark: marked(view) };
     return { sectors: [top, ...groups], pick };
   }
@@ -592,50 +648,17 @@ export class Wheel implements WheelHandle {
       sectors.push({ id: spec.id, label: spec.label, icon: spec.icon, cells, mark: false });
     }
     // More: what isn't named above (Other plane, a tool added since), then the bottom bar's (the line
-    // type, Normal to Sketch), the constraints column on or off, and Settings.
+    // type, Normal to Sketch) and the constraints column on or off. (Settings are on their own wheel.)
     const more = sectors.find((s) => s.id === "more" && !s.item);
     if (more) {
       const rest = tools.filter((t) => !placed.has(t.id)).map((item): Cell => ({ item }));
       const cons = settings.value.showConstraints;
       const constraints: ToolItem = { id: "set-constraints", label: "Constraints", icon: "constraints", sub: cons ? "On" : "Off", active: cons, run: () => this.host.ui.popAt("constraints", 0, 0) };
-      more.cells = [...rest, ...[...usable(bar).filter(notSep), constraints, this.settingsItem()].map((item, i): Cell => ({ item, gap: i === 0 && rest.length > 0 }))];
+      more.cells = [...rest, ...[...usable(bar).filter(notSep), constraints].map((item, i): Cell => ({ item, gap: i === 0 && rest.length > 0 }))];
     }
     for (const s of sectors) if (!s.item) s.mark = marked(s.cells);
     // (A category with nothing in it has no place on the ring.)
     return { sectors: sectors.filter((s) => s.item || s.cells.length), pick: "" };
-  }
-
-  /**
-   * Settings: the right column's lists (snapping, units and grid, appearance,
-   * shaders) and the numpad switch. With the wheel on they are here instead
-   * of in the column; each list opens by the wheel, where it was asked for.
-   */
-  private settingsItem(): ToolItem {
-    const ui = this.host.ui;
-    const list = (id: string, label: string, icon: IconName): ToolItem => ({
-      id: `set-${id}`,
-      label,
-      icon,
-      sub: ui.rightLabel(id),
-      run: () => {
-        // Beside the wheel, on the side the pointer is: not over it (kept somewhere, it stays up).
-        const out = Math.hypot(this.px - this.cx, this.py - this.cy) + 34;
-        ui.popAt(id, this.px >= this.cx ? this.cx + out : this.cx - out - 270, this.py - 28, label);
-      },
-    });
-    const pad = settings.value.numpad;
-    return {
-      id: "settings",
-      label: "Settings",
-      icon: "settings",
-      children: [
-        list("snap", "Snap to", "magnet"),
-        list("units", "Units", "ruler"),
-        list("appearance", "Appearance", "eye"),
-        list("display", "Shaders", "display"),
-        { id: "set-numpad", label: "NumPad", icon: "numpad", sub: pad ? "On" : "Off", active: pad, run: () => ui.popAt("numpad", 0, 0) },
-      ],
-    };
   }
 
   /**
@@ -876,7 +899,7 @@ export class Wheel implements WheelHandle {
   /** The whole wheel anew: the middle, the ring, no fan. */
   private draw(): void {
     this.hubEl.setAttribute("r", String(this.m.hub));
-    this.grip.innerHTML = this.layout === "tool" ? icons.settings : icons.move;
+    this.grip.innerHTML = this.layout === "settings" ? icons.settings : icons.move;
     this.hot = NONE;
     this.tip.hidden = true;
     this.drawRing();
@@ -897,7 +920,7 @@ export class Wheel implements WheelHandle {
     this.ringEls = this.sectors.map((s, i) => {
       const mid = this.midOf(i);
       const dim = !s.cells.length && !s.item;
-      const p = path(`wheel-cell wheel-sector${dim ? " dim" : ""}${i === 0 && this.layout !== "tool" ? " own" : ""}${s.on ? " on" : ""}`, wedge(m.r0, m.r1, mid - step / 2, mid + step / 2, 3));
+      const p = path(`wheel-cell wheel-sector${dim ? " dim" : ""}${i === 0 && this.layout !== "settings" ? " own" : ""}${s.on ? " on" : ""}`, wedge(m.r0, m.r1, mid - step / 2, mid + step / 2, 3));
       this.ringSvg.append(p);
       this.ringItems.append(this.item(s, s.label, `sector${dim ? " dim" : ""}${s.mark ? " mark" : ""}${s.on ? " on" : ""}`, (m.r0 + m.r1) / 2 + 1, mid));
       return p;
@@ -1067,7 +1090,7 @@ export class Wheel implements WheelHandle {
   /** What the middle is for, said under the wheel once the pointer rests on it. */
   private sayHub(): void {
     const text = this.isFolded
-      ? this.layout === "tool"
+      ? this.layout === "settings"
         ? "Settings: click · drag to move"
         : "Click to unfold · drag to move"
       : !this.kept
@@ -1199,9 +1222,13 @@ export class Wheel implements WheelHandle {
   }
 
   private run(item: ToolItem): void {
+    // A switch or a choice on the Settings wheel is set right there: the fan stays, showing it set.
+    if (item.id.startsWith("opt-") && !item.id.endsWith("-more")) {
+      item.run?.();
+      this.itemsChanged();
+      return;
+    }
     this.close();
-    // (Beside a tool it folds away again: the tool's own handles and window are what's being worked with.)
-    if (this.layout === "tool") this.fold(true);
     item.run?.();
   }
 

@@ -479,6 +479,58 @@ export class UI {
     return this.rightEntries.get(id)?.label?.();
   }
 
+  /**
+   * One of the right column's lists as wheel cells: each switch and choice
+   * in it a tool that sets it (lit while on), a new part of the list where
+   * the list has a heading. What only a slider or a typed value sets is left
+   * to `more` (the list's window), under More… at the end.
+   */
+  optionItems(id: string, more: () => void): { item: ToolItem; gap?: boolean }[] {
+    const entry = this.rightEntries.get(id);
+    if (!entry) return [];
+    const host = el("div", "");
+    entry.open(host);
+    const out: { item: ToolItem; gap?: boolean }[] = [];
+    let part = "";
+    let gap = false;
+    let rest = false;
+    let n = 0;
+    for (const row of Array.from(host.querySelectorAll<HTMLElement>(".pop-heading, .pop-row"))) {
+      if (row.classList.contains("pop-heading")) {
+        part = row.textContent ?? "";
+        gap = out.length > 0;
+        continue;
+      }
+      const toggle = row.classList.contains("toggle-row");
+      if (!toggle && !row.classList.contains("choice-row")) {
+        rest = true;
+        continue;
+      }
+      const k = n++;
+      const on = row.classList.contains(toggle ? "on" : "active");
+      const label = (toggle ? row.firstElementChild?.textContent : row.textContent) ?? "";
+      out.push({
+        gap,
+        item: {
+          id: `opt-${id}-${k}`,
+          label,
+          icon: on ? "check" : toggle ? "close" : "pointer",
+          sub: toggle ? `${part} · ${on ? "On" : "Off"}` : part,
+          active: on,
+          // (The list drawn again, its row clicked: what the window's own row would do.)
+          run: () => {
+            const h = el("div", "");
+            entry.open(h);
+            h.querySelectorAll<HTMLElement>(".toggle-row, .choice-row")[k]?.click();
+          },
+        },
+      });
+      gap = false;
+    }
+    if (rest) out.push({ gap: true, item: { id: `opt-${id}-more`, label: "More…", icon: "more", run: more } });
+    return out;
+  }
+
   /** Where a window from the wheel's Settings was last dragged to (the next one opens there). */
   private popSpot: { x: number; y: number } | null = null;
 

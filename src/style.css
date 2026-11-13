@@ -5528,7 +5528,7 @@ body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"
   width: 18px;
   height: 18px;
 }
-#wheel {
+.wheel-root {
   position: fixed;
   left: 0;
   top: 0;
@@ -5541,25 +5541,25 @@ body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"
   user-select: none;
   -webkit-touch-callout: none;
 }
-#wheel[hidden] {
+.wheel-root[hidden] {
   display: none;
 }
 /* A fan that didn't fit on the screen: the wheel slides to bring it on. */
-#wheel.slide {
+.wheel-root.slide {
   transition: transform 0.14s ease-out;
 }
 /* (Touches on it are never the page panning: the <svg>s themselves say so, not only their shapes.) */
-#wheel,
-#wheel svg {
+.wheel-root,
+.wheel-root svg {
   touch-action: none;
 }
 /* Dragged by its middle: it keeps up with the pointer. */
-#wheel.dragging {
+.wheel-root.dragging {
   transition: none;
 }
 /* Kept somewhere and folded: only the middle shows. */
-#wheel.folded .wheel-ring,
-#wheel.folded .wheel-fan {
+.wheel-root.folded .wheel-ring,
+.wheel-root.folded .wheel-fan {
   display: none;
 }
 .wheel-body,
@@ -5634,22 +5634,22 @@ circle.wheel-plate {
 .wheel-hub.hot {
   fill: rgba(20, 22, 26, 0.8);
 }
-#wheel.dragging .wheel-hub {
+.wheel-root.dragging .wheel-hub {
   cursor: grabbing;
   fill: #2f4c7e;
 }
-#wheel.folded .wheel-hub {
+.wheel-root.folded .wheel-hub {
   fill: rgba(31, 33, 37, 0.95);
   stroke: rgba(120, 165, 255, 0.55);
   stroke-width: 1.5px;
 }
-#wheel.folded .wheel-hub.hot {
+.wheel-root.folded .wheel-hub.hot {
   fill: #2f4c7e;
 }
 /* Just up: the second tap of a double tap still reaches the model. */
-#wheel.fresh .wheel-hub,
-#wheel.fresh-all .wheel-hub,
-#wheel.fresh-all .wheel-plate {
+.wheel-root.fresh .wheel-hub,
+.wheel-root.fresh-all .wheel-hub,
+.wheel-root.fresh-all .wheel-plate {
   pointer-events: none;
 }
 .wheel-item {
