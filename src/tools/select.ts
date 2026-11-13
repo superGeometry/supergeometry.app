@@ -169,18 +169,10 @@ export class SelectTool implements Tool {
     this.app.wheel.open(r.left + p.x, r.top + p.y, { type: p.type, held, summon });
   }
 
-  /** What the right-click menu holds beside the tools (the wheel takes its place): for the wheel's top sector. */
-  private wheelExtras(): { own: ToolItem[]; view: ToolItem[] } {
-    const app = this.app;
+  /** For the wheel's top sector, beside the picked thing's tools: where it is in the Items list (as the right-click menu has it). */
+  private wheelExtras(): ToolItem[] {
     const ids = this.pickedIds();
-    const through = app.view.selectThrough;
-    return {
-      own: ids.length ? [{ id: "reveal", label: "Reveal in Items", icon: "body", run: () => app.revealInItems(ids) }] : [],
-      view: [
-        { id: "fit", label: "Zoom to Fit", icon: "fit", shortcut: "F", run: () => app.view.fitAll() },
-        { id: "selectThrough", label: "Select Through", icon: "pointer", sub: through ? "On" : "Off", active: through, shortcut: "Ctrl+Shift+S", run: () => app.view.setSelectThrough(!through) },
-      ],
-    };
+    return ids.length ? [{ id: "reveal", label: "Reveal in Items", icon: "body", run: () => this.app.revealInItems(ids) }] : [];
   }
 
   /** What's picked, as rows of the Items list: bodies, planes, axes, images, sketches. */
@@ -397,17 +389,18 @@ export class SelectTool implements Tool {
       this.app.setSelection([]);
       return;
     }
-    // The tool wheel is on: it is the menu. What's under the pointer is picked
-    // first, unless it is part of the pick already (or nothing is there: then
-    // the wheel is for what's picked, wherever the pointer is).
-    if (this.app.wheel.on) {
+    // The tool wheel is on, and a finger or pen was held still (they have no
+    // right button): the wheel comes up under it. What's there is picked first,
+    // unless it is part of the pick already (or nothing is there: then the
+    // wheel is for what's picked). A mouse's right-click is the menu, as ever.
+    if (this.app.wheel.on && p.type !== "mouse") {
       const s = hitToSel(this.pickAt(p));
       const sel = this.app.selection;
       const picked = !!s && sel.some((x) => sameSel(x, s) || (x.kind === "body" && "body" in s && s.body === x.body));
       if (s && !picked && s.kind !== "curve" && s.kind !== "point") this.app.setSelection([s]);
       this.lastTap = p;
-      // (A finger or pen held still brought it up: it can slide to a tool and lift there.)
-      return this.openWheel(p, p.type !== "mouse", true);
+      // (It can slide to a tool and lift there.)
+      return this.openWheel(p, true, true);
     }
     const rows: (MenuRow | "-")[] = [];
     if (this.app.selection.length) {
@@ -507,7 +500,7 @@ export class SelectTool implements Tool {
               ? "Pick a tool, or tap the model to select part of it."
               : "Tap Sketch to start: draw a shape, then pull it into 3D."
           : // (The tool wheel on, up at the pointer and closed: no column to turn to - how to bring it up for what's picked.)
-            this.armedHint() + (this.app.wheel.on && !this.app.wheel.kept ? (isTouchDevice ? " Press and hold for the tool wheel." : " Right-click (or Q) for the tool wheel.") : ""),
+            this.armedHint() + (this.app.wheel.on && !this.app.wheel.kept ? (isTouchDevice ? " Press and hold for the tool wheel." : " Press Q for the tool wheel.") : ""),
     );
     const first = sel[0];
     if (!first) return;

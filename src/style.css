@@ -5468,10 +5468,21 @@ html[data-screen="phone"] .bim-props {
 /* ------------------------------------------------------------- tool wheel */
 /* An experiment beside the tool column (More → Tool wheel): the tools in a
    ring round the pointer, or kept where it was dragged to. While it stands in
-   for a column (the selection tool's, the sketch's), the column steps aside
-   (the bottom bar stays: it also shows what is on). */
-body.wheel-covers #toolbar {
+   for a column (the selection tool's, the sketch's), the column and the bar
+   at the bottom left step aside: their tools are on the wheel. */
+body.wheel-covers #toolbar,
+body.wheel-covers #bottom-left {
   display: none !important;
+}
+/* With the wheel on, the right column keeps Fit, Screenshot and History: its
+   other lists and switches (snapping, units, appearance, shaders, the numpad,
+   a sketch's constraints) are on the wheel, under Settings and More. */
+body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"]):not([data-right="history"]) {
+  display: none;
+}
+/* One of those lists, opened from the wheel at the pointer: over the wheel. */
+#popover.at-point {
+  z-index: 49;
 }
 #wheel {
   position: fixed;

@@ -1312,7 +1312,8 @@ export class App implements AppContext {
     moreItem("m-wheel", () => {
       settings.set("wheel", !settings.value.wheel);
       paintWheel();
-      this.refreshTools();
+      // (The selection tool's guide text says how the tools are reached. Another tool's column and bar stay its own.)
+      if (this.tool === this.selectTool) this.selectTool.refresh();
       this.ui.toast(settings.value.wheel ? "Tool wheel on: tap the model, or an empty spot, and the tools come up round the pointer" : "Tool wheel off: the tools are in the column on the left again");
     });
     // Offline mode: the app kept on this device, so it works with no connection.

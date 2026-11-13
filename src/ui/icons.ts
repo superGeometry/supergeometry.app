@@ -123,6 +123,8 @@ export const icons = {
   constraints: svg('<path d="M5 5v14M9 5v14"/><path d="M13 19L19 5"/><circle cx="16" cy="12" r="1.2" fill="currentColor"/>'),
   isolate: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
   body: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" fill="currentColor" fill-opacity=".2"/>'),
+  // A cog: the settings (on the tool wheel).
+  settings: svg('<circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.5-2-3.4-2.3 1a7.6 7.6 0 0 0-2.6-1.5l-.3-2.6h-4l-.3 2.6a7.6 7.6 0 0 0-2.6 1.5l-2.3-1-2 3.4 2 1.5a7.6 7.6 0 0 0 0 3l-2 1.5 2 3.4 2.3-1a7.6 7.6 0 0 0 2.6 1.5l.3 2.6h4l.3-2.6a7.6 7.6 0 0 0 2.6-1.5l2.3 1 2-3.4z"/>'),
 };
 
 export type IconName = keyof typeof icons;

@@ -16,6 +16,9 @@
 // It holds exactly what the column and the bottom bar hold - the same
 // ToolItems, by the same rule (only what can be used now) - so the keys, the
 // search box and the column itself (wheel off) go on working as they did.
+// With it on, the bottom bar steps aside with the column, and the right
+// column keeps Fit, Screenshot and History: its other lists (snapping, units,
+// appearance, shaders, the numpad) are under Settings, in View.
 
 import { isCoarse, screenClass } from "../device";
 import { settings } from "../settings";
@@ -25,8 +28,8 @@ import { el, usable, type ToolItem, type UI } from "./ui";
 /** Whose column it stands in for: the selection tool's, or the sketch's. */
 export type WheelLayout = "model" | "sketch";
 
-/** More for the model wheel's top sector, beside what the column and the bar hold: for what's picked, and for the view. */
-export type WheelExtras = () => { own: ToolItem[]; view: ToolItem[] };
+/** More for the model wheel's top sector, beside what the column holds for what's picked (Reveal in Items). */
+export type WheelExtras = () => ToolItem[];
 
 /** What a tool sees of the wheel. */
 export interface WheelHandle {
@@ -179,19 +182,23 @@ function wedge(r0: number, r1: number, a0: number, a1: number, gap = 2): string 
 }
 
 /**
- * A group's tools as rows of a half ring outside the ring of groups, centred
- * on the group (`mid`). One row while they fit, then a second further out.
+ * A group's tools as rows of a piece of ring outside the ring of groups,
+ * centred on the group (`mid`): half a ring at most (`spanAt` says how much
+ * of the ring a row reaching out to a radius may take - less than half where
+ * the screen is too small for that). One row while they fit, then more
+ * further out.
  */
-function fanLayout(cells: Cell[], mid: number, m: Metrics): Placed[] {
+function fanLayout(cells: Cell[], mid: number, m: Metrics, spanAt: (reach: number) => number = () => Math.PI): Placed[] {
   const N = cells.length;
   if (!N) return [];
-  const rows: { r0: number; r1: number; rm: number; cap: number }[] = [];
+  const rows: { r0: number; r1: number; rm: number; span: number; cap: number }[] = [];
   let room = 0;
-  for (let k = 0; room < N && k < 4; k++) {
+  for (let k = 0; room < N && k < 5; k++) {
     const r0 = m.r1 + m.gap + k * (m.depth + m.gap);
     const rm = r0 + m.depth / 2;
-    const cap = Math.max(1, Math.floor((Math.PI * rm) / m.min));
-    rows.push({ r0, r1: r0 + m.depth, rm, cap });
+    const span = spanAt(r0 + m.depth);
+    const cap = Math.max(1, Math.floor((span * rm) / m.min));
+    rows.push({ r0, r1: r0 + m.depth, rm, span, cap });
     room += cap;
   }
   // Read top to bottom at either side, left to right above and below.
@@ -209,7 +216,7 @@ function fanLayout(cells: Cell[], mid: number, m: Metrics): Placed[] {
     const seq = flip ? [...part].reverse() : part;
     const gapAt = seq.map((c, j) => j > 0 && !!(flip ? seq[j - 1].gap : c.gap));
     const gaps = gapAt.filter(Boolean).length * PART_GAP;
-    const w = Math.min(m.max, (Math.PI * row.rm - gaps) / seq.length);
+    const w = Math.min(m.max, (row.span * row.rm - gaps) / seq.length);
     let a = mid - (seq.length * w + gaps) / row.rm / 2;
     const placed = seq.map((c, j): Placed => {
       if (gapAt[j]) a += PART_GAP / row.rm;
@@ -355,7 +362,8 @@ export class Wheel implements WheelHandle {
     });
     this.root.addEventListener("contextmenu", (e) => e.preventDefault());
     host.ui.onTools = () => this.itemsChanged();
-    settings.onChange(() => this.sync());
+    // (A setting changed: the mode itself, or what Settings shows - the unit, the numpad on or off.)
+    settings.onChange(() => (this.sync(), this.itemsChanged()));
     this.sync();
   }
 
@@ -390,6 +398,8 @@ export class Wheel implements WheelHandle {
   /** The column steps aside while the wheel stands in for it; a kept wheel is up whenever it does. */
   private sync(): void {
     const covers = this.on && this.layout !== null;
+    // (On at all: the right column keeps only Fit, Screenshot and History - the rest is under Settings here.)
+    document.body.classList.toggle("wheel-ui", this.on);
     document.body.classList.toggle("wheel-covers", covers);
     if (!covers) return this.hide();
     if (this.kept && !this.up) this.showKept();
@@ -527,9 +537,8 @@ export class Wheel implements WheelHandle {
       });
     }
     const pick = shown.find((it) => it.id === "deselect")?.sub ?? "";
-    const extras = this.extras?.() ?? { own: [], view: [] };
-    own = [...own, ...extras.own.map((item) => ({ item }))];
-    const view = [...usable(bar).filter(notSep), ...extras.view].map((item, i): Cell => ({ item, gap: i === 0 && own.length > 0 }));
+    own = [...own, ...(this.extras?.() ?? []).map((item) => ({ item }))];
+    const view = [...usable(bar).filter(notSep), this.settingsItem()].map((item, i): Cell => ({ item, gap: i === 0 && own.length > 0 }));
     const top: Sector = { id: OWN, label: pick || "View", icon: pick ? "pointer" : "eye", cells: [...own, ...view], mark: marked(view) };
     return { sectors: [top, ...groups], pick };
   }
@@ -557,15 +566,51 @@ export class Wheel implements WheelHandle {
       });
       sectors.push({ id: spec.id, label: spec.label, icon: spec.icon, cells, mark: false });
     }
-    // More: what isn't named above (Other plane, a tool added since), then the bottom bar's (the line type, Normal to Sketch).
+    // More: what isn't named above (Other plane, a tool added since), then the bottom bar's (the line
+    // type, Normal to Sketch), the constraints column on or off, and Settings.
     const more = sectors.find((s) => s.id === "more" && !s.item);
     if (more) {
       const rest = tools.filter((t) => !placed.has(t.id)).map((item): Cell => ({ item }));
-      more.cells = [...rest, ...usable(bar).filter(notSep).map((item, i): Cell => ({ item, gap: i === 0 && rest.length > 0 }))];
+      const cons = settings.value.showConstraints;
+      const constraints: ToolItem = { id: "set-constraints", label: "Constraints", icon: "constraints", sub: cons ? "On" : "Off", active: cons, run: () => this.host.ui.popAt("constraints", 0, 0) };
+      more.cells = [...rest, ...[...usable(bar).filter(notSep), constraints, this.settingsItem()].map((item, i): Cell => ({ item, gap: i === 0 && rest.length > 0 }))];
     }
     for (const s of sectors) if (!s.item) s.mark = marked(s.cells);
     // (A category with nothing in it has no place on the ring.)
     return { sectors: sectors.filter((s) => s.item || s.cells.length), pick: "" };
+  }
+
+  /**
+   * Settings: the right column's lists (snapping, units and grid, appearance,
+   * shaders) and the numpad switch. With the wheel on they are here instead
+   * of in the column; each list opens by the wheel, where it was asked for.
+   */
+  private settingsItem(): ToolItem {
+    const ui = this.host.ui;
+    const list = (id: string, label: string, icon: IconName): ToolItem => ({
+      id: `set-${id}`,
+      label,
+      icon,
+      sub: ui.rightLabel(id),
+      run: () => {
+        // Beside the wheel, on the side the pointer is: not over it (kept somewhere, it stays up).
+        const out = Math.hypot(this.px - this.cx, this.py - this.cy) + 34;
+        ui.popAt(id, this.px >= this.cx ? this.cx + out : this.cx - out - 270, this.py - 28);
+      },
+    });
+    const pad = settings.value.numpad;
+    return {
+      id: "settings",
+      label: "Settings",
+      icon: "settings",
+      children: [
+        list("snap", "Snap to", "magnet"),
+        list("units", "Units", "ruler"),
+        list("appearance", "Appearance", "eye"),
+        list("display", "Shaders", "display"),
+        { id: "set-numpad", label: "NumPad", icon: "numpad", sub: pad ? "On" : "Off", active: pad, run: () => ui.popAt("numpad", 0, 0) },
+      ],
+    };
   }
 
   /** The tools shown in a group's fan: its own, or those of a tool opened inside it. */
@@ -595,14 +640,16 @@ export class Wheel implements WheelHandle {
     this.pick = pick;
     this.type = opts.type ?? "mouse";
     this.m = this.type === "touch" || isCoarse ? COARSE : FINE;
-    // Whole on the screen with any of its fans out, as near the pointer as that allows: it then
-    // never has to move under the pointer. Where the screen is too small for that (a phone, across),
-    // the ring is whole, and it slides when a fan needs the room (see fit).
+    // For a pointer that hovers: whole on the screen with any of its fans out, as near the
+    // pointer as that allows - it then never has to move under the pointer. For a finger (nothing
+    // is under it between taps), and where the screen is too small for that: the ring whole, right
+    // where it was asked for, and it slides when a fan needs the room (see fit).
     const M = 6;
     const reach = this.extent();
     const ring = this.m.r1;
-    const [l, r] = innerWidth >= reach.l + reach.r + 2 * M ? [reach.l, reach.r] : [ring, ring];
-    const [t, b] = innerHeight >= reach.t + reach.b + 2 * M ? [reach.t, reach.b] : [ring, ring];
+    const hovers = this.type !== "touch";
+    const [l, r] = hovers && innerWidth >= reach.l + reach.r + 2 * M ? [reach.l, reach.r] : [ring, ring];
+    const [t, b] = hovers && innerHeight >= reach.t + reach.b + 2 * M ? [reach.t, reach.b] : [ring, ring];
     this.cx = clamp(x, l + M, Math.max(l + M, innerWidth - r - M));
     this.cy = clamp(y, t + M, Math.max(t + M, innerHeight - b - M));
     this.home = { x: this.cx, y: this.cy };
@@ -738,7 +785,7 @@ export class Wheel implements WheelHandle {
       if (same && trail.length === this.trail.length) {
         // Nothing looks different (the model rebuilt, the same tools made again): only what a tap runs is new.
         this.trail = trail;
-        const fresh = fanLayout(this.cellsOf(this.openSector, trail), this.midOf(this.openSector), this.m);
+        const fresh = this.fanFor(this.cellsOf(this.openSector, trail), this.midOf(this.openSector));
         if (fresh.length === this.fan.length) this.fan = fresh;
         return;
       }
@@ -812,7 +859,7 @@ export class Wheel implements WheelHandle {
       this.tip.hidden = true;
     }
     const m = this.m;
-    this.fan = i < 0 ? [] : fanLayout(this.cellsOf(i, trail), this.midOf(i), m);
+    this.fan = i < 0 ? [] : this.fanFor(this.cellsOf(i, trail), this.midOf(i));
     this.fanSvg.replaceChildren();
     this.fanItems.replaceChildren();
     // (A plate under each row takes the pointer, as under the ring.)
@@ -842,20 +889,56 @@ export class Wheel implements WheelHandle {
     }
   }
 
+  /** How far the ring with these tools fanned out reaches each way from the middle. */
+  private spread(fan: Placed[], e = { l: this.m.r1, r: this.m.r1, t: this.m.r1, b: this.m.r1 }): { l: number; r: number; t: number; b: number } {
+    for (const c of fan)
+      for (const a of [c.a0, (c.a0 + c.a1) / 2, c.a1]) {
+        const x = c.r1 * Math.cos(a);
+        const y = c.r1 * Math.sin(a);
+        e.l = Math.max(e.l, -x);
+        e.r = Math.max(e.r, x);
+        e.t = Math.max(e.t, -y);
+        e.b = Math.max(e.b, y);
+      }
+    return e;
+  }
+
+  /**
+   * A fan that the screen can hold: half a ring where there is room for that.
+   * Where there isn't (a phone on its side is too short for nineteen tools
+   * down one side), each row is as much of the ring as fits at its distance -
+   * the outer rows narrower - and there are more rows, reaching further out.
+   */
+  private fanFor(cells: Cell[], mid: number): Placed[] {
+    const W = innerWidth - 12;
+    const H = innerHeight - 12;
+    const ring = this.m.r1;
+    // The widest piece of ring reaching out to R, centred on the group, that the screen holds together with the ring.
+    const spanAt = (R: number): number => {
+      for (let deg = 180; deg > 40; deg -= 10) {
+        const s = (deg * Math.PI) / 180;
+        let l = ring;
+        let r = ring;
+        let t = ring;
+        let b = ring;
+        for (let k = 0; k <= 16; k++) {
+          const a = mid - s / 2 + (s * k) / 16;
+          l = Math.max(l, -R * Math.cos(a));
+          r = Math.max(r, R * Math.cos(a));
+          t = Math.max(t, -R * Math.sin(a));
+          b = Math.max(b, R * Math.sin(a));
+        }
+        if (l + r <= W && t + b <= H) return s;
+      }
+      return (40 * Math.PI) / 180;
+    };
+    return fanLayout(cells, mid, this.m, spanAt);
+  }
+
   /** How far the wheel reaches each way from its middle, with every group's fan out. */
   private extent(): { l: number; r: number; t: number; b: number } {
     const e = { l: this.m.r1, r: this.m.r1, t: this.m.r1, b: this.m.r1 };
-    this.sectors.forEach((s, i) => {
-      for (const c of fanLayout(s.cells, this.midOf(i), this.m))
-        for (const a of [c.a0, (c.a0 + c.a1) / 2, c.a1]) {
-          const x = c.r1 * Math.cos(a);
-          const y = c.r1 * Math.sin(a);
-          e.l = Math.max(e.l, -x);
-          e.r = Math.max(e.r, x);
-          e.t = Math.max(e.t, -y);
-          e.b = Math.max(e.b, y);
-        }
-    });
+    this.sectors.forEach((s, i) => this.spread(this.fanFor(s.cells, this.midOf(i)), e));
     return e;
   }
 
@@ -866,24 +949,12 @@ export class Wheel implements WheelHandle {
 
   /** A fan that would run off the screen: the wheel slides to bring it on. */
   private fit(): void {
-    let x0 = -this.m.r1;
-    let x1 = this.m.r1;
-    let y0 = -this.m.r1;
-    let y1 = this.m.r1;
-    for (const c of this.fan)
-      for (const a of [c.a0, (c.a0 + c.a1) / 2, c.a1]) {
-        const x = c.r1 * Math.cos(a);
-        const y = c.r1 * Math.sin(a);
-        x0 = Math.min(x0, x);
-        x1 = Math.max(x1, x);
-        y0 = Math.min(y0, y);
-        y1 = Math.max(y1, y);
-      }
+    const e = this.spread(this.fan);
     const M = 6;
-    let dx = this.cx + x1 > innerWidth - M ? innerWidth - M - this.cx - x1 : 0;
-    if (this.cx + x0 + dx < M) dx = M - this.cx - x0;
-    let dy = this.cy + y1 > innerHeight - M ? innerHeight - M - this.cy - y1 : 0;
-    if (this.cy + y0 + dy < M) dy = M - this.cy - y0;
+    let dx = this.cx + e.r > innerWidth - M ? innerWidth - M - this.cx - e.r : 0;
+    if (this.cx - e.l + dx < M) dx = M - this.cx + e.l;
+    let dy = this.cy + e.b > innerHeight - M ? innerHeight - M - this.cy - e.b : 0;
+    if (this.cy - e.t + dy < M) dy = M - this.cy + e.t;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
     this.cx += dx;
     this.cy += dy;

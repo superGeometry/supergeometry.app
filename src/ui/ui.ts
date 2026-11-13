@@ -417,6 +417,8 @@ export class UI {
   addRight(id: string, icon: IconName, title: string, open: (host: HTMLElement) => void, label?: () => string, place?: { host: HTMLElement; className: string }): HTMLButtonElement {
     const b = document.createElement("button");
     b.className = place ? place.className : "right-btn";
+    b.dataset.right = id;
+    this.rightEntries.set(id, { open, label });
     b.title = title;
     b.innerHTML = icons[icon];
     if (label) {
@@ -466,10 +468,63 @@ export class UI {
 
   private popoverFill: (() => void) | null = null;
 
+  /** The right column's lists and switches, by id: the tool wheel's Settings opens them too. */
+  private rightEntries = new Map<string, { open: (host: HTMLElement) => void; label?: () => string }>();
+  private popAway: (() => void) | null = null;
+
+  /** What a right-column button says under its icon now (the unit, the shader). */
+  rightLabel(id: string): string | undefined {
+    return this.rightEntries.get(id)?.label?.();
+  }
+
+  /**
+   * One of the right column's lists (Snapping, Units & grid, Appearance,
+   * Display modes) opened at a point of the page instead of beside its
+   * button: the tool wheel's Settings. It closes at a press anywhere else, or
+   * Esc. One that is a switch (NumPad, Constraints) is just switched.
+   */
+  popAt(id: string, x: number, y: number): void {
+    const entry = this.rightEntries.get(id);
+    if (!entry) return;
+    this.closePopover();
+    this.popoverOwner = id;
+    this.popoverFill = () => {
+      this.popover.innerHTML = "";
+      entry.open(this.popover);
+    };
+    this.popoverFill();
+    if (!this.popover.childElementCount) return this.closePopover();
+    this.popover.hidden = false;
+    this.popover.classList.add("at-point");
+    this.popover.style.right = "auto";
+    this.popover.style.left = `${Math.round(Math.max(8, Math.min(x, innerWidth - this.popover.offsetWidth - 8)))}px`;
+    this.popover.style.top = `${Math.round(Math.max(8, Math.min(y, innerHeight - this.popover.offsetHeight - 8)))}px`;
+    const away = (e: Event) => {
+      if (e.type === "keydown" ? (e as KeyboardEvent).key !== "Escape" : this.popover.contains(e.target as Node)) return;
+      if (e.type === "keydown") e.stopPropagation();
+      this.closePopover();
+    };
+    // (Next tick: the press that opened it doesn't close it.)
+    setTimeout(() => {
+      if (this.popoverOwner !== id || this.popover.hidden) return;
+      addEventListener("pointerdown", away, true);
+      addEventListener("keydown", away, true);
+      this.popAway = () => {
+        removeEventListener("pointerdown", away, true);
+        removeEventListener("keydown", away, true);
+      };
+    });
+  }
+
   closePopover(): void {
     // An action button (no popover shown) must not stay the owner: its next click would only "close".
     this.popoverOwner = null;
+    this.popAway?.();
+    this.popAway = null;
     if (this.popover.hidden) return;
+    // (Opened at a point: back to its place beside the right column for next time.)
+    this.popover.classList.remove("at-point");
+    this.popover.style.left = "";
     this.popover.hidden = true;
     this.popoverFill = null;
     document.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));
