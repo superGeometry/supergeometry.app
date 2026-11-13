@@ -250,6 +250,64 @@ const brought = (bytes: Uint8Array, format: "stl" | "step" = "stl"): Feature => 
   say(coarse.faceGroups.length === hb.faces && memory() < before + 400, "...a copy of it meshed afresh: memory where it was", `${coarse.faceGroups.length} groups, ${memory()} MB`);
 }
 
+// ------------------------------------------------------------------ plates with a great many holes
+{
+  // A flat face with very many holes is cut into triangles by the engine itself (the kernel's mesher
+  // takes time and memory by the square of the holes: 400 holes 5 s and 700 MB). Round holes and square
+  // ones: the mesh closed (every side of a triangle met by one other, going the other way), the volume
+  // the part's, every face and edge shown; and the same part is still worked on (a face pushed, a shell).
+  const closed = (p: ArrayLike<number>, t: ArrayLike<number>) => {
+    const sides = new Map<string, number>();
+    const key = (i: number) => `${p[3 * i]},${p[3 * i + 1]},${p[3 * i + 2]}`;
+    let vol = 0;
+    for (let k = 0; k < t.length; k += 3) {
+      const [a, b, c] = [3 * t[k], 3 * t[k + 1], 3 * t[k + 2]];
+      vol += p[a] * (p[b + 1] * p[c + 2] - p[b + 2] * p[c + 1]) - p[a + 1] * (p[b] * p[c + 2] - p[b + 2] * p[c]) + p[a + 2] * (p[b] * p[c + 1] - p[b + 1] * p[c]);
+      for (const [u, v] of [[t[k], t[k + 1]], [t[k + 1], t[k + 2]], [t[k + 2], t[k]]]) sides.set(`${key(u)}|${key(v)}`, (sides.get(`${key(u)}|${key(v)}`) ?? 0) + 1);
+    }
+    let open = 0;
+    for (const [k, n] of sides) {
+      const [u, v] = k.split("|");
+      if (u !== v && (sides.get(`${v}|${u}`) ?? 0) !== n) open++;
+    }
+    return { open, vol: vol / 6 };
+  };
+  for (const [kind, n, each] of [["round", 12, Math.PI * 9], ["square", 12, 25], ["round", 20, Math.PI * 9]] as const) {
+    const holes = sketch("hs", XY(6), Array.from({ length: n * n }, (_, i) => (kind === "round" ? circle(`c${i}`, 5 + (i % n) * 10, 5 + Math.floor(i / n) * 10, 3) : rect(`r${i}`, 2.5 + (i % n) * 10, 2.5 + Math.floor(i / n) * 10, 7.5 + (i % n) * 10, 7.5 + Math.floor(i / n) * 10))));
+    const plate: Feature[] = [...block("P", n * 10, n * 10, 6), holes, extrude("hc", holes, -6, "cut", { target: "P" })];
+    const before = memory();
+    const t0 = performance.now();
+    const { r, errors } = await after(plate);
+    const ms = performance.now() - t0;
+    const shown = r.bodies[0];
+    const want = n * n * 600 - n * n * each * 6;
+    const mesh = shown ? closed(shown.positions, shown.indices) : { open: -1, vol: 0 };
+    const name = `a plate with ${n * n} ${kind} holes`;
+    say(!errors.length && !!shown && shown.faces.length === n * n * (kind === "round" ? 1 : 4) + 6 && shown.faceGroups.every((g) => g.count > 0) && shown.edgeGroups.length === shown.edges.length && shown.edgeGroups.every((g) => g.count > 1), `${name}: every face with its triangles, every edge with its line`, `${errors.join(" | ")} ${shown?.faces.length} faces`);
+    say(mesh.open === 0 && near(mesh.vol, want, kind === "round" ? 5e-3 : 1e-6), `...its mesh closed, of the part's volume`, `${mesh.open} open sides, volume ${mesh.vol.toFixed(2)} (the part: ${want.toFixed(2)})`);
+    say(ms < 20000 && memory() - before < 500, `...shown without the engine's memory growing by hundreds of megabytes`, `${Math.round(ms)} ms, ${before} -> ${memory()} MB`);
+    if (n > 12) continue;
+    // Out as STL: closed too.
+    const out = new Uint8Array(await (await exportBodies(plate, "stl")).arrayBuffer());
+    const dv = new DataView(out.buffer);
+    const count = dv.getUint32(80, true);
+    const p = new Float32Array(count * 9);
+    for (let k = 0; k < count; k++) for (let j = 0; j < 9; j++) p[k * 9 + j] = dv.getFloat32(84 + k * 50 + 12 + j * 4, true);
+    const printed = closed(p, Array.from({ length: count * 3 }, (_, i) => i));
+    say(printed.open === 0 && near(printed.vol, want, kind === "round" ? 5e-4 : 1e-6), `...out as STL: closed, the part's volume`, `${printed.open} open sides, volume ${printed.vol.toFixed(2)}`);
+    // Still a part to work on: its top pushed down by 1, then hollowed from below.
+    await build(plate);
+    const top = faceRef("P", (nn, c) => nn[2] > 0.99 && c[2] > 5.9);
+    let g = await build([...plate, { id: "M", name: "M", type: "moveFace", face: top, translate: [0, 0, -1] } as Feature]);
+    say(sound(g) && near(g.vol.P, (want * 5) / 6, 1e-6), `...its top pushed down by 1`, `${told(g, "P")} want ${((want * 5) / 6).toFixed(2)}`);
+    if (kind === "round") {
+      const side = faceRef("P", (nn) => nn[0] > 0.99);
+      g = await build([...plate, { id: "M", name: "M", type: "moveFace", face: side, translate: [4, 0, 0] } as Feature]);
+      say(sound(g) && near(g.vol.P, want + 4 * n * 10 * 6, 1e-6), `...a side pulled out by 4`, `${told(g, "P")} want ${(want + 4 * n * 10 * 6).toFixed(2)}`);
+    }
+  }
+}
+
 // ------------------------------------------------------------------ a body's copy
 {
   // Every step that works on a copy of a body (a fillet, a shell, a face moved) gets one of these:
