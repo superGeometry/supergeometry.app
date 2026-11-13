@@ -1440,24 +1440,46 @@ export class App implements AppContext {
     this.updateUndo();
 
     // Project name: click and type; Enter or leaving the field renames.
-    const name = document.getElementById("project-name") as HTMLInputElement;
+    // (Editable text, not an input: a phone's browser hung its autofill bar -
+    // passwords, cards, addresses - over the screen for an input.)
+    const name = document.getElementById("project-name") as HTMLElement;
+    name.contentEditable = "plaintext-only";
+    if (name.contentEditable !== "plaintext-only") name.contentEditable = "true";
+    const typed = () => (name.textContent ?? "").replace(/\s+/g, " ").trim();
     const show = () => {
-      if (document.activeElement !== name) name.value = this.store.doc.name;
+      if (document.activeElement !== name) name.textContent = this.store.doc.name;
       // A new, unnamed project keeps the page's own title (what search results show).
       document.title = this.store.doc.name === "Untitled" ? PAGE_TITLE : `${this.store.doc.name} – supergeometry.app`;
     };
     const rename = () => {
-      const v = name.value.trim();
+      const v = typed();
       if (v && v !== this.store.doc.name) this.store.commit((d) => (d.name = v));
-      else name.value = this.store.doc.name;
+      name.textContent = this.store.doc.name;
+      name.scrollLeft = 0;
     };
-    name.addEventListener("change", rename);
+    name.addEventListener("blur", rename);
     name.addEventListener("keydown", (e) => {
       e.stopPropagation();
-      if (e.key === "Enter") name.blur();
-      if (e.key === "Escape") (name.value = this.store.doc.name), name.blur();
+      if (e.key === "Enter") e.preventDefault(), name.blur();
+      if (e.key === "Escape") (name.textContent = this.store.doc.name), name.blur();
     });
-    name.addEventListener("focus", () => name.select());
+    // Pasted: as plain text on one line.
+    name.addEventListener("paste", (e) => {
+      e.preventDefault();
+      document.execCommand("insertText", false, (e.clipboardData?.getData("text/plain") ?? "").replace(/\s+/g, " "));
+    });
+    // A mouse selects the whole name to type over; a finger gets the caret
+    // where it tapped (selecting all brought up the phone's Cut / Copy bar).
+    name.addEventListener("focus", () => {
+      if (!matchMedia("(pointer: fine)").matches) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement !== name) return;
+        const r = document.createRange();
+        r.selectNodeContents(name);
+        getSelection()?.removeAllRanges();
+        getSelection()?.addRange(r);
+      });
+    });
     this.store.onChange(show);
     show();
     // The saved mark at the end of the name: a tick once every change is on this device.

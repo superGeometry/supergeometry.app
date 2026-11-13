@@ -109,8 +109,12 @@ kbd {
 }
 /* The project name reads as a tab; click it to type a new name. */
 .project-name {
+  display: block;
   width: 300px;
-  min-height: 36px;
+  height: 36px;
+  white-space: nowrap;
+  overflow: hidden;
+  outline: none;
   padding: 0 12px;
   margin-right: 10px;
   border-radius: 8px;
@@ -119,6 +123,7 @@ kbd {
   color: var(--text);
   font: inherit;
   font-weight: 550;
+  line-height: 34px;
   text-overflow: ellipsis;
   cursor: text;
   -webkit-user-select: text;
