@@ -72,7 +72,7 @@ import { areaProperties, measureArea as trueArea, measureVolume, normalOnEdge, s
 import { binarySTL, faceTriangles, meshEdgeLines, meshFaces, meshOff, type FaceMesh } from "./meshing";
 import { loftInLine } from "./loftAlign";
 import { railLoft } from "./loftRails";
-import { edgeOrigins, edgeSteps, faceAliases, faceOrigins, faceSteps, inheritTags, oldEdgeSteps, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
+import { edgeOrigins, edgeSteps, faceAliases, faceOrigins, faceSteps, inheritTags, movedTags, oldEdgeSteps, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
 import { closestOnEntity } from "../sketch/regions";
 
 import { cylinderOf, deleteFace,
@@ -3446,7 +3446,10 @@ function transform(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {
     };
     results.forEach((s, k) => {
       const m = rigid(k);
-      if (m) movedFrom.set(s, { from: new WeakRef(body), m, flip: op.kind === "mirror" });
+      if (!m) return;
+      movedFrom.set(s, { from: new WeakRef(body), m, flip: op.kind === "mirror" });
+      // (Its faces are still the steps' that made them: see movedTags.)
+      movedTags(body, s, f.id, m);
     });
     const isPattern = op.kind === "linear" || op.kind === "circular";
     // A freeform stays rebuildable through moves, scales and mirrors (copies too).
@@ -4032,11 +4035,16 @@ function originsOf(f: Feature, ctx: Ctx): OriginOf | undefined {
     return best!;
   };
   const axis = f.type === "revolve" ? resolveAxis(f.axis, ctx) : null;
-  return (face) => {
+  return (face, back) => {
     const p = face.pointOnSurface(0.5, 0.5);
-    const at = p.toTuple() as Vec3;
+    let at = p.toTuple() as Vec3;
     p.delete();
-    const fn = face.geomType === "PLANE" ? norm(face.normalAt().toTuple() as Vec3) : null;
+    let fn = face.geomType === "PLANE" ? norm(face.normalAt().toTuple() as Vec3) : null;
+    // (A face of a body moved since: taken back to where this step made it.)
+    if (back) {
+      at = back(at);
+      if (fn) fn = norm(back(fn, true));
+    }
     if (axis) {
       // An end of a part turn: a flat face the axis lies in.
       if (fn && Math.abs(dot(fn, axis.dir)) < 1e-6 && Math.abs(dot(sub(at, axis.origin), fn)) < 1e-4) return `cap:${Math.abs(dot(fn, n)) > 0.999 ? 0 : 1}`;
@@ -4316,8 +4324,8 @@ function meshBody(id: string, name: string, shape: Shape3D): BodyMesh {
     faceGroups: m.faceGroups.map((g, i) => ({ start: g.start, count: g.count, face: i })),
     edgePositions: new Float32Array(e.lines),
     edgeGroups: e.edgeGroups.map((g, i) => ({ start: g.start, count: g.count, edge: i })),
-    faces: shape.faces.map((f, i) => ({ ...faceInfo(f), step: faceSteps(shape)?.[i], curve: faceOrigins(shape)?.[i] })),
-    edges: shape.edges.map((e, i) => ({ ...edgeInfo(e), steps: edgeSteps(shape)?.[i], curves: edgeOrigins(shape)?.[i] })),
+    faces: shape.faces.map((f, i) => ({ ...faceInfo(f), step: faceSteps(shape)?.[i], curve: faceOrigins(shape)?.[i], ...(faceAliases(shape)?.[i] ? { was: faceAliases(shape)![i] } : {}) })),
+    edges: shape.edges.map((e, i) => ({ ...edgeInfo(e), steps: edgeSteps(shape)?.[i], curves: edgeOrigins(shape)?.[i], ...(oldEdgeSteps(shape) ? { was: oldEdgeSteps(shape)![i] } : {}) })),
 
     openEdges: openEdges(shape),
   };

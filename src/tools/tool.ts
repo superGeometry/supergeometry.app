@@ -136,8 +136,9 @@ export function goneRefs<R extends FaceRef | EdgeRef>(app: AppContext, refs: R[]
 
     const b = app.view.body(r.body);
     if (!b) return true;
-    if ("step" in r && r.step) return !b.faces.some((f) => f.step === r.step);
-    if ("steps" in r && r.steps) return !b.edges.some((e) => e.steps?.join() === r.steps!.join());
+    // (Or the step it was put down to when the pick was saved: a Move the body went through.)
+    if ("step" in r && r.step) return !b.faces.some((f) => f.step === r.step || f.was === r.step);
+    if ("steps" in r && r.steps) return !b.edges.some((e) => e.steps?.join() === r.steps!.join() || e.was?.join() === r.steps!.join());
     return false;
   });
 }

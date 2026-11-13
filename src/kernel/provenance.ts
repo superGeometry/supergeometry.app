@@ -24,9 +24,43 @@ interface Tagged {
   byHash: Map<number, { face: Face; i: number }[]>;
   /**
    * The step a face used to be put down to, where that was another body's
-   * (see tagBody): what projects saved before then name it by.
+   * (see tagBody) or a Move's (see movedTags): what projects saved before
+   * then name it by.
    */
   alias?: (string | undefined)[];
+  /**
+   * Where each face is now, against where its step made it: the moves, turns
+   * and mirrorings its body has been through since (a 3 x 4 matrix, row by
+   * row; none: where it was made).
+   */
+  moves?: (Moved | undefined)[];
+}
+
+/** A 3 x 4 matrix, row by row: where a point is after a move. */
+type Moved = number[];
+/** First m, then n. */
+function then(m: Moved, n: Moved): Moved {
+  const out: number[] = [];
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) out.push(n[r * 4] * m[c] + n[r * 4 + 1] * m[4 + c] + n[r * 4 + 2] * m[8 + c]);
+    out.push(n[r * 4] * m[3] + n[r * 4 + 1] * m[7] + n[r * 4 + 2] * m[11] + n[r * 4 + 3]);
+  }
+  return out;
+}
+
+/** A point (or a direction a face looks) taken back to where it was before a move. */
+export type Back = (v: [number, number, number], direction?: boolean) => [number, number, number];
+function backOf(m: Moved): Back {
+  const [a, b, c, d, e, f, g, h, i] = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
+  const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  // The matrix turned back (its inverse).
+  const inv = [e * i - f * h, c * h - b * i, b * f - c * e, f * g - d * i, a * i - c * g, c * d - a * f, d * h - e * g, b * g - a * h, a * e - b * d].map((x) => x / det);
+  return (v, direction) => {
+    // (The way a face looks goes back by the matrix laid on its side: the same thing for a move, a turn, a mirroring.)
+    if (direction) return [a * v[0] + d * v[1] + g * v[2], b * v[0] + e * v[1] + h * v[2], c * v[0] + f * v[1] + i * v[2]];
+    const q = [v[0] - m[3], v[1] - m[7], v[2] - m[11]];
+    return [inv[0] * q[0] + inv[1] * q[1] + inv[2] * q[2], inv[3] * q[0] + inv[4] * q[1] + inv[5] * q[2], inv[6] * q[0] + inv[7] * q[1] + inv[8] * q[2]];
+  };
 }
 
 const tags = new WeakMap<Shape3D, Tagged>();
@@ -103,17 +137,17 @@ function surfaceKey(face: Face): string | null {
  */
 export function tagBody(shape: Shape3D, step: string, from: Shape3D[], others: Shape3D[] = []): void {
   if (tags.has(shape)) return;
-  const hashes = new Map<number, { face: Face; step: string; key: string | null; alias?: string }[]>();
-  const byKey = new Map<string, { step: string; alias?: string }>();
+  const hashes = new Map<number, { face: Face; step: string; key: string | null; alias?: string; move?: Moved }[]>();
+  const byKey = new Map<string, { step: string; alias?: string; move?: Moved }>();
   for (const s of from) {
     const t = tags.get(s);
     if (!t || s === shape) continue;
     for (const list of t.byHash.values())
       for (const { face, i } of list) {
         const h = face.hashCode;
-        hashes.set(h, [...(hashes.get(h) ?? []), { face, step: t.steps[i], key: t.keys[i], alias: t.alias?.[i] }]);
+        hashes.set(h, [...(hashes.get(h) ?? []), { face, step: t.steps[i], key: t.keys[i], alias: t.alias?.[i], move: t.moves?.[i] }]);
       }
-    t.keys.forEach((k, i) => k && !byKey.has(k) && byKey.set(k, { step: t.steps[i], alias: t.alias?.[i] }));
+    t.keys.forEach((k, i) => k && !byKey.has(k) && byKey.set(k, { step: t.steps[i], alias: t.alias?.[i], move: t.moves?.[i] }));
   }
   const oldKey = new Map<string, string>();
   for (const s of others) {
@@ -124,6 +158,7 @@ export function tagBody(shape: Shape3D, step: string, from: Shape3D[], others: S
   const faces = shape.faces;
   const out: Tagged = { steps: [], keys: [], byHash: new Map() };
   const alias: (string | undefined)[] = [];
+  const moves: (Moved | undefined)[] = [];
   faces.forEach((face, i) => {
     const h = face.hashCode;
     out.byHash.set(h, [...(out.byHash.get(h) ?? []), { face, i }]);
@@ -132,6 +167,7 @@ export function tagBody(shape: Shape3D, step: string, from: Shape3D[], others: S
       out.steps.push(same.step);
       out.keys.push(same.key);
       alias.push(same.alias);
+      moves.push(same.move);
       return;
     }
     const key = surfaceKey(face);
@@ -139,9 +175,36 @@ export function tagBody(shape: Shape3D, step: string, from: Shape3D[], others: S
     const kept = key ? byKey.get(key) : undefined;
     out.steps.push(kept?.step ?? step);
     alias.push(kept ? kept.alias : key ? oldKey.get(key) : undefined);
+    moves.push(kept?.move);
   });
   if (alias.some((a) => a !== undefined)) out.alias = alias;
+  if (moves.some((m) => m !== undefined)) out.moves = moves;
   tags.set(shape, out);
+}
+
+/**
+ * A body moved, turned or mirrored whole - by a Move, or as a pattern's copy
+ * (`m`: where each point went; the same faces in the same order). Every face
+ * is still the step's that made it, and the same one of that step's faces:
+ * it used to become the Move's, so a pick on a moved body knew no more than
+ * where its face was - and a Move put in before a step lost the step its
+ * picks. What was saved then names the faces by the Move (`step`): kept
+ * beside, as the old answer.
+ */
+export function movedTags(from: Shape3D, moved: Shape3D, step: string, m: number[]): void {
+  const t = tags.get(from);
+  if (!t || tags.has(moved)) return;
+  const faces = moved.faces;
+  if (faces.length !== t.steps.length) return;
+  const byHash = new Map<number, { face: Face; i: number }[]>();
+  faces.forEach((face, i) => byHash.set(face.hashCode, [...(byHash.get(face.hashCode) ?? []), { face, i }]));
+  tags.set(moved, {
+    steps: t.steps,
+    keys: faces.map(surfaceKey),
+    byHash,
+    alias: faces.map(() => step),
+    moves: faces.map((_, i) => (t.moves?.[i] ? then(t.moves[i]!, m) : m)),
+  });
 }
 
 /** The step each face used to be put down to, where that differs (see tagBody); undefined: none does. */
@@ -196,7 +259,7 @@ function stepsOfEdges(shape: Shape3D, steps: string[]): string[][] {
  * step was made from (an extrusion's side by the sketch curve under it). One
  * per step that can tell; set by the engine as it replays the steps.
  */
-export type OriginOf = (face: Face) => string | null;
+export type OriginOf = (face: Face, back?: Back) => string | null;
 let originOf: Map<string, OriginOf> = new Map();
 export function setOrigins(of: Map<string, OriginOf>): void {
   originOf = of;
@@ -209,11 +272,13 @@ export function faceOrigins(shape: Shape3D): (string | undefined)[] | undefined 
   if (known) return known;
   const steps = faceSteps(shape);
   if (!steps) return undefined;
+  const moves = tags.get(shape)?.moves;
   const out = shape.faces.map((face, i) => {
     const of = originOf.get(steps[i]);
     if (!of) return undefined;
     try {
-      return of(face) ?? undefined;
+      // (Told where its step made it: a face moved since is taken back there.)
+      return of(face, moves?.[i] ? backOf(moves[i]!) : undefined) ?? undefined;
     } catch {
       return undefined;
     }
@@ -289,5 +354,5 @@ export function inheritTags(from: Shape3D, copy: Shape3D): void {
   if (faces.length !== t.steps.length) return;
   const byHash = new Map<number, { face: Face; i: number }[]>();
   faces.forEach((face, i) => byHash.set(face.hashCode, [...(byHash.get(face.hashCode) ?? []), { face, i }]));
-  tags.set(copy, { steps: t.steps, keys: t.keys, byHash, alias: t.alias });
+  tags.set(copy, { steps: t.steps, keys: t.keys, byHash, alias: t.alias, moves: t.moves });
 }

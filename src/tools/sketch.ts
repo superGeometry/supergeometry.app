@@ -4869,7 +4869,8 @@ export class SketchTool implements Tool {
     const order = this.app.store.features.map((f) => f.id);
     const at = this.sketchId ? order.indexOf(this.sketchId) : order.length;
     const before = (step: string) => order.indexOf(step) >= 0 && order.indexOf(step) < at;
-    if (!ref?.steps?.length || !ref.steps.every(before)) return this.commitAdd([e]);
+    // (And the Move its body went through since, if any: the edge is only there, where it is, after that.)
+    if (!ref?.steps?.length || !ref.steps.every(before) || !(b.edges[hit.edge].was ?? []).every(before)) return this.commitAdd([e]);
     const id = `${LINKED}${uid()}`;
     this.commit([...this.entities, { ...e, id, ...(this.construction ? { construction: true } : {}) }], this.constraints, [{ id, edge: ref }]);
     this.app.ui.toast("It follows that edge when the body changes");

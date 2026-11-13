@@ -17,6 +17,8 @@ export interface FaceInfo {
   step?: string;
   /** Which of that step's faces it is (the sketch curve it came from; see FaceRef.curve). */
   curve?: string;
+  /** The step it used to be put down to (a Move its body went through, say): picks saved then name it by that. */
+  was?: string;
 }
 
 export interface EdgeInfo {
@@ -31,6 +33,8 @@ export interface EdgeInfo {
   steps?: string[];
   /** Which faces of those steps (see EdgeRef.curves). */
   curves?: string[];
+  /** The steps its faces used to be put down to, where that differs (see FaceInfo.was). */
+  was?: string[];
 }
 
 export interface BodyMesh {
