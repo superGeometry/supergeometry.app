@@ -51,8 +51,9 @@ export interface Settings {
   /** Offline mode: the app's files are kept on this device (More → Offline mode). */
   offline: boolean;
   /**
-   * The tool wheel (an experiment, More → Tool wheel): the tools come up in a
-   * ring round the pointer where the model is tapped, in place of the column.
+   * The tool wheel: the tools come up in a ring round the pointer where the
+   * model is tapped, in place of the column. Always on - it is the only way to
+   * the tools (kept as a setting for the code that asks).
    */
   wheel: boolean;
 }
@@ -111,8 +112,11 @@ class SettingsStore {
     if ((saved.version ?? 1) < 3) this.value = { ...this.value, numpad: isTouchDevice, version: 3 };
     // v4: the Constraints column starts closed (it got in the way; the Constraints button opens it).
     if ((saved.version ?? 1) < 4) this.value = { ...this.value, showConstraints: false, version: 4 };
-    // v5: the tool wheel is how the app is worked (More → Tool wheel turns it off).
+    // v5: the tool wheel is how the app is worked.
     if ((saved.version ?? 1) < 5) this.value = { ...this.value, wheel: true, version: 5 };
+    // The wheel is the only way to the tools now (More no longer turns it off): on for
+    // anyone who had turned it off before.
+    this.value.wheel = true;
   }
 
   set<K extends keyof Settings>(key: K, v: Settings[K]): void {

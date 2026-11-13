@@ -5466,7 +5466,7 @@ html[data-screen="phone"] .bim-props {
 }
 
 /* ------------------------------------------------------------- tool wheel */
-/* An experiment beside the tool column (More → Tool wheel): the tools in a
+/* The only way to the tools: the tools in a
    ring round the pointer, or kept where it was dragged to. While it stands in
    for a column (the selection tool's, the sketch's), the column and the bar
    at the bottom left step aside: their tools are on the wheel. */

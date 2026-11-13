@@ -134,7 +134,7 @@ export function installDebug(app: App): void {
       return `ran ${hit.path}`;
     },
 
-    /** The tool wheel (More → Tool wheel): where its groups and fanned-out tools are on the page, to point and tap at. */
+    /** The tool wheel: where its groups and fanned-out tools are on the page, to point and tap at. */
     wheel: () => app.wheel.describe(),
 
     /** Every tool the wheel offers now, by where it is ("Tools › Fillet"): the same as sg.actions(), arranged its way. */

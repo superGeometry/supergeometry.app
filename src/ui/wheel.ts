@@ -1,4 +1,4 @@
-// The tool wheel: an experiment beside the tool column (More → Tool wheel).
+// The tool wheel: the only way to the tools (in place of the tool column).
 //
 // With it on, a tap on the model - or on an empty spot - brings the tools up
 // in a ring round the pointer: what's picked at the top, then the main groups
@@ -41,7 +41,7 @@ export type WheelExtras = () => ToolItem[];
 
 /** What a tool sees of the wheel. */
 export interface WheelHandle {
-  /** Switched on (More → Tool wheel). */
+  /** Switched on (always, now: the setting is kept on). */
   readonly on: boolean;
   /** Up now: round the pointer, or at the place it is kept. */
   readonly isOpen: boolean;

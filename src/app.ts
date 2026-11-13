@@ -68,7 +68,7 @@ export class App implements AppContext {
   readonly kernel = new KernelClient();
   readonly view: Viewport;
   readonly ui = new UI();
-  /** The tool wheel (More → Tool wheel): the tools in a ring round the pointer, beside the column. */
+  /** The tool wheel: the tools in a ring round the pointer (the only way to them). */
   readonly wheel = new Wheel({ ui: this.ui, mainTools: () => this.mainTools() });
   /** The Settings wheel: always on the screen while the wheel is on (folded to its cog unless opened). */
   readonly settingsWheel = new Wheel({ ui: this.ui, mainTools: () => [] }, "settings");
@@ -1312,17 +1312,6 @@ export class App implements AppContext {
       settings.set("showHints", !settings.value.showHints);
       paintHints();
       this.ui.refreshHint();
-    });
-    // The tool wheel (an experiment): the tools round the pointer where the model is tapped; off, the column is back.
-    const wheelState = document.getElementById("m-wheel-state")!;
-    const paintWheel = () => (wheelState.textContent = settings.value.wheel ? "On" : "Off");
-    paintWheel();
-    moreItem("m-wheel", () => {
-      settings.set("wheel", !settings.value.wheel);
-      paintWheel();
-      // (The selection tool's guide text says how the tools are reached. Another tool's column and bar stay its own.)
-      if (this.tool === this.selectTool) this.selectTool.refresh();
-      this.ui.toast(settings.value.wheel ? "Tool wheel on: tap the model, or an empty spot, and the tools come up round the pointer" : "Tool wheel off: the tools are in the column on the left again");
     });
     // Offline mode: the app kept on this device, so it works with no connection.
     const offlineState = document.getElementById("m-offline-state")!;
