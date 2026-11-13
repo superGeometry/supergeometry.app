@@ -86,8 +86,8 @@ const DEFAULTS: Settings = {
   numpad: isTouchDevice,
   showHints: true,
   offline: false,
-  wheel: false,
-  version: 4,
+  wheel: true,
+  version: 5,
 };
 
 type Listener = (s: Settings) => void;
@@ -111,6 +111,8 @@ class SettingsStore {
     if ((saved.version ?? 1) < 3) this.value = { ...this.value, numpad: isTouchDevice, version: 3 };
     // v4: the Constraints column starts closed (it got in the way; the Constraints button opens it).
     if ((saved.version ?? 1) < 4) this.value = { ...this.value, showConstraints: false, version: 4 };
+    // v5: the tool wheel is how the app is worked (More → Tool wheel turns it off).
+    if ((saved.version ?? 1) < 5) this.value = { ...this.value, wheel: true, version: 5 };
   }
 
   set<K extends keyof Settings>(key: K, v: Settings[K]): void {

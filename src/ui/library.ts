@@ -44,7 +44,8 @@ function supportBox(): HTMLElement {
     ),
   );
   const row = el("div", "library-support-row");
-  for (const w of SUPPORT) {
+  // (Only the ways with a link: Buy Me a Coffee and Stripe stay out of the welcome window until they have one.)
+  for (const w of SUPPORT.filter((s) => s.url)) {
     const b = el("button", "library-support-btn");
     b.type = "button";
     const logo = el("span", "library-support-logo");

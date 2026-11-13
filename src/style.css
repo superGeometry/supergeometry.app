@@ -5483,6 +5483,50 @@ body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"
 /* One of those lists, opened from the wheel at the pointer: over the wheel. */
 #popover.at-point {
   z-index: 49;
+  padding: 0 8px 8px;
+}
+/* A Settings list from the wheel is a window: dragged by its bar, closed by its button. */
+.pop-window-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 -8px 4px;
+  padding: 4px 4px 4px 12px;
+  background: var(--chrome-solid);
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pop-window-bar:active {
+  cursor: grabbing;
+}
+.pop-window-title {
+  flex: 1;
+  font-weight: 600;
+}
+.pop-window-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.pop-window-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.pop-window-close svg {
+  width: 18px;
+  height: 18px;
 }
 #wheel {
   position: fixed;
@@ -5559,7 +5603,8 @@ circle.wheel-plate {
 .wheel-sector.on {
   fill: #223250;
 }
-.wheel-sector.open {
+.wheel-sector.open,
+.wheel-cell.open {
   fill: #26375a;
 }
 .wheel-cell.hot {

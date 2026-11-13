@@ -432,6 +432,8 @@ export class UI {
     b.addEventListener("click", () => {
       // Popovers stay open until their button is clicked again.
       if (this.popoverOwner === id) return this.closePopover();
+      // (A window opened from the wheel's Settings gives way to the list beside the column.)
+      if (this.popover.classList.contains("at-point")) this.closePopover();
       this.popoverOwner = id;
       this.popoverFill = () => {
         this.popover.innerHTML = "";
@@ -477,48 +479,77 @@ export class UI {
     return this.rightEntries.get(id)?.label?.();
   }
 
+  /** Where a window from the wheel's Settings was last dragged to (the next one opens there). */
+  private popSpot: { x: number; y: number } | null = null;
+
   /**
    * One of the right column's lists (Snapping, Units & grid, Appearance,
-   * Display modes) opened at a point of the page instead of beside its
-   * button: the tool wheel's Settings. It closes at a press anywhere else, or
-   * Esc. One that is a switch (NumPad, Constraints) is just switched.
+   * Display modes) opened as a window of its own instead of beside its
+   * button: the tool wheel's Settings. It has a title bar to drag it by and a
+   * close button, and stays open while the model is worked on; Esc closes it
+   * too. One that is a switch (NumPad, Constraints) is just switched.
    */
-  popAt(id: string, x: number, y: number): void {
+  popAt(id: string, x: number, y: number, title = ""): void {
     const entry = this.rightEntries.get(id);
     if (!entry) return;
     this.closePopover();
     this.popoverOwner = id;
+    const bar = el("div", "pop-window-bar");
+    bar.append(el("span", "pop-window-title", title));
+    const close = el("button", "pop-window-close");
+    close.title = "Close";
+    close.innerHTML = icons.close;
+    close.onclick = () => this.closePopover();
+    bar.append(close);
+    const body = el("div", "pop-window-body");
     this.popoverFill = () => {
-      this.popover.innerHTML = "";
-      entry.open(this.popover);
+      body.innerHTML = "";
+      entry.open(body);
+      this.popover.replaceChildren(bar, body);
     };
     this.popoverFill();
-    if (!this.popover.childElementCount) return this.closePopover();
+    if (!body.childElementCount) return this.closePopover();
     this.popover.hidden = false;
     this.popover.classList.add("at-point");
     this.popover.style.right = "auto";
-    this.popover.style.left = `${Math.round(Math.max(8, Math.min(x, innerWidth - this.popover.offsetWidth - 8)))}px`;
-    this.popover.style.top = `${Math.round(Math.max(8, Math.min(y, innerHeight - this.popover.offsetHeight - 8)))}px`;
-    const away = (e: Event) => {
-      if (e.type === "keydown" ? (e as KeyboardEvent).key !== "Escape" : this.popover.contains(e.target as Node)) return;
-      // Esc, or a press on the model, is spent on closing it: it doesn't also step back, pick,
-      // or finish the tool that is open (a tap on empty space is a tool's Done).
-      if (e.type === "keydown" || (e.target as Element).tagName === "CANVAS") {
-        e.preventDefault();
-        e.stopPropagation();
+    const place = (px: number, py: number) => {
+      this.popover.style.left = `${Math.round(Math.max(8, Math.min(px, innerWidth - this.popover.offsetWidth - 8)))}px`;
+      const top = Math.round(Math.max(8, Math.min(py, innerHeight - 160)));
+      this.popover.style.top = `${top}px`;
+      // (Dragged low, it gets shorter and scrolls: the whole window stays on the screen.)
+      this.popover.style.maxHeight = `${innerHeight - top - 8}px`;
+    };
+    place(this.popSpot?.x ?? x, this.popSpot?.y ?? y);
+    // Dragged by its title bar.
+    bar.onpointerdown = (e) => {
+      if ((e.target as Element).closest(".pop-window-close")) return;
+      e.preventDefault();
+      const r = this.popover.getBoundingClientRect();
+      const dx = e.clientX - r.left;
+      const dy = e.clientY - r.top;
+      try {
+        bar.setPointerCapture(e.pointerId);
+      } catch {
+        // (A pointer the page no longer has: the drag still follows the bar.)
       }
+      bar.onpointermove = (m) => {
+        place(m.clientX - dx, m.clientY - dy);
+        this.popSpot = { x: parseFloat(this.popover.style.left), y: parseFloat(this.popover.style.top) };
+      };
+      bar.onpointerup = bar.onpointercancel = () => {
+        bar.onpointermove = null;
+        bar.onpointerup = bar.onpointercancel = null;
+      };
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Spent on closing it: it doesn't also step back out of the tool that is open.
+      e.preventDefault();
+      e.stopPropagation();
       this.closePopover();
     };
-    // (Next tick: the press that opened it doesn't close it.)
-    setTimeout(() => {
-      if (this.popoverOwner !== id || this.popover.hidden) return;
-      addEventListener("pointerdown", away, true);
-      addEventListener("keydown", away, true);
-      this.popAway = () => {
-        removeEventListener("pointerdown", away, true);
-        removeEventListener("keydown", away, true);
-      };
-    });
+    addEventListener("keydown", esc, true);
+    this.popAway = () => removeEventListener("keydown", esc, true);
   }
 
   closePopover(): void {
@@ -530,6 +561,7 @@ export class UI {
     // (Opened at a point: back to its place beside the right column for next time.)
     this.popover.classList.remove("at-point");
     this.popover.style.left = "";
+    this.popover.style.maxHeight = "";
     this.popover.hidden = true;
     this.popoverFill = null;
     document.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));

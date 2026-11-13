@@ -156,6 +156,8 @@ interface Placed extends Cell {
   r1: number;
   a0: number;
   a1: number;
+  /** 0: the group's own tools; 1, 2: the kinds of a tool opened further out (the cascade). */
+  level: number;
 }
 
 // What the pointer is over, as a number (compared on every move): nothing, the middle, a group, a tool.
@@ -195,13 +197,13 @@ function wedge(r0: number, r1: number, a0: number, a1: number, gap = 2): string 
  * the screen is too small for that). One row while they fit, then more
  * further out.
  */
-function fanLayout(cells: Cell[], mid: number, m: Metrics, spanAt: (reach: number) => number = () => Math.PI): Placed[] {
+function fanLayout(cells: Cell[], mid: number, m: Metrics, spanAt: (reach: number) => number = () => Math.PI, inner = m.r1, level = 0): Placed[] {
   const N = cells.length;
   if (!N) return [];
   const rows: { r0: number; r1: number; rm: number; span: number; cap: number }[] = [];
   let room = 0;
   for (let k = 0; room < N && k < 5; k++) {
-    const r0 = m.r1 + m.gap + k * (m.depth + m.gap);
+    const r0 = inner + m.gap + k * (m.depth + m.gap);
     const rm = r0 + m.depth / 2;
     const span = spanAt(r0 + m.depth);
     const cap = Math.max(1, Math.floor((span * rm) / m.min));
@@ -229,7 +231,7 @@ function fanLayout(cells: Cell[], mid: number, m: Metrics, spanAt: (reach: numbe
       if (gapAt[j]) a += PART_GAP / row.rm;
       const a0 = a;
       a += w / row.rm;
-      return { ...c, r0: row.r0, r1: row.r1, a0, a1: a };
+      return { ...c, r0: row.r0, r1: row.r1, a0, a1: a, level };
     });
     out.push(...(flip ? placed.reverse() : placed));
   });
@@ -615,7 +617,7 @@ export class Wheel implements WheelHandle {
       run: () => {
         // Beside the wheel, on the side the pointer is: not over it (kept somewhere, it stays up).
         const out = Math.hypot(this.px - this.cx, this.py - this.cy) + 34;
-        ui.popAt(id, this.px >= this.cx ? this.cx + out : this.cx - out - 270, this.py - 28);
+        ui.popAt(id, this.px >= this.cx ? this.cx + out : this.cx - out - 270, this.py - 28, label);
       },
     });
     const pad = settings.value.numpad;
@@ -633,12 +635,41 @@ export class Wheel implements WheelHandle {
     };
   }
 
-  /** The tools shown in a group's fan: its own, or those of a tool opened inside it. */
-  private cellsOf(i: number, trail: ToolItem[]): Cell[] {
+  /**
+   * A group's fan, and in a cascade outside it the kinds of each tool opened
+   * on the way (`trail`): each further row centred on the tool it comes from,
+   * the rows before it staying where they are.
+   */
+  private buildFan(i: number, trail: ToolItem[]): { fan: Placed[]; trail: ToolItem[] } {
     const s = this.sectors[i];
-    if (!s) return [];
-    const parent = trail[trail.length - 1];
-    if (!parent) return s.cells;
+    if (!s) return { fan: [], trail: [] };
+    const fan = this.fanFor(s.cells, this.midOf(i));
+    const kept: ToolItem[] = [];
+    for (const t of trail) {
+      const from = fan.find((c) => c.level === kept.length && c.item.id === t.id && opens(c.item));
+      if (!from) break;
+      const inner = fan.reduce((r, c) => Math.max(r, c.r1), this.m.r1);
+      const kinds = this.kindsOf(from.item);
+      const mid = (from.a0 + from.a1) / 2;
+      // Centred on the tool it comes from - or turned round the wheel, a little at a time, to where the screen holds it with the rest.
+      const fits = (row: Placed[]) => {
+        const e = this.spread([...fan, ...row]);
+        return e.l + e.r <= innerWidth - 12 && e.t + e.b <= innerHeight - 12;
+      };
+      let row = this.fanFor(kinds, mid, inner, kept.length + 1);
+      for (let k = 1; k <= 12 && !fits(row); k++) {
+        const d = ((k + 1) >> 1) * (Math.PI / 18) * (k % 2 ? 1 : -1);
+        const turned = this.fanFor(kinds, mid + d, inner, kept.length + 1);
+        if (fits(turned)) row = turned;
+      }
+      fan.push(...row);
+      kept.push(from.item);
+    }
+    return { fan, trail: kept };
+  }
+
+  /** A tool's kinds, as cells of the row opened for it. */
+  private kindsOf(parent: ToolItem): Cell[] {
     const kids = kidsOf(parent);
     const cells = kids.map((item): Cell => ({ item }));
     // What a tap on it does in the column (the kind used last) comes first, unless one of its kinds is marked as that.
@@ -804,9 +835,11 @@ export class Wheel implements WheelHandle {
       }
       if (same && trail.length === this.trail.length) {
         // Nothing looks different (the model rebuilt, the same tools made again): only what a tap runs is new.
-        this.trail = trail;
-        const fresh = this.fanFor(this.cellsOf(this.openSector, trail), this.midOf(this.openSector));
-        if (fresh.length === this.fan.length) this.fan = fresh;
+        const fresh = this.buildFan(this.openSector, trail);
+        if (fresh.fan.length === this.fan.length) {
+          this.fan = fresh.fan;
+          this.trail = fresh.trail;
+        }
         return;
       }
       this.unpoint();
@@ -872,25 +905,31 @@ export class Wheel implements WheelHandle {
   private showFan(i: number, trail: ToolItem[] = []): void {
     this.ringEls[this.openSector]?.classList.remove("open");
     this.fanCount++;
+    // (Another row of a cascade added to the same group's fan: only that row comes in.)
+    const before = i === this.openSector && i >= 0 ? this.fan.length : 0;
+    const deeper = before > 0 && trail.length > this.trail.length;
     this.openSector = i;
-    this.trail = trail;
+    const built = i < 0 ? { fan: [], trail: [] } : this.buildFan(i, trail);
+    this.trail = built.trail;
     this.ringEls[i]?.classList.add("open");
     if (this.hot >= CELL) {
       this.hot = NONE;
       this.tip.hidden = true;
     }
     const m = this.m;
-    this.fan = i < 0 ? [] : this.fanFor(this.cellsOf(i, trail), this.midOf(i));
+    this.fan = built.fan;
     this.fanSvg.replaceChildren();
     this.fanItems.replaceChildren();
     // (A plate under each row takes the pointer, as under the ring.)
-    for (const r0 of new Set(this.fan.map((c) => c.r0))) {
-      const row = this.fan.filter((c) => c.r0 === r0);
+    for (const key of new Set(this.fan.map((c) => `${c.level}:${c.r0}`))) {
+      const row = this.fan.filter((c) => `${c.level}:${c.r0}` === key);
+      const r0 = row[0].r0;
       this.fanSvg.append(path("wheel-plate", wedge(r0 - m.gap / 2, row[0].r1 + m.gap / 2, Math.min(...row.map((c) => c.a0)), Math.max(...row.map((c) => c.a1)), 0)));
     }
+    const opened = new Set(this.trail);
     this.fanEls = this.fan.map((c) => {
       const it = c.item;
-      const p = path(`wheel-cell${it.active ? " on" : ""}`, wedge(c.r0, c.r1, c.a0, c.a1));
+      const p = path(`wheel-cell${it.active ? " on" : ""}${opened.has(it) ? " open" : ""}`, wedge(c.r0, c.r1, c.a0, c.a1));
       this.fanSvg.append(p);
       const rm = (c.r0 + c.r1) / 2;
       const mid = (c.a0 + c.a1) / 2;
@@ -901,7 +940,11 @@ export class Wheel implements WheelHandle {
       this.fanItems.append(this.item(it, kidsOf(it).length ? `${it.label} ›` : it.label, `${it.active ? "on" : ""}${it.pulse ? " mark" : ""}`, rm, mid, width));
       return p;
     });
-    if (this.fan.length && !calm()) this.fanBox.animate([{ opacity: 0, transform: "scale(0.9)" }, { opacity: 1, transform: "none" }], { duration: 90, easing: "ease-out" });
+    if (deeper && !calm()) {
+      const grow = [{ opacity: 0, transform: "scale(0.94)" }, { opacity: 1, transform: "none" }];
+      for (let k = before; k < this.fan.length; k++) this.fanEls[k]?.animate(grow, { duration: 90, easing: "ease-out" });
+      this.fanItems.querySelectorAll<HTMLElement>(".wheel-item").forEach((d, k) => k >= before && d.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 90 }));
+    } else if (this.fan.length && !calm()) this.fanBox.animate([{ opacity: 0, transform: "scale(0.9)" }, { opacity: 1, transform: "none" }], { duration: 90, easing: "ease-out" });
     if (this.fan.length) this.fit();
     // A kept wheel that slid for the fan goes back to its place once the fan is away.
     else if (this.kept && this.slid && this.up) {
@@ -930,7 +973,7 @@ export class Wheel implements WheelHandle {
    * down one side), each row is as much of the ring as fits at its distance -
    * the outer rows narrower - and there are more rows, reaching further out.
    */
-  private fanFor(cells: Cell[], mid: number): Placed[] {
+  private fanFor(cells: Cell[], mid: number, inner = this.m.r1, level = 0): Placed[] {
     const W = innerWidth - 12;
     const H = innerHeight - 12;
     const ring = this.m.r1;
@@ -953,7 +996,7 @@ export class Wheel implements WheelHandle {
       }
       return (40 * Math.PI) / 180;
     };
-    return fanLayout(cells, mid, this.m, spanAt);
+    return fanLayout(cells, mid, this.m, spanAt, inner, level);
   }
 
   /** How far the wheel reaches each way from its middle, with every group's fan out. */
@@ -1085,8 +1128,13 @@ export class Wheel implements WheelHandle {
     if (hit >= CELL) {
       const c = this.fan[hit - CELL];
       this.sayTool(c.item, (c.a0 + c.a1) / 2, this.reach() + 8);
-      // Resting on a tool with kinds of its own opens them (a tap does at once).
-      if (opens(c.item) && !c.item.variantsWhenActive && this.type !== "touch") this.drillTimer = window.setTimeout(() => this.hot === hit && this.drill(hit - CELL, true), 280);
+      if (this.type === "touch") return;
+      // Resting on a tool with kinds of its own opens them in a row further out (a tap does at
+      // once); resting on another tool of a row whose neighbour is open closes that one's row.
+      const drills = opens(c.item) && !c.item.variantsWhenActive && this.trail[c.level] !== c.item;
+      const closes = !drills && c.level < this.trail.length && this.trail[c.level] !== c.item;
+      if (drills) this.drillTimer = window.setTimeout(() => this.hot === hit && this.drill(hit - CELL, true), 280);
+      else if (closes) this.drillTimer = window.setTimeout(() => this.hot === hit && this.collapse(c.level), 280);
       return;
     }
     this.tip.hidden = true;
@@ -1118,12 +1166,33 @@ export class Wheel implements WheelHandle {
     else this.switchTimer = window.setTimeout(go, slid ? 450 : 90);
   }
 
-  /** A tool's own kinds (Plane ›, Colour ›) take the fan's place. */
+  /** A tool's own kinds (Plane ›, Colour ›) open in a row outside the one it is in. */
   private drill(index: number, resting: boolean): void {
     const c = this.fan[index];
-    if (!c) return;
-    this.showFan(this.openSector, [...this.trail, c.item]);
+    if (!c || this.trail[c.level] === c.item) return;
+    const hot = this.hot;
+    this.showFan(this.openSector, [...this.trail.slice(0, c.level), c.item]);
+    // The pointer is still on the tool it opened (the rows before stay put): it stays lit.
+    const at = this.fan.findIndex((f) => f.level === c.level && f.item.id === c.item.id);
+    if (resting && at >= 0 && hot === CELL + index) {
+      this.hot = CELL + at;
+      this.elOf(this.hot)?.classList.add("hot");
+      this.sayTool(this.fan[at].item, (this.fan[at].a0 + this.fan[at].a1) / 2, this.reach() + 8);
+    }
     this.guardUntil = resting ? performance.now() + 260 : 0;
+  }
+
+  /** The rows opened beyond this level of the cascade go. */
+  private collapse(level: number): void {
+    if (this.trail.length <= level) return;
+    const hot = this.hot >= CELL ? this.fan[this.hot - CELL] : null;
+    this.showFan(this.openSector, this.trail.slice(0, level));
+    const at = hot ? this.fan.findIndex((f) => f.level === hot.level && f.item.id === hot.item.id) : -1;
+    if (at >= 0) {
+      this.hot = CELL + at;
+      this.elOf(this.hot)?.classList.add("hot");
+      this.sayTool(this.fan[at].item, (this.fan[at].a0 + this.fan[at].a1) / 2, this.reach() + 8);
+    }
   }
 
   private run(item: ToolItem): void {
@@ -1138,7 +1207,8 @@ export class Wheel implements WheelHandle {
     if (hit >= CELL) {
       const c = this.fan[hit - CELL];
       if (!c) return;
-      if (opens(c.item)) return this.drill(hit - CELL, false);
+      // (Tapped again once its kinds are out: they go.)
+      if (opens(c.item)) return this.trail[c.level] === c.item ? this.collapse(c.level) : this.drill(hit - CELL, false);
       if (performance.now() < this.guardUntil) return;
       return this.run(c.item);
     }
