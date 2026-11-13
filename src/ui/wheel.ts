@@ -24,7 +24,8 @@
 
 import { isCoarse, screenClass } from "../device";
 import { settings } from "../settings";
-import { toDisplay, UNIT_LABEL, units } from "../units";
+import { evaluate, toDisplay, UNIT_LABEL, units } from "../units";
+import { numpadInput, openNumpad } from "./numpad";
 import { icons, type IconName } from "./icons";
 import { el, usable, type ToolItem, type UI } from "./ui";
 
@@ -377,8 +378,11 @@ export class Wheel implements WheelHandle {
     window.addEventListener("wheel", () => this.away(), { capture: true, passive: true });
     window.addEventListener("blur", () => this.away());
     window.addEventListener("resize", () => {
-      if (!this.up) return;
+      // (Typing a value: on a phone the keyboard coming up is a resize - the wheel stays as it is.)
+      if (!this.up || this.typer) return;
       if (!this.kept) return this.hide();
+      // (A fan laid out for the old screen may not fit the new one: it is put away, opened again where it fits.)
+      this.shut();
       this.home = this.homeNow();
       this.rest();
     });
@@ -629,14 +633,22 @@ export class Wheel implements WheelHandle {
         const scale = len ? ({ mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8 } as const)[units()] : 1;
         const small = it.type === "slider" ? (it.step ?? (it.max - it.min) / 100) : scale;
         const show = it.type === "slider" ? (it.show?.(it.value) ?? String(it.value)) : len ? `${+(toDisplay(it.value)).toFixed(3)} ${UNIT_LABEL[units()]}` : String(+it.value.toFixed(3));
-        const set = (d: number) => () => {
-          let v = it.value + d;
+        const put = (to: number) => {
+          let v = to;
           if (it.type === "slider") v = Math.min(it.max, Math.max(it.min, v));
           else if (it.min !== undefined) v = Math.max(it.min, v);
           if (it.type === "number" && it.kind === "int") v = Math.round(v);
           it.onInput(v);
+          // (A tool that does not draw its window again keeps this item: it holds the new value from now on.)
+          it.value = v;
+          ui.syncPanelValue(it, v);
         };
+        const set = (d: number) => () => put(it.value + d);
         const steps = [-10, -1, 1, 10].map((n) => opt(`${n > 0 ? "+" : "−"}${Math.abs(n) === 10 ? (it.type === "slider" ? "more" : "10") : it.type === "slider" ? "" : "1"}`.replace(/^([+−])$/, "$1 a little"), set(n * small), false, undefined, n > 0 ? "move" : "close"));
+        // Or the exact value, typed in a box on the wheel (the numpad comes up for it where it is on).
+        const kind = it.type === "slider" || it.kind === "int" || it.kind === "number" ? "number" : it.kind === "angle" ? "angle" : "length";
+        const now = it.type === "number" && kind === "length" ? String(+toDisplay(it.value).toFixed(4)) : String(+it.value.toFixed(4));
+        steps.push(opt("Type…", () => this.typeValue(it.label, now, kind, put), false, undefined, "numpad"));
         valueCells.push({ item: { id: `value-${k++}`, label: it.label, icon: "numpad", sub: show, children: steps } });
       }
     }
@@ -651,6 +663,67 @@ export class Wheel implements WheelHandle {
     if (p.done) sectors.push({ id: "done", label: "Done", icon: "check", cells: [], item: { id: "done", label: "Done", icon: "check", shortcut: "Enter", run: p.done }, mark: false });
     // (Only Done or Cancel: nothing to set - no wheel; the tool's own ways to finish stay.)
     return { sectors: sectors.some((s) => s.id !== "done" && s.id !== "cancel") ? sectors : [], pick: "" };
+  }
+
+  /** The box a value is being typed into, on the wheel. */
+  private typer: HTMLElement | null = null;
+  /** Ends that box: true sets what is typed, false leaves the value as it was. */
+  private typerEnd: ((keep: boolean) => void) | null = null;
+
+  /**
+   * Type a value right on the wheel: a small box by the pointer, the value
+   * in it selected. Enter (or tapping away) sets it, Esc leaves it as it was.
+   */
+  private typeValue(label: string, now: string, kind: "length" | "angle" | "number", put: (v: number) => void): void {
+    this.typerEnd?.(false);
+    const box = el("div", "wheel-type");
+    box.append(el("span", "wheel-type-label", label));
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.value = now;
+    input.dataset.kind = kind === "number" ? "number" : kind;
+    numpadInput(input);
+    box.append(input);
+    const unit = kind === "length" ? UNIT_LABEL[units()] : kind === "angle" ? "°" : "";
+    if (unit) box.append(el("span", "wheel-type-unit", unit));
+    box.style.left = `${Math.round(this.px - this.cx)}px`;
+    box.style.top = `${Math.round(this.py - this.cy)}px`;
+    this.root.append(box);
+    this.typer = box;
+    let over = false;
+    const done = (keep: boolean) => {
+      if (over) return;
+      over = true;
+      if (keep) {
+        const v = evaluate(input.value, kind);
+        if (v !== null) put(v);
+      }
+      box.remove();
+      if (this.typer === box) (this.typer = null), (this.typerEnd = null);
+      this.itemsChanged();
+    };
+    this.typerEnd = done;
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        done(true);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        done(false);
+      }
+      e.stopPropagation();
+    });
+    input.addEventListener("blur", () => setTimeout(() => document.activeElement !== input && done(true), 150));
+    // Kept on the screen.
+    const r = box.getBoundingClientRect();
+    if (r.right > innerWidth - 6) box.style.left = `${Math.round(this.px - this.cx - (r.right - innerWidth + 6))}px`;
+    if (r.bottom > innerHeight - 6) box.style.top = `${Math.round(this.py - this.cy - (r.bottom - innerHeight + 6))}px`;
+    input.focus();
+    input.select();
+    openNumpad(input);
   }
 
   /** A list's window (for what the wheel can't set: a slider, a typed size), beside the wheel on the side the pointer is. */
@@ -1078,6 +1151,46 @@ export class Wheel implements WheelHandle {
    * the outer rows narrower - and there are more rows, reaching further out.
    */
   private fanFor(cells: Cell[], mid: number, inner = this.m.r1, level = 0): Placed[] {
+    if (level === 0) {
+      const rays = this.rayFor(cells, mid);
+      if (rays) return rays;
+    }
+    return this.arcFor(cells, mid, inner, level);
+  }
+
+  /**
+   * A group's tools as rays straight out from it: the first tool right next to
+   * the group (where the pointer or finger already is), the next ones further
+   * out along the same ray, then rays to either side in turn. As many tools to
+   * a ray as the screen holds at that distance (two on a phone, up to four).
+   * Null when that would go most of the way round the wheel: then rows.
+   */
+  private rayFor(cells: Cell[], mid: number): Placed[] | null {
+    const N = cells.length;
+    if (!N) return [];
+    const m = this.m;
+    const pitch = m.depth + m.gap;
+    const most = Math.max(1, Math.min(4, Math.floor((Math.min(innerWidth, innerHeight) - 12 - 2 * m.r1) / pitch)));
+    const L = Math.min(N <= 5 ? N : 4, most);
+    const R = Math.ceil(N / L);
+    // Each ray as wide as a full cell where it is narrowest (next to the ring).
+    const w = m.max / (m.r1 + m.gap + m.depth / 2);
+    if (R * w > 1.6 * Math.PI) return null;
+    const out: Placed[] = [];
+    cells.forEach((c, i) => {
+      const ray = Math.floor(i / L);
+      const k = i % L;
+      // 0 in the middle, then one to the clockwise side, one to the other, ...
+      const side = ray === 0 ? 0 : ray % 2 ? (ray + 1) / 2 : -ray / 2;
+      const a = mid + side * w;
+      const r0 = m.r1 + m.gap + k * pitch;
+      out.push({ ...c, r0, r1: r0 + m.depth, a0: a - w / 2, a1: a + w / 2, level: 0 });
+    });
+    return out;
+  }
+
+  /** Rows of ring (the cascade's further rows, and a group too big for rays). */
+  private arcFor(cells: Cell[], mid: number, inner: number, level: number): Placed[] {
     const W = innerWidth - 12;
     const H = innerHeight - 12;
     const ring = this.m.r1;
@@ -1341,6 +1454,8 @@ export class Wheel implements WheelHandle {
   }
 
   private onDown = (e: PointerEvent): void => {
+    // (Typing a value: a press in its box, or on the numpad, is for that.)
+    if (this.typer && ((e.target as Element).closest?.(".wheel-type, .numpad") ?? null)) return;
     if (!this.up) {
       this.dismissed = false;
       return;
@@ -1454,6 +1569,13 @@ export class Wheel implements WheelHandle {
 
   private onKey = (e: KeyboardEvent): void => {
     if (!this.up || e.key !== "Escape") return;
+    // (Typing a value: Esc is the box's, it leaves the value as it was.)
+    if (this.typer) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.typerEnd?.(false);
+      return;
+    }
     // Esc closes the wheel only (kept somewhere: its fan), and what's picked stays picked. With no fan out, Esc is the app's.
     if (this.kept && this.openSector < 0) return;
     e.preventDefault();

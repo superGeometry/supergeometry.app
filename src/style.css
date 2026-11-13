@@ -5735,6 +5735,37 @@ circle.wheel-plate {
   height: 20px;
 }
 /* The name of what's pointed at, just outside the wheel there. */
+/* A value typed right on the wheel (Options: a value › Type…). */
+.wheel-type {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 14px));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--chrome-solid);
+  border: 1px solid rgba(120, 165, 255, 0.55);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  white-space: nowrap;
+  z-index: 2;
+}
+.wheel-type-label {
+  font-weight: 600;
+}
+.wheel-type input {
+  width: 84px;
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.wheel-type-unit {
+  opacity: 0.7;
+}
 .wheel-tip {
   position: absolute;
   display: flex;

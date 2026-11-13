@@ -937,6 +937,29 @@ export class UI {
   }
 
   /**
+   * A value of the tool's window set from the Options wheel: the window's
+   * own record of it and its box follow (a tool doesn't always draw its
+   * window again), so the next step starts from it.
+   */
+  syncPanelValue(item: PanelItem, v: number): void {
+    const spec = this.panelSpec;
+    if (!spec || !("label" in item)) return;
+    const f = spec.fields?.find((x) => x.label === item.label);
+    if (f) f.value = v;
+    const it = spec.items?.find((x) => (x.type === "number" || x.type === "slider") && x.label === item.label);
+    if (it && (it.type === "number" || it.type === "slider")) it.value = v;
+    for (const box of Array.from(this.panel.querySelectorAll<HTMLElement>(".field"))) {
+      if (box.querySelector(".field-label")?.textContent !== item.label) continue;
+      const input = box.querySelector("input");
+      if (!input) continue;
+      if (input.type === "range") input.value = String(v);
+      else input.value = shown(v, (input.dataset.kind as FieldKind) || "length");
+      const out = box.querySelector(".slider-value");
+      if (out && item.type === "slider") out.textContent = item.show ? item.show(v) : String(v);
+    }
+  }
+
+  /**
    * With the Options wheel up the tool's window stays out of sight; Values on
    * the wheel brings it back for typing (and again puts it away).
    */
