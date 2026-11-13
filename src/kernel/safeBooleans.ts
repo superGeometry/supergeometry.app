@@ -14,6 +14,7 @@ function run(kind: "fuse" | "cut" | "common", a: { wrapped: unknown }, b: { wrap
   const algo = kind === "fuse" ? new oc.BRepAlgoAPI_Fuse() : kind === "cut" ? new oc.BRepAlgoAPI_Cut() : new oc.BRepAlgoAPI_Common();
   const args = new oc.NCollection_List_TopoDS_Shape();
   const tools = new oc.NCollection_List_TopoDS_Shape();
+  const progress = new oc.Message_ProgressRange();
   try {
     args.Append(a.wrapped as never);
     tools.Append(b.wrapped as never);
@@ -22,15 +23,22 @@ function run(kind: "fuse" | "cut" | "common", a: { wrapped: unknown }, b: { wrap
     algo.SetNonDestructive(true);
     if (opts.optimisation === "commonFace") algo.SetGlue(oc.BOPAlgo_GlueEnum.BOPAlgo_GlueShift);
     if (opts.optimisation === "sameFace") algo.SetGlue(oc.BOPAlgo_GlueEnum.BOPAlgo_GlueFull);
-    algo.Build(new oc.Message_ProgressRange());
+    algo.Build(progress);
     if (opts.simplify !== false) algo.SimplifyResult(true, true, 0.001);
-    const out = cast(withoutInternals(algo.Shape()));
-    if (!isShape3D(out)) throw new Error(`Could not ${kind} as a 3d shape`);
-    return out;
+    // (The kernel's handle to what it made is given back once the body has its own: release.ts.)
+    const made = algo.Shape();
+    try {
+      const out = cast(withoutInternals(made));
+      if (!isShape3D(out)) throw new Error(`Could not ${kind} as a 3d shape`);
+      return out;
+    } finally {
+      made.delete();
+    }
   } finally {
     algo.delete();
     args.delete();
     tools.delete();
+    progress.delete();
   }
 }
 
@@ -49,7 +57,12 @@ export function withoutInternals<T>(wrapped: T): T {
   const has = (kind: unknown): boolean => {
     const ex = new oc.TopExp_Explorer(wrapped as never, kind as never, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
     try {
-      for (; ex.More(); ex.Next()) if (ex.Current().Orientation() === INTERNAL) return true;
+      for (; ex.More(); ex.Next()) {
+        const item = ex.Current();
+        const inside = item.Orientation() === INTERNAL;
+        item.delete();
+        if (inside) return true;
+      }
       return false;
     } finally {
       ex.delete();
@@ -84,32 +97,41 @@ export function useSafeBooleans(): void {
   const q = Shape.prototype as unknown as object;
   Object.defineProperty(q, "edges", { configurable: true, get(this: { wrapped: unknown }) {
     const oc = getOC();
-    return unique(this.wrapped, oc.TopAbs_ShapeEnum.TopAbs_EDGE).map((x) => new Edge(oc.TopoDS.Edge(x)));
+    return unique(this.wrapped, oc.TopAbs_ShapeEnum.TopAbs_EDGE, (x) => new Edge(oc.TopoDS.Edge(x as never)));
   } });
   Object.defineProperty(q, "faces", { configurable: true, get(this: { wrapped: unknown }) {
     const oc = getOC();
-    return unique(this.wrapped, oc.TopAbs_ShapeEnum.TopAbs_FACE).map((x) => new Face(oc.TopoDS.Face(x)));
+    return unique(this.wrapped, oc.TopAbs_ShapeEnum.TopAbs_FACE, (x) => new Face(oc.TopoDS.Face(x as never)));
   } });
 }
 
-/** The sub-shapes of one kind, each once (the same one met again from another face is skipped). */
-function unique(shape: unknown, kind: unknown): any[] {
+/**
+ * The sub-shapes of one kind, each once (the same one met again from another
+ * face is skipped), as `wrap` makes them. (The explorer's own handles are
+ * deleted here, each of them: left to lie, every one kept its face or edge
+ * alive for good - see release.ts.)
+ */
+function unique<T>(shape: unknown, kind: unknown, wrap: (item: unknown) => T): T[] {
   const oc = getOC();
   const ex = new oc.TopExp_Explorer(shape as never, kind as never, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
   const buckets = new Map<number, any[]>();
-  const out: any[] = [];
+  const found: any[] = [];
   try {
     for (; ex.More(); ex.Next()) {
       const item = ex.Current();
       const h = oc.ReplicadShapeHasher.HashCode(item, HASH_CODE_MAX);
       const b = buckets.get(h);
-      if (b?.some((x) => x.IsSame(item))) continue;
+      if (b?.some((x) => x.IsSame(item))) {
+        item.delete();
+        continue;
+      }
       if (b) b.push(item);
       else buckets.set(h, [item]);
-      out.push(item);
+      found.push(item);
     }
+    return found.map(wrap);
   } finally {
+    for (const item of found) item.delete();
     ex.delete();
   }
-  return out;
 }

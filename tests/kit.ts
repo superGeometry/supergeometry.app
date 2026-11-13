@@ -67,7 +67,7 @@ const entitiesOf = (fs: Feature[], id: string) => (fs.find((f) => f.id === id) a
 // ------------------------------------------------------------------ steps
 
 /** An extrude of the sketch's shapes (all of them, given its entities or the steps holding it). */
-export function extrude(id: string, sk: Feature | string, distance: number, mode: "new" | "add" | "cut" = "new", extra: Record<string, unknown> = {}): Feature {
+export function extrude(id: string, sk: Feature | string, distance: number, mode: "new" | "join" | "cut" | "intersect" | "auto" = "new", extra: Record<string, unknown> = {}): Feature {
   const sid = typeof sk === "string" ? sk : sk.id;
   const es = typeof sk === "string" ? [] : (sk as { entities: SketchEntity[] }).entities;
   return { id, name: id, type: "extrude", source: profile(sid, es), distance, mode, ...extra } as Feature;

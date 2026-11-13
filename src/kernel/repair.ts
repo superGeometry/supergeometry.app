@@ -132,7 +132,12 @@ function merged(s: Shape3D, tol: number): Shape3D | null {
     u.SetLinearTolerance(tol);
     u.SetAngularTolerance(1e-5);
     u.Build();
-    return cast(u.Shape()) as Shape3D;
+    const made = u.Shape();
+    try {
+      return cast(made) as Shape3D;
+    } finally {
+      made.delete();
+    }
   } catch {
     return null;
   } finally {

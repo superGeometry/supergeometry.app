@@ -1,6 +1,7 @@
 // Health checks for solids, shared by the engine's edit guard and the repair tool.
 
 import { cast, getOC, measureArea, type Edge, type Shape3D } from "replicad";
+import { meshFaces } from "./meshing";
 
 /** OpenCascade's own check (self-crossing faces, bad edges…). */
 const validCache = new WeakMap<Shape3D, boolean>();
@@ -14,13 +15,38 @@ export function shapeValid(shape: Shape3D): boolean {
 
 function checkValid(shape: Shape3D): boolean {
   try {
-    const oc = getOC();
-    const check = new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false);
-    const ok = (check as unknown as { IsValid(): boolean }).IsValid();
-    check.delete();
-    return ok;
+    return validNow(shape.wrapped);
   } catch {
     return true;
+  }
+}
+
+/**
+ * OpenCascade's check of a shape, made now (nothing remembered). Its checker
+ * keeps what it found on every face, edge and corner, and deleting it doesn't
+ * give that back: each check of an everyday body left over half a megabyte
+ * behind for good. A plate of 35 faces checked 3 000 times took the engine
+ * from 100 MB to 1.9 GB - and every edit checks its result, so a long session
+ * ran the engine out of memory. Pointed at nothing before it goes, the checker
+ * lets go of it all.
+ */
+export function validNow(wrapped: unknown): boolean {
+  const oc = getOC();
+  const check = new oc.BRepCheck_Analyzer(wrapped as never, true, false, false);
+  try {
+    return (check as unknown as { IsValid(): boolean }).IsValid();
+  } finally {
+    const builder = new oc.TopoDS_Builder();
+    const nothing = new oc.TopoDS_Compound();
+    try {
+      builder.MakeCompound(nothing);
+      check.Init(nothing, false);
+    } catch {
+      // As it is: the check itself is done.
+    }
+    builder.delete();
+    nothing.delete();
+    check.delete();
   }
 }
 
@@ -58,11 +84,38 @@ function findOpenEdges(shape: Shape3D): number[] {
 
 /**
  * A real copy: its own topology and its own curves and surfaces (replicad's
- * clone() only wraps the same shape again). Made by "moving" it nowhere with
- * copying on.
+ * clone() only wraps the same shape again), its faces and edges in the same
+ * order. Written out and read back. The kernel's own copier ("moving" it
+ * nowhere with copying on) keeps every piece of the shape and of the copy,
+ * and can't be made to let go of them (release.ts): each edit of a step that
+ * works on a copy - a fillet's size dragged - lost a whole body for good.
+ * What is read from a file is held by its handle alone. (The mesh goes out
+ * and in with it, and is taken off: a copy has none.)
  */
+let copies = 0;
 export function deepCopy(s: Shape3D): Shape3D {
   const oc = getOC();
+  const name = `/copy-${copies++}.bin`;
+  const progress = new oc.Message_ProgressRange();
+  const read = new oc.TopoDS_Shape();
+  try {
+    if (oc.BinTools.Write(s.wrapped, name, progress) && oc.BinTools.Read(read, name, progress) && !read.IsNull()) {
+      oc.BRepTools.Clean(read, true);
+      return cast(read) as Shape3D;
+    }
+  } catch (err) {
+    // (The engine itself breaking down is not a copy that couldn't be made.)
+    if (typeof WebAssembly !== "undefined" && err instanceof WebAssembly.RuntimeError) throw err;
+  } finally {
+    try {
+      oc.FS.unlink(name);
+    } catch {
+      // never written
+    }
+    progress.delete();
+    read.delete();
+  }
+  // The old way, if it can't be written.
   const t = new oc.gp_Trsf();
   const mk = new oc.BRepBuilderAPI_Transform(s.wrapped, t, true, false);
   try {
@@ -77,7 +130,11 @@ export function subShapes(s: Shape3D, kind: "SOLID" | "SHELL"): any[] {
   const oc = getOC();
   const ex = new oc.TopExp_Explorer(s.wrapped, kind === "SOLID" ? oc.TopAbs_ShapeEnum.TopAbs_SOLID : oc.TopAbs_ShapeEnum.TopAbs_SHELL, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
   const out: any[] = [];
-  for (; ex.More(); ex.Next()) out.push(kind === "SOLID" ? oc.TopoDS.Solid(ex.Current()) : oc.TopoDS.Shell(ex.Current()));
+  for (; ex.More(); ex.Next()) {
+    const item = ex.Current();
+    out.push(kind === "SOLID" ? oc.TopoDS.Solid(item) : oc.TopoDS.Shell(item));
+    item.delete();
+  }
   ex.delete();
   return out;
 }
@@ -98,7 +155,7 @@ function countHairThin(s: Shape3D): number {
 
 /** A solid's volume counted from a mesh of it (coarse, so the view's own finer mesh still gets made). */
 export function meshVolume(s: Shape3D, size: number): number {
-  const m = s.mesh({ tolerance: size * 1e-3, angularTolerance: 0.3 });
+  const m = meshFaces(s, size * 1e-3, 0.3);
   const p = m.vertices;
   const t = m.triangles;
   let v = 0;

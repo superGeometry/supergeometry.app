@@ -10,7 +10,8 @@ import { assembleWire, basicFaceExtrusion, getOC, loft, makeFace, makeBSplineApp
 import { measureVolume } from "./ocFree";
 import type { PlaneDef, Vec3 } from "../doc/types";
 import { add, cross, dist, dot, len, norm, scale, sub, xDirFor } from "../geom";
-import { subShapes } from "./health";
+import { subShapes, validNow } from "./health";
+import { faceTriangles } from "./meshing";
 import { borderPieces, borderThrough, boundaryEdges, limitPoints, subdivide, type Cage } from "../freeform/cage";
 import { cageToShape } from "./freeform";
 
@@ -98,12 +99,8 @@ export function onFace(body: Shape3D, F: Face): { p: Vec3; n: Vec3 } {
     const p = tup(F.pointOnSurface(0.5, 0.5));
     return { p, n: norm(tup(F.normalAt(p))) };
   }
-  let t = F.triangulation();
-  if (!t || !t.trianglesIndexes.length) {
-    body.mesh({ tolerance: sizeOf(body) * 1e-3, angularTolerance: 0.3 });
-    t = F.triangulation();
-  }
-  if (t && t.trianglesIndexes.length) {
+  const t = faceTriangles(F, sizeOf(body));
+  if (t) {
     // Centroid of the biggest triangle: well inside the face.
     const v = (i: number): Vec3 => [t!.vertices[3 * i], t!.vertices[3 * i + 1], t!.vertices[3 * i + 2]];
     let best: Vec3 = v(0);
@@ -116,7 +113,10 @@ export function onFace(body: Shape3D, F: Face): { p: Vec3; n: Vec3 } {
         best = scale(add(add(a, b), c), 1 / 3);
       }
     }
-    return { p: best, n: norm(tup(F.normalAt(best))) };
+    const n = norm(tup(F.normalAt(best)));
+    // (The mesh's corners are kept to seven digits: the point is put back on the face's own plane.)
+    const on = tup(F.pointOnSurface(0.5, 0.5));
+    return { p: sub(best, scale(n, dot(sub(best, on), n))), n };
   }
   const p = tup(F.pointOnSurface(0.5, 0.5));
   return { p, n: norm(tup(F.normalAt(p))) };
@@ -281,10 +281,7 @@ export function freeformFace(body: Shape3D, F: Face, points: Vec3[]): Shape3D {
   for (const degree of [2, 3]) {
     try {
       const solid = filledFace(body, F, points, degree);
-      const check = new oc.BRepCheck_Analyzer(solid.wrapped, true, false);
-      const ok = check.IsValid();
-      check.delete();
-      if (ok) return solid;
+      if (validNow(solid.wrapped)) return solid;
     } catch {
       // the next degree
     }
@@ -391,10 +388,7 @@ export function sheetFace(body: Shape3D, F: Face, cage: Cage): Shape3D {
     oc.BRepLib.OrientClosedSolid(oc.TopoDS.Solid(made));
     const solid = cast(made) as Shape3D;
     if (!(measureVolume(solid) > 0)) throw new Error("volume");
-    const check = new oc.BRepCheck_Analyzer(solid.wrapped, true, false);
-    const ok = check.IsValid();
-    check.delete();
-    if (!ok) throw new Error("invalid");
+    if (!validNow(solid.wrapped)) throw new Error("invalid");
     return solid;
   } finally {
     sew.delete();
@@ -672,12 +666,8 @@ function faceColumn(body: Shape3D, F: Face, L: number): Shape3D {
     }
     return null;
   });
-  let t = F.triangulation();
-  if (!t || !t.trianglesIndexes.length) {
-    body.mesh({ tolerance: sizeOf(body) * 1e-3, angularTolerance: 0.3 });
-    t = F.triangulation();
-  }
-  if (!t || !t.trianglesIndexes.length) return extendedRegion(body, F, q0, L);
+  const t = faceTriangles(F, sizeOf(body));
+  if (!t) return extendedRegion(body, F, q0, L);
   const v = (i: number): Vec3 => [t!.vertices[3 * i], t!.vertices[3 * i + 1], t!.vertices[3 * i + 2]];
   const cells = new Map<string, Vec3>();
   const parts = new Map<string, Vec3[]>();
@@ -1450,7 +1440,13 @@ export function unify(body: Shape3D, size?: number): Shape3D {
     u.SetLinearTolerance((size ?? sizeOf(body)) * 1e-6);
     u.SetAngularTolerance(1e-6);
     u.Build();
-    return cast(u.Shape()) as Shape3D;
+    // (The kernel's handle to the result is given back once the body has its own: release.ts.)
+    const made = u.Shape();
+    try {
+      return cast(made) as Shape3D;
+    } finally {
+      made.delete();
+    }
   } catch {
     // Merging is tidying only: if OpenCascade can't (a fillet ending on a face split in two), keep the pieces.
     return body;

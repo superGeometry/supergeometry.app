@@ -67,7 +67,9 @@ import { healthOf, isHealthy, repairShape } from "./repair";
 export { shapeValid } from "./health";
 import { applyPlan, boundaryEdges, cachedPlan, deleteFaces, isClosed, selfCrossings, subdivide } from "../freeform/cage";
 import { useSafeBooleans, withoutInternals } from "./safeBooleans";
+import { useReleases } from "./release";
 import { areaProperties, measureArea as trueArea, measureVolume, normalOnEdge, surfaceAt, volumeProperties } from "./ocFree";
+import { binarySTL, faceTriangles, meshEdgeLines, meshFaces, type FaceMesh } from "./meshing";
 import { loftInLine } from "./loftAlign";
 import { railLoft } from "./loftRails";
 import { edgeOrigins, edgeSteps, faceAliases, faceOrigins, faceSteps, inheritTags, oldEdgeSteps, sameSteps, seamEdges, setOrigins, tagBody, type OriginOf } from "./provenance";
@@ -721,14 +723,28 @@ export async function exportBodies(features: Feature[], format: ExportFormat, on
   if (format === "mesh") {
     // As fine as the STL (the view's own mesh is coarser, for speed).
     const out = shapes.map(([id, s]) => {
-      const m = s.mesh({ tolerance: PRINT_TOLERANCE, angularTolerance: PRINT_ANGLE });
-      return { id, positions: m.vertices, indices: m.triangles };
+      const m = printMesh(s);
+      return { id, positions: Array.from(m.vertices), indices: Array.from(m.triangles) };
     });
     return new Blob([JSON.stringify(out)], { type: "application/json" });
   }
-  return format === "step"
-    ? exportSTEP(shapes.map(([id, shape]) => ({ shape, name: names.get(id)! })))
-    : await makeCompound(shapes.map(([, s]) => s.clone())).blobSTL({ binary: true, tolerance: PRINT_TOLERANCE, angularTolerance: PRINT_ANGLE });
+  if (format === "step") return exportSTEP(shapes.map(([id, shape]) => ({ shape, name: names.get(id)! })));
+  // (Written here from the bodies' own meshes: OpenCascade's writer meshes them
+  // all as one shape first - gigabytes for a body of thousands of faces.)
+  return new Blob([binarySTL(shapes.map(([, s]) => printMesh(s))) as BlobPart], { type: "application/sla" });
+}
+
+/**
+ * A body's mesh for printing - of a copy of it: meshed itself, the body kept
+ * those triangles (ten times the view's, megabytes on a part of a few hundred
+ * faces) for as long as it was there, and every later copy of it carried them.
+ * Kept here with the body instead, for the next file made of it.
+ */
+const printMeshes = new WeakMap<Shape3D, FaceMesh>();
+function printMesh(s: Shape3D): FaceMesh {
+  let m = printMeshes.get(s);
+  if (!m) printMeshes.set(s, (m = meshFaces(deepCopy(s), PRINT_TOLERANCE, PRINT_ANGLE)));
+  return m;
 }
 
 /**
@@ -784,6 +800,7 @@ export function debugBodies(): Map<string, Shape3D> {
 
 async function run(features: Feature[], saved = false) {
   useSafeBooleans();
+  useReleases();
   // Steps after the History's breakpoint: off, like suppressed ones.
   if (features.some((f) => f.rolledBack)) features = features.map((f) => (f.rolledBack && !f.suppressed ? { ...f, suppressed: true } : f));
   const errors: FeatureError[] = [];
@@ -1082,7 +1099,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       if (f.mode === "auto") {
         const hit = overlapping(solid, ctx, f.target);
         for (const id of hit) {
-          const cut = fuzzyBoolean("cut", need(bodies, id), solid);
+          const cut = checkedBoolean("cut", need(bodies, id), solid);
           if (isEmpty(cut)) bodies.delete(id);
           else bodies.set(id, cut);
           ctx.freeforms.delete(id);
@@ -1168,23 +1185,56 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           return;
         }
       }
-      const parts = withHoles(f.source, ctx, (w0, outer0) => {
+      const scaled = Math.abs(k - 1) > 1e-9;
+      const twisted = Math.abs(twist) > 1e-9;
+      // Facing the same way all along, the profile has no thickness where the
+      // path runs in the profile's own plane (up a post, then sideways): that
+      // leg came out missing without a word, or as a body "damaged", and a
+      // ring's never came back at all (the engine hung). Said, before it's tried.
+      if (parallel) {
+        const src = sourceFaces(f.source, ctx);
+        const facing = place ? norm(spine.tangentAt(dist(src[0].face.center.toTuple() as Vec3, spine.startPoint.toTuple() as Vec3) <= dist(src[0].face.center.toTuple() as Vec3, spine.endPoint.toTuple() as Vec3) ? 0 : 1).toTuple() as Vec3) : norm(src[0]?.normal ?? [0, 0, 1]);
+        if (runsAcross(spine, facing) > 0.02) throw new Error("Facing the same way, the profile slides along its own plane on part of this path and has no thickness there - turn the profile to face along that part, or set Orientation to Normal to path");
+      }
+      // One profile along one path is one solid. Round a sharp corner of the
+      // path a profile that changes size, or turns as it goes, came out in two
+      // pieces run through each other (or broken): said as what it is.
+      const corners = (scaled || twisted) && sharpCorners(spine);
+      const cornerTrouble = () =>
+        new Error(`A profile that ${scaled && twisted ? "changes size and turns" : scaled ? "changes size" : "turns"} as it goes can't get round a sharp corner of the path - round the corner (a small fillet in the path's sketch), or set ${scaled && twisted ? "End size back to 100% and Twist to 0" : scaled ? "End size back to 100%" : "Twist back to 0"}`);
+      const whole = (part: Shape3D): Shape3D => {
+        const pieces = subShapes(part, "SOLID").length;
+        if (pieces === 1 && !(corners && !shapeValid(part))) return part;
+        if (corners) throw cornerTrouble();
+        if (twisted) throw new Error("The twist didn't build along this path - try a smoother path (no sharp corners) or less twist");
+        throw new Error("The sweep came apart along this path - try a smoother path (no sharp corners, no tight turns)");
+      };
+      // (With holes - a tube: each wire's sweep may be sound and the one cut from the other still not.)
+      const made = () => withHoles(f.source, ctx, (w0, outer0) => {
         const w = place ? place(w0) : w0;
         const outer = place ? place(outer0) : outer0;
-        const law = Math.abs(k - 1) > 1e-9 ? scaleLaw(spine, k) : null;
-        if (parallel) return flatFaces(fixedSweep(w, spine, corner, law));
+        const law = scaled ? scaleLaw(spine, k) : null;
+        if (parallel) return whole(flatFaces(fixedSweep(w, spine, corner, law)));
         // A circle round the path's start, square to it, is the same twisted or not (a gear's bore): swept
         // plainly it stays a true cylinder (twisted, a spline with a winding seam that threads couldn't use).
-        if (Math.abs(twist) < 1e-9 || roundAboutPath(w, spine)) return flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: corner, law }) as Shape3D);
+        if (!twisted || roundAboutPath(w, spine)) return whole(flatFaces(genericSweep(w, spine, { frenet: false, transitionMode: corner, law }) as Shape3D));
         // Twisted: the profile's sideways direction follows a curve wound round the path.
         const reach = Math.max(1, len(sub(...(outer.boundingBox.bounds as [Vec3, Vec3]))));
         try {
-          return flatFaces(genericSweep(w, spine, { auxiliarySpine: twistGuide(spine, twist, reach), transitionMode: "right", law }) as Shape3D);
+          return whole(flatFaces(genericSweep(w, spine, { auxiliarySpine: twistGuide(spine, twist, reach), transitionMode: "right", law }) as Shape3D));
         } catch (err) {
           if (err instanceof Error && /Could not sweep/.test(err.message)) throw new Error("The twist didn't build along this path - try a smoother path (no sharp corners) or less twist");
           throw err;
         }
       });
+      let parts: Shape3D[];
+      try {
+        parts = made();
+      } catch (err) {
+        if (!corners || isFault(err) || (err instanceof Error && /sharp corner/.test(err.message))) throw err;
+        throw cornerTrouble();
+      }
+      if (corners && parts.some((part) => subShapes(part, "SOLID").length !== 1 || !shapeValid(part))) throw cornerTrouble();
       combine(f.id, f.mode, f.target, fuseAll(parts), false, ctx);
       ctx.sweeps.set(f.id, spine);
       return;
@@ -1534,7 +1584,11 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
         const blob = new Blob([bytes]);
         try {
           shape = (f.format === "step" ? await importSTEP(blob) : readSTL(bytes)) as Shape3D;
-        } catch {
+        } catch (err) {
+          // (The engine itself breaking down is for whoever runs it - it was
+          // taken for a file that couldn't be read, and the broken engine kept.
+          // A mesh too big says so in its own words.)
+          if (isFault(err) || err instanceof TooBig) throw err;
           // (OpenCascade's own words were "This shape has not type, it is null".)
           throw new Error(f.format === "step" ? "This STEP file couldn't be read - it may be damaged" : "This STL file couldn't be read");
         }
@@ -1943,11 +1997,10 @@ function checkedFreeform(cage: { verts: Vec3[]; faces: [number, number, number, 
 function scaleFace(body: Shape3D, face: Face, u0: Vec3, [su, sv]: [number, number]): Shape3D {
   if (face.geomType !== "PLANE") throw new Error("Scale Face works on flat faces");
   if (su <= 0 || sv <= 0) throw new Error("Scale factors must be positive");
-  const { origin: c0, normal: n } = planeOf(face);
+  const { normal: n } = planeOf(face);
   const c = face.center.toTuple() as Vec3;
   const u = norm(sub(u0, scale(n, dot(u0, n))));
   const v = cross(n, u);
-  void c0;
   const map = (p: Vec3): Vec3 => {
     const d = sub(p, c);
     return add(c, add(add(scale(u, su * dot(d, u)), scale(v, sv * dot(d, v))), scale(n, dot(d, n))));
@@ -2080,12 +2133,6 @@ function movePolyhedronVertex(body: Shape3D, at: Vec3, to: Vec3): Shape3D | null
 }
 
 /**
- * A body of flat, straight-edged faces with some corners moved: every other
- * corner stays exactly where it is. A face whose corners no longer lie in one
- * plane keeps its unmoved part, and the moved corners get triangles (fanned
- * from the unmoved corner before them); coplanar pieces merge again after.
- */
-/**
  * A straight-edged shape tapered: its outline, the outline scaled about its
  * centre at the far end, and a flat four-sided face between each pair of
  * edges (a scaled edge stays parallel to its original, so each side is flat).
@@ -2116,6 +2163,12 @@ function taperedPrism(face: Face, c: Vec3, normal: Vec3, k: number, d: number): 
   }
 }
 
+/**
+ * A body of flat, straight-edged faces with some corners moved: every other
+ * corner stays exactly where it is. A face whose corners no longer lie in one
+ * plane keeps its unmoved part, and the moved corners get triangles (fanned
+ * from the unmoved corner before them); coplanar pieces merge again after.
+ */
 function movePolyhedronPoints(body: Shape3D, moves: [Vec3, Vec3][]): Shape3D | null {
   const size = Math.hypot(body.boundingBox.width, body.boundingBox.height, body.boundingBox.depth) || 1;
   const tol = size * 1e-6;
@@ -2342,7 +2395,7 @@ function fillNetwork(f: Extract<Feature, { type: "fill" }>, ctx: Ctx): Shape3D {
         // A body's edge, held to the face beside it (the first one of that body that has it).
         const c = p.kind === "edges" ? cont(p.edges[k]) : undefined;
         if (c === "g2") g2 = true;
-        const beside = p.kind === "edges" && c && c !== "g0" ? need(ctx.bodies, p.edges[0].body).faces.find((fc) => fc.edges.some((x) => x.isSame(e))) : undefined;
+        const beside = p.kind === "edges" && c && c !== "g0" ? need(ctx.bodies, p.edges[k].body).faces.find((fc) => fc.edges.some((x) => x.isSame(e))) : undefined;
         if (beside) fill.Add(e.wrapped, beside.wrapped, orderOf(c), true);
         else fill.Add(e.wrapped, oc.GeomAbs_Shape.GeomAbs_C0, true);
         n++;
@@ -2605,16 +2658,13 @@ function wallsStand(body: Shape3D, shell: Shape3D, kept: Face[], t: number): boo
     const each = Math.max(1, Math.min(6, Math.floor(600 / kept.length)));
     const every = Math.ceil(kept.length / 600);
     const h = t / 6;
-    const cubes: Shape3D[] = [];
+    const at: Vec3[] = [];
     for (const [i, g] of kept.entries()) {
       if (i % every) continue;
-      for (const { p, n } of spotsOn(body, g, each)) {
-        const c = sub(p, scale(n, t / 2));
-        cubes.push(makeBox([c[0] - h, c[1] - h, c[2] - h], [c[0] + h, c[1] + h, c[2] + h]) as Shape3D);
-      }
+      for (const { p, n } of spotsOn(body, g, each)) at.push(sub(p, scale(n, t / 2)));
     }
-    if (!cubes.length) return true;
-    const probes = cubes.length === 1 ? cubes[0] : (makeCompound(cubes) as unknown as Shape3D);
+    if (!at.length) return true;
+    const probes = cubesAt(at, h);
     const inBody = body.intersect(probes);
     const want = isEmpty(inBody) ? 0 : Math.abs(measureVolume(inBody));
     if (!(want > 0)) return true;
@@ -2627,16 +2677,38 @@ function wallsStand(body: Shape3D, shell: Shape3D, kept: Face[], t: number): boo
   }
 }
 
+/**
+ * Cubes `2h` across, one about each point, as one shape. One cube is made and
+ * the others are that cube moved (a handle each): made one by one, every cube
+ * stayed in the kernel for good (release.ts) - 250 of them with each check of
+ * a 40-face part's shell, megabytes with every move of a drag.
+ */
+function cubesAt(at: Vec3[], h: number): Shape3D {
+  const oc = getOC();
+  const first = makeBox([at[0][0] - h, at[0][1] - h, at[0][2] - h], [at[0][0] + h, at[0][1] + h, at[0][2] + h]) as Shape3D;
+  if (at.length === 1) return first;
+  const cubes: Shape3D[] = [first];
+  for (const p of at.slice(1)) {
+    const move = new oc.gp_Trsf();
+    const by = new oc.gp_Vec(p[0] - at[0][0], p[1] - at[0][1], p[2] - at[0][2]);
+    move.SetTranslation(by);
+    const place = new oc.TopLoc_Location(move);
+    const moved = first.wrapped.Moved(place, true);
+    try {
+      cubes.push(cast(moved) as Shape3D);
+    } finally {
+      for (const x of [move, by, place, moved]) x.delete();
+    }
+  }
+  return makeCompound(cubes) as unknown as Shape3D;
+}
+
 /** Up to `n` points spread over a face (the middles of triangles of its mesh, taken evenly through them), each with the face's outward normal there. */
 function spotsOn(body: Shape3D, face: Face, n: number): { p: Vec3; n: Vec3 }[] {
   const one = () => [pointOnFace(body, face)];
   if (n <= 1) return one();
-  let tri = face.triangulation();
-  if (!tri || !tri.trianglesIndexes.length) {
-    body.mesh({ tolerance: sizeOf(body) * 1e-3, angularTolerance: 0.3 });
-    tri = face.triangulation();
-  }
-  if (!tri || !tri.trianglesIndexes.length) return one();
+  const tri = faceTriangles(face, sizeOf(body));
+  if (!tri) return one();
   const count = tri.trianglesIndexes.length / 3;
   const v = (i: number): Vec3 => [tri!.vertices[3 * i], tri!.vertices[3 * i + 1], tri!.vertices[3 * i + 2]];
   const out: { p: Vec3; n: Vec3 }[] = [];
@@ -2662,21 +2734,39 @@ function spotsOn(body: Shape3D, face: Face, n: number): { p: Vec3; n: Vec3 }[] {
 function hollowInside(body: Shape3D, shell: Shape3D, kept: Face[], t: number): boolean {
   if (!kept.length || !(t > 0)) return true;
   try {
-    const skin = subShapes(body, "SHELL").map((x) => cast(x) as AnyShape);
+    const skin = subShapes(body, "SHELL");
     if (!skin.length) return true;
     const every = Math.ceil(kept.length / 40);
     const h = t / 6;
-    const cubes: Shape3D[] = [];
-    for (const [i, g] of kept.entries()) {
-      if (i % every) continue;
-      const { p, n } = pointOnFace(body, g);
-      const q = sub(p, scale(n, 3 * t));
-      const point = makeVertex(q);
-      if (Math.min(...skin.map((sk) => measureDistanceBetween(point, sk))) < 2.1 * t) continue;
-      cubes.push(makeBox([q[0] - h, q[1] - h, q[2] - h], [q[0] + h, q[1] + h, q[2] + h]) as Shape3D);
+    const at: Vec3[] = [];
+    // (One measurer for each skin, asked about every spot: one made for each
+    // spot kept what it worked out about the whole skin, for good - release.ts.)
+    const oc = getOC();
+    const far = skin.map((sk) => {
+      const d = new oc.BRepExtrema_DistShapeShape();
+      d.LoadS1(sk);
+      return d;
+    });
+    try {
+      for (const [i, g] of kept.entries()) {
+        if (i % every) continue;
+        const { p, n } = pointOnFace(body, g);
+        const q = sub(p, scale(n, 3 * t));
+        const point = makeVertex(q);
+        let near = Infinity;
+        for (const d of far) {
+          d.LoadS2(point.wrapped);
+          d.Perform();
+          near = Math.min(near, d.Value());
+        }
+        if (near < 2.1 * t) continue;
+        at.push(q);
+      }
+    } finally {
+      for (const d of far) d.delete();
     }
-    if (!cubes.length) return true;
-    const probes = cubes.length === 1 ? cubes[0] : (makeCompound(cubes) as unknown as Shape3D);
+    if (!at.length) return true;
+    const probes = cubesAt(at, h);
     const inBody = body.intersect(probes);
     const deep = isEmpty(inBody) ? 0 : Math.abs(measureVolume(inBody));
     if (!(deep > 0)) return true;
@@ -2942,6 +3032,8 @@ function resolveAxis(a: AxisRef, ctx: Ctx): { origin: Vec3; dir: Vec3 } {
 
 /** Put a new solid into the model: new body, or join/cut a target. */
 function combine(id: string, mode: string, target: string | undefined, solid: Shape3D, negative: boolean, ctx: Ctx): void {
+  // (A mode that isn't one - a damaged file: the body was left as it was, and nothing said so.)
+  if (typeof mode === "string" && !["auto", "new", "join", "cut", "intersect"].includes(mode)) throw new Error(DAMAGED_TEXT);
   const m = mode === "auto" ? (target ? (negative ? "cut" : "join") : "new") : mode;
   // Add or Cut picked, with no body named (drawn on the floor, not on a face):
   // it acts on what it runs into - Add on the body it touches, Cut on every
@@ -2950,7 +3042,7 @@ function combine(id: string, mode: string, target: string | undefined, solid: Sh
   if (!target && m === "cut") {
     for (const hit of overlapping(solid, ctx)) {
       const t = ctx.bodies.get(hit)!;
-      const out = fuzzyBoolean("cut", t, solid);
+      const out = checkedBoolean("cut", t, solid);
       if (isEmpty(out)) ctx.bodies.delete(hit);
       else ctx.bodies.set(hit, out);
       ctx.freeforms.delete(hit);
@@ -2975,19 +3067,24 @@ function combine(id: string, mode: string, target: string | undefined, solid: Sh
     return;
   }
   const t = need(ctx.bodies, target);
-  let result = m === "join" ? fuzzyBoolean("fuse", t, solid) : m === "cut" ? fuzzyBoolean("cut", t, solid) : t;
-  if (m === "join" || m === "cut") {
-    // OpenCascade can get a boolean wrong without saying so (a thread only just
-    // overlapping the core it's joined to): its volume then can't be right.
-    const ok = (r: Shape3D) => booleanVolumeOk(m === "join" ? "fuse" : "cut", t, solid, r);
-    if (!ok(result)) {
-      const plain = m === "join" ? t.fuse(solid) : t.cut(solid);
-      if (!ok(plain)) throw new Error(m === "join" ? "Joining these didn't work out - the shapes only just overlap here: let them overlap more" : "This cut didn't work out - the shapes only just overlap here: let them overlap more, or less");
-      result = plain;
-    }
-  }
+  const result = m === "join" ? checkedBoolean("fuse", t, solid) : m === "cut" ? checkedBoolean("cut", t, solid) : t;
   if (isEmpty(result)) ctx.bodies.delete(target);
   else ctx.bodies.set(target, result);
+}
+
+/**
+ * A join or a cut held to a volume it can have. OpenCascade can get a boolean
+ * wrong without saying so (a thread only just overlapping the core it's
+ * joined to): its volume then can't be right - the plain way is tried, and
+ * if that's wrong too, said. (Every cut and join of a new solid goes through
+ * here: one aimed at a body, and one that takes whatever it runs into.)
+ */
+function checkedBoolean(op: "fuse" | "cut", t: Shape3D, solid: Shape3D): Shape3D {
+  const result = fuzzyBoolean(op, t, solid);
+  if (booleanVolumeOk(op, t, solid, result)) return result;
+  const plain = op === "fuse" ? t.fuse(solid) : t.cut(solid);
+  if (!booleanVolumeOk(op, t, solid, plain)) throw new Error(op === "fuse" ? "Joining these didn't work out - the shapes only just overlap here: let them overlap more" : "This cut didn't work out - the shapes only just overlap here: let them overlap more, or less");
+  return plain;
 }
 
 /**
@@ -3069,6 +3166,7 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
   const algo = op === "cut" ? new oc.BRepAlgoAPI_Cut() : op === "fuse" ? new oc.BRepAlgoAPI_Fuse() : new oc.BRepAlgoAPI_Common();
   const args = new oc.NCollection_List_TopoDS_Shape();
   const tools = new oc.NCollection_List_TopoDS_Shape();
+  const progress = new oc.Message_ProgressRange();
   try {
     args.Append(a.wrapped);
     tools.Append(b.wrapped);
@@ -3077,12 +3175,21 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
     algo.SetFuzzyValue(tol);
     // (Never adjusting a or b: they're earlier steps' results.)
     algo.SetNonDestructive(true);
-    algo.Build(new oc.Message_ProgressRange());
+    algo.Build(progress);
     if (!algo.IsDone()) throw new Error("boolean failed");
-    const out = cast(withoutInternals(algo.Shape())) as Shape3D;
+    // (The kernel's handle to what it made is given back once the body has its own: release.ts.)
+    const made = algo.Shape();
+    let out: Shape3D;
+    try {
+      out = cast(withoutInternals(made)) as Shape3D;
+    } finally {
+      made.delete();
+    }
     // Fuse and cut keep their faces tidy like the usual booleans do.
     return op === "common" ? out : (unify(out, Math.max(sizeOf(a), sizeOf(b))) as Shape3D);
-  } catch {
+  } catch (err) {
+    // (The engine itself breaking down is not a boolean to try another way.)
+    if (isFault(err)) throw err;
     try {
       return op === "cut" ? a.cut(b) : op === "fuse" ? a.fuse(b) : a.intersect(b);
     } catch {
@@ -3093,6 +3200,7 @@ function fuzzyBoolean(op: "cut" | "fuse" | "common", a: Shape3D, b: Shape3D): Sh
     algo.delete();
     args.delete();
     tools.delete();
+    progress.delete();
   }
 }
 
@@ -4149,8 +4257,8 @@ function meshLines(shape: Shape3D) {
   // (Never finer than 1/50 000 of its size: a 100 m arc at 0.1 mm is millions of triangles.)
   const tolerance = Math.max(Math.min(0.1, Math.max(0.001, diag * 0.0008)), diag * 2e-5);
   const angularTolerance = 0.25;
-  const m = shape.mesh({ tolerance, angularTolerance });
-  const e = shape.meshEdges({ tolerance, angularTolerance });
+  const m = meshFaces(shape, tolerance, angularTolerance);
+  const e = meshEdgeLines(shape, tolerance, angularTolerance);
   // A face made freeform is many patches, smooth across the lines between
   // them: those lines aren't edges to show or pick (drawn as nothing).
   const made = edgeSteps(shape);
@@ -4373,44 +4481,117 @@ function staysClosed(before: Shape3D, after: Shape3D): Shape3D {
 }
 
 /**
- * An STL file as a body. OpenCascade's reader hands back a compound holding
- * the mesh's shell (replicad's importSTL wanted the shell itself and threw on
- * every file - the app's own STL exports too). One closed shell: a solid, its
- * flat triangles merged; anything else stays loose faces for Repair to close.
+ * The most triangles a mesh file may have. Every triangle is a face of the
+ * body (flat neighbours merged), and a body takes time and memory by its
+ * faces: 57 000 triangles come in in 13 s on a desktop, 115 000 in 41 s,
+ * 250 000 in a minute and a half (a phone is several times slower, with less
+ * memory). More is refused at once, in words: it used to run the engine out
+ * of memory, which showed as a step that "broke down".
+ */
+const MESH_MAX = 250000;
+class TooBig extends Error {
+  constructor(count: number) {
+    super(`This mesh has ${count.toLocaleString("en-US")} triangles - more than can be brought in (up to ${MESH_MAX.toLocaleString("en-US")}). Thin it out in a mesh program first`);
+  }
+}
+
+/**
+ * An STL file as a body. OpenCascade's reader hands back the triangles loose
+ * (a pile of faces, no two sharing an edge - replicad's importSTL wanted a
+ * shell and threw on every file, the app's own STL exports too). Sewn here:
+ * one closed skin is a solid, its flat triangles merged; anything else (open,
+ * several lumps) stays loose faces for Repair to close. (The reader used to
+ * hand back a shell, and this looked for one: with none to find, every STL
+ * came in as loose faces - a block of 12 triangles too - and nothing could be
+ * joined to it or cut from it until it was Repaired.)
  */
 function readSTL(bytes: Uint8Array): Shape3D {
   const oc = getOC();
+  // A binary file is known by its length: 84 bytes and 50 for each triangle
+  // it says it has (one with too many isn't read at all). OpenCascade's reader
+  // goes by its first 134 bytes instead - binary if one of them is no letter
+  // of plain text - and took for text a file with a blank or plain heading
+  // whose first triangle's numbers were all such bytes (round sizes and no
+  // normal: a 10 mm cube out of a 3MF) - "couldn't be read". Its heading,
+  // which nothing reads, is given such a byte.
+  let file = bytes;
+  if (bytes.length >= 134) {
+    const said = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(80, true);
+    if (84 + said * 50 === bytes.length) {
+      if (said > MESH_MAX) throw new TooBig(said);
+      file = bytes.slice();
+      file[79] = 0xff;
+    }
+  }
   const name = `stl-${Math.random().toString(36).slice(2)}.stl`;
-  oc.FS.writeFile(`/${name}`, bytes);
+  oc.FS.writeFile(`/${name}`, file);
   const reader = new oc.StlAPI_Reader();
   const read = new oc.TopoDS_Shell();
   try {
     if (!reader.Read(read, name)) throw new Error("This STL file couldn't be read");
-    const shells = [...iterTopo(read, "shell")];
-    if (shells.length === 1) {
+    const loose = cast(read) as Shape3D;
+    // (Counted straight off the shape: replicad's iterTopo checks each one against
+    // all before it - 6 of the 10 s ten thousand triangles took to come in.)
+    let count = 0;
+    const each = new oc.TopExp_Explorer(read, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+    for (; each.More(); each.Next()) count++;
+    each.delete();
+    if (count > MESH_MAX) throw new TooBig(count);
+    if (count) {
+      const size = sizeOf(loose);
+      const sew = new oc.BRepBuilderAPI_Sewing(Math.max(1e-7, size * 1e-7), true, true, true, false);
+      const progress = new oc.Message_ProgressRange();
       try {
-        const unify = new oc.ShapeUpgrade_UnifySameDomain(shells[0], true, true, false);
-        unify.Build();
-        const merged = unify.Shape();
-        unify.delete();
-        const mk = new oc.BRepBuilderAPI_MakeSolid();
-        for (const sh of iterTopo(merged, "shell")) mk.Add(oc.TopoDS.Shell(sh));
-        const solid = cast(mk.Solid()) as Shape3D;
-        mk.delete();
-        let v = measureVolume(solid);
-        if (v < 0) {
-          oc.BRepLib.OrientClosedSolid(solid.wrapped);
-          v = measureVolume(solid);
+        sew.Add(read);
+        sew.Perform(progress);
+        const shells = subShapes(cast(sew.SewedShape()) as Shape3D, "SHELL");
+        if (shells.length === 1 && sew.NbFreeEdges() === 0) {
+          const mk = new oc.BRepBuilderAPI_MakeSolid();
+          mk.Add(shells[0]);
+          const made = cast(mk.Solid()) as Shape3D;
+          mk.delete();
+          // Flat triangles made one face each, as Repair leaves them. A file's
+          // numbers are to seven digits, so a corner can be a hair off the
+          // plane of the face it now belongs to, which the check calls damage
+          // (a faceted ball came in "invalid"): its edges are given that room,
+          // as Repair's first step does - or the triangles are kept as they are.
+          let solid = unify(made, size);
+          if (solid !== made && !shapeValid(solid)) {
+            try {
+              oc.BRepLib.BuildCurves3d(solid.wrapped);
+              oc.BRepLib.SameParameter(solid.wrapped, size * 1e-7, true);
+              oc.BRepLib.UpdateTolerances(solid.wrapped, true);
+            } catch (err) {
+              if (isFault(err)) throw err;
+            }
+            // (Looked at afresh: what a shape was found to be is remembered.)
+            solid = cast(solid.wrapped) as Shape3D;
+            if (!shapeValid(solid)) solid = made;
+          }
+          let v = measureVolume(solid);
+          if (v < 0) {
+            oc.BRepLib.OrientClosedSolid(solid.wrapped);
+            v = measureVolume(solid);
+          }
+          if (v > 0 && !openEdges(solid).length) {
+            // (Measured once: a body of a hundred thousand faces takes seconds to.)
+            volumes.set(solid, v);
+            return solid;
+          }
         }
-        if (v > 0 && !openEdges(solid).length) return solid;
-      } catch {
+      } catch (err) {
+        if (isFault(err)) throw err;
         // fall through: loose faces
+      } finally {
+        sew.delete();
+        progress.delete();
       }
     }
-    return cast(read) as Shape3D;
+    return loose;
   } finally {
     oc.FS.unlink(`/${name}`);
     reader.delete();
+    read.delete();
   }
 }
 
@@ -4735,6 +4916,40 @@ function chordFillet(body: Shape3D, edges: Edge[], c1: number, c2: number, flip:
   } finally {
     builder.delete();
   }
+}
+
+/**
+ * How much of a path (as a share of its length) runs across `facing` - in the
+ * plane of a profile that faces that way: a profile held facing the same way
+ * has no thickness along those parts.
+ */
+function runsAcross(spine: Wire, facing: Vec3): number {
+  let total = 0;
+  let across = 0;
+  for (const e of spine.edges) {
+    const L = e.length as number;
+    const n = e.geomType === "LINE" ? 1 : 32;
+    for (let i = 0; i < n; i++) {
+      const t = norm(e.tangentAt((i + 0.5) / n).toTuple() as Vec3);
+      if (Math.abs(dot(t, facing)) < 0.005) across += L / n;
+    }
+    total += L;
+  }
+  return total > 0 ? across / total : 0;
+}
+
+/** Does a path have a sharp corner (two of its edges meeting at an angle)? */
+function sharpCorners(spine: Wire): boolean {
+  const edges = spine.edges;
+  const size = edges.reduce((sum, e) => sum + (e.length as number), 0) || 1;
+  const ends = edges.flatMap((e) => [0, 1].map((u) => ({ e, p: e.pointAt(u).toTuple() as Vec3, t: norm(e.tangentAt(u).toTuple() as Vec3) })));
+  for (let i = 0; i < ends.length; i++)
+    for (let j = i + 1; j < ends.length; j++) {
+      if (ends[i].e === ends[j].e || dist(ends[i].p, ends[j].p) > size * 1e-7) continue;
+      // (The same line through the point, whichever way each edge runs: within about two degrees.)
+      if (Math.abs(dot(ends[i].t, ends[j].t)) < 0.9994) return true;
+    }
+  return false;
 }
 
 /** A path that runs straight from its start to its end: its ends (else null). */
