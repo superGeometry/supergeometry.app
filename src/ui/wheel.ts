@@ -1096,6 +1096,7 @@ export class Wheel implements WheelHandle {
     this.openSector = i;
     const built = i < 0 ? { fan: [], trail: [] } : this.buildFan(i, trail);
     this.trail = built.trail;
+    this.root.classList.toggle("fanned", i >= 0);
     const open = this.ringEls[i];
     if (open) {
       open.classList.add("open");
@@ -1354,10 +1355,14 @@ export class Wheel implements WheelHandle {
 
   /** The pointer came onto a group, a tool, the middle - or off them all. */
   private point(hit: number): void {
+    // A group's tools are out: the other groups are greyed, and the pointer crossing one on its
+    // way to a tool neither lights it nor swaps the fan for it (a tap on it still does).
+    const greyed = hit >= SECTOR && hit < CELL && this.openSector >= 0 && hit - SECTOR !== this.openSector;
     this.elOf(this.hot)?.classList.remove("hot");
     this.hot = hit;
-    this.elOf(hit)?.classList.add("hot");
+    if (!greyed) this.elOf(hit)?.classList.add("hot");
     this.clearTimers();
+    if (greyed) return void (this.tip.hidden = true);
     if (hit >= CELL) {
       const c = this.fan[hit - CELL];
       this.sayTool(c.item, (c.a0 + c.a1) / 2, this.reach() + 8);

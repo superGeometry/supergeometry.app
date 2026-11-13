@@ -5687,6 +5687,17 @@ circle.wheel-plate {
   color: #fff;
   font-weight: 600;
 }
+/* A group's tools are out: the other groups grey out (crossing them on the
+   way to a tool doesn't switch to them; a tap does). */
+.wheel-root.fanned .wheel-sector:not(.open) {
+  fill: rgba(16, 17, 20, 0.9);
+  stroke: rgba(255, 255, 255, 0.05);
+  stroke-width: 1px;
+}
+.wheel-root.fanned .wheel-ring .wheel-item:not(.open) {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
 .wheel-sector.dim {
   fill: rgba(23, 25, 29, 0.86);
 }
