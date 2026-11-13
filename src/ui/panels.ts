@@ -7,6 +7,7 @@ import { UNIT_LABEL, units } from "../units";
 import type { Viewport } from "../view/viewport";
 import type { UI } from "./ui";
 import { el } from "./ui";
+import { textField } from "./textField";
 
 export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnits: (u: Units) => void, isolatedNames: () => string[] = () => []): void {
   ui.addRight("fit", "fit", "Zoom to fit (F)", () => view.fitAll(), () => "Fit");
@@ -40,8 +41,8 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
       host.append(toggleRow(`Lock grid size (${s.gridStep} mm)`, s.gridLocked, (v) => settings.set("gridLocked", v)));
       const stepRow = el("label", "pop-row");
       stepRow.append(el("span", "", "Locked size (mm)"));
-      const input = document.createElement("input");
-      input.className = "pop-input";
+      const input = textField("pop-input");
+      input.inputMode = "decimal";
       input.value = String(s.gridStep);
       input.addEventListener("change", () => {
         const v = Number(input.value);

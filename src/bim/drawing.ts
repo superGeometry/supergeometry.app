@@ -9,6 +9,7 @@ import type { DimText, DrawingDim, DrawingMark, DrawingNote, DrawingOptions, Pro
 import type { ProjectedView, ViewSpec } from "../kernel/protocol";
 import { icons, type IconName } from "../ui/icons";
 import { el, textButton } from "../ui/ui";
+import { textField as typingBox } from "../ui/textField";
 import { UNIT_MM } from "../units";
 import type { AppContext } from "../tools/tool";
 import { measureBodies } from "./bimTool";
@@ -1123,7 +1124,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
   const noteInput = (q: [number, number], cx: number, cy: number, edit?: DrawingNote, to?: DrawingNote["to"]) => {
     // One being written already: kept as it is.
     closeNote?.();
-    const input = el("input", "bim-note-input");
+    const input = typingBox("bim-note-input");
     input.placeholder = "Note";
     input.value = edit?.text ?? "";
     const r = stage.getBoundingClientRect();
@@ -1299,10 +1300,8 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
           button("Max", () => flip(true), !!d.max);
         }
         // How far out from what it measures, typed (mm on the paper).
-        const far = el("input", "bim-input bim-dim-far");
-        far.type = "number";
-        far.min = "1";
-        far.step = "1";
+        const far = typingBox("bim-input bim-dim-far");
+        far.inputMode = "decimal";
         far.value = String(Math.round(Math.abs(d.offset) * 10) / 10);
         far.title = "How far out from what it measures (mm on the paper)";
         far.addEventListener("change", () => {
@@ -1415,7 +1414,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
       back.append(box);
       back.addEventListener("pointerdown", (e) => e.target === back && done(false));
       document.body.append(back);
-      (list.querySelector("input, select") as HTMLElement | null)?.focus();
+      (list.querySelector("input, select, .text-field") as HTMLElement | null)?.focus();
     });
   const select = (value: string, options: [string, string][]) => {
     const s = el("select", "bim-select");
@@ -1428,10 +1427,9 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     return s;
   };
   const input = (value: string, placeholder = "") => {
-    const i = el("input", "");
+    const i = typingBox();
     i.value = value;
     i.placeholder = placeholder;
-    i.autocomplete = "off";
     return i;
   };
 
@@ -1614,8 +1612,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
     sheets.append(acts);
     // Many drawings: a box to find one by its title (the list narrows as it's typed).
     if (listed.length > 8) {
-      const find = el("input", "bim-input bim-dfind");
-      find.type = "search";
+      const find = typingBox("bim-input bim-dfind");
       find.placeholder = `Find among ${listed.length}…`;
       find.value = listFilter;
       find.addEventListener("keydown", (e) => e.stopPropagation());
@@ -1677,7 +1674,7 @@ export async function openDrawing(app: AppContext, which?: string): Promise<void
       return s;
     };
     const textField = (value: string, change: (v: string) => void) => {
-      const i = el("input", "bim-input");
+      const i = typingBox("bim-input");
       i.value = value;
       i.placeholder = "-";
       i.addEventListener("change", () => change(i.value.trim()));

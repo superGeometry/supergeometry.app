@@ -133,9 +133,21 @@ export class ViewCube {
       this.setHover(this.zoneAt(e));
     });
     this.canvas.addEventListener("pointerleave", () => this.setHover(null));
+    // A double tap (or click) on the cube fits everything on screen - from
+    // where the view was before the first tap turned it.
+    let tapped: { at: number; x: number; y: number; before: ReturnType<Viewport["cam"]["mark"]> } | null = null;
     this.canvas.addEventListener("pointerup", (e) => {
       last = null;
-      if (this.dragged) return;
+      if (this.dragged) return (tapped = null), undefined;
+      const t = tapped;
+      if (t && e.timeStamp - t.at < 400 && Math.hypot(e.clientX - t.x, e.clientY - t.y) < 24) {
+        tapped = null;
+        this.view.cam.back(t.before);
+        this.view.fitAll();
+        this.view.requestRender();
+        return;
+      }
+      tapped = { at: e.timeStamp, x: e.clientX, y: e.clientY, before: this.view.cam.mark() };
       const zone = this.zoneAt(e);
       if (!zone) return;
       const face = FACES.find((f) => f.n.every((v, i) => v === zone[i]));

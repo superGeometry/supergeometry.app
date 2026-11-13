@@ -8,6 +8,7 @@
 import type { MaterialDef } from "../doc/types";
 import type { BodyProps } from "../kernel/protocol";
 import { el } from "../ui/ui";
+import { caretToEnd, textField } from "../ui/textField";
 import { icons } from "../ui/icons";
 import type { ToolPointer } from "../view/input";
 import { hitToSel, type AppContext, type Sel, type Tool } from "../tools/tool";
@@ -256,16 +257,15 @@ export class BimTool implements Tool {
     card.append(info);
 
     // ---- The library, by class; search to narrow it.
-    const find = el("input", "bim-search");
-    find.type = "search";
+    const find = textField("bim-search");
     find.placeholder = "Search materials (steel, PLA, oak…)";
     find.value = this.search;
     find.addEventListener("input", () => {
       this.search = find.value;
       this.render();
-      const again = this.card?.querySelector<HTMLInputElement>(".bim-search");
+      const again = this.card?.querySelector<HTMLElement>(".bim-search");
       again?.focus();
-      again?.setSelectionRange(again.value.length, again.value.length);
+      if (again) caretToEnd(again);
     });
     card.append(find);
     const box = el("div", "bim-materials");

@@ -193,6 +193,7 @@ class Numpad {
   open(input: HTMLInputElement, stay = false): void {
     // Moving on to another box: it stays right where it is (setFx re-places it).
     const at = stay ? { left: this.el.style.left, top: this.el.style.top } : null;
+    this.target?.classList.remove("np-all");
     this.target = input;
     this.fresh = true;
     // A formula in the box already: ƒx is on.
@@ -243,6 +244,7 @@ class Numpad {
 
   private close(): void {
     this.el.hidden = true;
+    this.target?.classList.remove("np-all");
     this.target = null;
   }
 
@@ -256,6 +258,18 @@ class Numpad {
   }
 
   private showSelection(): void {
+    const t = this.target;
+    // A finger: the value shows picked (lit), the box's own selection stays a
+    // caret - selected for real, it brought up the phone's Cut / Copy bar.
+    if (t && !matchMedia("(pointer: fine)").matches) {
+      t.classList.toggle("np-all", this.selStart !== this.selEnd);
+      try {
+        t.setSelectionRange(this.selEnd, this.selEnd);
+      } catch {
+        // not a text box
+      }
+      return;
+    }
     try {
       this.target?.setSelectionRange(this.selStart, this.selEnd);
     } catch {

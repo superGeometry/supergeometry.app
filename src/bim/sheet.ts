@@ -10,6 +10,7 @@
 import type { ProjectInfo } from "../doc/types";
 import type { BodyProps } from "../kernel/protocol";
 import { el } from "../ui/ui";
+import { textField } from "../ui/textField";
 import { trim, UNIT_LABEL, UNIT_MM, units } from "../units";
 import type { AppContext } from "../tools/tool";
 import { dataTable, fmtArea, fmtMass, fmtVolume, measureBodies } from "./bimTool";
@@ -119,7 +120,7 @@ function render(app: AppContext, paper: HTMLElement, rows: PartRow[]): void {
     f.append(el("span", "bim-tb-label", label));
     if (!key) f.append(el("span", "bim-tb-value", value));
     else {
-      const input = el("input", "bim-tb-value");
+      const input = textField("bim-tb-value");
       input.value = value;
       input.placeholder = "-";
       input.addEventListener("change", () => app.store.commit((d) => (d.info = { ...(d.info ?? {}), [key]: input.value.trim() || undefined })));

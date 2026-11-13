@@ -156,6 +156,10 @@ export class App implements AppContext {
     if (handheld) {
       vrBtn.textContent = "Enter AR";
       vrBtn.title = "See the model in your room through the camera";
+      // A phone or tablet: under More (History has its place in the top bar).
+      vrBtn.className = "";
+      vrBtn.addEventListener("click", () => (document.getElementById("more-menu")!.hidden = true));
+      document.getElementById("more-menu")!.prepend(vrBtn);
     }
     const checkVR = () => void vrSupported(handheld).then((ok) => (vrBtn.hidden = !ok && !isHeadset));
     checkVR();
@@ -1151,7 +1155,7 @@ export class App implements AppContext {
       return;
     }
     const target = e.target as HTMLElement;
-    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
     const mod = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
     if (mod && k === "z") {
@@ -1306,6 +1310,7 @@ export class App implements AppContext {
     };
     on("file-btn", () => ((more.hidden = true), menu.toggleAttribute("hidden"), !menu.hidden && phoneItemsAway()));
     on("more-btn", () => ((menu.hidden = true), more.toggleAttribute("hidden"), !more.hidden && phoneItemsAway()));
+    on("history-btn", () => ((menu.hidden = more.hidden = true), this.ui.toggleHistory()));
     document.getElementById("m-version")!.textContent = `Version ${__APP_VERSION__}`;
     const moreItem = (id: string, fn: () => void) => on(id, () => ((more.hidden = true), fn()));
     // Fullscreen (the label follows the state; Esc also leaves it).

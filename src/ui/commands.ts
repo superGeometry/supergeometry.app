@@ -4,6 +4,7 @@
 // so a command is found by its label there, and run as a tap would run it.
 
 import { icons } from "./icons";
+import { caretAtEnd, caretToEnd, textField } from "./textField";
 import { el, type ToolItem } from "./ui";
 
 export interface Listed {
@@ -83,14 +84,11 @@ let openBox: HTMLElement | null = null;
  * closes. What the picked thing offers comes first.
  */
 export function openCommandSearch(offered: () => ToolItem[], main: () => ToolItem[]): void {
-  if (openBox) return void openBox.querySelector("input")?.focus();
+  if (openBox) return void openBox.querySelector<HTMLElement>(".cmd-input")?.focus();
   const box = el("div", "cmd-search");
-  const input = el("input", "cmd-input");
-  input.type = "text";
+  const input = textField("cmd-input");
   input.placeholder = "Search commands…";
   input.setAttribute("aria-label", "Search commands");
-  input.autocomplete = "off";
-  input.spellcheck = false;
   const list = el("div", "cmd-list");
   list.setAttribute("role", "listbox");
   box.append(input, list);
@@ -179,9 +177,10 @@ export function openCommandSearch(offered: () => ToolItem[], main: () => ToolIte
       paint();
     }
     // → at the end of the text: the highlighted command's whole name.
-    if (e.key === "ArrowRight" && input.selectionStart === input.value.length && shown[at]) {
+    if (e.key === "ArrowRight" && caretAtEnd(input) && shown[at]) {
       e.preventDefault();
       input.value = shown[at].label;
+      caretToEnd(input);
       filter();
     }
   });

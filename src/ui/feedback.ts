@@ -7,6 +7,7 @@
 
 import { icons } from "./icons";
 import { el, textButton } from "./ui";
+import { textField as typingBox } from "./textField";
 import { openSupport } from "./support";
 
 export const SUBREDDIT = "supergeometry";
@@ -72,15 +73,13 @@ export function showFeedback(): void {
 
   const titleField = el("label", "dialog-field");
   titleField.append(el("span", "field-label", "Title"));
-  const title = document.createElement("input");
+  const title = typingBox();
   title.maxLength = 280;
-  title.autocomplete = "off";
   titleField.append(title);
 
   const textField = el("label", "dialog-field");
   textField.append(el("span", "field-label", "Description"));
-  const text = document.createElement("textarea");
-  text.rows = 6;
+  const text = typingBox("", { multiline: true });
   text.maxLength = MAX_TEXT;
   textField.append(text);
 

@@ -12,6 +12,7 @@ import { mergingCommits } from "../doc/store";
 import type { Variable, Vec3 } from "../doc/types";
 import type { VarKind, VarTag } from "../doc/varAnchors";
 import { numpadInput, openNumpad } from "../ui/numpad";
+import { selectAll } from "../ui/textField";
 import { el } from "../ui/ui";
 import { bareExpr, toDisplay, trim, withUnitOf } from "../units";
 import type { Viewport } from "../view/viewport";
@@ -168,7 +169,7 @@ export class VariableTags {
     this.showValue();
     this.layout();
     this.input.focus();
-    this.input.select();
+    selectAll(this.input);
     openNumpad(this.input);
   }
 

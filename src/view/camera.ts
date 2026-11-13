@@ -249,6 +249,14 @@ export class CameraController {
     this.go({ target: new Vector3(...v.target), distance: v.distance, azimuth: v.azimuth, elevation: v.elevation, roll: 0 });
   }
 
+  /** Where the view is heading now, to come back to with `back` (a view cube double tap undoes its first tap's turn). */
+  mark(): ViewState {
+    return this.aim();
+  }
+  back(s: ViewState): void {
+    this.go({ ...s, target: s.target.clone() });
+  }
+
   /** Advance animations; returns true while animating. */
   tick(now: number): boolean {
     if (!this.animation) return false;

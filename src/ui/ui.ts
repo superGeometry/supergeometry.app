@@ -7,6 +7,7 @@ import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
 import { icons, type IconName } from "./icons";
 import { DIALOG_ACTION } from "./dialogAction";
 import { numpadInput } from "./numpad";
+import { selectAll, textField } from "./textField";
 import { settings } from "../settings";
 
 export interface ToolItem {
@@ -270,6 +271,7 @@ export class UI {
     }
     // Everything on the right makes room for the docked History panel.
     document.body.classList.toggle("history-open", on);
+    document.getElementById("history-btn")?.classList.toggle("on", on);
     // Things placed beside the right-hand bar (panel, constraint column) re-fit.
     window.dispatchEvent(new Event("resize"));
   }
@@ -823,7 +825,7 @@ export class UI {
       x.addEventListener("click", () => close(null));
       head.append(x);
       box.append(head);
-      const values = () => Object.fromEntries(fields.map((f, i) => [f.key, f.check ? (inputs[i].checked ? "1" : "") : inputs[i].value]));
+      const values = () => Object.fromEntries(fields.map((f, i) => [f.key, f.check ? ((inputs[i] as HTMLInputElement).checked ? "1" : "") : inputs[i].value]));
       if (action) {
         const a = el("button", "text-btn dialog-action");
         a.type = "button";
@@ -848,11 +850,9 @@ export class UI {
         }
         const l = el("label", "dialog-field");
         l.append(el("span", "field-label", f.label));
-        const i = document.createElement("input");
+        const i = textField();
         i.value = f.value;
         i.placeholder = f.placeholder ?? "";
-        i.autocomplete = "off";
-        i.spellcheck = false;
         l.append(i);
         list.append(l);
         return i;
@@ -877,7 +877,7 @@ export class UI {
       back.append(box);
       back.addEventListener("pointerdown", (e) => e.target === back && close(null));
       document.body.append(back);
-      (inputs.find((i) => i.type !== "checkbox") ?? ok).focus();
+      (inputs.find((i) => !(i instanceof HTMLInputElement)) ?? ok).focus();
     });
   }
 
@@ -1163,12 +1163,12 @@ export class UI {
     };
     input.addEventListener("input", apply);
     // Clicking a value selects it: typing replaces it (no "020").
-    input.addEventListener("focus", () => requestAnimationFrame(() => document.activeElement === input && input.select()));
+    input.addEventListener("focus", () => requestAnimationFrame(() => document.activeElement === input && selectAll(input)));
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
         apply();
-        if (spec.enterApplies) input.select();
+        if (spec.enterApplies) selectAll(input);
         else spec.onDone?.();
       } else if (e.key === "Escape") {
         e.preventDefault();

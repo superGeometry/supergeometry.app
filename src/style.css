@@ -808,6 +808,32 @@ body.sketching .right-btn.sketch-only {
   font-size: 12px;
   padding: 6px 8px;
 }
+/* Typing boxes made of editable text (ui/textField.ts - a phone shows no
+   autofill bar over them): one line scrolled to the caret, or several, and
+   the placeholder while empty. (Before the boxes' own rules: those win.) */
+.text-field {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.text-field.multiline {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+}
+.text-field:empty::before {
+  content: attr(data-placeholder) "\200b";
+  opacity: 0.45;
+  pointer-events: none;
+}
+/* A number box's value picked to type over, by a finger: lit, not selected
+   (a selection brought up the phone's Cut / Copy bar). */
+input.np-all {
+  box-shadow: inset 0 0 0 100px rgba(77, 144, 254, 0.3);
+}
 .pop-input {
   width: 70px;
   font: 13px ui-monospace, monospace;
@@ -1382,6 +1408,7 @@ body.sketching .right-btn.sketch-only {
 .text-input {
   width: 180px;
   font-family: inherit;
+  line-height: 34px;
 }
 .field input:focus,
 .text-input:focus {
@@ -1816,9 +1843,11 @@ body.items-open #bottom-left {
   gap: 4px;
   color: var(--muted);
 }
-.dialog-field input {
+.dialog-field input,
+.dialog-field .text-field {
   min-height: 38px;
   font: 14px ui-monospace, monospace;
+  line-height: 36px;
   color: var(--text);
   background: #2b2e34;
   border: 1px solid var(--line);
@@ -1941,6 +1970,7 @@ form.dialog {
   flex: 1;
   min-height: 36px;
   font: 14px ui-monospace, monospace;
+  line-height: 34px;
   color: var(--text);
   background: #2b2e34;
   border: 1px solid var(--line);
@@ -1985,8 +2015,10 @@ form.dialog {
   accent-color: var(--accent, #3b82f6);
 }
 
-.dialog-field textarea {
+.dialog-field textarea,
+.dialog-field .text-field.multiline {
   min-height: 110px;
+  max-height: 40vh;
   resize: vertical;
   font: 14px/1.4 system-ui, sans-serif;
   color: var(--text);
@@ -1997,8 +2029,10 @@ form.dialog {
   -webkit-user-select: text;
   user-select: text;
 }
-.dialog.feedback .dialog-field input {
+.dialog.feedback .dialog-field input,
+.dialog.feedback .dialog-field .text-field:not(.multiline) {
   font: 14px system-ui, sans-serif;
+  line-height: 36px;
 }
 .feedback-kinds .chip {
   flex: 1 1 auto;
@@ -2034,7 +2068,8 @@ form.dialog {
     padding: 10px 12px;
     gap: 8px;
   }
-  .dialog-field textarea {
+  .dialog-field textarea,
+  .dialog-field .text-field.multiline {
     min-height: 64px;
   }
 }
@@ -4367,6 +4402,9 @@ input.scrubbing {
   .panel-buttons {
     gap: 5px;
   }
+  #panel .text-input {
+    line-height: 28px;
+  }
   .field input,
   #panel .text-input {
     min-height: 30px;
@@ -4602,6 +4640,7 @@ html[data-screen="phone"] body.bim-open .hint {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text);
   font: inherit;
+  line-height: 34px;
   margin-bottom: 6px;
   -webkit-user-select: text;
   user-select: text;
@@ -4735,7 +4774,7 @@ html[data-screen="phone"] body.bim-open .hint {
   font-weight: 600;
   width: 100%;
 }
-input.bim-tb-value:focus {
+.bim-tb-value:focus {
   outline: 1px solid var(--accent);
 }
 .bim-h {
@@ -5479,11 +5518,14 @@ body.wheel-covers #toolbar,
 body.wheel-covers #bottom-left {
   display: none !important;
 }
-/* With the wheel on, the right column keeps Fit, Screenshot and History: its
-   other lists and switches (snapping, units, appearance, shaders, the numpad,
-   a sketch's constraints) are on the wheel, under Settings and More. */
-body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"]):not([data-right="history"]) {
-  display: none;
+/* With the wheel on, no right column: its lists and switches (snapping, units,
+   appearance, shaders, the numpad, a snapshot) are on the Settings wheel,
+   History is in the top bar and a double tap on the view cube fits. */
+body.wheel-ui #right-col {
+  display: none !important;
+}
+#history-btn.on {
+  color: var(--accent);
 }
 /* Phones upright: with the tool strip gone, undo/redo go down to the bottom
    edge (the Options and Settings icons on that row too, at the right) and the

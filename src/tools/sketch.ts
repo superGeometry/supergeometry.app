@@ -5,6 +5,7 @@ import type { EdgeLink, FaceRef, PlaneDef, PointRef, SketchConstraint, SketchEnt
 import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, patternSpacing, planeY, roundSig, scale as scale3, sub as sub3, toPlane } from "../geom";
 import { addForUser, addStrict, constraintError, constraintName, LINKED, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
+import { caretToEnd, selectAll, textField, type TextField } from "../ui/textField";
 import { nearestSnap } from "../sketch/snapPick";
 import { arrangement } from "../sketch/regions";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
@@ -1606,9 +1607,12 @@ export class SketchTool implements Tool {
 
   private addTextInput(): void {
     const panel = document.getElementById("panel")!;
-    const input = document.createElement("input");
-    input.className = "text-input";
-    input.value = this.text;
+    const input = textField("text-input");
+    // A finger: the last text shows as the placeholder (Enter keeps it) and
+    // typing starts afresh - selected to type over, it brought up the phone's
+    // Cut / Copy bar.
+    if (matchMedia("(pointer: fine)").matches) input.value = this.text;
+    else input.placeholder = this.text;
     input.addEventListener("input", () => ((this.text = input.value), this.refreshPreview()));
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") this.commitText();
@@ -1620,7 +1624,7 @@ export class SketchTool implements Tool {
     // made during the tap, and keys typed straight away must land here.
     this.textTyped = false;
     input.focus();
-    input.select();
+    selectAll(input);
     input.addEventListener("input", () => (this.textTyped = true), { once: true });
   }
   /** Something was typed into the text box since it opened (else the last text is still there, selected). */
@@ -2483,7 +2487,7 @@ export class SketchTool implements Tool {
     // Text placed, its box not focused yet (typed straight after the tap): the
     // keys are the text, not shortcuts - "1" then Enter used to be lost.
     if (this.kind === "text" && this.pts.length === 1) {
-      const box = document.querySelector<HTMLInputElement>("#panel .text-input");
+      const box = document.querySelector<TextField>("#panel .text-input");
       if (box && document.activeElement !== box) {
         if (e.key.length === 1) {
           if (!this.textTyped) box.value = "";
@@ -2492,6 +2496,7 @@ export class SketchTool implements Tool {
           this.text = box.value;
           this.refreshPreview();
           box.focus();
+          caretToEnd(box);
           return true;
         }
         if (e.key === "Enter") {

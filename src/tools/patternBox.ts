@@ -5,6 +5,7 @@ import { Vector3 } from "three";
 import type { Vec3 } from "../doc/types";
 import { el } from "../ui/ui";
 import { numpadInput } from "../ui/numpad";
+import { selectAll } from "../ui/textField";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
 import type { Viewport } from "../view/viewport";
 
@@ -65,7 +66,7 @@ export class PatternBox {
     document.body.append(this.box);
     view.frameHooks.add(this.hook);
     view.helpers.add(this);
-    setTimeout(() => (this.count.focus(), this.count.select()), 0);
+    setTimeout(() => (this.count.focus(), selectAll(this.count)), 0);
   }
 
   /** Where the box sits (a world point, e.g. the arrow's tip). */

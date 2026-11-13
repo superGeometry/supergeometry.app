@@ -26,6 +26,7 @@ import { isCoarse, screenClass } from "../device";
 import { settings } from "../settings";
 import { evaluate, toDisplay, UNIT_LABEL, units } from "../units";
 import { numpadInput, openNumpad } from "./numpad";
+import { selectAll } from "./textField";
 import { icons, type IconName } from "./icons";
 import { el, usable, type PanelItem, type ToolItem, type UI } from "./ui";
 
@@ -595,7 +596,7 @@ export class Wheel implements WheelHandle {
   /**
    * The Settings wheel: Snap to, Units, Appearance, Shaders - each fanning out
    * its switches and choices, set with a tap right there (what only a slider or
-   * a typed value can set is under More…, in the list's window) - and NumPad.
+   * a typed value can set is under More…, in the list's window) - NumPad and Snapshot.
    */
   private settingsContent(): { sectors: Sector[]; pick: string } {
     const ui = this.host.ui;
@@ -615,6 +616,8 @@ export class Wheel implements WheelHandle {
     const pad = settings.value.numpad;
     const numpad: ToolItem = { id: "set-numpad", label: "NumPad", icon: "numpad", sub: pad ? "On" : "Off", active: pad, run: () => ui.popAt("numpad", 0, 0) };
     sectors.push({ id: "numpad", label: "NumPad", icon: "numpad", cells: [], item: numpad, on: pad, mark: false });
+    const shot: ToolItem = { id: "set-shot", label: "Snapshot", icon: "camera", run: () => ui.popAt("shot", 0, 0) };
+    sectors.push({ id: "shot", label: "Snapshot", icon: "camera", cells: [], item: shot, mark: false });
     return { sectors, pick: "" };
   }
 
@@ -754,7 +757,7 @@ export class Wheel implements WheelHandle {
     if (r.right > innerWidth - 6) box.style.left = `${Math.round(this.px - this.cx - (r.right - innerWidth + 6))}px`;
     if (r.bottom > innerHeight - 6) box.style.top = `${Math.round(this.py - this.cy - (r.bottom - innerHeight + 6))}px`;
     input.focus();
-    input.select();
+    selectAll(input);
     openNumpad(input);
   }
 

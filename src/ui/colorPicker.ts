@@ -4,6 +4,7 @@
 // as you go. Done keeps it; Cancel (or Esc, or a tap outside) puts it back.
 
 import { el, textButton } from "./ui";
+import { textField } from "./textField";
 
 type HSV = [number, number, number];
 
@@ -80,10 +81,7 @@ export function pickColor(title: string, start: string, live: (hex: string) => v
 
     const row = el("div", "color-row");
     const preview = el("span", "swatch color-preview");
-    const input = document.createElement("input");
-    input.className = "color-hex";
-    input.autocomplete = "off";
-    input.spellcheck = false;
+    const input = textField("color-hex");
     input.maxLength = 7;
     row.append(preview, input);
 
