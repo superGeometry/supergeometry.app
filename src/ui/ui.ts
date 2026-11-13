@@ -271,7 +271,6 @@ export class UI {
     }
     // Everything on the right makes room for the docked History panel.
     document.body.classList.toggle("history-open", on);
-    document.getElementById("history-btn")?.classList.toggle("on", on);
     // Things placed beside the right-hand bar (panel, constraint column) re-fit.
     window.dispatchEvent(new Event("resize"));
   }
