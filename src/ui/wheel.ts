@@ -490,8 +490,15 @@ export class Wheel implements WheelHandle {
       const right = col && col.width > 0 ? col.left : innerWidth;
       // (Placed by the folded size: the two icons keep their places; unfolded, a wheel comes in from the edges as far as it must.)
       const r = this.m.r0;
-      const up = this.layout === "options" ? 2 * r + 16 : 0;
-      return { x: right - 8 - r, y: innerHeight - 70 - up - r };
+      const step = this.layout === "options" ? 2 * r + 16 : 0;
+      // (A phone: no tool strip along the bottom any more - down on the row of undo/redo, level
+      // with its bottom; upright, where there's no room above the guide text, side by side.)
+      const undo = document.getElementById("undo-dock")?.getBoundingClientRect();
+      if (document.documentElement.dataset.screen === "phone" && undo && undo.height > 0) {
+        const upright = innerHeight > innerWidth;
+        return { x: right - 8 - r - (upright ? step : 0), y: undo.bottom - r - (upright ? 0 : step) };
+      }
+      return { x: right - 8 - r, y: innerHeight - 70 - step - r };
     }
     // (The sketch's wheel never moved: where the model's is kept, if it is.)
     const s = (this.layout && this.spots[this.layout]) ?? this.spots.model;

@@ -5480,6 +5480,48 @@ body.wheel-covers #bottom-left {
 body.wheel-ui #right-col > button:not([data-right="fit"]):not([data-right="shot"]):not([data-right="history"]) {
   display: none;
 }
+/* Phones upright: with the tool strip gone, undo/redo go down to the bottom
+   edge (the Options and Settings icons on that row too, at the right) and the
+   guide text sits just above them (the tool's window over it). */
+@media (max-width: 720px) and (orientation: portrait) {
+  html[data-screen="phone"] body.wheel-ui #undo-dock {
+    bottom: calc(8px + var(--safe-b));
+  }
+  html[data-screen="phone"] body.wheel-ui #hint {
+    bottom: calc(76px + var(--safe-b));
+  }
+  html[data-screen="phone"] body.wheel-ui:has(#hint:not([hidden])) #panel {
+    bottom: calc(124px + var(--safe-b));
+  }
+  html[data-screen="phone"] body.wheel-ui:not(:has(#hint:not([hidden]))) #panel {
+    bottom: calc(64px + var(--safe-b));
+  }
+}
+/* Phones sideways: the bottom row is free, so the guide text goes down there,
+   beside undo/redo, instead of over the top of the view. */
+@media (max-height: 500px) and (orientation: landscape) {
+  html[data-screen="phone"] body.wheel-ui #hint:not([hidden]),
+  html[data-screen="phone"] body.wheel-ui.history-open #hint:not([hidden]) {
+    display: block;
+    visibility: visible;
+    top: auto;
+    bottom: calc(10px + var(--safe-b));
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: min(440px, calc(100vw - 360px - var(--safe-l) - var(--safe-r)));
+    text-align: center;
+  }
+  /* History open over the right side: between undo/redo and it. */
+  html[data-screen="phone"] body.wheel-ui.history-open #hint:not([hidden]) {
+    left: calc(190px + var(--safe-l));
+    right: calc(266px + var(--safe-r));
+    transform: none;
+    width: auto;
+    max-width: none;
+  }
+}
 /* One of those lists, opened from the wheel at the pointer: over the wheel. */
 #popover.at-point {
   z-index: 49;
