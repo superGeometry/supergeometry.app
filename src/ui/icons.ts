@@ -3,6 +3,10 @@
 const svg = (body: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
+/** An icon that is a short text (units: mm, in...). */
+const glyph = (t: string, size = 10) =>
+  svg(`<text x="12" y="${12 + size * 0.36}" font-size="${size}" font-family="system-ui, sans-serif" font-weight="600" text-anchor="middle" fill="currentColor" stroke="none">${t}</text>`);
+
 /** A plane (lower right) with a small symbol above its corner. */
 const planeWith = (mark: string) =>
   svg(`<path d="M6 19l5-5h11l-5 5z"/><text x="7" y="11" font-size="11" font-family="system-ui, sans-serif" text-anchor="middle" fill="currentColor" stroke="none">${mark}</text>`);
@@ -126,7 +130,101 @@ export const icons = {
   // A cog: the settings (on the tool wheel).
   /** A tool's options (the Options wheel): three sliders. */
   options: svg('<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>'),
+  // For the wheels' switches and choices: what each one is (on or off shows by its highlight).
+  grid: svg('<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16"/>'),
+  axes: svg('<path d="M5 19V5"/><path d="M5 19h14"/><path d="M5 19l8-6"/><path d="M3 7l2-2 2 2M17 17l2 2-2 2"/>'),
+  point: svg('<circle cx="12" cy="12" r="2.4" fill="currentColor"/><path d="M12 3.5v4M12 16.5v4M3.5 12h4M16.5 12h4"/>'),
+  hiddenEdges: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" stroke-dasharray="2 2"/>'),
+  zebra: svg('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10l6-6M4 16L16 4M8 20L20 8M14 20l6-6"/>'),
+  curvature: svg('<path d="M3 18c4-10 14-10 18 0"/><path d="M7 12.5L5.5 10M12 10V7M17 12.5l1.5-2.5"/>'),
+  ortho: svg('<rect x="4" y="8" width="12" height="12"/><path d="M4 8l4-4h12l-4 4M16 20l4-4V4"/>'),
+  throughAll: svg('<path d="M3 12h18"/><path d="M17 8l4 4-4 4"/><path d="M8 5v14M12 5v14" stroke-dasharray="2 2"/>'),
+  upTo: svg('<path d="M3 12h12"/><path d="M11 8l4 4-4 4"/><path d="M19 4v16"/>'),
+  oneSide: svg('<path d="M7 4v16"/><path d="M7 12h12"/><path d="M15 8l4 4-4 4"/>'),
+  symmetric: svg('<path d="M12 4v16" stroke-dasharray="2 2"/><path d="M4 12h16"/><path d="M7 9l-3 3 3 3M17 9l3 3-3 3"/>'),
+  auto: svg('<path d="M6 19l6-14 6 14"/><path d="M8.6 13h6.8"/>'),
+  link: svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'),
+  selectAll: svg('<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3 2.5"/><path d="M9 8l7 5-3 .6 1.4 3.4-1.4.7-1.4-3.4L9 16z"/>'),
+  unitMm: glyph("mm"),
+  unitCm: glyph("cm"),
+  unitM: glyph("m", 12),
+  unitIn: glyph("in"),
+  unitFt: glyph("ft"),
+  degDecimal: glyph("0.5"),
+  degFraction: glyph("° ′", 11),
+  hint: svg('<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12.5h5"/>'),
   settings: svg('<circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.5-2-3.4-2.3 1a7.6 7.6 0 0 0-2.6-1.5l-.3-2.6h-4l-.3 2.6a7.6 7.6 0 0 0-2.6 1.5l-2.3-1-2 3.4 2 1.5a7.6 7.6 0 0 0 0 3l-2 1.5 2 3.4 2.3-1a7.6 7.6 0 0 0 2.6 1.5l.3 2.6h4l.3-2.6a7.6 7.6 0 0 0 2.6-1.5l2.3 1 2-3.4z"/>'),
 };
 
 export type IconName = keyof typeof icons;
+
+/** A wheel switch's or choice's own picture, by its label (on or off shows by its highlight). */
+export function iconNameFor(label: string): IconName | undefined {
+  return ICON_BY_LABEL.find(([re]) => re.test(label))?.[1];
+}
+
+const ICON_BY_LABEL: [RegExp, IconName][] = [
+  // Settings: snapping, units, appearance, shaders.
+  [/^(Grid|Show grid|Lock grid size)/, "grid"],
+  [/guide lines/i, "lineDashed"],
+  [/guide points|^Guide points/i, "point"],
+  [/^Distant edges/, "offsetEdge"],
+  [/^Snapping hints/, "hint"],
+  [/^Millimet/, "unitMm"],
+  [/^Centimet/, "unitCm"],
+  [/^Meter|^Metre/, "unitM"],
+  [/^Inch/, "unitIn"],
+  [/^Foot|^Feet/, "unitFt"],
+  [/^Decimal/, "degDecimal"],
+  [/^Fractional/, "degFraction"],
+  [/^Animate camera/, "camera"],
+  [/^Orthographic/, "ortho"],
+  [/world axes/i, "axes"],
+  [/^Wireframe/, "views"],
+  [/^X-Ray/, "eye"],
+  [/^Shaded/, "display"],
+  [/^Show hidden edges/, "hiddenEdges"],
+  [/^Show edges/, "views"],
+  [/^Off$/, "eyeOff"],
+  [/^Zebra/, "zebra"],
+  [/^Curvature/, "curvature"],
+  // A tool's choices and switches.
+  [/^Distance$/, "ruler"],
+  [/^Through all/, "throughAll"],
+  [/^Up to/, "upTo"],
+  [/^One side/, "oneSide"],
+  [/^Symmetric/, "symmetric"],
+  [/^Auto$/, "auto"],
+  [/^New body/, "body"],
+  [/^Add$/, "union"],
+  [/^Cut$/, "subtract"],
+  [/^Intersect$/, "intersect"],
+  [/^Open faces/, "shell"],
+  [/^Clear/, "deselect"],
+  [/^Replace with/, "replaceFace"],
+  [/^(XY|XZ|YZ)\b/, "plane"],
+  [/^Constant$/, "fillet"],
+  [/^Variable$/, "spline"],
+  [/^Round$/, "fillet"],
+  [/^Smooth/, "spline"],
+  [/^Radius$/, "circle"],
+  [/^Chord/, "line"],
+  [/^Equal distance/, "chamfer"],
+  [/^Two distances/, "ruler"],
+  [/^Edge$/, "offsetEdge"],
+  [/^On face/, "offsetFace"],
+  [/^Mirror (plane|line|across)/, "mirror"],
+  [/^Copy$/, "copy"],
+  [/^(Link|Chain)$/, "link"],
+  [/^(From|To) point/, "point"],
+  [/^Move$/, "move"],
+  [/^Turn$/, "rotateAxis"],
+  [/^Scale$/, "scale"],
+  [/^Select all/, "selectAll"],
+  [/^Apply/, "check"],
+  [/^Boundary/, "fill"],
+  [/^Guides/, "spline"],
+  [/^Symmetry/, "mirror"],
+  [/^(Up|Down)$/, "extrude"],
+];
+

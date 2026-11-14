@@ -4,7 +4,7 @@ import type { Feature, HistoryGroup } from "../doc/types";
 import { screenClass, watchScreenClass } from "../device";
 import type { FeatureError } from "../kernel/protocol";
 import { evaluate, toDisplay, trim, UNIT_LABEL, units } from "../units";
-import { icons, type IconName } from "./icons";
+import { iconNameFor, icons, type IconName } from "./icons";
 import { DIALOG_ACTION } from "./dialogAction";
 import { numpadInput } from "./numpad";
 import { selectAll, textField } from "./textField";
@@ -515,7 +515,7 @@ export class UI {
         item: {
           id: `opt-${id}-${k}`,
           label,
-          icon: on ? "check" : toggle ? "close" : "pointer",
+          icon: iconNameFor(label) ?? (on ? "check" : toggle ? "close" : "options"),
           sub: toggle ? `${part} · ${on ? "On" : "Off"}` : part,
           active: on,
           // (The list drawn again, its row clicked: what the window's own row would do.)

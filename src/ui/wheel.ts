@@ -27,7 +27,7 @@ import { settings } from "../settings";
 import { evaluate, toDisplay, UNIT_LABEL, units } from "../units";
 import { numpadInput, openNumpad } from "./numpad";
 import { selectAll } from "./textField";
-import { icons, type IconName } from "./icons";
+import { iconNameFor, icons, type IconName } from "./icons";
 import { el, usable, type PanelItem, type ToolItem, type UI } from "./ui";
 
 /**
@@ -633,7 +633,7 @@ export class Wheel implements WheelHandle {
     if (!p) return { sectors: [], pick: "" };
     let k = 0;
     // ("opt-": set right there, the wheel stays open showing it.)
-    const opt = (label: string, run: () => void, on?: boolean, sub?: string, icon?: IconName): ToolItem => ({ id: `opt-panel-${k++}`, label, icon: icon ?? (on ? "check" : "pointer"), sub, active: on, run });
+    const opt = (label: string, run: () => void, on?: boolean, sub?: string, icon?: IconName): ToolItem => ({ id: `opt-panel-${k++}`, label, icon: icon ?? iconNameFor(label) ?? (on ? "check" : "options"), sub, active: on, run });
     const sectors: Sector[] = [];
     // (A freeform shape: its wheel has the rest - here only the values to set.)
     const ff = toolsLayout === "freeform";
@@ -646,24 +646,23 @@ export class Wheel implements WheelHandle {
         const cells = it.options.map((o): Cell => ({ item: opt(o.label, () => it.onChange(o.id), o.id === it.value) }));
         sectors.push({ id: `choice-${k}`, label: it.label ?? now?.label ?? "Kind", icon: "more", cells, mark: false });
       } else if (it.type === "toggle") {
-        const item = opt(it.label, () => it.onChange(!it.value), it.value, it.value ? "On" : "Off", it.value ? "check" : "close");
+        const item = opt(it.label, () => it.onChange(!it.value), it.value, it.value ? "On" : "Off", iconNameFor(it.label) ?? (it.value ? "check" : "close"));
         sectors.push({ id: item.id, label: it.label, icon: item.icon, cells: [], item, on: it.value, mark: false });
       } else if (it.type === "slot") {
-        const item = opt(it.label, it.onClick, it.active, it.value, it.filled ? "check" : "pointer");
+        const item = opt(it.label, it.onClick, it.active, it.value, iconNameFor(it.label) ?? (it.filled ? "check" : "point"));
         sectors.push({ id: item.id, label: it.label, icon: item.icon, cells: [], item, on: it.active, mark: false });
       } else if (it.type === "chips") {
         if (!it.chips.length) continue;
-        const cells = it.chips.map((c): Cell => ({ item: opt(c.glyph ? `${c.glyph} ${c.label}` : c.label, c.onClick, !!c.on) }));
+        const cells = it.chips.map((c): Cell => ({ item: opt(c.glyph ? `${c.glyph} ${c.label}` : c.label, c.onClick, !!c.on, undefined, "constraints") }));
         sectors.push({ id: `chips-${k++}`, label: it.label ?? "Add", icon: "constraints", cells, mark: false });
       } else if (it.type === "button") {
         // A tap each, on the ring (where to sketch: XY, XZ, YZ…); past the room there, under More.
-        const item: ToolItem = { id: `panel-btn-${k++}`, label: it.label, icon: it.icon ?? "pointer", run: it.onClick };
+        const item: ToolItem = { id: `panel-btn-${k++}`, label: it.label, icon: it.icon ?? iconNameFor(it.label) ?? "tools", run: it.onClick };
         sectors.push({ id: item.id, label: it.label, icon: item.icon, cells: [], item, mark: !!it.primary });
       } else if (it.type === "number" || it.type === "slider") {
-        // A value: set by steps fanned out from it, the value itself as its second line (no window to type in).
+        // A value: a tap and its box is up to type it in (the numpad with it,
+        // where that's on) - the value itself as its second line.
         const len = it.type === "number" && (it.kind ?? "length") === "length";
-        const scale = len ? ({ mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8 } as const)[units()] : 1;
-        const small = it.type === "slider" ? (it.step ?? (it.max - it.min) / 100) : scale;
         const show = it.type === "slider" ? (it.show?.(it.value) ?? String(it.value)) : len ? `${+(toDisplay(it.value)).toFixed(3)} ${UNIT_LABEL[units()]}` : String(+it.value.toFixed(3));
         const put = (to: number) => {
           let v = to;
@@ -675,13 +674,9 @@ export class Wheel implements WheelHandle {
           it.value = v;
           ui.syncPanelValue(it, v);
         };
-        const set = (d: number) => () => put(it.value + d);
-        const steps = [-10, -1, 1, 10].map((n) => opt(`${n > 0 ? "+" : "−"}${Math.abs(n) === 10 ? (it.type === "slider" ? "more" : "10") : it.type === "slider" ? "" : "1"}`.replace(/^([+−])$/, "$1 a little"), set(n * small), false, undefined, n > 0 ? "move" : "close"));
-        // Or the exact value, typed in a box on the wheel (the numpad comes up for it where it is on).
         const kind = it.type === "slider" || it.kind === "int" || it.kind === "number" ? "number" : it.kind === "angle" ? "angle" : "length";
         const now = it.type === "number" && kind === "length" ? String(+toDisplay(it.value).toFixed(4)) : String(+it.value.toFixed(4));
-        steps.push(opt("Type…", () => this.typeValue(it.label, now, kind, put), false, undefined, "numpad"));
-        valueCells.push({ item: { id: `value-${k++}`, label: it.label, icon: "numpad", sub: show, children: steps } });
+        valueCells.push({ item: opt(it.label, () => this.typeValue(it.label, now, kind, put), false, show, "numpad") });
       }
     }
     // Room on the ring: past six of its own, the rest of the window's switches and buttons go under More.
@@ -690,9 +685,11 @@ export class Wheel implements WheelHandle {
       more.unshift(...(s.item ? [{ item: s.item }] : s.cells));
     }
     if (more.length) sectors.push({ id: "more", label: "More", icon: "more", cells: more, mark: false });
-    // Only values to set (a new shape's size): each its own place on the ring, its steps fanning out
-    // from it - not one lone Values group on a whole ring.
-    if (!sectors.length && valueCells.length <= 8) for (const c of valueCells) sectors.push({ id: c.item.id, label: c.item.label, icon: "numpad", cells: kidsOf(c.item).map((item) => ({ item })), mark: false });
+    // Only values to set (a new shape's size): each its own place on the ring, a tap to type it -
+    // not one lone Values group on a whole ring.
+    if (!sectors.length && valueCells.length <= 8) for (const c of valueCells) sectors.push({ id: c.item.id, label: c.item.label, icon: c.item.icon, cells: [], item: c.item, mark: false });
+    // (One value: Values is it - a tap and its box is up.)
+    else if (valueCells.length === 1) sectors.push({ id: "values", label: valueCells[0].item.label, icon: "numpad", cells: [], item: valueCells[0].item, mark: false });
     else if (valueCells.length) sectors.push({ id: "values", label: "Values", icon: "numpad", cells: valueCells, mark: false });
     if (p.cancel && !ff) sectors.push({ id: "cancel", label: "Cancel", icon: "close", cells: [], item: { id: "cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: p.cancel }, mark: false });
     if (p.done && !ff) sectors.push({ id: "done", label: "Done", icon: "check", cells: [], item: { id: "done", label: "Done", icon: "check", shortcut: "Enter", run: p.done }, mark: false });
@@ -827,8 +824,8 @@ export class Wheel implements WheelHandle {
     if (!p) return { sectors: [], pick: "" };
     let k = 0;
     // ("opt-": set right there, the fan stays showing it; a button that changes the shape closes it.)
-    const opt = (label: string, run: () => void, on?: boolean, sub?: string, icon?: IconName): ToolItem => ({ id: `opt-ff-${k++}`, label, icon: icon ?? (on ? "check" : "pointer"), sub, active: on, run });
-    const act = (label: string, run: () => void, icon?: IconName): ToolItem => ({ id: `ff-${k++}`, label, icon: icon ?? "pointer", run });
+    const opt = (label: string, run: () => void, on?: boolean, sub?: string, icon?: IconName): ToolItem => ({ id: `opt-ff-${k++}`, label, icon: icon ?? iconNameFor(label) ?? (on ? "check" : "options"), sub, active: on, run });
+    const act = (label: string, run: () => void, icon?: IconName): ToolItem => ({ id: `ff-${k++}`, label, icon: icon ?? iconNameFor(label) ?? "freeform", run });
     const cells: Record<string, Cell[]> = { shape: [], holes: [], move: [], symmetry: [], solid: [], more: [] };
     const choice = (it: Extract<PanelItem, { type: "choice" }>) => it.options.map((o): Cell => ({ item: opt(o.label, () => it.onChange(o.id), o.id === it.value) }));
     for (const it of p.items) {
@@ -843,9 +840,9 @@ export class Wheel implements WheelHandle {
         else cells.more.push({ item: { id: `ff-kinds-${k++}`, label: it.label ?? "Kind", icon: "more", sub: it.options.find((o) => o.id === it.value)?.label, children: choice(it).map((c) => c.item) } });
       } else if (it.type === "toggle") {
         const to = it.label === "Symmetry" ? "symmetry" : "more";
-        cells[to].unshift({ item: opt(it.label, () => it.onChange(!it.value), it.value, it.value ? "On" : "Off", it.value ? "check" : "close") });
+        cells[to].unshift({ item: opt(it.label, () => it.onChange(!it.value), it.value, it.value ? "On" : "Off", iconNameFor(it.label) ?? (it.value ? "check" : "close")) });
       } else if (it.type === "slot") {
-        cells.more.push({ item: opt(it.label, it.onClick, it.active, it.value, it.filled ? "check" : "pointer") });
+        cells.more.push({ item: opt(it.label, it.onClick, it.active, it.value, iconNameFor(it.label) ?? (it.filled ? "check" : "point")) });
       } else if (it.type === "chips") {
         for (const c of it.chips) cells.more.push({ item: opt(c.label, c.onClick, !!c.on) });
       }
@@ -868,7 +865,7 @@ export class Wheel implements WheelHandle {
       group("solid", "Solid", "shell", "A closed shape is solid already"),
     );
     if (cells.more.length) sectors.push(group("more", "More", "more", ""));
-    if (selectAll) sectors.push({ id: "select", label: "Select all", icon: "pointer", cells: [], item: selectAll, mark: false });
+    if (selectAll) sectors.push({ id: "select", label: "Select all", icon: "selectAll", cells: [], item: selectAll, mark: false });
     if (p.cancel) sectors.push({ id: "cancel", label: "Cancel", icon: "close", cells: [], item: { id: "ff-cancel", label: "Cancel", icon: "close", shortcut: "Esc", run: p.cancel }, mark: false });
     return { sectors, pick: "" };
   }
@@ -1288,8 +1285,10 @@ export class Wheel implements WheelHandle {
     cells.forEach((c, i) => {
       const ray = Math.floor(i / L);
       const k = i % L;
-      // 0 in the middle, then one to the clockwise side, one to the other, ...
-      const side = ray === 0 ? 0 : ray % 2 ? (ray + 1) / 2 : -ray / 2;
+      // Symmetric about the group: an odd number of rays has the first straight
+      // out from it, then one to the clockwise side, one to the other...; an
+      // even number has the first two either side of the middle, and so on out.
+      const side = R % 2 ? (ray === 0 ? 0 : ray % 2 ? (ray + 1) / 2 : -ray / 2) : ray % 2 ? -(ray + 1) / 2 + 0.5 : ray / 2 + 0.5;
       const a = mid + side * w;
       const r0 = m.r1 + m.gap + k * pitch;
       out.push({ ...c, r0, r1: r0 + m.depth, a0: a - w / 2, a1: a + w / 2, level: 0 });
