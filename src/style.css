@@ -5764,6 +5764,13 @@ circle.wheel-plate {
   touch-action: none;
   cursor: grab;
 }
+/* A group's tools are up: the middle is Back. */
+.wheel-root.inner .wheel-hub {
+  fill: rgba(31, 33, 37, 0.95);
+  stroke: rgba(120, 165, 255, 0.55);
+  stroke-width: 1.5px;
+  cursor: pointer;
+}
 .wheel-hub.hot {
   fill: rgba(20, 22, 26, 0.8);
 }

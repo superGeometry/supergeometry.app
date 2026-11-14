@@ -79,6 +79,7 @@ export const icons = {
   subtract: svg('<circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5" stroke-dasharray="2 2"/>'),
   intersect: svg('<circle cx="9" cy="12" r="5.5" stroke-dasharray="2 2"/><circle cx="15" cy="12" r="5.5" stroke-dasharray="2 2"/><path d="M12 7.4a5.5 5.5 0 0 1 0 9.2a5.5 5.5 0 0 1 0-9.2z" fill="currentColor" fill-opacity=".35"/>'),
   trash: svg('<path d="M5 7h14"/><path d="M9 7V4h6v3"/><path d="M7 7l1 13h8l1-13"/>'),
+  back: svg('<path d="M14.5 5l-7 7 7 7"/>'),
   undo: svg('<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
   redo: svg('<path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/>'),
   history: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>'),

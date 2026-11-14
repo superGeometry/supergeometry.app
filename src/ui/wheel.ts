@@ -1,11 +1,12 @@
 // The tool wheel: the only way to the tools (in place of the tool column).
 //
 // With it on, a tap on the model - or on an empty spot - brings the tools up
-// in a ring round the pointer: what's picked at the top, then the main groups
-// (Sketch, Freeform, Insert, Construct, Transform, Tools, BIM) clockwise, each
-// always in the same place. Pointing at a group fans its tools out from that
-// side of the ring; a tap on one runs it. A tool with kinds of its own (Plane,
-// Colour…) opens them in place of the fan; the group brings its list back.
+// in a ring round the pointer: the main groups, each always in the same one
+// of eight places (MODEL_RING). A tap on a group - or a press slid out across
+// it - turns the ring into that group's tools, right there: the most used in
+// the group's own place, under the finger, the next either side of it (RANK,
+// ORDER), and the middle becomes Back. A tool with kinds of its own (Plane,
+// Colour…) opens them the same way. Press, slide, let go: any tool in one stroke.
 //
 // Its middle is a handle: dragged, the wheel goes where it is put and is kept
 // there - it then stays up, showing what the pick offers, instead of coming up
@@ -97,23 +98,12 @@ interface Metrics {
 const FINE: Metrics = { hub: 24, r0: 30, r1: 100, gap: 4, depth: 54, min: 46, max: 58 };
 /** Fingers (and a headset's ray): bigger cells. */
 const COARSE: Metrics = { hub: 26, r0: 32, r1: 108, gap: 4, depth: 58, min: 52, max: 64 };
-/** A small gap (px) where a new part of a list starts. */
-const PART_GAP = 9;
 /** The drawings are this far (px) each way from the middle at most. */
 const BOX = 440;
 const SVG = "http://www.w3.org/2000/svg";
 const TAU = Math.PI * 2;
 /** Where the wheel is kept, per kind of screen (as the tool card's place is). */
 const SPOTS = "sg-wheel-spot";
-/** The tools last run from the model's wheel, shown under View (most recent first). */
-const RECENT = "sg-wheel-recent";
-const RECENT_MAX = 3;
-
-/** Every tool that runs, in a tree of them (groups and families opened). */
-function leaves(items: ToolItem[]): ToolItem[] {
-  return items.flatMap((it) => (it.children?.length ? leaves(it.children) : it.run ? [it] : []));
-}
-
 /** The top sector: what's picked (its own tools), and the view's. */
 const OWN = "own";
 /**
@@ -131,20 +121,46 @@ const GROUP_OF: Record<string, string> = {
 };
 
 /**
- * The sketch's wheel, clockwise from the top: Exit, then the tools by what
- * they are for down the right (their fans open away from the screen's edge
- * the wheel starts at), and the rest - the line type, Normal to Sketch, a tool
- * not named here - under More; Delete and Select on the left, a tap each.
+ * Each group's tools, most used first: the first goes straight on from the
+ * way the group was opened, the next either side of it, and on round (ORDER) -
+ * the most used is always the shortest move. (Tools not named here come after,
+ * as they are listed.)
+ */
+const RANK = [
+  "extrude", "revolve", "sweep", "loft",
+  "fillet", "chamfer", "shell", "offsetFace", "fix", "offsetEdge", "thread", "wrap",
+  "subtract", "union", "intersect", "split",
+  "move", "mirror", "pattern", "scale", "translate", "rotate",
+  "plane", "axis", "proje",
+  "ff-box", "ff-cylinder", "ff-sphere", "ff-plane", "faceFreeform", "connect",
+  "measure", "section", "variables", "insert", "bim",
+];
+const rankOf = (id: string) => {
+  const k = RANK.indexOf(id);
+  return k < 0 ? RANK.length : k;
+};
+/** Where a ring's tools go, most used first: eighths of a turn from the way in - straight on, then either side, on round. */
+const ORDER = [0, 1, -1, 2, -2, 3, -3, 4];
+/** The model's first ring, clockwise from the top: eight places, each always the same. */
+const MODEL_RING = ["create", "combine", "modify", "construct", "transform", "freeform", "sketch", OWN];
+
+/**
+ * The sketch's wheel: the tools by what they are for, each list most used
+ * first, and the rest - the line type, Normal to Sketch, a tool not named
+ * here - under More; Exit, Delete and Select a tap each. SKETCH_RING says
+ * where each is, clockwise from the top.
  */
 const SKETCH: ({ tool: string; label?: string } | { id: string; label: string; icon: IconName; tools: string[] })[] = [
   { tool: "exit", label: "Exit" },
-  { id: "draw", label: "Draw", icon: "line", tools: ["line", "arc", "spline", "rect", "circle", "ellipse", "polygon", "text"] },
-  { id: "modify", label: "Modify", icon: "trim", tools: ["fillet", "trim", "extend", "split", "align", "offset", "project"] },
-  { id: "transform", label: "Transform", icon: "transform", tools: ["move", "rotate", "scale", "mirror", "pattern"] },
+  { id: "draw", label: "Draw", icon: "line", tools: ["line", "rect", "circle", "arc", "spline", "polygon", "ellipse", "text"] },
+  { id: "modify", label: "Modify", icon: "trim", tools: ["trim", "fillet", "offset", "extend", "project", "split", "align"] },
+  { id: "transform", label: "Transform", icon: "transform", tools: ["move", "mirror", "rotate", "pattern", "scale"] },
   { id: "more", label: "More", icon: "more", tools: [] },
   { tool: "delete" },
   { tool: "select" },
 ];
+/** Drawing at the top, Modify and Transform straight across, Exit at the bottom ("": an empty place). */
+const SKETCH_RING = ["draw", "delete", "modify", "", "exit", "more", "transform", "select"];
 
 interface Cell {
   item: ToolItem;
@@ -164,6 +180,20 @@ interface Sector {
   why?: string;
   /** The tool most likely next (or the one in use, or one that is on) is in it. */
   mark: boolean;
+  /** An empty place (the others keep the places they always have). */
+  blank?: boolean;
+  /** A colour as its picture, in place of an icon. */
+  swatch?: string;
+}
+/** A ring opened on the way to the one up now: where its middle was, and what of it was opened (`at`: its place, -1 one of its outer band). */
+interface Level {
+  sectors: Sector[];
+  fan: Placed[];
+  cx: number;
+  cy: number;
+  at: number;
+  id: string;
+  dir: number;
 }
 interface Placed extends Cell {
   r0: number;
@@ -193,6 +223,24 @@ function signature(sectors: Sector[]): string {
   return JSON.stringify(sectors.map((s) => [s.id, s.label, s.icon, !!s.on, s.mark, s.why, s.item && tool(s.item), s.cells.map((c) => [!!c.gap, tool(c.item)])]));
 }
 
+/** What a ring shows, its outer band too. */
+const sigOf = (sectors: Sector[], fan: Placed[]) => signature(sectors) + JSON.stringify(fan.map((c) => [c.item.id, c.item.label, c.item.sub, !!c.item.active]));
+
+/** An empty place on a ring. */
+const blank = (): Sector => ({ id: "", label: "", icon: "more", cells: [], mark: false, blank: true });
+
+/** A ring's sectors in their fixed places (ids clockwise from the top, "" empty); one not named takes an empty place. */
+function compassOf(order: string[], sectors: Sector[]): Sector[] {
+  const out = order.map((id) => (id && sectors.find((s) => s.id === id)) || blank());
+  for (const s of sectors) {
+    if (order.includes(s.id)) continue;
+    const k = out.findIndex((x) => x.blank);
+    if (k >= 0) out[k] = s;
+    else out.push(s);
+  }
+  return out;
+}
+
 /** A piece of a ring, from r0 to r1 and a0 to a1 (clockwise, 0 to the right), a gap of `gap` px kept round it. */
 function wedge(r0: number, r1: number, a0: number, a1: number, gap = 2): string {
   const p = (r: number, a: number) => `${(r * Math.cos(a)).toFixed(2)} ${(r * Math.sin(a)).toFixed(2)}`;
@@ -202,54 +250,6 @@ function wedge(r0: number, r1: number, a0: number, a1: number, gap = 2): string 
   const o1 = a1 - gap / 2 / r1;
   const big = (a: number, b: number) => (b - a > Math.PI ? 1 : 0);
   return `M${p(r0, i0)}L${p(r1, o0)}A${r1} ${r1} 0 ${big(o0, o1)} 1 ${p(r1, o1)}L${p(r0, i1)}A${r0} ${r0} 0 ${big(i0, i1)} 0 ${p(r0, i0)}Z`;
-}
-
-/**
- * A group's tools as rows of a piece of ring outside the ring of groups,
- * centred on the group (`mid`): half a ring at most (`spanAt` says how much
- * of the ring a row reaching out to a radius may take - less than half where
- * the screen is too small for that). One row while they fit, then more
- * further out.
- */
-function fanLayout(cells: Cell[], mid: number, m: Metrics, spanAt: (reach: number) => number = () => Math.PI, inner = m.r1, level = 0): Placed[] {
-  const N = cells.length;
-  if (!N) return [];
-  const rows: { r0: number; r1: number; rm: number; span: number; cap: number }[] = [];
-  let room = 0;
-  for (let k = 0; room < N && k < 5; k++) {
-    const r0 = inner + m.gap + k * (m.depth + m.gap);
-    const rm = r0 + m.depth / 2;
-    const span = spanAt(r0 + m.depth);
-    const cap = Math.max(1, Math.floor((span * rm) / m.min));
-    rows.push({ r0, r1: r0 + m.depth, rm, span, cap });
-    room += cap;
-  }
-  // Read top to bottom at either side, left to right above and below.
-  const flip = Math.cos(mid) < -0.01 || (Math.abs(Math.cos(mid)) <= 0.01 && Math.sin(mid) > 0);
-  const out: Placed[] = [];
-  let at = 0;
-  rows.forEach((row, k) => {
-    const left = N - at;
-    const later = rows.slice(k + 1).reduce((s, r) => s + r.cap, 0);
-    // In proportion to the row's room (so the cells come out about as wide in each), the list kept in order.
-    const n = k === rows.length - 1 ? left : Math.max(left - later, Math.min(row.cap, left, Math.round((N * row.cap) / room)));
-    const part = cells.slice(at, at + n);
-    at += n;
-    if (!part.length) return;
-    const seq = flip ? [...part].reverse() : part;
-    const gapAt = seq.map((c, j) => j > 0 && !!(flip ? seq[j - 1].gap : c.gap));
-    const gaps = gapAt.filter(Boolean).length * PART_GAP;
-    const w = Math.min(m.max, (row.span * row.rm - gaps) / seq.length);
-    let a = mid - (seq.length * w + gaps) / row.rm / 2;
-    const placed = seq.map((c, j): Placed => {
-      if (gapAt[j]) a += PART_GAP / row.rm;
-      const a0 = a;
-      a += w / row.rm;
-      return { ...c, r0: row.r0, r1: row.r1, a0, a1: a, level };
-    });
-    out.push(...(flip ? placed.reverse() : placed));
-  });
-  return out;
 }
 
 function svgBox(): SVGSVGElement {
@@ -298,10 +298,12 @@ export class Wheel implements WheelHandle {
   private sig = "";
   /** What's picked, as the top sector names it ("" nothing): a wheel up at the pointer goes when that changes under it. */
   private pick = "";
+  /** The ring's outer band: its tools past eight. */
   private fan: Placed[] = [];
-  /** The group whose tools are fanned out (-1: none), and the tools opened inside it (Plane › …). */
-  private openSector = -1;
-  private trail: ToolItem[] = [];
+  /** The rings opened on the way to this one (the first ring first). */
+  private stack: Level[] = [];
+  /** The way into this ring (from the middle of the one before): its most used tool is straight on. */
+  private dir = -Math.PI / 2;
   private hot = NONE;
   private up = false;
   private dismissed = false;
@@ -315,7 +317,6 @@ export class Wheel implements WheelHandle {
   /** The middle, on the page (off its home while a fan needs the room). */
   private cx = 0;
   private cy = 0;
-  private slid = false;
   /** Where the pointer is, and where it was when the wheel came up. */
   private px = 0;
   private py = 0;
@@ -333,27 +334,19 @@ export class Wheel implements WheelHandle {
   /** Opened under a finger still down: its next move makes it the pressed one. */
   private adopt = false;
   private adopted = false;
-  private openAtPress = -1;
   /** What the press came down on, and where: a tap acts on that, wherever the wheel has slid to since. */
   private pressHit = NONE;
   private pressAt = { x: 0, y: 0 };
-  /** Counts the fans shown: a tool pressed in a fan that has since been replaced isn't run. */
+  /** Counts the rings shown: a press on one that has since been replaced is let go of.  */
   private fanCount = 0;
   private pressFan = 0;
-  /** A list swapped in under a resting pointer: a click this soon after isn't for it. */
-  private guardUntil = 0;
-  /** When the wheel last slid to bring a fan on the screen. */
-  private slidAt = -Infinity;
   /**
    * Just up at the pointer: the second tap of a double tap (the whole body)
    * still goes to the model - through the middle, or through all of it when
    * it had to open off the pointer (which is then on one of its pieces).
    */
   private fresh: "" | "hub" | "all" = "";
-  private switchTimer = 0;
-  private drillTimer = 0;
   private freshTimer = 0;
-  private leaveTimer = 0;
   private tipTimer = 0;
   private refreshing = false;
 
@@ -536,7 +529,6 @@ export class Wheel implements WheelHandle {
     const r = this.isFolded ? this.m.r0 : this.m.r1;
     this.cx = clamp(this.home.x, r + M, Math.max(r + M, innerWidth - r - M));
     this.cy = clamp(this.home.y, r + M, Math.max(r + M, innerHeight - r - M));
-    this.slid = false;
     this.place();
   }
 
@@ -549,13 +541,15 @@ export class Wheel implements WheelHandle {
     if (!this.layout) return;
     this.folded[this.layout] = on;
     this.root.classList.toggle("folded", on);
+    if (on) this.shut();
     if (!on && this.layout === "settings") {
       // (Unfolded: the lists as they are now - the settings may have changed from elsewhere since.)
+      this.stack = [];
+      this.fan = [];
       this.sectors = this.content().sectors;
-      this.sig = signature(this.sectors);
-      this.drawRing();
+      this.sig = sigOf(this.sectors, []);
+      this.redraw();
     }
-    if (on) this.shut();
     this.unpoint();
     this.root.classList.add("slide");
     this.home = this.homeNow();
@@ -764,17 +758,28 @@ export class Wheel implements WheelHandle {
     this.host.ui.popAt(id, this.px >= this.cx ? this.cx + out : this.cx - out - 270, this.py - 28, label);
   }
 
-  /** The model's ring: the top sector, then the main groups in the column's order - each with what it holds now. */
+  /**
+   * The model's ring: the main groups, each always in its place (MODEL_RING),
+   * and More - what's picked offers of its own, the view's tools, Insert and
+   * BIM. Each group's tools most used first (RANK).
+   */
   private modelContent(): { sectors: Sector[]; pick: string } {
     const { column, bar } = this.host.ui.shown();
     const main = this.host.mainTools();
     const shown = usable(column).filter(notSep);
+    // (Move's kinds - Move/Rotate, Translate, Rotate Around Axis - are Transform's own tools: no ring more to reach them.)
+    const flat = (items: ToolItem[]) => items.flatMap((it) => (it.id === "moveKinds" ? kidsOf(it) : [it]));
+    const ranked = (cells: Cell[]) =>
+      cells
+        .map((c, k) => ({ c, k }))
+        .sort((x, y) => rankOf(x.c.item.id) - rankOf(y.c.item.id) || x.k - y.k)
+        .map(({ c }) => c);
     let groups: Sector[];
     let own: Cell[] = [];
     if (shown.length > 0 && shown.every((it) => main.some((g) => g.id === it.id))) {
       // Nothing picked: the column is the main tools themselves.
       groups = shown.map((g) => {
-        const cells = kidsOf(g).map((item) => ({ item }));
+        const cells = ranked(flat(kidsOf(g)).map((item) => ({ item })));
         return { id: g.id, label: g.label, icon: g.icon, cells, item: g.children?.length ? undefined : g, mark: !!g.pulse || marked(cells) };
       });
     } else {
@@ -789,28 +794,26 @@ export class Wheel implements WheelHandle {
       for (const g of main) walk([g], g.id);
       const groupOf = (id: string) => GROUP_OF[id] ?? where.get(id) ?? OWN;
       const lists = new Map<string, Cell[]>(main.map((g) => [g.id, []]));
-      for (const it of shown) (lists.get(groupOf(it.id)) ?? own).push({ item: it });
+      for (const it of flat(shown)) (lists.get(groupOf(it.id)) ?? own).push({ item: it });
       // A group with nothing for this pick says why: its tools that are off, with their reasons.
       const off = new Map<string, string[]>();
       for (const it of column) if (it.disabled && it.why && it.label) off.set(groupOf(it.id), [...(off.get(groupOf(it.id)) ?? []), `${it.label}: ${it.why}`]);
       const what = shown.find((it) => it.id === "deselect")?.sub;
       groups = main.map((g) => {
-        const cells = lists.get(g.id)!;
+        const cells = ranked(lists.get(g.id)!);
         const why = cells.length ? undefined : off.get(g.id)?.slice(0, 3).join(" · ") ?? `${g.label} has nothing for ${what ?? "this"}`;
         return { id: g.id, label: g.label, icon: g.icon, cells, why, mark: marked(cells) };
       });
     }
     const pick = shown.find((it) => it.id === "deselect")?.sub ?? "";
     own = [...own, ...(this.extras?.() ?? []).map((item) => ({ item }))];
-    const view = usable(bar).filter(notSep).map((item, i): Cell => ({ item, gap: i === 0 && own.length > 0 }));
-    // Nothing picked: the tools run last, after the view's (a picked thing's own come first instead).
-    const all = pick ? [] : leaves(main);
-    const recent = this.recent
-      .map((id) => all.find((t) => t.id === id))
-      .filter((t): t is ToolItem => !!t && !t.disabled && !view.some((c) => c.item.id === t.id))
-      .map((item, i): Cell => ({ item, gap: i === 0 }));
-    const top: Sector = { id: OWN, label: pick || "View", icon: pick ? "pointer" : "eye", cells: [...own, ...view, ...recent], mark: marked(view) };
-    return { sectors: [top, ...groups], pick };
+    const view = ranked(usable(bar).filter(notSep).map((item): Cell => ({ item }))).map((c, i): Cell => ({ ...c, gap: i === 0 && own.length > 0 }));
+    // The More group's own (Insert, BIM) join it: eight places on the ring.
+    const more = groups.find((g) => g.id === "more");
+    groups = groups.filter((g) => g !== more);
+    const rest = (more?.cells ?? []).map((c, i): Cell => ({ ...c, gap: i === 0 }));
+    const top: Sector = { id: OWN, label: pick || "More", icon: pick ? "pointer" : "more", cells: [...own, ...view, ...rest], mark: marked(view) };
+    return { sectors: compassOf(MODEL_RING, [top, ...groups]), pick };
   }
 
   /**
@@ -904,49 +907,93 @@ export class Wheel implements WheelHandle {
     }
     for (const s of sectors) if (!s.item) s.mark = marked(s.cells);
     // (A category with nothing in it has no place on the ring.)
-    return { sectors: sectors.filter((s) => s.item || s.cells.length), pick: "" };
+    return { sectors: compassOf(SKETCH_RING, sectors.filter((s) => s.item || s.cells.length)), pick: "" };
   }
 
-  /**
-   * A group's fan, and in a cascade outside it the kinds of each tool opened
-   * on the way (`trail`): each further row centred on the tool it comes from,
-   * the rows before it staying where they are.
-   */
-  private buildFan(i: number, trail: ToolItem[]): { fan: Placed[]; trail: ToolItem[] } {
-    const s = this.sectors[i];
-    if (!s) return { fan: [], trail: [] };
-    const fan = this.fanFor(s.cells, this.midOf(i));
-    const kept: ToolItem[] = [];
-    for (const t of trail) {
-      const from = fan.find((c) => c.level === kept.length && c.item.id === t.id && opens(c.item));
-      if (!from) break;
-      const inner = fan.reduce((r, c) => Math.max(r, c.r1), this.m.r1);
-      const kinds = this.kindsOf(from.item);
-      const mid = (from.a0 + from.a1) / 2;
-      // Centred on the tool it comes from - or turned round the wheel, a little at a time, to where the screen holds it with the rest.
-      const fits = (row: Placed[]) => {
-        const e = this.spread([...fan, ...row]);
-        return e.l + e.r <= innerWidth - 12 && e.t + e.b <= innerHeight - 12;
-      };
-      let row = this.fanFor(kinds, mid, inner, kept.length + 1);
-      for (let k = 1; k <= 12 && !fits(row); k++) {
-        const d = ((k + 1) >> 1) * (Math.PI / 18) * (k % 2 ? 1 : -1);
-        const turned = this.fanFor(kinds, mid + d, inner, kept.length + 1);
-        if (fits(turned)) row = turned;
-      }
-      fan.push(...row);
-      kept.push(from.item);
-    }
-    return { fan, trail: kept };
-  }
-
-  /** A tool's kinds, as cells of the row opened for it. */
+  /** A tool's kinds, as the cells of its ring. */
   private kindsOf(parent: ToolItem): Cell[] {
     const kids = kidsOf(parent);
     const cells = kids.map((item): Cell => ({ item }));
     // What a tap on it does in the column (the kind used last) comes first, unless one of its kinds is marked as that.
     if (parent.run && !kids.some((k) => k.active)) cells.unshift({ item: { ...parent, children: undefined } });
     return cells;
+  }
+
+  /** A tool as a place on a ring: a tap runs it - or, one with kinds of its own, opens them. */
+  private sectorOf(it: ToolItem): Sector {
+    if (opens(it)) {
+      const cells = this.kindsOf(it);
+      return { id: it.id, label: it.label, icon: it.icon, swatch: it.swatch, cells, on: !!it.active, mark: marked(cells) };
+    }
+    return { id: it.id, label: it.label, icon: it.icon, swatch: it.swatch, cells: [], item: it, on: !!it.active, mark: !!it.pulse };
+  }
+
+  /**
+   * A group's tools (or a tool's kinds) as a ring of their own, come into
+   * from `dir`: the most used straight on, the next either side of it, and on
+   * round (ORDER). Past eight, the rest in a band round the outside, the same way.
+   */
+  private ringOf(cells: Cell[], dir: number): { sectors: Sector[]; fan: Placed[] } {
+    const n = 8;
+    const step = TAU / n;
+    const e = Math.round((dir + Math.PI / 2) / step);
+    const sectors = Array.from({ length: n }, blank);
+    cells.slice(0, n).forEach((c, k) => (sectors[(((e + ORDER[k]) % n) + n) % n] = this.sectorOf(c.item)));
+    const rest = cells.slice(n);
+    const m = this.m;
+    const w = TAU / Math.max(n, rest.length);
+    const r0 = m.r1 + m.gap;
+    const fan = rest.map((c, k): Placed => {
+      const a = dir + (k === 0 ? 0 : k % 2 ? (k + 1) / 2 : -k / 2) * w;
+      return { item: c.item, r0, r1: r0 + m.depth, a0: a - w / 2, a1: a + w / 2, level: 0 };
+    });
+    return { sectors, fan };
+  }
+
+  /** Open a group (or a tool's kinds): the ring becomes its tools, in place; the middle is Back. */
+  private enter(id: string, cells: Cell[], dir: number, at: number): void {
+    this.stack.push({ sectors: this.sectors, fan: this.fan, cx: this.cx, cy: this.cy, at, id, dir: this.dir });
+    const ring = this.ringOf(cells, dir);
+    this.sectors = ring.sectors;
+    this.fan = ring.fan;
+    this.dir = dir;
+    this.sig = sigOf(this.sectors, this.fan);
+    this.levelChanged();
+  }
+
+  /** Back to the ring before, where it was. */
+  private back(): void {
+    const l = this.stack.pop();
+    if (!l) return;
+    this.sectors = l.sectors;
+    this.fan = l.fan;
+    this.dir = l.dir;
+    this.sig = sigOf(this.sectors, this.fan);
+    this.levelChanged();
+  }
+
+  /** Back to the first ring, if another is up. */
+  private shut(): void {
+    if (!this.stack.length) return;
+    this.stack.length = 1;
+    this.back();
+  }
+
+  /** Another ring is up, where the wheel is (moved in only as far as its outer band needs). */
+  private levelChanged(grow = true): void {
+    this.fanCount++;
+    this.unpoint();
+    const M = 6;
+    const R = this.reach();
+    const at = this.kept ? this.home : { x: this.cx, y: this.cy };
+    this.cx = clamp(at.x, R + M, Math.max(R + M, innerWidth - R - M));
+    this.cy = clamp(at.y, R + M, Math.max(R + M, innerHeight - R - M));
+    this.root.classList.remove("slide");
+    this.place();
+    this.redraw();
+    // The pointer stays where it is: what's under it counts once it moves on.
+    this.hold = { x: this.px, y: this.py };
+    if (grow && this.up && !calm()) this.body.animate([{ opacity: 0.4, transform: "scale(0.86)" }, { opacity: 1, transform: "none" }], { duration: 110, easing: "ease-out" });
   }
 
   // ------------------------------------------------------------ open / close
@@ -959,22 +1006,18 @@ export class Wheel implements WheelHandle {
     const { sectors, pick } = this.content();
     if (!sectors.some((s) => s.cells.length || s.item)) return;
     this.sectors = sectors;
-    this.sig = signature(sectors);
+    this.stack = [];
+    this.fan = [];
+    this.dir = -Math.PI / 2;
+    this.sig = sigOf(sectors, []);
     this.pick = pick;
     this.type = opts.type ?? "mouse";
     this.m = this.type === "touch" || isCoarse ? COARSE : FINE;
-    // For a pointer that hovers: whole on the screen with any of its fans out, as near the
-    // pointer as that allows - it then never has to move under the pointer. For a finger (nothing
-    // is under it between taps), and where the screen is too small for that: the ring whole, right
-    // where it was asked for, and it slides when a fan needs the room (see fit).
+    // Round the pointer, whole on the screen.
     const M = 6;
-    const reach = this.extent();
     const ring = this.m.r1;
-    const hovers = this.type !== "touch";
-    const [l, r] = hovers && innerWidth >= reach.l + reach.r + 2 * M ? [reach.l, reach.r] : [ring, ring];
-    const [t, b] = hovers && innerHeight >= reach.t + reach.b + 2 * M ? [reach.t, reach.b] : [ring, ring];
-    this.cx = clamp(x, l + M, Math.max(l + M, innerWidth - r - M));
-    this.cy = clamp(y, t + M, Math.max(t + M, innerHeight - b - M));
+    this.cx = clamp(x, ring + M, Math.max(ring + M, innerWidth - ring - M));
+    this.cy = clamp(y, ring + M, Math.max(ring + M, innerHeight - ring - M));
     this.home = { x: this.cx, y: this.cy };
     this.px = this.from.x = x;
     this.py = this.from.y = y;
@@ -999,7 +1042,10 @@ export class Wheel implements WheelHandle {
   private showKept(): void {
     const { sectors, pick } = this.content();
     this.sectors = sectors;
-    this.sig = signature(sectors);
+    this.stack = [];
+    this.fan = [];
+    this.dir = -Math.PI / 2;
+    this.sig = sigOf(sectors, []);
     this.pick = pick;
     this.type = isCoarse ? "touch" : "mouse";
     this.m = isCoarse ? COARSE : FINE;
@@ -1054,21 +1100,12 @@ export class Wheel implements WheelHandle {
     this.grab = null;
     this.adopt = false;
     this.hot = NONE;
-    this.openSector = -1;
-    this.trail = [];
+    this.stack = [];
     this.fan = [];
   }
 
   private clearTimers(): void {
-    clearTimeout(this.switchTimer);
-    clearTimeout(this.drillTimer);
-    clearTimeout(this.leaveTimer);
     clearTimeout(this.tipTimer);
-  }
-
-  /** Put the fan away, if one is out. */
-  private shut(): void {
-    if (this.openSector >= 0) this.showFan(-1);
   }
 
   /** Nothing pointed at any more (what was is redrawn, or gone). */
@@ -1090,40 +1127,41 @@ export class Wheel implements WheelHandle {
       // Up at the pointer, and what's picked changed under it (deleted, deselected by a key): it goes.
       if (!this.kept && pick !== this.pick) return this.hide();
       this.pick = pick;
-      const open = this.sectors[this.openSector]?.id;
-      const sig = signature(sectors);
-      const same = sig === this.sig;
-      this.sectors = sectors;
+      // The rings opened on the way here, found again among the new tools (as far as they still are).
+      const was = this.stack;
+      const stack: Level[] = [];
+      let ring: { sectors: Sector[]; fan: Placed[] } = { sectors, fan: [] };
+      let dir = -Math.PI / 2;
+      for (const l of was) {
+        const k = ring.sectors.findIndex((s) => s.id === l.id && !s.item && s.cells.length > 0);
+        const c = k < 0 ? ring.fan.find((f) => f.item.id === l.id && opens(f.item)) : undefined;
+        if (k < 0 && !c) break;
+        const cells = c ? this.kindsOf(c.item) : ring.sectors[k].cells;
+        const d = c ? (c.a0 + c.a1) / 2 : this.midOf(k, ring.sectors.length);
+        stack.push({ ...l, sectors: ring.sectors, fan: ring.fan, at: k, dir });
+        ring = this.ringOf(cells, d);
+        dir = d;
+      }
+      const sig = sigOf(ring.sectors, ring.fan);
+      const same = sig === this.sig && stack.length === was.length;
+      this.stack = stack;
+      this.sectors = ring.sectors;
+      this.fan = ring.fan;
+      this.dir = dir;
       this.sig = sig;
-      const at = sectors.findIndex((s) => s.id === open && s.cells.length > 0);
-      // The tools opened inside a tool (Plane › …), found again among the new ones.
-      const trail: ToolItem[] = [];
-      let from = at >= 0 ? sectors[at].cells.map((c) => c.item) : [];
-      for (const t of this.trail) {
-        const it = from.find((x) => x.id === t.id);
-        if (!it) break;
-        trail.push(it);
-        from = kidsOf(it);
-      }
-      if (same && trail.length === this.trail.length) {
-        // Nothing looks different (the model rebuilt, the same tools made again): only what a tap runs is new.
-        const fresh = this.buildFan(this.openSector, trail);
-        if (fresh.fan.length === this.fan.length) {
-          this.fan = fresh.fan;
-          this.trail = fresh.trail;
-        }
-        return;
-      }
+      // (Nothing looks different - the model rebuilt, the same tools made again: only what a tap runs is new.)
+      if (same) return;
+      // Back as far as there still is something: round where that ring was.
+      if (stack.length < was.length) return this.levelChanged(false);
       this.unpoint();
-      this.drawRing();
-      this.showFan(at, at >= 0 ? trail : []);
+      this.redraw();
     });
   }
 
   // ----------------------------------------------------------------- drawing
 
-  private midOf(i: number): number {
-    return -Math.PI / 2 + (i * TAU) / this.sectors.length;
+  private midOf(i: number, n = this.sectors.length): number {
+    return -Math.PI / 2 + (i * TAU) / n;
   }
 
   private item(it: { icon: IconName; swatch?: string }, label: string, cls: string, r: number, a: number, width?: number): HTMLElement {
@@ -1142,19 +1180,24 @@ export class Wheel implements WheelHandle {
     return d;
   }
 
-  /** The whole wheel anew: the middle, the ring, no fan. */
+  /** The whole wheel anew: the middle, the ring. */
   private draw(): void {
     this.hubEl.setAttribute("r", String(this.m.hub));
-    this.grip.innerHTML = this.layout === "settings" ? icons.settings : this.layout === "options" ? icons.options : icons.move;
     this.hot = NONE;
     this.tip.hidden = true;
+    this.redraw();
+  }
+
+  private redraw(): void {
     this.drawRing();
-    this.showFan(-1);
+    this.drawFan();
+    this.drawCrumbs();
   }
 
   private drawRing(): void {
     const m = this.m;
     const step = TAU / this.sectors.length;
+    const inner = this.stack.length > 0;
     // What takes the pointer is a plate under the pieces (the hairlines between them included): a
     // press on a hairline is a press on the wheel, not on the model behind it.
     const plate = document.createElementNS(SVG, "circle");
@@ -1164,195 +1207,58 @@ export class Wheel implements WheelHandle {
     this.ringSvg.replaceChildren(plate);
     this.ringItems.replaceChildren();
     this.ringEls = this.sectors.map((s, i) => {
+      if (s.blank) return path("wheel-cell", "");
       const mid = this.midOf(i);
       const dim = !s.cells.length && !s.item;
-      const p = path(`wheel-cell wheel-sector${dim ? " dim" : ""}${i === 0 && (this.layout === "model" || this.layout === "sketch") ? " own" : ""}${s.on ? " on" : ""}`, wedge(m.r0, m.r1, mid - step / 2, mid + step / 2, 3));
+      const own = !inner && (s.id === OWN || (this.layout === "sketch" && s.id === "exit"));
+      const p = path(`wheel-cell wheel-sector${dim ? " dim" : ""}${own ? " own" : ""}${s.on ? " on" : ""}`, wedge(m.r0, m.r1, mid - step / 2, mid + step / 2, 3));
       this.ringSvg.append(p);
-      this.ringItems.append(this.item(s, s.label, `sector${dim ? " dim" : ""}${s.mark ? " mark" : ""}${s.on ? " on" : ""}`, (m.r0 + m.r1) / 2 + 1, mid));
+      this.ringItems.append(this.item(s, inner && !s.item && s.cells.length ? `${s.label} ›` : s.label, `sector${dim ? " dim" : ""}${s.mark ? " mark" : ""}${s.on ? " on" : ""}`, (m.r0 + m.r1) / 2 + 1, mid));
       return p;
     });
+    // (What's on is drawn last: its outline whole, over its neighbours'.)
+    for (const p of this.ringEls) if (p.classList.contains("on")) this.ringSvg.append(p);
   }
 
-  /** Fan out a group's tools (-1: none), or the tools of a tool opened inside it. */
-  private showFan(i: number, trail: ToolItem[] = []): void {
-    this.ringEls[this.openSector]?.classList.remove("open");
-    this.ringItems.children[this.openSector]?.classList.remove("open");
-    this.fanCount++;
-    // (Another row of a cascade added to the same group's fan: only that row comes in.)
-    const before = i === this.openSector && i >= 0 ? this.fan.length : 0;
-    const deeper = before > 0 && trail.length > this.trail.length;
-    this.openSector = i;
-    const built = i < 0 ? { fan: [], trail: [] } : this.buildFan(i, trail);
-    this.trail = built.trail;
-    this.root.classList.toggle("fanned", i >= 0);
-    const open = this.ringEls[i];
-    if (open) {
-      open.classList.add("open");
-      this.ringItems.children[i]?.classList.add("open");
-      // (Drawn last: its outline whole, over its neighbours'.)
-      this.ringSvg.append(open);
-    }
-    if (this.hot >= CELL) {
-      this.hot = NONE;
-      this.tip.hidden = true;
-    }
+  /** The band round the outside: a ring's tools past eight. */
+  private drawFan(): void {
     const m = this.m;
-    this.fan = built.fan;
     this.fanSvg.replaceChildren();
     this.fanItems.replaceChildren();
-    // (A plate under each row takes the pointer, as under the ring.)
-    for (const key of new Set(this.fan.map((c) => `${c.level}:${c.r0}`))) {
-      const row = this.fan.filter((c) => `${c.level}:${c.r0}` === key);
-      const r0 = row[0].r0;
-      this.fanSvg.append(path("wheel-plate", wedge(r0 - m.gap / 2, row[0].r1 + m.gap / 2, Math.min(...row.map((c) => c.a0)), Math.max(...row.map((c) => c.a1)), 0)));
+    if (this.fan.length) {
+      const c = this.fan[0];
+      const plate = document.createElementNS(SVG, "circle");
+      plate.setAttribute("class", "wheel-plate");
+      plate.setAttribute("r", String((c.r0 + c.r1) / 2));
+      plate.setAttribute("stroke-width", String(c.r1 - c.r0 + m.gap));
+      this.fanSvg.append(plate);
     }
-    const opened = new Set(this.trail);
     this.fanEls = this.fan.map((c) => {
       const it = c.item;
-      const p = path(`wheel-cell${it.active ? " on" : ""}${opened.has(it) ? " open" : ""}`, wedge(c.r0, c.r1, c.a0, c.a1));
+      const p = path(`wheel-cell${it.active ? " on" : ""}`, wedge(c.r0, c.r1, c.a0, c.a1));
       this.fanSvg.append(p);
       const rm = (c.r0 + c.r1) / 2;
       const mid = (c.a0 + c.a1) / 2;
-      // The room for its name: the cell's width along the row above and below the wheel, its depth at the sides.
+      // The room for its name: the cell's width along the band above and below the wheel, its depth at the sides.
       const up = Math.abs(Math.sin(mid));
       const across = Math.abs(Math.cos(mid));
       const width = (up * (c.a1 - c.a0) * rm + across * (c.r1 - c.r0)) / (up + across) - 4;
-      this.fanItems.append(this.item(it, kidsOf(it).length ? `${it.label} ›` : it.label, `${it.active ? "on" : ""}${opened.has(it) ? " open" : ""}${it.pulse ? " mark" : ""}`, rm, mid, width));
+      this.fanItems.append(this.item(it, kidsOf(it).length ? `${it.label} ›` : it.label, `${it.active ? "on" : ""}${it.pulse ? " mark" : ""}`, rm, mid, width));
       return p;
     });
-    // (What's on or open is drawn last: its outline whole, not under its neighbours'.)
-    for (const p of this.fanEls) if (p.classList.contains("on") || p.classList.contains("open")) this.fanSvg.append(p);
-    if (deeper && !calm()) {
-      const grow = [{ opacity: 0, transform: "scale(0.94)" }, { opacity: 1, transform: "none" }];
-      for (let k = before; k < this.fan.length; k++) this.fanEls[k]?.animate(grow, { duration: 90, easing: "ease-out" });
-      this.fanItems.querySelectorAll<HTMLElement>(".wheel-item").forEach((d, k) => k >= before && d.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 90 }));
-    } else if (this.fan.length && !calm()) this.fanBox.animate([{ opacity: 0, transform: "scale(0.9)" }, { opacity: 1, transform: "none" }], { duration: 90, easing: "ease-out" });
-    if (this.fan.length) this.fit();
-    // A kept wheel that slid for the fan goes back to its place once the fan is away.
-    else if (this.kept && this.slid && this.up) {
-      this.root.classList.add("slide");
-      this.rest();
-    }
+    for (const p of this.fanEls) if (p.classList.contains("on")) this.fanSvg.append(p);
   }
 
-  /** How far the ring with these tools fanned out reaches each way from the middle. */
-  private spread(fan: Placed[], e = { l: this.m.r1, r: this.m.r1, t: this.m.r1, b: this.m.r1 }): { l: number; r: number; t: number; b: number } {
-    for (const c of fan)
-      for (const a of [c.a0, (c.a0 + c.a1) / 2, c.a1]) {
-        const x = c.r1 * Math.cos(a);
-        const y = c.r1 * Math.sin(a);
-        e.l = Math.max(e.l, -x);
-        e.r = Math.max(e.r, x);
-        e.t = Math.max(e.t, -y);
-        e.b = Math.max(e.b, y);
-      }
-    return e;
+  /** The middle: the handle - or, while a group's tools are up, Back. */
+  private drawCrumbs(): void {
+    const inner = this.stack.length > 0;
+    this.root.classList.toggle("inner", inner);
+    this.grip.innerHTML = inner ? icons.back : this.layout === "settings" ? icons.settings : this.layout === "options" ? icons.options : icons.move;
   }
 
-  /**
-   * A fan that the screen can hold: half a ring where there is room for that.
-   * Where there isn't (a phone on its side is too short for nineteen tools
-   * down one side), each row is as much of the ring as fits at its distance -
-   * the outer rows narrower - and there are more rows, reaching further out.
-   */
-  private fanFor(cells: Cell[], mid: number, inner = this.m.r1, level = 0): Placed[] {
-    if (level === 0) {
-      const rays = this.rayFor(cells, mid);
-      if (rays) return rays;
-    }
-    return this.arcFor(cells, mid, inner, level);
-  }
-
-  /**
-   * A group's tools as rays straight out from it: the first tool right next to
-   * the group (where the pointer or finger already is), the next ones further
-   * out along the same ray, then rays to either side in turn. As many tools to
-   * a ray as the screen holds at that distance (two on a phone, up to four).
-   * Null when that would go most of the way round the wheel: then rows.
-   */
-  private rayFor(cells: Cell[], mid: number): Placed[] | null {
-    const N = cells.length;
-    if (!N) return [];
-    const m = this.m;
-    const pitch = m.depth + m.gap;
-    const most = Math.max(1, Math.min(4, Math.floor((Math.min(innerWidth, innerHeight) - 12 - 2 * m.r1) / pitch)));
-    const L = Math.min(N <= 5 ? N : 4, most);
-    const R = Math.ceil(N / L);
-    // Each ray as wide as a full cell where it is narrowest (next to the ring).
-    const w = m.max / (m.r1 + m.gap + m.depth / 2);
-    if (R * w > 1.6 * Math.PI) return null;
-    const out: Placed[] = [];
-    cells.forEach((c, i) => {
-      const ray = Math.floor(i / L);
-      const k = i % L;
-      // Symmetric about the group: an odd number of rays has the first straight
-      // out from it, then one to the clockwise side, one to the other...; an
-      // even number has the first two either side of the middle, and so on out.
-      const side = R % 2 ? (ray === 0 ? 0 : ray % 2 ? (ray + 1) / 2 : -ray / 2) : ray % 2 ? -(ray + 1) / 2 + 0.5 : ray / 2 + 0.5;
-      const a = mid + side * w;
-      const r0 = m.r1 + m.gap + k * pitch;
-      out.push({ ...c, r0, r1: r0 + m.depth, a0: a - w / 2, a1: a + w / 2, level: 0 });
-    });
-    return out;
-  }
-
-  /** Rows of ring (the cascade's further rows, and a group too big for rays). */
-  private arcFor(cells: Cell[], mid: number, inner: number, level: number): Placed[] {
-    const W = innerWidth - 12;
-    const H = innerHeight - 12;
-    const ring = this.m.r1;
-    // The widest piece of ring reaching out to R, centred on the group, that the screen holds together with the ring.
-    const spanAt = (R: number): number => {
-      for (let deg = 180; deg > 40; deg -= 10) {
-        const s = (deg * Math.PI) / 180;
-        let l = ring;
-        let r = ring;
-        let t = ring;
-        let b = ring;
-        for (let k = 0; k <= 16; k++) {
-          const a = mid - s / 2 + (s * k) / 16;
-          l = Math.max(l, -R * Math.cos(a));
-          r = Math.max(r, R * Math.cos(a));
-          t = Math.max(t, -R * Math.sin(a));
-          b = Math.max(b, R * Math.sin(a));
-        }
-        if (l + r <= W && t + b <= H) return s;
-      }
-      return (40 * Math.PI) / 180;
-    };
-    return fanLayout(cells, mid, this.m, spanAt, inner, level);
-  }
-
-  /** How far the wheel reaches each way from its middle, with every group's fan out. */
-  private extent(): { l: number; r: number; t: number; b: number } {
-    const e = { l: this.m.r1, r: this.m.r1, t: this.m.r1, b: this.m.r1 };
-    this.sectors.forEach((s, i) => this.spread(this.fanFor(s.cells, this.midOf(i)), e));
-    return e;
-  }
-
-  /** How far out the fan reaches. */
+  /** How far out the wheel reaches (its outer band too). */
   private reach(): number {
     return this.fan.reduce((r, c) => Math.max(r, c.r1), this.m.r1);
-  }
-
-  /** A fan that would run off the screen: the wheel slides to bring it on. */
-  private fit(): void {
-    const e = this.spread(this.fan);
-    const M = 6;
-    let dx = this.cx + e.r > innerWidth - M ? innerWidth - M - this.cx - e.r : 0;
-    if (this.cx - e.l + dx < M) dx = M - this.cx + e.l;
-    let dy = this.cy + e.b > innerHeight - M ? innerHeight - M - this.cy - e.b : 0;
-    if (this.cy - e.t + dy < M) dy = M - this.cy + e.t;
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
-    this.cx += dx;
-    this.cy += dy;
-    this.slid = true;
-    if (this.up) this.root.classList.add("slide");
-    this.place();
-    // The pointer stayed put and the wheel moved: what's under it now counts once it moves
-    // again - and another group it lands on has to wait a little longer to take the fan.
-    this.hold = { x: this.px, y: this.py };
-    this.slidAt = performance.now();
   }
 
   // -------------------------------------------------------------------- tip
@@ -1387,7 +1293,9 @@ export class Wheel implements WheelHandle {
 
   /** What the middle is for, said under the wheel once the pointer rests on it. */
   private sayHub(): void {
-    const text = this.isFolded
+    const text = this.stack.length
+      ? "Back"
+      : this.isFolded
       ? this.layout === "settings" || this.layout === "options"
         ? `${this.layout === "settings" ? "Settings" : "Options"}: click · drag to move`
         : "Click to unfold · drag to move"
@@ -1413,7 +1321,8 @@ export class Wheel implements WheelHandle {
     if (r <= m.r1 + m.gap / 2) {
       const n = this.sectors.length;
       const step = TAU / n;
-      return SECTOR + ((((Math.floor((a + Math.PI / 2 + step / 2) / step) % n) + n) % n));
+      const k = ((Math.floor((a + Math.PI / 2 + step / 2) / step) % n) + n) % n;
+      return this.sectors[k]?.blank ? NONE : SECTOR + k;
     }
     for (let i = 0; i < this.fan.length; i++) {
       const c = this.fan[i];
@@ -1439,38 +1348,28 @@ export class Wheel implements WheelHandle {
       this.hold = null;
     }
     const hit = this.hitAt(x, y);
+    // Pressed and slid out across a group: the ring becomes its tools, the most used under the finger - slide on to another, let go.
+    if (this.pressed !== null && !this.grab && hit >= SECTOR && hit < CELL && Math.hypot(x - this.cx, y - this.cy) > (this.m.r0 + this.m.r1) / 2 && Math.hypot(x - this.pressAt.x, y - this.pressAt.y) > 12) {
+      const i = hit - SECTOR;
+      const s = this.sectors[i];
+      if (!s.item && s.cells.length) return this.enter(s.id, s.cells, this.midOf(i), i);
+    }
     // (The same thing as before: nothing to do. This runs on every move.)
     if (hit !== this.hot) this.point(hit);
   }
 
-  /** The pointer came onto a group, a tool, the middle - or off them all. */
+  /** The pointer came onto a group, a tool, the middle - or off them all: its name, just outside the wheel. */
   private point(hit: number): void {
-    // A group's tools are out: the other groups are greyed, and the pointer crossing one on its
-    // way to a tool neither lights it nor swaps the fan for it (a tap on it still does).
-    const greyed = hit >= SECTOR && hit < CELL && this.openSector >= 0 && hit - SECTOR !== this.openSector;
     this.elOf(this.hot)?.classList.remove("hot");
     this.hot = hit;
-    if (!greyed) this.elOf(hit)?.classList.add("hot");
+    this.elOf(hit)?.classList.add("hot");
     this.clearTimers();
-    if (greyed) return void (this.tip.hidden = true);
     if (hit >= CELL) {
       const c = this.fan[hit - CELL];
-      this.sayTool(c.item, (c.a0 + c.a1) / 2, this.reach() + 8);
-      if (this.type === "touch") return;
-      // Resting on a tool with kinds of its own opens them in a row further out (a tap does at
-      // once); resting on another tool of a row whose neighbour is open closes that one's row.
-      const drills = opens(c.item) && !c.item.variantsWhenActive && this.trail[c.level] !== c.item;
-      const closes = !drills && c.level < this.trail.length && this.trail[c.level] !== c.item;
-      if (drills) this.drillTimer = window.setTimeout(() => this.hot === hit && this.drill(hit - CELL, true), 280);
-      else if (closes) this.drillTimer = window.setTimeout(() => this.hot === hit && this.collapse(c.level), 280);
-      return;
+      return this.sayTool(c.item, (c.a0 + c.a1) / 2, this.reach() + 8);
     }
     this.tip.hidden = true;
-    if (hit === NONE) {
-      // Off a kept wheel: its fan goes away after a moment (one up at the pointer is closed as a whole).
-      if (this.kept && this.openSector >= 0 && this.pressed === null) this.leaveTimer = window.setTimeout(() => this.hot === NONE && this.shut(), 500);
-      return;
-    }
+    if (hit === NONE) return;
     if (hit === HUB) {
       this.tipTimer = window.setTimeout(() => this.hot === HUB && !this.grab?.moved && this.sayHub(), 700);
       return;
@@ -1478,70 +1377,8 @@ export class Wheel implements WheelHandle {
     const i = hit - SECTOR;
     const s = this.sectors[i];
     const mid = this.midOf(i);
-    if (!s.cells.length && !s.item) return this.say(mid, this.m.r1 + 8, s.why ?? `${s.label} has nothing here`, { why: true });
-    if (s.item) this.sayTool(s.item, mid, this.m.r1 + 8);
-    if (i === this.openSector) {
-      // Back from a tool's kinds to the group's own list.
-      if (this.trail.length) this.showFan(i);
-      return;
-    }
-    const go = () => this.hot === hit && this.showFan(i);
-    // Straight away - except from one group's fan to the next: heading across a
-    // neighbour for a tool at the far end of the fan mustn't swap the fan away.
-    // (Longer just after the wheel slid: the pointer is still on its way to the fan that moved.)
-    const slid = performance.now() - this.slidAt < 450;
-    if (this.openSector < 0 || (this.pressed !== null && !slid)) go();
-    else this.switchTimer = window.setTimeout(go, slid ? 450 : 90);
-  }
-
-  /** A tool's own kinds (Plane ›, Colour ›) open in a row outside the one it is in. */
-  private drill(index: number, resting: boolean): void {
-    const c = this.fan[index];
-    if (!c || this.trail[c.level] === c.item) return;
-    const hot = this.hot;
-    this.showFan(this.openSector, [...this.trail.slice(0, c.level), c.item]);
-    // The pointer is still on the tool it opened (the rows before stay put): it stays lit.
-    const at = this.fan.findIndex((f) => f.level === c.level && f.item.id === c.item.id);
-    if (resting && at >= 0 && hot === CELL + index) {
-      this.hot = CELL + at;
-      this.elOf(this.hot)?.classList.add("hot");
-      this.sayTool(this.fan[at].item, (this.fan[at].a0 + this.fan[at].a1) / 2, this.reach() + 8);
-    }
-    this.guardUntil = resting ? performance.now() + 260 : 0;
-  }
-
-  /** The rows opened beyond this level of the cascade go. */
-  private collapse(level: number): void {
-    if (this.trail.length <= level) return;
-    const hot = this.hot >= CELL ? this.fan[this.hot - CELL] : null;
-    this.showFan(this.openSector, this.trail.slice(0, level));
-    const at = hot ? this.fan.findIndex((f) => f.level === hot.level && f.item.id === hot.item.id) : -1;
-    if (at >= 0) {
-      this.hot = CELL + at;
-      this.elOf(this.hot)?.classList.add("hot");
-      this.sayTool(this.fan[at].item, (this.fan[at].a0 + this.fan[at].a1) / 2, this.reach() + 8);
-    }
-  }
-
-  /** The tools last run from the model's wheel (ids, newest first): shown under View. */
-  private recent: string[] = (() => {
-    try {
-      const v = JSON.parse(localStorage.getItem(RECENT) ?? "[]");
-      return Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, RECENT_MAX) : [];
-    } catch {
-      return [];
-    }
-  })();
-
-  /** A main tool was run: first among the recent ones. */
-  private remember(item: ToolItem): void {
-    if (this.kind !== "tools" || this.layout !== "model" || !leaves(this.host.mainTools()).some((t) => t.id === item.id)) return;
-    this.recent = [item.id, ...this.recent.filter((x) => x !== item.id)].slice(0, RECENT_MAX);
-    try {
-      localStorage.setItem(RECENT, JSON.stringify(this.recent));
-    } catch {
-      // (Not kept: just this visit's.)
-    }
+    if (!s.cells.length && !s.item) return this.say(mid, this.reach() + 8, s.why ?? `${s.label} has nothing here`, { why: true });
+    if (s.item) this.sayTool(s.item, mid, this.reach() + 8);
   }
 
   private run(item: ToolItem): void {
@@ -1552,33 +1389,28 @@ export class Wheel implements WheelHandle {
       return;
     }
     this.close();
-    this.remember(item);
     item.run?.();
   }
 
-  /** A tap (or a press let go) on a group or a tool. */
+  /** A tap (or a press let go) at (x, y) on a place of the ring, or of its outer band. */
   private activate(hit: number): void {
     if (hit >= CELL) {
       const c = this.fan[hit - CELL];
       if (!c) return;
-      // (Tapped again once its kinds are out: they go.)
-      if (opens(c.item)) return this.trail[c.level] === c.item ? this.collapse(c.level) : this.drill(hit - CELL, false);
-      if (performance.now() < this.guardUntil) return;
+      if (opens(c.item)) return this.enter(c.item.id, this.kindsOf(c.item), (c.a0 + c.a1) / 2, -1);
       return this.run(c.item);
     }
     const i = hit - SECTOR;
     const s = this.sectors[i];
-    if (!s) return;
+    if (!s || s.blank) return;
     if (s.item) return this.run(s.item);
-    if (!s.cells.length) return this.say(this.midOf(i), this.m.r1 + 8, s.why ?? `${s.label} has nothing here`, { why: true });
-    // A group with one tool, its fan already showing: a tap on the group runs it.
-    const only = s.cells.length === 1 ? s.cells[0].item : null;
-    if (only && this.openAtPress === i && !this.trail.length && !opens(only)) return this.run(only);
-    if (this.openSector !== i || this.trail.length) this.showFan(i);
+    if (!s.cells.length) return this.say(this.midOf(i), this.reach() + 8, s.why ?? `${s.label} has nothing here`, { why: true });
+    this.enter(s.id, s.cells, this.midOf(i), i);
   }
 
-  /** A tap on the middle: one up at the pointer closes; one kept somewhere folds or unfolds - twice, the model's is let go. */
+  /** A tap on the middle: back a ring; on the first, one up at the pointer closes, one kept somewhere folds or unfolds - twice, the model's is let go. */
   private hubTap(): void {
+    if (this.stack.length) return this.back();
     if (!this.kept) return this.hide();
     const now = performance.now();
     if (this.layout === "model" && now - this.hubTapAt < 400) return this.letGo();
@@ -1607,9 +1439,9 @@ export class Wheel implements WheelHandle {
         this.hide();
         return;
       }
-      // Kept somewhere, it stays: the press only puts its fan away. A finger's is spent on that
-      // (nothing hovers a fan away for a finger, and a tap meant to close it would draw a point).
-      if (this.openSector < 0) return;
+      // Kept somewhere, it stays: the press only takes it back to its first ring. A finger's is spent
+      // on that (a tap meant to close the ring would draw a point).
+      if (!this.stack.length) return;
       this.shut();
       if (e.pointerType === "touch" && onView) {
         e.preventDefault();
@@ -1625,7 +1457,6 @@ export class Wheel implements WheelHandle {
     this.adopt = this.adopted = false;
     this.still = false;
     this.hold = null;
-    this.openAtPress = this.openSector;
     this.pressHit = hit;
     this.pressFan = this.fanCount;
     this.pressAt = { x: e.clientX, y: e.clientY };
@@ -1654,7 +1485,7 @@ export class Wheel implements WheelHandle {
       this.adopt = false;
       this.adopted = true;
       this.pressed = e.pointerId;
-      this.openAtPress = this.openSector;
+      this.pressAt = { ...this.from };
     }
     // (A finger only counts while it is down on the wheel.)
     if (e.pointerType === "touch") {
@@ -1684,7 +1515,7 @@ export class Wheel implements WheelHandle {
     const tap = !this.adopted && Math.hypot(e.clientX - this.pressAt.x, e.clientY - this.pressAt.y) < 10;
     const hit = tap ? this.pressHit : this.hitAt(e.clientX, e.clientY);
     if (hit === NONE || hit === HUB) return;
-    if (tap && hit >= CELL && this.pressFan !== this.fanCount) return;
+    if (tap && this.pressFan !== this.fanCount) return;
     // (Not kept from the view: a finger that came down on it, and was held for the wheel, is let go of there too.)
     e.preventDefault();
     this.activate(hit);
@@ -1709,18 +1540,19 @@ export class Wheel implements WheelHandle {
       this.typerEnd?.(false);
       return;
     }
-    // Esc closes the wheel only (kept somewhere: its fan), and what's picked stays picked. With no fan out, Esc is the app's.
-    if (this.kept && this.openSector < 0) return;
+    // Esc goes back a ring; on the first it closes the wheel (kept somewhere, Esc is then the app's). What's picked stays picked.
+    if (this.kept && !this.stack.length) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    this.close();
+    if (this.stack.length) this.back();
+    else this.close();
   };
 
   // ------------------------------------------------------------ for checking
 
   /** Every tool the wheel offers now, by where it is ("Tools › Fillet"), whether it is up or not. */
   tools(): { id: string; label: string; path: string }[] {
-    const { sectors } = this.up ? { sectors: this.sectors } : this.content();
+    const { sectors } = this.up ? { sectors: this.stack[0]?.sectors ?? this.sectors } : this.content();
     const out: { id: string; label: string; path: string }[] = [];
     const walk = (it: ToolItem, path: string[]) => {
       const here = [...path, it.label];
@@ -1748,9 +1580,8 @@ export class Wheel implements WheelHandle {
         ? {
             folded: this.isFolded,
             center: { x: Math.round(this.cx), y: Math.round(this.cy) },
-            group: this.sectors[this.openSector]?.id ?? null,
-            inside: this.trail.map((t) => t.label),
-            sectors: this.sectors.map((s, i) => ({
+            path: this.stack.map((l) => l.id),
+            sectors: this.sectors.map((s, i) => ({ s, i })).filter(({ s }) => !s.blank).map(({ s, i }) => ({
               id: s.id,
               label: s.label,
               ...at((m.r0 + m.r1) / 2, this.midOf(i)),
