@@ -29,8 +29,13 @@ export interface TimelapseHost {
 const STOP = Symbol("stop");
 
 // How long each thing takes (ms). Slow on purpose: a step has to be seen, not flashed past.
-const STEP = 2500; // from one step to the next, all told: the view going to it, and the step on show
-const SHOWN = 900; // ...of which the step is on show at least this long, however long the view took
+// From one step to the next, all told (the view going to it, and the step on show): 2.5 s - less in a long
+// project, so that its steps take about a minute and a half between them, and never under 1.2 s.
+const STEP = 2500;
+const STEP_LEAST = 1200;
+const WHOLE = 90000;
+const SHOWN = 900; // of a step's time, it is on show at least this long (at the full pace), however long the view took
+const STILL = 0.75; // a step the view did not have to move for is there to see already: this much of the time
 const MOVE = 700; // the view going somewhere else
 const TURN = 900; // ...and turning to another side on the way
 const SETTLE = 120; // after the view arrives, before the step appears
@@ -41,6 +46,8 @@ export class Timelapse {
   state: PlayState = "idle";
   private token = 0;
   private wake: (() => void) | null = null;
+  /** How much quicker than the full pace this playing goes (1: the full pace; a long project: down to about a half). */
+  private quick = 1;
   /** The part of the view to keep the model in (a recording: the part that is in the video); else what the panels leave free. */
   private within: (() => Insets) | null = null;
   private free(): Insets {
@@ -104,6 +111,9 @@ export class Timelapse {
     this.within = within;
     let whole = false;
     const t = ++this.token;
+    // The pace: how long a step has, and how much quicker than the full pace everything goes.
+    const step = Math.max(STEP_LEAST, Math.min(STEP, WHOLE / on.length));
+    this.quick = step / STEP;
     this.set("playing");
     // The first k steps: the rest switched off, the way a breakpoint does it.
     const upTo = (k: number): Feature[] => {
@@ -144,10 +154,11 @@ export class Timelapse {
         const changed = r.bodies.filter((b) => had.get(b.id) !== b.key);
         const plane = isSketch ? (r.sketchPlanes[f.id] ?? (f as { plane: PlaneDef }).plane) : null;
         const fresh = plane ? null : freshParts(changed, was);
+        let moved = false;
         const box = plane ? sketchBox(r.sketchEntities?.[f.id] ?? (f as { entities: SketchEntity[] }).entities, plane) : fresh!.box;
         if (!box.isEmpty()) {
           const model = meshBox(r.bodies).union(box);
-          await this.frame(box, model, plane ? new Vector3(...plane.normal) : null, fresh?.spots ?? [], r.bodies, t);
+          moved = await this.frame(box, model, plane ? new Vector3(...plane.normal) : null, fresh?.spots ?? [], r.bodies, t);
         }
         this.h.show(r, fs, isSketch ? f.id : null);
         this.h.mark(at);
@@ -156,7 +167,7 @@ export class Timelapse {
         // (Nothing is lit: what a step added was shown in the blue of a picked face, and read as a selection.)
         // Steps follow each other at an even pace: what the view's move took comes off the time on show.
         if (!isSketch && !changed.length) await this.sleep(QUIET, t);
-        else await this.sleep(Math.max(SHOWN, STEP - (performance.now() - began)), t);
+        else await this.sleep(Math.max(SHOWN * this.quick, step * (moved ? 1 : STILL) - (performance.now() - began)), t);
       }
       // All of it, to end on.
       this.h.mark(null);
@@ -205,7 +216,7 @@ export class Timelapse {
    * The view goes to where the change is, if it isn't in sight already: over to it (and closer, or further), and
    * round to its side when it is seen edge-on or from behind.
    */
-  private async frame(box: Box3, model: Box3, normal: Vector3 | null, spots: Spot[], bodies: BodyMesh[], t: number): Promise<void> {
+  private async frame(box: Box3, model: Box3, normal: Vector3 | null, spots: Spot[], bodies: BodyMesh[], t: number): Promise<boolean> {
     const view = this.h.view();
     const cam = view.cam;
     const size = Math.max(model.getSize(new Vector3()).length(), 1e-6);
@@ -262,12 +273,14 @@ export class Timelapse {
     }
     // What to have in the picture: the change with room round it; most of the model, if the change is most of it.
     const focus = own > size * 0.55 ? model.clone().expandByScalar(size * 0.08) : box.clone().expandByScalar(Math.max(own * 0.6, size * 0.2));
-    if (!from && this.inSight(box, focus)) return;
+    if (!from && this.inSight(box, focus)) return false;
     cam.fit(focus, true, this.free());
-    cam.pace(from ? TURN : MOVE);
-    const end = performance.now() + (from ? TURN : MOVE) + 400;
-    while (cam.animating && performance.now() < end) await this.sleep(40, t);
-    await this.sleep(SETTLE, t);
+    const takes = (from ? TURN : MOVE) * this.quick;
+    cam.pace(takes);
+    const end = performance.now() + takes + 400;
+    while (cam.animating && performance.now() < end) await this.sleep(30, t);
+    await this.sleep(SETTLE * this.quick, t);
+    return true;
   }
 
   /** Is the change in the picture, and neither a speck nor bigger than the screen? */
