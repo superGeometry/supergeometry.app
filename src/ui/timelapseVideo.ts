@@ -47,7 +47,13 @@ export class TimelapseVideo {
     const stream = this.out.captureStream(0);
     const track = stream.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?(): void };
     const push = () => (track.requestFrame ? track.requestFrame() : (stream as MediaStream & { requestFrame?(): void }).requestFrame?.());
-    this.ticker = window.setInterval(() => this.rec.state === "recording" && push(), 1000 / 30);
+    // (Sent as each picture is drawn, so a frame is the picture of its own moment - sent by the clock alone, a
+    // turning view came out uneven. The clock sends one only when nothing has been drawn for a while.)
+    this.push = () => {
+      this.pushed = performance.now();
+      if (this.rec.state === "recording") push();
+    };
+    this.ticker = window.setInterval(() => performance.now() - this.pushed > 45 && this.push(), 1000 / 30);
     this.rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
     this.rec.ondataavailable = (e) => e.data.size && this.parts.push(e.data);
     this.stopped = new Promise((done) => (this.rec.onstop = () => done()));
@@ -64,6 +70,8 @@ export class TimelapseVideo {
   private open = false;
   private done = false;
   private ticker = 0;
+  private push: () => void = () => {};
+  private pushed = 0;
   start(): void {
     if (this.open) return;
     this.open = true;
@@ -88,6 +96,12 @@ export class TimelapseVideo {
   }
 
   private draw(): void {
+    this.paint();
+    // At most thirty a second (the screen draws sixty, or more).
+    if (this.open && performance.now() - this.pushed > 27) this.push();
+  }
+
+  private paint(): void {
     // (Nothing is copied before the playing has cleared the view: the recorder's first picture is whatever was
     // last put on this canvas, and that was the finished model.)
     if (!this.open) return;

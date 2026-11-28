@@ -35,7 +35,7 @@ const SETTLE = 250; // after the view arrives, before the step appears
 const SKETCH = 1300; // a sketch on show
 const SOLID = 1800; // a step that changed a body
 const QUIET = 700; // a step that shows nothing new (a plane, a variable)
-const ORBIT = 8000; // once round the finished model, at the end
+const ORBIT = 10000; // once round the finished model, at the end
 
 export class Timelapse {
   state: PlayState = "idle";
@@ -83,6 +83,16 @@ export class Timelapse {
       await new Promise<void>((done) => (this.wake = done));
       this.check(t);
     }
+  }
+
+  /** The screen's next frame (a moment later, where frames are not being drawn); and on, while it is paused. */
+  private async frameTick(t: number): Promise<void> {
+    await new Promise<void>((done) => {
+      const id = setTimeout(done, 60);
+      requestAnimationFrame(() => (clearTimeout(id), done()));
+    });
+    this.check(t);
+    if (this.state === "paused") await this.sleep(0, t);
   }
 
   /** Played from the start; true if it ran to its end. `within`: see above. */
@@ -159,7 +169,8 @@ export class Timelapse {
         let gone = 0;
         let last = performance.now();
         while (gone < ORBIT) {
-          await this.sleep(16, t);
+          // (In step with the screen's own frames: by a timer the turn fell between them, and juddered.)
+          await this.frameTick(t);
           const now = performance.now();
           // (Time spent paused, or with the page out of sight, is not time turned.)
           gone = Math.min(ORBIT, gone + Math.min(50, now - last));
