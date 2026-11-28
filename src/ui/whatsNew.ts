@@ -17,6 +17,12 @@ interface Update {
 
 export const UPDATES: Update[] = [
   {
+    date: "2026-11-28",
+    fixed: [
+      "With a mouse, a sketch started on a body's face keeps the plain arrow. The pointer could stay a hand, left over from the picked body, and it hid where the next point would go.",
+    ],
+  },
+  {
     date: "2026-11-27",
     added: [
       "On Android, Save project and the exports open the device's own Save to window where the browser has it: pick Google Drive there (or any other place the device knows) and the file is on your computer without moving it by hand. Close the window and nothing is saved. Where the browser has no such window, the file is downloaded as before.",

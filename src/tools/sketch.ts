@@ -1892,6 +1892,8 @@ export class SketchTool implements Tool {
     if (!p && this.phase === "draw") this.app.ui.clearPointerLabel();
     if (!p && this.fillHot) ((this.fillHot = null), this.refreshPreview());
     if (!p || this.phase !== "draw" || this.dragging || this.sdrag) return;
+    // Drawing: the plain arrow, whatever Select's arrows left (a hand).
+    if (this.kind !== "select" && this.app.view.canvas.style.cursor) this.app.view.canvas.style.cursor = "";
     if (this.kind === "patternLinear" && this.patGimbal) {
       const g = this.patGimbal.hit(p);
       this.patGimbal.setHot(g ?? (this.patDrag ? ({ kind: "axis", i: this.patDrag.axis as 0 | 1 }) : null));

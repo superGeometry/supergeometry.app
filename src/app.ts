@@ -502,6 +502,9 @@ export class App implements AppContext {
     this.tool.exit?.();
     this.tool = next;
     this.input.handler = next;
+    // The pointer's shape was the last tool's (a hand over a picked body that can be dragged): it stayed a hand
+    // all through a sketch started on that body's face, hiding where the next point would go.
+    this.view.canvas.style.cursor = "";
     this.showPose();
     this.hover = null;
     this.ui.closeFlyout();
