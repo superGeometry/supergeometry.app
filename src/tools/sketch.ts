@@ -3321,10 +3321,23 @@ export class SketchTool implements Tool {
     // "on line", past its ends as "extension" (not too far out).
     const lt = touch ? p.tol * 0.6 : p.tol;
     const near: { L: Locus; q: Vec2; d: number; label: string; ext?: Vec2 }[] = [];
+    // A line begun on the end of another line and drawn along it - straight on, or back over it: plainly meant to
+    // lie on it, so that way catches from twice as far. (A little off, it missed, and the point fell on the grid
+    // beside the line: a second line half a millimetre from the first.)
+    const along: Vec2[] = [];
+    if (from) {
+      for (const e of [...this.entities, ...this.boundary]) {
+        if (e.kind !== "line") continue;
+        const joined = Math.hypot(e.a[0] - from[0], e.a[1] - from[1]) < 1e-9 || Math.hypot(e.b[0] - from[0], e.b[1] - from[1]) < 1e-9;
+        if (joined) along.push(unit2([e.b[0] - e.a[0], e.b[1] - e.a[1]]));
+      }
+    }
+    const meant = (L: Locus): boolean =>
+      !!from && L.kind === "line" && Math.abs((from[0] - L.p[0]) * -L.d[1] + (from[1] - L.p[1]) * L.d[0]) < 1e-9 && along.some((d) => Math.abs(d[0] * L.d[1] - d[1] * L.d[0]) < 1e-9);
     for (const L of loci) {
       const q = nearestOnLocus(L, raw);
       const d = Math.hypot(q[0] - raw[0], q[1] - raw[1]) / wpp;
-      if (d >= lt) continue;
+      if (d >= (meant(L) ? lt * 2 : lt)) continue;
       // On (or past the end of) a line the new line runs alongside: not a place to land.
       if (L.kind === "line" && L.seg && alongside(L.seg[0], L.seg[1], q)) continue;
       // (The other half of a tangent circle is the arc doubling back along its line.)
@@ -3368,7 +3381,7 @@ export class SketchTool implements Tool {
         const x = crossLoci(A.L, n.L, raw);
         if (!x) continue;
         const d = Math.hypot(x[0] - raw[0], x[1] - raw[1]) / wpp;
-        if (d < lt * 1.3 && (!bestX || d < bestX.d)) bestX = { n, x, d };
+        if (d < lt * (meant(n.L) || meant(A.L) ? 2.6 : 1.3) && (!bestX || d < bestX.d)) bestX = { n, x, d };
       }
       if (bestX) {
         used.push(bestX.n);
