@@ -5,6 +5,7 @@ import { isTouchDevice } from "../device";
 import { peekSegs } from "./ghost";
 import { settings } from "../settings";
 import { BODY_COLORS, BODY_OPACITY, DEFAULT_BODY_COLOR, bodyColor } from "../doc/types";
+import { featureFamily } from "../doc/featureFamily";
 import type { DeleteGeomFeature, Feature, EdgeLink, FaceFreeformFeature, FreeformFeature, EdgeRef, ExtrudeSource, FaceRef, ImageFeature, PlaneDef, PlaneFeature, SketchFeature, Vec3 } from "../doc/types";
 import { sayRounds } from "../io/insert";
 import { editedStep } from "../doc/freeformEdits";
@@ -846,6 +847,15 @@ export class SelectTool implements Tool {
       const wall = app.view.body(s.body)?.faces.findIndex((g) => g.step === info.step && !!g.round?.hole) ?? -1;
       return wall >= 0 ? (faceRefOf(app, { body: s.body, face: wall }) ?? undefined) : undefined;
     })();
+    // Faces a later step made on the body (a boss, a pocket, a rib - not the step that made the body itself): a
+    // feature. Mirror and the patterns repeat it in its body, with every step built on it (featureFamily).
+    const feature = ((): string[] | undefined => {
+      const mesh = app.view.body(s.body);
+      const made = [...new Set(sel.flatMap((x) => (x.kind === "face" && x.body === s.body ? [mesh?.faces[x.face]?.step] : [])))];
+      if (!made.length || made.some((id) => !id || id === s.body || s.body.startsWith(`${id}:`))) return undefined;
+      const family = featureFamily(app.store.features, made as string[]);
+      return family.length ? family : undefined;
+    })();
     // A round face: its axis (from its mesh).
     const axis = info?.round && one ? roundAxis(app, s.body, s.face) : null;
     // A face a Freeform Face step made: that step opens again to reshape it.
@@ -900,11 +910,12 @@ export class SelectTool implements Tool {
       // The face's body moved, copied round or mirrored, without picking the body first.
       // (A hole's round wall: the pattern repeats the hole in its body - it copied the whole body, and there was no
       // way to repeat a hole.)
-      { id: "patl", label: "Pattern – Linear", icon: "patternLinear", ...(holeRef ? { sub: "repeats this hole" } : {}), run: () => app.setTool(new TransformOp(app, "linear", holeRef ? [s.body] : bodies, undefined, undefined, false, holeRef, holeRef ? info?.round?.r : undefined)) },
-      { id: "patc", label: "Pattern – Circular", icon: "patternCircular", ...(holeRef ? { sub: "repeats this hole" } : {}), run: () => app.setTool(new TransformOp(app, "circular", holeRef ? [s.body] : bodies, undefined, undefined, false, holeRef)) },
+      { id: "patl", label: "Pattern – Linear", icon: "patternLinear", ...(holeRef ? { sub: "repeats this hole" } : feature ? { sub: "repeats this feature" } : {}), run: () => app.setTool(new TransformOp(app, "linear", holeRef || feature ? [s.body] : bodies, undefined, undefined, false, holeRef, holeRef ? info?.round?.r : undefined, holeRef ? undefined : feature)) },
+      { id: "patc", label: "Pattern – Circular", icon: "patternCircular", ...(holeRef ? { sub: "repeats this hole" } : feature ? { sub: "repeats this feature" } : {}), run: () => app.setTool(new TransformOp(app, "circular", holeRef || feature ? [s.body] : bodies, undefined, undefined, false, holeRef, undefined, holeRef ? undefined : feature)) },
       { id: "translate", label: "Translate", icon: "translate", shortcut: "N", run: () => app.setTool(new TransformOp(app, "translate", bodies)) },
       { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: () => app.setTool(new TransformOp(app, "rotate", bodies)) },
-      { id: "mirror", label: "Mirror", icon: "mirror", run: () => app.setTool(new TransformOp(app, "mirror", bodies)) },
+      // (Faces of a feature - a boss, a pocket, a rib: the feature is mirrored in its body, with all that was built on it.)
+      { id: "mirror", label: "Mirror", icon: "mirror", ...(feature ? { sub: "mirrors this feature" } : {}), run: () => app.setTool(new TransformOp(app, "mirror", feature ? [s.body] : bodies, undefined, undefined, false, undefined, undefined, feature)) },
       { id: "replace", label: "Replace Face", icon: "replaceFace", ...needFlat, run: () => ref && app.setTool(new ReplaceFaceOp(app, ref)) },
       { id: "projs", label: "Project as Sketch", icon: "project", ...needFlat, run: () => this.projectFace("select") },
       // The neighbours extend to close the gap (fillets, chamfers, holes).

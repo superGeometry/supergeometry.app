@@ -114,6 +114,11 @@ interface Ctx {
    * one of a group changes the others the same way (see `followLinks`).
    */
   links: Map<string, { group: string; m: Affine }>;
+  /**
+   * What each step did to the bodies that were there before it (by step): the body as it was and as the step left
+   * it. A mirror or a pattern of a feature repeats the difference.
+   */
+  made: Map<string, { body: string; before: Shape3D; after: Shape3D }[]>;
 }
 
 /**
@@ -129,7 +134,7 @@ interface Reads {
   written: Set<string>;
 }
 let reading: Reads | null = null;
-const KINDS = ["bodies", "sketches", "planes", "axes", "freeforms", "sweeps", "links"] as const;
+const KINDS = ["bodies", "sketches", "planes", "axes", "freeforms", "sweeps", "links", "made"] as const;
 const rawGet = <V>(m: Map<string, V>, k: string): V | undefined => Map.prototype.get.call(m, k) as V | undefined;
 const rawHas = (m: Map<string, unknown>, k: string): boolean => Map.prototype.has.call(m, k) as boolean;
 const rawEntries = <V>(m: Map<string, V>): [string, V][] => [...(Map.prototype.entries.call(m) as IterableIterator<[string, V]>)];
@@ -202,6 +207,7 @@ function fork(ctx: Ctx): Ctx {
     freeforms: new Noted("freeforms", ctx.freeforms),
     sweeps: new Noted("sweeps", ctx.sweeps),
     links: new Noted("links", ctx.links),
+    made: new Noted("made", ctx.made),
   };
 }
 /** How many steps the last rebuild ran, took as they were (nothing before them changed), or put back (nothing they read changed). */
@@ -897,7 +903,7 @@ async function run(features: Feature[], saved = false) {
   editable = new Set(features.filter((f) => (f.type === "freeform" || f.type === "faceFreeform") && !f.suppressed).map((f) => f.id));
   const errors: FeatureError[] = [];
   const notes: FeatureError[] = [];
-  let ctx: Ctx = fork({ bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map(), links: new Map() });
+  let ctx: Ctx = fork({ bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map(), links: new Map(), made: new Map() });
   switchedOff = new Set(features.filter((f) => f.suppressed).map((f) => f.id));
   const off = [...switchedOff].sort().join();
   // The steps as last rebuilt (by step, wherever in the list they are now).
@@ -1048,9 +1054,18 @@ async function run(features: Feature[], saved = false) {
           // Linked bodies: the others of a changed one's group follow it. (Any change among the links is a change
           // for this step: it is built again then.)
           // (A pattern of a hole changes its body's shape, as a cut does: the body's linked ones follow.)
-          if (f.type !== "transform" || f.hole) {
+          if (f.type !== "transform" || f.hole || f.steps?.length) {
             reads.all.add("links");
             followLinks(f.id, ctx, out);
+          }
+          // What it did to the bodies that were there (a mirror or a pattern of this feature repeats it).
+          {
+            const did: { body: string; before: Shape3D; after: Shape3D }[] = [];
+            for (const [id, after] of rawEntries(out.bodies)) {
+              const before = rawGet(ctx.bodies, id);
+              if (before && before !== after) did.push({ body: id, before, after });
+            }
+            if (did.length) Map.prototype.set.call(out.made, f.id, did);
           }
           if (editNotes.length) entry.note = [...new Set(editNotes)].join(" ");
           // Anything but a move/scale changing a freeform body makes it an ordinary body.
@@ -4559,9 +4574,67 @@ function holePattern(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void
   ctx.freeforms.delete(id);
 }
 
+/**
+ * A mirror or a pattern of features: what each of the steps named added to the body is added again at each place,
+ * and what it cut away is cut again - in the order the steps were made (a boss, then the hole in it).
+ */
+function featureRepeat(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {
+  const op = f.op;
+  if (op.kind !== "mirror" && op.kind !== "linear" && op.kind !== "circular") throw new Error("A feature is repeated with Mirror or a pattern");
+  const id = f.bodies[0];
+  const body = need(ctx.bodies, id);
+  const parts: { add?: Shape3D; cut?: Shape3D }[] = [];
+  const tiny = Math.abs(quickVolume(body)) * 1e-9;
+  for (const step of f.steps ?? []) {
+    const did = ctx.made.get(step)?.find((x) => x.body === id);
+    // (One of several that did nothing to this body - switched off, or on another body: the others are repeated.)
+    if (!did && (f.steps?.length ?? 0) > 1) continue;
+    if (!did) throw new Error("The step that made that feature is gone, or it did not change this body");
+    const add = did.after.cut(did.before) as Shape3D;
+    const cut = did.before.cut(did.after) as Shape3D;
+    const part = { ...(!isEmpty(add) && quickVolume(add) > tiny ? { add } : {}), ...(!isEmpty(cut) && quickVolume(cut) > tiny ? { cut } : {}) };
+    if (part.add || part.cut) parts.push(part);
+  }
+  if (!parts.length) throw new Error("That step changed nothing in the body that could be repeated");
+  const places: ((s: Shape3D) => Shape3D)[] = [];
+  if (op.kind === "mirror") places.push((s) => s.clone().mirror(op.plane.normal, op.plane.origin) as Shape3D);
+  else if (op.kind === "linear") {
+    patternCount(op.count);
+    if (Math.abs(op.spacing) < 1e-9 || len(op.dir) < 1e-12) throw new Error("The spacing is zero: the copies would all sit in one place");
+    for (let k = 1; k < op.count; k++) places.push((s) => s.clone().translate(scale(norm(op.dir), op.spacing * k)) as Shape3D);
+  } else {
+    patternCount(op.count);
+    if (Math.abs(op.angle) < 1e-9) throw new Error("The angle is zero: the copies would all sit in one place");
+    const ax = resolveAxis(op.axis, ctx);
+    const full = Math.abs(Math.abs(op.angle) - 360) < 1e-6;
+    const turn = op.angle / (full ? op.count : Math.max(1, op.count - 1));
+    for (let k = 1; k < op.count; k++) places.push((s) => s.clone().rotate(turn * k, ax.origin, ax.dir) as Shape3D);
+  }
+  let out = body;
+  let missed = 0;
+  for (const place of places) {
+    const was = out;
+    for (const part of parts) {
+      if (part.add) out = out.fuse(place(part.add)) as Shape3D;
+      if (part.cut) out = out.cut(place(part.cut)) as Shape3D;
+    }
+    if (isEmpty(out)) throw new Error("That would cut the whole body away");
+    if (Math.abs(quickVolume(out) - quickVolume(was)) <= Math.abs(quickVolume(was)) * 1e-9) missed++;
+  }
+  if (missed === places.length) throw new Error(op.kind === "mirror" ? "Mirrored there, the feature changes nothing: it is there already, or off the body" : "None of the copies changes the body: check the direction and the spacing");
+  if (missed) editNotes.push(`${missed} of the ${places.length} copies changed nothing: off the body, or there already.`);
+  // (A piece added where the body is not: it would be a loose lump - said, not kept as a second solid.)
+  if (subShapes(out, "SOLID").length > subShapes(body, "SOLID").length) throw new Error("There the feature does not touch the body: it would be a loose piece. Check the mirror plane, or the direction and the spacing.");
+  const kept = guardEdit(body, out, true);
+  if (!kept) throw new Error("That would cut the whole body away");
+  ctx.bodies.set(id, kept);
+  ctx.freeforms.delete(id);
+}
+
 function transform(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {
   const op = f.op;
   if (f.hole) return holePattern(f, ctx);
+  if (f.steps?.length) return featureRepeat(f, ctx);
   const copies: [string, Shape3D][] = [];
   for (const id of f.bodies) {
     const body = need(ctx.bodies, id);

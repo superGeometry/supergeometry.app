@@ -438,6 +438,11 @@ export interface TransformFeature extends FeatureBase {
    * is in - the body itself is not copied. `bodies` is that one body.
    */
   hole?: FaceRef;
+  /**
+   * A mirror or a pattern of features (faces of theirs picked): what each of these steps added to the body, or cut
+   * from it, is added or cut again at each place - the body itself is not copied. `bodies` is that one body.
+   */
+  steps?: string[];
   op:
     | { kind: "move"; translate: Vec3; rotate?: { origin: Vec3; axis: Vec3; angle: number } }
     /** `ref`: scaled by reference - the two points picked (center is the first), the distance typed between them. */

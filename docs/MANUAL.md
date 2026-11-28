@@ -299,6 +299,15 @@ sketch. A sketch stays in view until every region of it is used.
   gimbal; the faces around it tilt to follow (Fillet / Chamfer are in the
   list). Every edit is checked: one that would tear the body open stops with a
   message instead.
+- **Mirror or pattern a feature**, not the whole body: tap a face of the
+  feature (a boss, a pocket, a rib - anything a later step made on the body),
+  then Transform, Mirror (it says "mirrors this feature") and tap the plane.
+  The feature is built again on the other side, in the same body, with
+  everything that was made on it: the hole drilled in it, the fillet round
+  its foot. It stays tied to the original, so changing the boss changes its
+  mirror image. Pattern - Linear and Pattern - Circular repeat a feature the
+  same way. With the whole body picked (double-tap), Mirror and the patterns
+  work on the body, as before.
 - A body that stands at an angle: in Move/Rotate, drag the gimbal's middle
   dot onto a straight edge, a corner or a flat face of it and the gimbal turns
   to point that part's way - its arrows then move the body along that edge or

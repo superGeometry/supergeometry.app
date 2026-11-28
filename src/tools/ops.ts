@@ -1718,6 +1718,8 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     hole?: FaceRef,
     /** That hole's radius: the first spacing is three of them (the body's own length would put the next hole off it). */
     holeR?: number,
+    /** A mirror or a pattern of features (faces of theirs picked): these steps' work is repeated in the body, not the body. */
+    steps?: string[],
   ) {
     const center = pivot ?? bodyCenter(app, bodies);
     const op: TransformFeature["op"] =
@@ -1731,7 +1733,8 @@ export class TransformOp extends FeatureOp<TransformFeature> {
               ? { kind: "circular", axis: { origin: [0, 0, 0], dir: [0, 0, 1] }, count: 6, angle: 360 }
               : { kind: "move", translate: [0, 0, 0], rotate: { origin: center, axis: [0, 0, 1], angle: 0 } };
     const label = kind === "linear" || kind === "circular" ? "Pattern" : TITLES[kind].split(" ")[0].replace("/Rotate", "");
-    super(app, { ...app.store.newIdentity("transform", copy ? "Copy" : hole ? "Hole Pattern" : label), type: "transform", bodies, copy: kind === "mirror" || copy, op, ...(hole && (kind === "linear" || kind === "circular") ? { hole } : {}) }, existing);
+    const repeats = !hole && !!steps?.length && (kind === "mirror" || kind === "linear" || kind === "circular");
+    super(app, { ...app.store.newIdentity("transform", copy ? "Copy" : hole ? "Hole Pattern" : repeats ? `Feature ${label}` : label), type: "transform", bodies, copy: kind === "mirror" || copy, op, ...(hole && (kind === "linear" || kind === "circular") ? { hole } : {}), ...(repeats ? { steps } : {}) }, existing);
     const o = this.feature.op;
     if (existing) {
       if (o.kind === "mirror") this.plane = o.plane;
@@ -1831,7 +1834,9 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       case "move":
         return "Drag an arrow to move it or an arc to turn it, or type. The middle dot is the point it turns about.";
       case "mirror":
-        return "The body is flipped across the plane. A copy is made unless you turn Copy off.";
+        return this.feature.steps?.length
+          ? "Tap the plane to mirror across: the feature is built again on the other side, with everything made on it. It follows the original when that changes."
+          : "The body is flipped across the plane. A copy is made unless you turn Copy off.";
       case "translate":
         return "Tap a point on the body, then the point it should move to.";
       default:
@@ -1872,7 +1877,9 @@ export class TransformOp extends FeatureOp<TransformFeature> {
         this.render();
       },
     };
-    const copy: PanelItem[] = this.feature.copy && !this.existing ? [copyToggle, link] : [copyToggle];
+    // (A feature mirrored or patterned in its body: nothing is copied, so no Copy and no Link to set.)
+    const inBody = !!this.feature.steps?.length;
+    const copy: PanelItem[] = inBody ? [] : this.feature.copy && !this.existing ? [copyToggle, link] : [copyToggle];
     // A pattern's Link: its copies and what they were made from change together afterwards - a hole cut in one is
     // cut in all. Off, each is a body of its own.
     const patternLink: PanelItem = {
@@ -1922,13 +1929,13 @@ export class TransformOp extends FeatureOp<TransformFeature> {
         return [
           this.num("Count", "op.count", "int", { min: 2 }),
           this.num("Spacing", "op.spacing", "length"),
-          patternLink,
+          ...(inBody ? [] : [patternLink]),
         ];
       case "circular":
         return [
           this.num("Count", "op.count", "int", { min: 2 }),
           this.num("Angle", "op.angle", "angle"),
-          patternLink,
+          ...(inBody ? [] : [patternLink]),
         ];
     }
   }
