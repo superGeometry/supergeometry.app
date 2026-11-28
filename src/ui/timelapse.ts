@@ -135,7 +135,7 @@ export class Timelapse {
         const box = plane ? sketchBox(r.sketchEntities?.[f.id] ?? (f as { entities: SketchEntity[] }).entities, plane) : fresh!.box;
         if (!box.isEmpty()) {
           const model = meshBox(r.bodies).union(box);
-          await this.frame(box, model, plane ? new Vector3(...plane.normal) : null, t);
+          await this.frame(box, model, plane ? new Vector3(...plane.normal) : null, fresh?.facing ?? null, t);
         }
         this.h.show(r, fs, isSketch ? f.id : null);
         this.h.mark(at);
@@ -167,16 +167,19 @@ export class Timelapse {
    * The view goes to where the change is, if it isn't in sight already: over to it (and closer, or further), and
    * round to its side when it is seen edge-on or from behind.
    */
-  private async frame(box: Box3, model: Box3, normal: Vector3 | null, t: number): Promise<void> {
+  private async frame(box: Box3, model: Box3, normal: Vector3 | null, facing: Vector3 | null, t: number): Promise<void> {
     const view = this.h.view();
     const cam = view.cam;
     const size = Math.max(model.getSize(new Vector3()).length(), 1e-6);
     const own = box.getSize(new Vector3()).length();
     const dir = cam.viewDir();
-    // Round to it: a sketch seen edge-on or from behind, a change on the far side of the model.
+    // Round to it: a sketch seen edge-on or from behind; new faces that look another way than at the viewer (a
+    // round on the side of a part seen from its front was made, and hardly seen); a change on the model's far side.
     let from: Vector3 | null = null;
     if (normal) {
       if (-dir.dot(normal.clone().normalize()) < 0.3) from = normal.clone().normalize();
+    } else if (facing) {
+      if (-dir.dot(facing) < 0.55) from = facing.clone();
     } else {
       const off = box.getCenter(new Vector3()).sub(model.getCenter(new Vector3()));
       if (off.length() > size * 0.12 && dir.dot(off.clone().normalize()) > 0.35) from = off.normalize();
@@ -189,10 +192,17 @@ export class Timelapse {
       const over = new Vector3().crossVectors(side, from).normalize();
       if (over.z < 0 && Math.abs(from.z) < 0.99) over.negate();
       const w = from.clone().addScaledVector(side, 0.5).addScaledVector(over, 0.45).normalize();
+      // Never from straight above or from far below: the part's sides give it its shape.
+      const flat = Math.hypot(w.x, w.y);
+      const z = Math.max(-0.35, Math.min(0.72, w.z));
+      if (z !== w.z && flat > 1e-6) {
+        const k = Math.sqrt(1 - z * z) / flat;
+        w.set(w.x * k, w.y * k, z);
+      }
       cam.lookAlong(w.toArray() as Vec3);
     }
     // What to have in the picture: the change with room round it; most of the model, if the change is most of it.
-    const focus = own > size * 0.55 ? model.clone().expandByScalar(size * 0.16) : box.clone().expandByScalar(Math.max(own * 0.5, size * 0.3));
+    const focus = own > size * 0.55 ? model.clone().expandByScalar(size * 0.16) : box.clone().expandByScalar(Math.max(own * 0.6, size * 0.22));
     if (!from && this.inSight(box, focus)) return;
     cam.fit(focus, true, this.free());
     cam.pace(from ? TURN : MOVE);
@@ -222,7 +232,7 @@ export class Timelapse {
     // Too far off to see what changed, or so near that there is no telling where on the model it is.
     const f = span(focus);
     const share = f ? Math.max((f.bx - f.ax) / (x1 - x0), (f.by - f.ay) / (y1 - y0)) : 2;
-    return share > 0.22 && share < 1.6;
+    return share > 0.33 && share < 1.6;
   }
 }
 
@@ -239,9 +249,14 @@ function corners(bodies: BodyMesh[]): Set<string> {
  * block is the hole, not the block). Nothing new in a body that changed (something was only taken away), or all of
  * it new: the body.
  */
-function freshParts(changed: BodyMesh[], was: Set<string>): { box: Box3 } {
+function freshParts(changed: BodyMesh[], was: Set<string>): { box: Box3; facing: Vector3 | null } {
   const box = new Box3();
   const p = new Vector3();
+  // Which way the new faces look, all told (each triangle with new corners, by its size): a round looks out of
+  // its corner, a hole out of its mouth. A whole new body looks every way: none.
+  const sum = new Vector3();
+  let area = 0;
+  const [a, b2, c] = [new Vector3(), new Vector3(), new Vector3()];
   for (const b of changed) {
     const isNew = new Uint8Array(b.positions.length / 3);
     let n = 0;
@@ -251,8 +266,18 @@ function freshParts(changed: BodyMesh[], was: Set<string>): { box: Box3 } {
       continue;
     }
     for (let v = 0; v < isNew.length; v++) if (isNew[v]) box.expandByPoint(p.set(b.positions[v * 3], b.positions[v * 3 + 1], b.positions[v * 3 + 2]));
+    for (let i = 0; i + 2 < b.indices.length; i += 3) {
+      const [i0, i1, i2] = [b.indices[i], b.indices[i + 1], b.indices[i + 2]];
+      if (isNew[i0] + isNew[i1] + isNew[i2] < 2) continue;
+      a.fromArray(b.positions, i0 * 3);
+      b2.fromArray(b.positions, i1 * 3).sub(a);
+      c.fromArray(b.positions, i2 * 3).sub(a);
+      const n = b2.cross(c);
+      area += n.length();
+      sum.add(n);
+    }
   }
-  return { box };
+  return { box, facing: area > 0 && sum.length() > area * 0.2 ? sum.normalize() : null };
 }
 
 function meshBox(bodies: BodyMesh[]): Box3 {
