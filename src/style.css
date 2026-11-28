@@ -8056,3 +8056,9 @@ body.tut-on .numpad {
   font-size: 12px;
   color: var(--muted);
 }
+/* A grey line across a menu: what is below it is another kind of thing. */
+.pop-rule {
+  height: 1px;
+  margin: 8px 4px;
+  background: var(--line);
+}

@@ -24,7 +24,9 @@ export interface Settings {
   ortho: boolean;
   shader: "shaded" | "wireframe" | "xray";
   /** Surface analysis on the bodies (Display modes): zebra stripes or a curvature map. */
-  analysis: "none" | "zebra" | "curvature";
+  analysis: "none" | "zebra" | "curvature" | "overhang";
+  /** Overhang check: how far a face may lean out from upright (degrees) before it needs support to print. */
+  overhangAngle: number;
   zebraStripes: number;
   zebraDirection: "vertical" | "horizontal";
   /** Curvature map: a curve this tight (radius, mm) shows fully red (domed) or blue (hollow). */
@@ -190,6 +192,7 @@ const DEFAULTS: Settings = {
   ortho: true,
   shader: "shaded",
   analysis: "none",
+  overhangAngle: 45,
   zebraStripes: 16,
   zebraDirection: "vertical",
   curvatureRadius: 10,

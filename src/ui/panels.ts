@@ -167,6 +167,7 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
     // Surface analysis: how smoothly faces meet (zebra), how much they bend (curvature).
     host.append(heading("Analysis"));
     for (const [id, label] of [["none", "Off"], ["zebra", "Zebra stripes"], ["curvature", "Curvature map"]] as const) {
+      // (Off is lit while the overhang check, below the line, is the one that is on: none of these three is.)
       host.append(choiceRow(label, s.analysis === id, () => (settings.set("analysis", id), ui.refreshPopover())));
     }
     if (s.analysis === "zebra") {
@@ -182,7 +183,16 @@ export function setupRightColumn(ui: UI, view: Viewport, store: DocStore, onUnit
         el("div", "pop-note", "Red: domed. Green: flat. Blue: hollow."),
       );
     }
-  }, () => (settings.value.analysis === "zebra" ? "Zebra" : settings.value.analysis === "curvature" ? "Curv." : ({ shaded: "Shaded", wireframe: "Wire", xray: "X-Ray" })[settings.value.shader]));
+    // For printing, apart from the surface analyses: which faces lean out too far to print without support.
+    host.append(el("div", "pop-rule"));
+    host.append(toggleRow("Overhang check", s.analysis === "overhang", (v) => (settings.set("analysis", v ? "overhang" : "none"), ui.refreshPopover())));
+    if (s.analysis === "overhang") {
+      host.append(
+        sliderRow("Prints without support up to", 20, 80, 1, s.overhangAngle, (v) => settings.set("overhangAngle", v), (v) => `${v}°`),
+        el("div", "pop-note", "Red: needs support, printed upright as it stands. Yellow: close to the limit. The angle is how far a face leans out from upright."),
+      );
+    }
+  }, () => (settings.value.analysis === "zebra" ? "Zebra" : settings.value.analysis === "curvature" ? "Curv." : settings.value.analysis === "overhang" ? "Overhang" : ({ shaded: "Shaded", wireframe: "Wire", xray: "X-Ray" })[settings.value.shader]));
 
   ui.addRight("shot", "camera", "Screenshot", () => {
     void view.screenshot({ project: store.doc.name, isolated: isolatedNames() }).then((blob) => {

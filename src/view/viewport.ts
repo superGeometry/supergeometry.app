@@ -393,7 +393,17 @@ export class Viewport {
       return;
     }
     const m = (this.anaMat ??= analysisMaterial());
-    m.uniforms.uKind.value = s.analysis === "zebra" ? 0 : 1;
+    m.uniforms.uKind.value = s.analysis === "zebra" ? 0 : s.analysis === "overhang" ? 2 : 1;
+    if (s.analysis === "overhang") {
+      // Printed upwards from the floor: the lowest point of what is on show is on the bed.
+      let bed = Infinity;
+      for (const b of this.visibleBodies()) {
+        const p = b.data.positions;
+        for (let i = 2; i < p.length; i += 3) if (p[i] < bed) bed = p[i];
+      }
+      m.uniforms.uLean.value = Math.sin((Math.max(1, Math.min(89, s.overhangAngle)) * Math.PI) / 180);
+      m.uniforms.uBed.value = Number.isFinite(bed) ? bed : 0;
+    }
     m.uniforms.uStripes.value = s.zebraStripes;
     m.uniforms.uHorizontal.value = s.zebraDirection === "horizontal" ? 1 : 0;
     m.uniforms.uScale.value = 1 / Math.max(s.curvatureRadius, 1e-3);

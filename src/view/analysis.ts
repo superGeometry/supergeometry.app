@@ -1,10 +1,12 @@
 // Surface analysis in the view: zebra stripes (reflected stripes show where
-// faces meet smoothly - a kink in a stripe is a crease, a jump a gap) and a
-// curvature map (blue hollow, green flat, red domed).
+// faces meet smoothly - a kink in a stripe is a crease, a jump a gap), a
+// curvature map (blue hollow, green flat, red domed), and the overhang check
+// for 3D printing (red: a face that leans out further than a printer can
+// build without support, printing upwards from the floor).
 
 import { ShaderMaterial, UniformsLib, UniformsUtils, Vector3 } from "three";
 
-export type Analysis = "none" | "zebra" | "curvature";
+export type Analysis = "none" | "zebra" | "curvature" | "overhang";
 
 /**
  * Curvature at each vertex of a mesh (1/mm), from how the normals turn along
@@ -54,7 +56,9 @@ void main() {
 
 const fragment = /* glsl */ `
 #include <clipping_planes_pars_fragment>
-uniform int uKind;        // 0 zebra, 1 curvature
+uniform int uKind;        // 0 zebra, 1 curvature, 2 overhang
+uniform float uLean;      // overhang: the sine of the furthest lean from upright that prints without support
+uniform float uBed;       // overhang: the height the model stands on (what lies on it needs no support)
 uniform float uStripes;   // zebra: stripes round the view
 uniform int uHorizontal;  // zebra: stripes across (1) or upright (0)
 uniform float uScale;     // curvature: the curvature (1/mm) shown fully red / blue
@@ -79,6 +83,20 @@ void main() {
     float w = fwidth(u * uStripes);
     float band = smoothstep(0.5 - w, 0.5 + w, s) * (1.0 - smoothstep(1.0 - w, 1.0, s));
     col = mix(vec3(0.08), vec3(0.97), band) * (0.85 + 0.15 * light);
+  } else if (uKind == 2) {
+    // How far the face looks down: 0 for an upright wall, 1 for a ceiling. Past the limit it needs support - red;
+    // within ten degrees of it, a warning yellow; what lies on the bed is held by the bed.
+    float down = -N.z;
+    float near = sin(max(asin(clamp(uLean, 0.0, 1.0)) - 0.1745, 0.0));
+    vec3 fine = vec3(0.62, 0.66, 0.72);
+    vec3 warn = vec3(0.98, 0.78, 0.22);
+    vec3 bad = vec3(0.93, 0.22, 0.2);
+    float onBed = step(vWorld.z, uBed + 0.05);
+    float w = max(fwidth(down), 1e-4);
+    col = mix(fine, warn, smoothstep(near - w, near + w, down));
+    col = mix(col, bad, smoothstep(uLean - w, uLean + w, down));
+    col = mix(col, fine, onBed * step(0.9, down));
+    col *= light;
   } else {
     float t = clamp(vCurv / uScale, -1.0, 1.0);
     vec3 flat_ = vec3(0.25, 0.78, 0.35);
@@ -99,6 +117,8 @@ export function analysisMaterial(): ShaderMaterial {
         uStripes: { value: 16 },
         uHorizontal: { value: 0 },
         uScale: { value: 0.1 },
+        uLean: { value: Math.SQRT1_2 },
+        uBed: { value: 0 },
         uOrtho: { value: false },
         uViewDir: { value: new Vector3(0, 0, -1) },
       },
