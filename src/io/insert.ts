@@ -42,7 +42,7 @@ export function pickFile(accept: string): Promise<File | null> {
  */
 export const MESH_MAX = 250000;
 /** (A mesh as text is some 250 bytes a triangle; a STEP or 3MF file that large is far more than the engine reads.) */
-const FILE_MAX: Record<string, number> = { stl: 100, obj: 100, step: 40, stp: 40, "3mf": 40 };
+const FILE_MAX: Record<string, number> = { stl: 100, obj: 100, step: 40, stp: 40, "3mf": 40, brep: 40, brp: 40, fcstd: 60, glb: 100, gltf: 100, ifc: 60 };
 
 /** How many triangles an STL has: said in a binary one, counted in a text one. */
 export function stlTriangleCount(bytes: Uint8Array): number {
@@ -103,7 +103,7 @@ export function sayRounds(app: AppContext, id: string, name: string, before = -1
 }
 
 export async function insertFile(app: AppContext): Promise<void> {
-  const file = await pickFile(".step,.stp,.stl,.obj,.3mf,.dxf,.svg,.dwg,.super,.tessel");
+  const file = await pickFile(".step,.stp,.stl,.obj,.3mf,.glb,.gltf,.brep,.brp,.fcstd,.ifc,.dxf,.svg,.dwg,.super,.tessel");
   if (!file) return;
   const ext = file.name.split(".").pop()!.toLowerCase();
   try {
@@ -139,12 +139,52 @@ export async function insertFile(app: AppContext): Promise<void> {
       insertProject(app, { ...theirs, features: parts.filter((f) => !big.includes(f)) }, file.name);
       return;
     }
+    // A shape in the geometry kernel's own form, and a FreeCAD document's shapes (kept in it in that form): the
+    // exact solids, each a body. (The readers of these, of glTF and of IFC are fetched when such a file is picked.)
+    if (ext === "brep" || ext === "brp") {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!/CASCADE Topology/.test(new TextDecoder().decode(bytes.subarray(0, 400)))) return app.ui.toast(`Could not insert ${file.name}: it isn't a BRep file`, "error");
+      app.store.add({ ...app.store.newIdentity("import"), type: "import" as const, format: "brep" as const, fileName: file.name, data: toBase64(bytes), apart: true });
+      return;
+    }
+    if (ext === "fcstd") {
+      app.ui.setStatus(`Reading ${file.name}…`);
+      const { readFcstd } = await import("./moreFormats");
+      const shapes = await readFcstd(new Uint8Array(await file.arrayBuffer()));
+      app.ui.setStatus(null);
+      const title = file.name.replace(/\.fcstd$/i, "");
+      const steps = shapes.map((s) => ({ ...app.store.newIdentity("import"), name: s.name, type: "import" as const, format: "brep" as const, fileName: `${s.name} (${file.name})`, data: toBase64(s.brep), apart: true }));
+      // One object: a step. Several: together, as one group in History and one folder in Items, named after the file.
+      const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      app.store.commit((d) => {
+        d.features.push(...steps);
+        for (const s of steps) d.names = { ...d.names, [s.id]: s.name };
+        if (steps.length < 2) return;
+        const ids = steps.map((s) => s.id);
+        d.historyGroups = [...(d.historyGroups ?? []), { id: `hgroup-${stamp}`, name: title, steps: ids }];
+        d.folders = [...(d.folders ?? []), { id: `folder-${stamp}`, name: title, items: [...ids], fresh: ids }];
+      });
+      app.ui.toast(`Inserted ${steps.length} ${steps.length === 1 ? "shape" : "shapes"} from ${file.name}: the exact solids, as FreeCAD last built them (without their history)`);
+      return;
+    }
     // (Any file can be picked on an iPad: see acceptFor.)
-    if (!["step", "stp", "stl", "obj", "3mf"].includes(ext)) return app.ui.toast(`Could not insert ${file.name}: it is not a kind of file the app reads (STEP, STL, OBJ, 3MF, DXF, SVG or a project)`, "error");
+    if (!["step", "stp", "stl", "obj", "3mf", "glb", "gltf", "ifc"].includes(ext))
+      return app.ui.toast(`Could not insert ${file.name}: it is not a kind of file the app reads (STEP, STL, OBJ, 3MF, glTF, BRep, FreeCAD, IFC, DXF, SVG or a project)`, "error");
     let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
     let format: "step" | "stl" = ext === "stl" ? "stl" : "step";
     if (ext === "obj") {
       bytes = objToStl(new TextDecoder().decode(bytes));
+      format = "stl";
+    }
+    // glTF and IFC: their meshes, as one mesh in millimetres.
+    if (ext === "glb" || ext === "gltf" || ext === "ifc") {
+      app.ui.setStatus(`Reading ${file.name}…`);
+      const more = await import("./moreFormats");
+      const tris = ext === "ifc" ? await (await import("./ifc")).ifcTriangles(bytes, MESH_MAX) : more.gltfTriangles(bytes);
+      app.ui.setStatus(null);
+      if (tris.length > MESH_MAX)
+        return app.ui.toast(`Could not insert ${file.name}: it has ${many(tris.length)} triangles, more than can be brought in (up to ${many(MESH_MAX)}).`, "error");
+      bytes = more.stlOfTriangles(tris);
       format = "stl";
     }
     // 3MF: the exact model packed in it (ours), else its meshes.

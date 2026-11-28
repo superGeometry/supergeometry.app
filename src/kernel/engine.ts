@@ -11,6 +11,7 @@ import {
   getOC,
   genericSweep,
   importSTEP,
+  deserializeShape,
   loft,
   makeCompound,
   makeBox,
@@ -1801,14 +1802,14 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           // (A mesh asked to be made into faces: its flat faces built whole here, whichever way they face; where
           // that cannot be done, the kernel's own reading of the file.)
           const whole = rounding ? meshBodyOf(bytes) : null;
-          shape = whole?.shape ?? ((f.format === "step" ? await importSTEP(blob) : readSTL(bytes)) as Shape3D);
+          shape = whole?.shape ?? ((f.format === "step" ? await importSTEP(blob) : f.format === "brep" ? readBRep(bytes) : readSTL(bytes)) as Shape3D);
         } catch (err) {
           // (The engine itself breaking down is for whoever runs it - it was
           // taken for a file that couldn't be read, and the broken engine kept.
           // A mesh too big says so in its own words.)
           if (isFault(err) || err instanceof TooBig) throw err;
           // (OpenCascade's own words were "This shape has not type, it is null".)
-          throw new Error(f.format === "step" ? "This STEP file couldn't be read - it may be damaged" : "This STL file couldn't be read");
+          throw new Error(f.format === "step" ? "This STEP file couldn't be read - it may be damaged" : f.format === "brep" ? "This file's shape couldn't be read - it may be damaged, or saved by a newer version of its program" : "This STL file couldn't be read");
         }
         if (isEmpty(shape)) throw new Error("The file contains no solid geometry");
         importCache.set(cacheKey, shape);
@@ -1816,7 +1817,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       // A file of several solids (an assembly; this app's own STEP of two bodies): each a body of its own, to pick,
       // hide, move and cut by itself. (They came in as one body of several pieces: the two bodies of a project
       // saved as STEP and opened again were one, that nothing could take apart.)
-      const solids = f.apart && (f.format === "step" || rounding) ? subShapes(shape, "SOLID") : [];
+      const solids = f.apart && (f.format === "step" || f.format === "brep" || rounding) ? subShapes(shape, "SOLID") : [];
       if (solids.length > 1) {
         solids.forEach((s, i) => bodies.set(i ? `${f.id}:${i}` : f.id, cast(s) as Shape3D));
         return;
@@ -5974,6 +5975,18 @@ function readSTL(bytes: Uint8Array): Shape3D {
     reader.delete();
     read.delete();
   }
+}
+
+/**
+ * A shape in the kernel's own text form (a .brep file; what a FreeCAD document keeps of each object): read as it
+ * is - the exact faces, nothing converted. One solid in it: that solid; several, or none (surfaces): all of it.
+ */
+function readBRep(bytes: Uint8Array): Shape3D {
+  const text = new TextDecoder().decode(bytes);
+  if (!/CASCADE Topology/.test(text.slice(0, 400))) throw new Error("not a BRep file");
+  const all = deserializeShape(text) as unknown as Shape3D;
+  const solids = subShapes(all, "SOLID");
+  return solids.length === 1 ? (cast(solids[0]) as Shape3D) : all;
 }
 
 /**

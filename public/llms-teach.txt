@@ -190,7 +190,7 @@ Needs: the lamp.
 3. For printing the shade lying flat, set `tilt` to `0` first; set it back after.
 4. **File**, **Save project** downloads a `.super` file: the whole model with its history, to keep as a backup or open on another device with **File**, **Open…**.
 5. The project also saves itself in this browser. Clearing the browser's data for this site deletes it, so the saved file is the safe copy.
-6. **File**, **Import file…** brings a STEP, STL, OBJ, 3MF, DXF or SVG file into the project that is open: a part from somewhere else to build round.
+6. **File**, **Import file…** brings a STEP, STL, OBJ, 3MF, glTF, FreeCAD, BRep, IFC, DXF or SVG file into the project that is open: a part from somewhere else to build round.
 
 Check: nothing to check in the app; ask them whether the file opened in their slicer.
 Then tell them what they now know: a sketch, a solid from it, changing a step in History, drawing on a face, a second body, a hollow one, a freeform shape, holes and patterns, turning bodies, variables. What is left is in lessons 10 to 12, for when they need it, and **More**, **Help** has every tool.

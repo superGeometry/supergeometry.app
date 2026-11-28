@@ -474,7 +474,7 @@ records, the guide text says what the buttons do.
 - **On Android**, Save project and the exports open the device's own *Save to* window where the
   browser has it (Chrome): Google Drive and the device's other places are in it. Where it has none, the
   file is downloaded as before.
-- **File → Import file…** brings a STEP, STL, OBJ, 3MF, DXF or SVG file into the project that is
+- **File → Import file…** brings a STEP, STL, OBJ, 3MF, glTF, FreeCAD, BRep, IFC, DXF or SVG file into the project that is
   open (the same as More → Insert → File).
 - **File → Export STL** or **Export 3MF** for 3D printing (3MF keeps body
   names and colours), **Export STEP** for other CAD programs. With bodies
@@ -488,7 +488,7 @@ records, the guide text says what the buttons do.
   and saves it as a video (see [History](#history-change-anything-later)).
 - **File → New project** starts an empty one; the open project stays in the
   gallery.
-- **More → Insert** brings in files (STEP, STL, OBJ, 3MF, DXF, SVG), another
+- **More → Insert** brings in files (STEP, STL, OBJ, 3MF, glTF, FreeCAD, BRep, IFC, DXF, SVG), another
   project's parts (**Project**), and pictures to trace over (**Image on
   plane**: on the floor, front or side, its middle at the X / Y you type).
 - An inserted **project** is kept together: its steps are one group in History
@@ -496,7 +496,15 @@ records, the guide text says what the buttons do.
   file. Its own folders are inside that folder, and its names, colours, hidden
   sketches and variables come along (a variable this project already has keeps
   this project's value). One Undo takes it all out again.
-- A mesh (**STL**, OBJ, the meshes in a 3MF) comes in as a solid with real
+- A **FreeCAD** document (`.FCStd`) brings in the bodies on show in it as the
+  exact solids FreeCAD last built, each a body by its name - without their
+  history (save it from FreeCAD with *Save shapes in binary format* off, which
+  is how it comes). A **BRep** file (`.brep`, `.brp`) is one such shape.
+- **glTF** (`.glb`, or a `.gltf` with its data inside it) and **IFC** (a
+  building model) come in as a mesh, in millimetres with Z up: an IFC's walls,
+  slabs, doors and the rest together, its rooms' volumes left out. The reader
+  for IFC is fetched the first time an IFC file is picked.
+- A mesh (**STL**, OBJ, glTF, IFC, the meshes in a 3MF) comes in as a solid with real
   faces, so it can be worked on: every flat side is one face, whichever way
   it leans, and the round parts are truly round - a hole, a boss, a pin, a
   rounded upright corner each become one round face, at its exact size. Then
@@ -680,4 +688,5 @@ no UI framework. Project autosave in IndexedDB.
 
 AGPL-3.0-or-later: anyone can use, study, change and host it, but modified
 versions offered to the public must stay open source. OpenCascade (via
-`replicad-opencascadejs`) is LGPL-2.1; replicad and three.js are MIT.
+`replicad-opencascadejs`) is LGPL-2.1; replicad and three.js are MIT; web-ifc
+(the IFC reader) is MPL-2.0.

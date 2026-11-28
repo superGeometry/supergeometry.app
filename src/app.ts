@@ -1673,7 +1673,7 @@ export class App implements AppContext {
             icon: "insert",
             children: [
               { id: "image", label: "Image on plane", icon: "image", run: () => void insertImage(this).then((f) => f && this.setTool(new ImageOp(this, f))) },
-              { id: "file", label: "File", icon: "file", sub: "STEP, STL, OBJ, 3MF, DXF, SVG", run: () => void insertFile(this) },
+              { id: "file", label: "File", icon: "file", sub: "STEP, STL, OBJ, 3MF, glTF, FreeCAD, BRep, IFC, DXF, SVG", run: () => void insertFile(this) },
               { id: "project", label: "Project", icon: "file", sub: ".super", run: () => void insertFile(this) },
               { id: "refImage", label: "Reference Image", icon: "refImage", sub: "a picture in its own window, over the model", run: () => void this.refImages.open() },
               // A web page or a video in a window over the model (open already: brought up again).

@@ -486,7 +486,8 @@ export type AxisKind = "face" | "edge" | "round" | "2pt" | "planes";
 /** A body imported from a file. The file content travels inside the project. */
 export interface ImportFeature extends FeatureBase {
   type: "import";
-  format: "step" | "stl";
+  /** "brep": the geometry kernel's own text form of a shape (a .brep file, a FreeCAD document's shapes). */
+  format: "step" | "stl" | "brep";
   fileName: string;
   /** Base64 of the file. */
   data: string;
