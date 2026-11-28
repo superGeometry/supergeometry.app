@@ -362,26 +362,7 @@ export class App implements AppContext {
       .then(() => this.attachLibrary());
     // Every visit starts at the projects, with a welcome: shown as soon as the
     // projects are read, while the geometry kernel is still loading behind it.
-    // (Unless it was started with a project to open: a .super file opened with the installed app, or handed over
-    // by a web file - then that project is what is shown.)
-    const launch = (window as unknown as { launchQueue?: { setConsumer(fn: (p: { files?: { getFile(): Promise<File> }[] }) => void): void } }).launchQueue;
-    launch?.setConsumer((p) => {
-      const h = p.files?.[0];
-      if (!h) return;
-      this.launchedWith = h.getFile().then(
-        (file) => (this.started ? (void this.openProjectFile(file), null) : file),
-        () => null,
-      );
-    });
-    void loaded.then(async () => {
-      // (A file the app was started with is told a moment after the page begins.)
-      await new Promise((r) => setTimeout(r, 0));
-      const file = await this.launchedWith;
-      this.started = true;
-      if (file) return void this.openProjectFile(file);
-      if (this.receiveShared(() => void this.showProjects(true, true))) return;
-      void this.showProjects(true, true);
-    });
+    void loaded.then(() => this.showProjects(true, true));
     Promise.all([this.kernel.ready, loaded])
       .then(async () => {
         this.ui.setStatus(null);
@@ -2173,7 +2154,6 @@ export class App implements AppContext {
     item("m-new", () => void this.newProject());
     item("m-open", () => void this.showProjects());
     item("m-save", () => this.save());
-    item("m-webfile", () => void this.saveWebFile());
     // (The same as More > Insert > File: where a file is looked for first.)
     item("m-import", () => void insertFile(this));
     item("m-stl", () => void this.export("stl"));
@@ -2599,91 +2579,19 @@ export class App implements AppContext {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = acceptFor(".super,.tessel,application/json");
-    input.onchange = () => {
+    input.onchange = async () => {
       const file = input.files?.[0];
-      if (file) void this.openProjectFile(file);
-    };
-    input.click();
-  }
-
-  /** A project file opened: a project of its own in the library (the open one is kept as it was). */
-  private async openProjectFile(file: File): Promise<void> {
-    try {
-      const doc = parseProject(await file.text());
-      doc.name = file.name.replace(/\.(super|tessel)$/i, "");
-      await this.switchProject(doc, newProjectId());
-    } catch (err) {
-      this.ui.toast(`Could not open: ${(err as Error).message}`, "error");
-    }
-  }
-
-  /** A .super file the installed app was started with (its device opens such files with it); null: none. */
-  private launchedWith: Promise<File | null> = Promise.resolve(null);
-  private started = false;
-
-  /**
-   * Started by a web file (io/webFile.ts) with a project to open: in the address itself ("#p=..."), or - a big one -
-   * to be asked of the page that opened this one ("#receive": this says it is ready, that page answers). Opened as
-   * a project of its own, checked and read as a file chosen by hand is. `none`: what to do if nothing comes of it.
-   * False: not started that way.
-   */
-  private receiveShared(none: () => void): boolean {
-    const hash = location.hash;
-    const inAddress = hash.startsWith("#p=") ? hash.slice(3) : null;
-    const opener = window.opener as Window | null;
-    if (inAddress === null && !(hash === "#receive" && opener)) {
-      if (hash === "#receive") history.replaceState(null, "", location.pathname + location.search);
-      return false;
-    }
-    // (Out of the address: a reload, or the address copied on, is not that project again.)
-    history.replaceState(null, "", location.pathname + location.search);
-    const take = async (packed: string) => {
+      if (!file) return;
       try {
-        const { unpack } = await import("./io/webFile");
-        const doc = parseProject(await unpack(packed));
+        const doc = parseProject(await file.text());
+        doc.name = file.name.replace(/\.(super|tessel)$/i, "");
+        // A project of its own in the library (the open one is kept as it was).
         await this.switchProject(doc, newProjectId());
-        this.ui.toast(`"${doc.name}" is now one of your projects`);
       } catch (err) {
-        this.ui.toast(`Could not open the shared project: ${(err as Error).message}`, "error");
-        none();
+        this.ui.toast(`Could not open: ${(err as Error).message}`, "error");
       }
     };
-    if (inAddress !== null) {
-      void take(inAddress);
-      return true;
-    }
-    let done = false;
-    const end = () => {
-      done = true;
-      window.removeEventListener("message", onMessage);
-    };
-    const onMessage = (e: MessageEvent) => {
-      const d = e.data as { sg?: string; packed?: unknown } | null;
-      if (done || e.source !== opener || d?.sg !== "project" || typeof d.packed !== "string") return;
-      end();
-      void take(d.packed);
-    };
-    window.addEventListener("message", onMessage);
-    try {
-      opener!.postMessage({ sg: "ready" }, "*");
-    } catch {
-      end();
-      return false;
-    }
-    window.setTimeout(() => {
-      if (done) return;
-      end();
-      none();
-    }, 8000);
-    return true;
-  }
-
-  /** The project as a web file: a page that opens the app with the project in it, for someone who has never used it. */
-  private async saveWebFile(how: Delivery = "download"): Promise<void> {
-    const { webFile } = await import("./io/webFile");
-    const name = this.store.doc.name;
-    await this.deliver(new Blob([await webFile(name, JSON.stringify(this.store.doc), location.origin)], { type: "text/html" }), `${name}.html`, how);
-    this.ui.toast("Saved. Whoever opens that file gets the project in their browser.");
+    input.click();
   }
 
   /**
@@ -2880,7 +2788,6 @@ const MIME: Record<string, string> = {
   dxf: "image/vnd.dxf",
   svg: "image/svg+xml",
   super: "application/json",
-  html: "text/html",
 };
 
 function canShare(file: File): boolean {

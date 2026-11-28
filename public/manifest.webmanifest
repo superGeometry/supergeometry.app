@@ -4,9 +4,6 @@
   "description": "Free 3D CAD and 3D modeling in your browser, for phone, tablet, computer and VR.",
   "start_url": "./",
   "display": "standalone",
-  "file_handlers": [
-    { "action": "./", "accept": { "application/x-supergeometry": [".super"] } }
-  ],
   "background_color": "#1f2125",
   "theme_color": "#1f2125",
   "icons": [
