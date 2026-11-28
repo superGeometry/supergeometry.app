@@ -45,6 +45,7 @@ export const UPDATES: Update[] = [
       "The timelapse can be saved as a video: the dot beside Play in History (tap it twice: the first tap lights it, the second records), or File > Export MP4 timelapse. It plays from the first step and saves the model with each step's name, without the panels or the grid, the app's name in the corner, 1280 x 720 (upright on a phone held upright). The time a step takes to build is left out. A browser that can't record MP4 saves a WebM instead, with its length written in so players show how long it is and can jump about in it. Keep the app on screen while it records.",
     ],
     fixed: [
+      "The Shaders and Settings windows open right beside their button. With History open they opened a History's width away from it, even when History was short and nowhere near. Their button, and the Section, Isolate and Measure buttons, now pulse while on.",
       "Show hidden edges (Shaders > Options) reads properly. Hidden edges are dark dashes that stand out on every face, light ones on a dark body; only the part of an edge that really is behind something is dashed, so the edges in front stay whole; and the dashes keep their size as you zoom.",
       "Touch screens: turning the view with two fingers takes a real twist now. One finger moved a little, while pinching or sliding, used to start rolling the view, most of all with the fingers close together.",
       "The overhang check is off each time the app is opened. Left on, it stayed on for the next visit.",

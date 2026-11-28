@@ -623,8 +623,9 @@ export class UI {
       this.popover.hidden = false;
       this.popoverAt = { button: b, cube: !!place };
       this.placePopover();
-      document.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));
-      b.classList.add("pop-open");
+      document.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open", "pulse"));
+      // (Lit and pulsing while its window is open, as the buttons at the left edge are while they are on.)
+      b.classList.add("pop-open", "pulse");
       // Things placed beside the right column (the constraint column) move over.
       window.dispatchEvent(new Event("resize"));
     });
@@ -656,8 +657,13 @@ export class UI {
     const r = at.button.getBoundingClientRect();
     const col = this.rightCol.getBoundingClientRect();
     pop.style.maxHeight = "";
+    pop.style.right = "";
     // Sideways: beside the column (the stylesheet's place), or under the cube with its right edge at the button.
-    pop.style.right = at.cube ? `${Math.max(W - r.right, col.width ? W - col.left + 8 : 8)}px` : "";
+    // (Beside the column where the column really is. The stylesheet put it a History's width in from the edge
+    // whenever History was open - though a short History leaves the column at the edge, and the window then
+    // opened far from its button.)
+    const phone = document.documentElement.dataset.screen === "phone";
+    pop.style.right = at.cube ? `${Math.max(W - r.right, col.width ? W - col.left + 8 : 8)}px` : col.width && !phone ? `${Math.round(W - col.left + 8)}px` : "";
     let box = pop.getBoundingClientRect();
     const seen = (sel: string): DOMRect | null => {
       const e = document.querySelector<HTMLElement>(sel);
@@ -724,11 +730,12 @@ export class UI {
     this.popoverOwner = null;
     if (this.popover.hidden) return;
     this.popover.style.left = "";
+    this.popover.style.right = "";
     this.popover.style.maxHeight = "";
     this.popover.hidden = true;
     this.popoverFill = null;
     this.popoverAt = null;
-    document.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open"));
+    document.querySelectorAll(".pop-open").forEach((x) => x.classList.remove("pop-open", "pulse"));
     window.dispatchEvent(new Event("resize"));
   }
 
