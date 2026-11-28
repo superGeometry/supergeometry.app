@@ -1955,18 +1955,39 @@ body.tut-on #hint .hint-x {
 .history-head .icon-btn {
   background: none;
 }
-/* Play: beside the title, the other buttons to the right. */
+/* The title gives way first: Play, Record, Select and Close always fit, whatever the panel's width and the
+   device's letters (on a 13 inch tablet Close stood half out of the panel). */
 .history-head > span {
   margin-right: auto;
 }
+#history .history-head {
+  gap: 2px;
+  padding-right: 4px;
+}
+#history .history-head > span {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#history .history-head .icon-btn {
+  width: 32px;
+  flex: none;
+}
+#history .history-head .text-btn {
+  flex: none;
+  white-space: nowrap;
+  padding: 0 7px;
+}
 #history-play {
-  margin: 0 2px 0 6px;
+  margin: 0;
 }
 #history-play.on {
   color: var(--accent);
 }
 #history-record {
-  margin: 0 2px 0 0;
+  margin: 0;
 }
 #history-record.recording {
   color: #ff5a52;
@@ -4605,12 +4626,6 @@ html[data-screen="phone"] #panel.folded .panel-grip {
 .cglyph.sel:not(.dim) { color: #ffd34d !important; text-decoration: underline; }
 
 /* History groups: a folder row, its steps indented under it. */
-#history .history-head {
-  gap: 6px;
-}
-#history .history-head > span {
-  flex: 1;
-}
 .history-group .history-name {
   display: flex;
   align-items: center;
