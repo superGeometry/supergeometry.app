@@ -1376,7 +1376,12 @@ export function addForUser(
   const refs = new Set(added.flatMap(refsOf));
   const all = [...existing, ...added];
   const holdFirst = !!first && refs.has(first) && [...refs].some((r) => r !== first) && !added.every((c) => c.type === "fix");
-  const tries: SolveOptions[] = holdFirst ? [{ fixed: new Set([first!]) }, {}] : [{}];
+  // What was not picked stays where it is, if the constraint can be met that way: only the picked curves change.
+  // (Left to the solver, a line that had nothing to do with it moved: a line and an arc made tangent, and the
+  // line at the arc's other end slid along.) Then the first-picked alone held, then nothing.
+  const others = entities.map((e) => e.id).filter((id) => !refs.has(id));
+  const apart: SolveOptions[] = others.length && others.length < entities.length ? [...(holdFirst ? [{ fixed: new Set([...others, first!]) }] : []), { fixed: new Set(others) }] : [];
+  const tries: SolveOptions[] = [...apart, ...(holdFirst ? [{ fixed: new Set([first!]) }, {}] : [{}])];
   // No curve may all but vanish for it (a line squashed to a speck "is" any
   // direction): unless the new constraint sizes that very curve, each keeps
   // a good part of its size.
