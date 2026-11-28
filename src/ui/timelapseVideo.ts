@@ -41,7 +41,14 @@ export class TimelapseVideo {
     this.out.width = wide ? 1280 : 720;
     this.out.height = wide ? 720 : 1280;
     this.g = this.out.getContext("2d", { alpha: false })!;
-    this.rec = new MediaRecorder(this.out.captureStream(30), { mimeType: mime, videoBitsPerSecond: 6_000_000 });
+    // A frame thirty times a second, whether the picture changed or not. (Left to the browser, a frame is sent only
+    // when the canvas changes: a step held for two seconds was one frame two seconds long, and players took that
+    // as a stall - or jumped over it.)
+    const stream = this.out.captureStream(0);
+    const track = stream.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?(): void };
+    const push = () => (track.requestFrame ? track.requestFrame() : (stream as MediaStream & { requestFrame?(): void }).requestFrame?.());
+    this.ticker = window.setInterval(() => this.rec.state === "recording" && push(), 1000 / 30);
+    this.rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
     this.rec.ondataavailable = (e) => e.data.size && this.parts.push(e.data);
     this.stopped = new Promise((done) => (this.rec.onstop = () => done()));
     view.plainGround(true);
@@ -56,6 +63,7 @@ export class TimelapseVideo {
   private begun = false;
   private open = false;
   private done = false;
+  private ticker = 0;
   start(): void {
     if (this.open) return;
     this.open = true;
@@ -171,10 +179,12 @@ export class TimelapseVideo {
     this.view.afterDraw = null;
     this.view.plainGround(false);
     this.done = true;
+    if (!this.begun || this.rec.state === "inactive") clearInterval(this.ticker);
     if (!this.begun || this.rec.state === "inactive") return null;
     if (this.rec.state === "paused") this.rec.resume();
     this.rec.stop();
     await this.stopped;
+    clearInterval(this.ticker);
     this.out.width = this.out.height = 0;
     if (!keep || !this.parts.length) return null;
     return new Blob(this.parts, { type: this.rec.mimeType.split(";")[0] || `video/${this.ext}` });

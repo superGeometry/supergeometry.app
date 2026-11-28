@@ -35,6 +35,7 @@ const SETTLE = 250; // after the view arrives, before the step appears
 const SKETCH = 1300; // a sketch on show
 const SOLID = 1800; // a step that changed a body
 const QUIET = 700; // a step that shows nothing new (a plane, a variable)
+const ORBIT = 8000; // once round the finished model, at the end
 
 export class Timelapse {
   state: PlayState = "idle";
@@ -135,7 +136,7 @@ export class Timelapse {
         const box = plane ? sketchBox(r.sketchEntities?.[f.id] ?? (f as { entities: SketchEntity[] }).entities, plane) : fresh!.box;
         if (!box.isEmpty()) {
           const model = meshBox(r.bodies).union(box);
-          await this.frame(box, model, plane ? new Vector3(...plane.normal) : null, fresh?.facing ?? null, t);
+          await this.frame(box, model, plane ? new Vector3(...plane.normal) : null, fresh?.spots ?? [], r.bodies, t);
         }
         this.h.show(r, fs, isSketch ? f.id : null);
         this.h.mark(at);
@@ -149,7 +150,31 @@ export class Timelapse {
       this.h.mark(null);
       this.h.view().cam.fit(this.h.view().bounds(), true, this.free());
       this.h.view().cam.pace(MOVE);
-      await this.sleep(MOVE + 900, t);
+      await this.sleep(MOVE + 400, t);
+      // And once round it, unhurried.
+      {
+        const view = this.h.view();
+        const cam = view.cam;
+        const start = cam.azimuth;
+        let gone = 0;
+        let last = performance.now();
+        while (gone < ORBIT) {
+          await this.sleep(16, t);
+          const now = performance.now();
+          // (Time spent paused, or with the page out of sight, is not time turned.)
+          gone = Math.min(ORBIT, gone + Math.min(50, now - last));
+          last = now;
+          const k = gone / ORBIT;
+          // Setting off and arriving gently.
+          cam.azimuth = start + (k - Math.sin(2 * Math.PI * k) / (2 * Math.PI) * 0.3) * 2 * Math.PI;
+          cam.update();
+          view.requestRender();
+        }
+        cam.azimuth = start;
+        cam.update();
+        view.requestRender();
+      }
+      await this.sleep(700, t);
       whole = true;
     } catch (e) {
       if (e !== STOP) throw e;
@@ -167,19 +192,39 @@ export class Timelapse {
    * The view goes to where the change is, if it isn't in sight already: over to it (and closer, or further), and
    * round to its side when it is seen edge-on or from behind.
    */
-  private async frame(box: Box3, model: Box3, normal: Vector3 | null, facing: Vector3 | null, t: number): Promise<void> {
+  private async frame(box: Box3, model: Box3, normal: Vector3 | null, spots: Spot[], bodies: BodyMesh[], t: number): Promise<void> {
     const view = this.h.view();
     const cam = view.cam;
     const size = Math.max(model.getSize(new Vector3()).length(), 1e-6);
     const own = box.getSize(new Vector3()).length();
     const dir = cam.viewDir();
-    // Round to it: a sketch seen edge-on or from behind; new faces that look another way than at the viewer (a
-    // round on the side of a part seen from its front was made, and hardly seen); a change on the model's far side.
+    // Round to it: a sketch seen edge-on or from behind; new faces that can't be seen from where the view is (a
+    // round on the side of a part seen from its front, a hole in a face turned away: made, and not seen at all);
+    // a change on the model's far side.
     let from: Vector3 | null = null;
+    // (A side picked because the new faces are seen from it is taken as it is, not stepped aside from.)
+    let exact = false;
     if (normal) {
       if (-dir.dot(normal.clone().normalize()) < 0.3) from = normal.clone().normalize();
-    } else if (facing) {
-      if (-dir.dot(facing) < 0.55) from = facing.clone();
+    } else if (spots.length) {
+      // How much of what is new is in sight from here, and from sixteen sides round and above the part: if another
+      // side shows clearly more of it, the view goes there - of the sides that show it about as well, the nearest.
+      const now = dir.clone().negate();
+      const seenNow = seenShare(spots, bodies, now, size);
+      const sides: { from: Vector3; seen: number }[] = [];
+      for (const el of [0.42, 0.82])
+        for (let k = 0; k < 8; k++) {
+          const az = (k * Math.PI) / 4 + 0.3;
+          const side = new Vector3(Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), Math.sin(el));
+          sides.push({ from: side, seen: seenShare(spots, bodies, side, size) });
+        }
+      const most = Math.max(...sides.map((x) => x.seen));
+      if (most > 0 && seenNow < most * 0.7) {
+        const good = sides.filter((x) => x.seen >= most * 0.85);
+        good.sort((a, b) => b.from.dot(now) - a.from.dot(now));
+        from = good[0].from;
+        exact = true;
+      }
     } else {
       const off = box.getCenter(new Vector3()).sub(model.getCenter(new Vector3()));
       if (off.length() > size * 0.12 && dir.dot(off.clone().normalize()) > 0.35) from = off.normalize();
@@ -191,7 +236,7 @@ export class Timelapse {
       side.normalize();
       const over = new Vector3().crossVectors(side, from).normalize();
       if (over.z < 0 && Math.abs(from.z) < 0.99) over.negate();
-      const w = from.clone().addScaledVector(side, 0.5).addScaledVector(over, 0.45).normalize();
+      const w = exact ? from.clone() : from.clone().addScaledVector(side, 0.5).addScaledVector(over, 0.45).normalize();
       // Never from straight above or from far below: the part's sides give it its shape.
       const flat = Math.hypot(w.x, w.y);
       // (From below only for a sketch drawn under the part: a body seen from underneath reads as upside down.)
@@ -250,13 +295,15 @@ function corners(bodies: BodyMesh[]): Set<string> {
  * block is the hole, not the block). Nothing new in a body that changed (something was only taken away), or all of
  * it new: the body.
  */
-function freshParts(changed: BodyMesh[], was: Set<string>): { box: Box3; facing: Vector3 | null } {
+/** A place on a new face, and the way the face looks there. */
+type Spot = { p: Vector3; n: Vector3 };
+
+function freshParts(changed: BodyMesh[], was: Set<string>): { box: Box3; spots: Spot[] } {
   const box = new Box3();
   const p = new Vector3();
-  // Which way the new faces look, all told (each triangle with new corners, by its size): a round looks out of
-  // its corner, a hole out of its mouth. A whole new body looks every way: none.
-  const sum = new Vector3();
-  let area = 0;
+  // Places on the new faces (the middle of each triangle with new corners), to ask what can be seen of them. A
+  // whole new body has none: it is seen from anywhere.
+  const all: Spot[] = [];
   const [a, b2, c] = [new Vector3(), new Vector3(), new Vector3()];
   for (const b of changed) {
     const isNew = new Uint8Array(b.positions.length / 3);
@@ -271,14 +318,58 @@ function freshParts(changed: BodyMesh[], was: Set<string>): { box: Box3; facing:
       const [i0, i1, i2] = [b.indices[i], b.indices[i + 1], b.indices[i + 2]];
       if (isNew[i0] + isNew[i1] + isNew[i2] < 2) continue;
       a.fromArray(b.positions, i0 * 3);
-      b2.fromArray(b.positions, i1 * 3).sub(a);
-      c.fromArray(b.positions, i2 * 3).sub(a);
-      const n = b2.cross(c);
-      area += n.length();
-      sum.add(n);
+      b2.fromArray(b.positions, i1 * 3);
+      c.fromArray(b.positions, i2 * 3);
+      const mid = a.clone().add(b2).add(c).multiplyScalar(1 / 3);
+      const n = b2.clone().sub(a).cross(c.clone().sub(a));
+      if (n.length() > 1e-12) all.push({ p: mid, n: n.normalize() });
     }
   }
-  return { box, facing: area > 0 && sum.length() > area * 0.2 ? sum.normalize() : null };
+  // Twenty of them, spread over the lot.
+  const step = Math.max(1, all.length / 20);
+  const spots: Spot[] = [];
+  for (let i = 0; i < all.length && spots.length < 20; i += step) spots.push(all[Math.floor(i)]);
+  return { box, spots };
+}
+
+/**
+ * How much of the new faces is in sight looking from `from` (a direction, the part far off): the share of the
+ * spots whose face looks that way and that nothing of the model stands in front of.
+ */
+function seenShare(spots: Spot[], bodies: BodyMesh[], from: Vector3, size: number): number {
+  let seen = 0;
+  for (const s of spots) {
+    if (s.n.dot(from) < 0.15) continue;
+    const o = s.p.clone().addScaledVector(s.n, size * 1e-3);
+    if (!hidden(bodies, o.x, o.y, o.z, from.x, from.y, from.z, size * 1e-4)) seen++;
+  }
+  return seen / spots.length;
+}
+
+/** Does a ray from (ox, oy, oz) along (dx, dy, dz) run into any of the bodies? */
+function hidden(bodies: BodyMesh[], ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, least: number): boolean {
+  for (const b of bodies) {
+    const P = b.positions;
+    const I = b.indices;
+    for (let i = 0; i + 2 < I.length; i += 3) {
+      const [i0, i1, i2] = [I[i] * 3, I[i + 1] * 3, I[i + 2] * 3];
+      const [ax, ay, az] = [P[i0], P[i0 + 1], P[i0 + 2]];
+      const [e1x, e1y, e1z] = [P[i1] - ax, P[i1 + 1] - ay, P[i1 + 2] - az];
+      const [e2x, e2y, e2z] = [P[i2] - ax, P[i2 + 1] - ay, P[i2 + 2] - az];
+      const [px, py, pz] = [dy * e2z - dz * e2y, dz * e2x - dx * e2z, dx * e2y - dy * e2x];
+      const det = e1x * px + e1y * py + e1z * pz;
+      if (det > -1e-12 && det < 1e-12) continue;
+      const inv = 1 / det;
+      const [tx, ty, tz] = [ox - ax, oy - ay, oz - az];
+      const u = (tx * px + ty * py + tz * pz) * inv;
+      if (u < 0 || u > 1) continue;
+      const [qx, qy, qz] = [ty * e1z - tz * e1y, tz * e1x - tx * e1z, tx * e1y - ty * e1x];
+      const v = (dx * qx + dy * qy + dz * qz) * inv;
+      if (v < 0 || u + v > 1) continue;
+      if ((e2x * qx + e2y * qy + e2z * qz) * inv > least) return true;
+    }
+  }
+  return false;
 }
 
 function meshBox(bodies: BodyMesh[]): Box3 {
