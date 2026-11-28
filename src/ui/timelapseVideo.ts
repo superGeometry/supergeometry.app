@@ -32,8 +32,6 @@ export class TimelapseVideo {
   private text: { count: string; name: string } | null = null;
   private waits = new Set<string>();
   private stopped: Promise<void>;
-  /** The app's mark, drawn with its name in the bottom right corner (there once it has loaded). */
-  private mark: HTMLImageElement | null = null;
 
   constructor(private view: Viewport) {
     const [mime, ext] = kind()!;
@@ -46,9 +44,6 @@ export class TimelapseVideo {
     this.rec = new MediaRecorder(this.out.captureStream(30), { mimeType: mime, videoBitsPerSecond: 6_000_000 });
     this.rec.ondataavailable = (e) => e.data.size && this.parts.push(e.data);
     this.stopped = new Promise((done) => (this.rec.onstop = () => done()));
-    const mark = new Image();
-    mark.onload = () => ((this.mark = mark), this.view.requestRender());
-    mark.src = "icon.svg";
     view.plainGround(true);
     view.afterDraw = () => this.draw();
     view.requestRender();
@@ -109,7 +104,7 @@ export class TimelapseVideo {
     }
     const size = Math.round(Math.min(W, H) * 0.036);
     const sans = `system-ui, -apple-system, "Segoe UI", sans-serif`;
-    // The app's mark and name, bottom right.
+    // The app's name, bottom right.
     const edge = size * 1.1;
     const ls = Math.round(size * 0.95);
     g.textBaseline = "middle";
@@ -117,19 +112,19 @@ export class TimelapseVideo {
     const n1 = g.measureText("superGeometry").width;
     g.font = `600 ${ls}px ${sans}`;
     const n2 = g.measureText(".app").width;
+    // (The height of the row the name and the step's caption share.)
     const icon = ls * 1.35;
-    const lw = icon + ls * 0.35 + n1 + n2;
+    const lw = n1 + n2;
     const [lx, ly] = [W - edge - lw, H - edge - icon / 2];
     g.save();
     g.shadowColor = "rgba(0, 0, 0, 0.55)";
     g.shadowBlur = ls * 0.4;
-    if (this.mark) g.drawImage(this.mark, lx, ly - icon / 2, icon, icon);
     g.font = `750 ${ls}px ${sans}`;
     g.fillStyle = "#f1f3f6";
-    g.fillText("superGeometry", lx + icon + ls * 0.35, ly);
+    g.fillText("superGeometry", lx, ly);
     g.font = `600 ${ls}px ${sans}`;
     g.fillStyle = "#3d8bff";
-    g.fillText(".app", lx + icon + ls * 0.35 + n1, ly);
+    g.fillText(".app", lx + n1, ly);
     g.restore();
     if (!this.text) return;
     // The step's number and name, as on the screen: a dark pill at the bottom - in the middle where there is room
