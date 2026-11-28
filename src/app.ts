@@ -819,15 +819,8 @@ export class App implements AppContext {
   readonly timelapse: Timelapse = new Timelapse({
     view: () => this.view,
     steps: () => this.store.doc.features,
-    build: async (fs) => {
-      // (A recording leaves out the time a step takes to build.)
-      this.recording?.hold("build", true);
-      try {
-        return await this.kernel.regenerate(fs);
-      } finally {
-        this.recording?.hold("build", false);
-      }
-    },
+    build: (fs) => this.kernel.regenerate(fs),
+    waiting: (on) => this.recording?.hold("build", on),
     show: (r, fs, sketch) => {
       this.playSketch = sketch;
       this.apply(r, fs);

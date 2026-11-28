@@ -15,6 +15,8 @@ export interface TimelapseHost {
   steps(): Feature[];
   /** The model of these steps (null: the engine was asked for something else meanwhile). */
   build(features: Feature[]): Promise<RegenResult | null>;
+  /** A stage is being waited for (true), or has come (false): a recording leaves that wait out. */
+  waiting(on: boolean): void;
   /** Show that model; `sketch`: the sketch to show with it, hidden or not. */
   show(r: RegenResult, features: Feature[], sketch: string | null): void;
   /** Light up these bodies and faces (none: nothing lit). */
@@ -110,13 +112,24 @@ export class Timelapse {
       let had = new Map<string, number>();
       // Every corner of the model as it was a step ago: what a step adds is what was not there.
       let was = new Set<string>();
+      // Each stage is asked for while the one before it is on show: it is there when its turn comes. (The engine
+      // has every step built already - a stage costs it the drawing of the bodies as they were then, up to a
+      // second on a hundred-step project, and that second passes while the step before is being looked at.)
+      let ahead: Promise<RegenResult | null> | null = this.h.build(upTo(1));
       for (let k = 0; k < on.length; k++) {
         const f = on[k];
         const fs = upTo(k + 1);
         const at = { id: f.id, index: k, of: on.length, name: f.name };
         this.h.mark(at);
-        const r = await this.h.build(fs);
+        this.h.waiting(true);
+        let r: RegenResult | null;
+        try {
+          r = await (ahead ?? this.h.build(fs));
+        } finally {
+          this.h.waiting(false);
+        }
         this.check(t);
+        ahead = k + 1 < on.length ? this.h.build(upTo(k + 2)) : null;
         if (!r) continue;
         const isSketch = f.type === "sketch";
         const changed = r.bodies.filter((b) => had.get(b.id) !== b.key);
