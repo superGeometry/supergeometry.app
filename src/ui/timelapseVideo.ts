@@ -51,9 +51,14 @@ export class TimelapseVideo {
     // turning view came out uneven. The clock sends one only when nothing has been drawn for a while.)
     this.push = () => {
       this.pushed = performance.now();
-      if (this.rec.state === "recording") push();
+      if (this.rec.state !== "recording") return;
+      // (A frame asked for is only sent if the canvas has changed since the last one: one dot of it is drawn over
+      // itself, which changes nothing to see. Without it a step held still was one frame seconds long, and a
+      // player on a computer stood still on it - or for much longer, losing its place among such frames.)
+      this.g.drawImage(this.out, 0, 0, 1, 1, 0, 0, 1, 1);
+      push();
     };
-    this.ticker = window.setInterval(() => performance.now() - this.pushed > 45 && this.push(), 1000 / 30);
+    this.ticker = window.setInterval(() => performance.now() - this.pushed > 30 && this.push(), 1000 / 30);
     this.rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
     this.rec.ondataavailable = (e) => e.data.size && this.parts.push(e.data);
     this.stopped = new Promise((done) => (this.rec.onstop = () => done()));
@@ -119,7 +124,6 @@ export class TimelapseVideo {
         requestAnimationFrame(() => {
           if (this.rec.state !== "inactive" || this.done) return;
           this.rec.start(1000);
-          if (this.waits.size) this.rec.pause();
           this.view.requestRender();
         }),
       );
@@ -179,13 +183,15 @@ export class TimelapseVideo {
     this.view.requestRender();
   }
 
-  /** Nothing to see for a while (the engine is building a step, the playing is paused): that while is left out. */
+  /**
+   * Nothing new to see for a while (the engine is building a step, the playing is paused). The recording runs on,
+   * on the picture there is: stopped and started again for such whiles, the file's clock ran on without frames and
+   * came out with single frames many seconds long. (Each stage is built ahead of its turn, so these whiles are
+   * short.)
+   */
   hold(why: string, on: boolean): void {
     if (on) this.waits.add(why);
     else this.waits.delete(why);
-    if (this.rec.state === "inactive") return;
-    if (this.waits.size && this.rec.state === "recording") this.rec.pause();
-    else if (!this.waits.size && this.rec.state === "paused") this.rec.resume();
   }
 
   /** The end: the video (null: thrown away, or nothing was recorded). */
@@ -195,7 +201,6 @@ export class TimelapseVideo {
     this.done = true;
     if (!this.begun || this.rec.state === "inactive") clearInterval(this.ticker);
     if (!this.begun || this.rec.state === "inactive") return null;
-    if (this.rec.state === "paused") this.rec.resume();
     this.rec.stop();
     await this.stopped;
     clearInterval(this.ticker);
