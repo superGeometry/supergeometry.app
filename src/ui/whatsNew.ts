@@ -19,6 +19,9 @@ export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
     fixed: [
+      "Sketch: a line joined to another line at one end, given a new length, grows or shrinks at its free end. The joined end stays where it is, and the other line is no longer dragged along.",
+      "Wireframe is easy to read: the model's lines are light and drawn whole. They were dark on the dark background, and only faint dashes over them showed.",
+      "A round or a chamfer that ends on a flat face no longer leaves curved lines across that face. The face was left in several flat pieces; it is one face again.",
       "With a mouse, a sketch started on a body's face keeps the plain arrow. The pointer could stay a hand, left over from the picked body, and it hid where the next point would go.",
     ],
   },

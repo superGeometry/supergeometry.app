@@ -1517,7 +1517,7 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
           if (edges.every((e) => smoothEdge(body, e))) throw new Error(`${edges.length > 1 ? "Those edges are" : "That edge is"} smooth already: the faces either side run into each other with no corner to ${f.type === "fillet" ? "round" : "cut"}. Pick an edge with a corner.`);
           throw new Error(`That ${f.type} doesn't fit here - the ${what} is too big for the faces around ${edges.length > 1 ? "those edges" : "that edge"}. Try a smaller ${what}.`);
         }
-        bodies.set(bodyId, result);
+        bodies.set(bodyId, flatSplinesPlain(result));
       }
       return;
     }
@@ -6787,6 +6787,49 @@ function loftAlong(wires: Wire[], guide: Wire | null, closed: boolean): Shape3D 
     throw new Error(guide ? "The profiles can't be carried along that guide - each one needs to sit across it" : "These profiles can't be joined into a closed loop");
   } finally {
     builder.delete();
+  }
+}
+
+/**
+ * Where a round or a chamfer ends on a flat face, the kernel hands back the piece of that face beside its end as
+ * a spline surface: flat, but not a plane to it, so it is never merged with the rest of the face - a cube's side
+ * came out in five pieces, with curved lines across it where nothing bends. Those pieces are made planes again
+ * and the body put together from its faces, so the face is one. Only if the result is sound and the same volume.
+ */
+function flatSplinesPlain(body: Shape3D): Shape3D {
+  try {
+    const faces = body.faces;
+    if (faces.every((f) => f.geomType === "PLANE" || f.geomType === "CYLINDRE" || f.geomType === "CONE" || f.geomType === "SPHERE" || f.geomType === "TORUS")) return body;
+    const size = sizeOf(body);
+    const P = (v: { toTuple(): number[] }) => v.toTuple() as Vec3;
+    let found = 0;
+    const list = faces.map((f) => {
+      if (f.geomType !== "BSPLINE_SURFACE" && f.geomType !== "BEZIER_SURFACE") return f.clone();
+      // Flat: every point of it in one plane, the same way up everywhere.
+      // (Read the way a face is measured, ocFree.surfaceAt: asking a twisted gear flank for a point's normal
+      // by projection brought the kernel down.)
+      const mid = surfaceAt(f, 0.5, 0.5);
+      if (len(mid.n) < 1e-12) return f.clone();
+      const n = norm(mid.n);
+      for (const u of [0.02, 0.5, 0.98])
+        for (const v of [0.02, 0.5, 0.98]) {
+          const at = surfaceAt(f, u, v);
+          if (len(at.n) < 1e-12 || Math.abs(dot(sub(at.p, mid.p), n)) > size * 1e-8 || len(cross(norm(at.n), n)) > 1e-7) return f.clone();
+        }
+      // Its edges in that plane too.
+      if (f.edges.some((e) => [0, 0.5, 1].some((k) => Math.abs(dot(sub(P(e.pointAt(k)), mid.p), n)) > size * 1e-7))) return f.clone();
+      const holes = f.clone().innerWires();
+      const plain = makeFace(f.clone().outerWire(), holes.length ? holes : undefined);
+      found++;
+      return plain;
+    });
+    if (!found) return body;
+    const made = unify(makeSolid(list) as unknown as Shape3D, size);
+    if (made.faces.length >= faces.length || !shapeValid(made) || openEdges(made).length > 0) return body;
+    const [v0, v1] = [measureVolume(body), measureVolume(made)];
+    return Math.abs(v1 - v0) <= 1e-7 * Math.abs(v0) ? made : body;
+  } catch {
+    return body;
   }
 }
 
