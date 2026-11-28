@@ -19,6 +19,7 @@ export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
     added: [
+      "Sketch, Mirror: Draw mirror line, beside Mirror line on the bottom line. Tap where the line starts and where it ends (each tap snaps) and the picked curves mirror over it, with a preview while you aim. No line has to be drawn in the sketch first.",
       "Sketch: a Move, Rotate, Scale, Mirror or Pattern done in a sketch can be opened again. In History, open the sketch's own steps (the arrow beside it) and tap one: its tool comes back with the same curves picked and its values as they were, to change and apply. Undo puts it back as it was. A pattern's line stands for the element it was made from: the lines that only drew that element leave the list when it is patterned. Steps made before this update, and a step that later work rests on, open the sketch with their curves picked, as before.",
       "Sketch, Pattern Linear: with a line or shape already picked, four arrows are there at once (right, up, left, down) with the copies and the value box. Tap an arrow and the copies run that way; tap another to change it; drag one to set the spacing too.",
       "Sketch, Pattern Circular and Rotate About: while you look for the centre, an arrow runs from the nearest point of what is picked to the pointer, with the distance beside it.",

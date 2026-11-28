@@ -353,7 +353,9 @@ export class SketchTool implements Tool {
   private edit: {
     pivot?: Vec2;
     mirrorLine?: [Vec2, Vec2];
-    picking?: "pivot" | "mirror" | "refA" | "refB";
+    picking?: "pivot" | "mirror" | "mirrorDraw" | "refA" | "refB";
+    /** Mirror, its line being drawn: the first of its two points. */
+    mirrorFrom?: Vec2;
     /** Scale by reference: the point that stays put and the second point (their distance becomes what's typed). */
     refA?: Vec2;
     refB?: Vec2;
@@ -1390,6 +1392,8 @@ export class SketchTool implements Tool {
     this.finishFillet();
     this.clearPreviewJoin();
     this.edit.mirrorLine = undefined;
+    this.edit.mirrorFrom = undefined;
+    if (this.edit.picking === "mirrorDraw") this.edit.picking = undefined;
     this.edit.refA = this.edit.refB = undefined;
     if (this.edit.picking === "refA" || this.edit.picking === "refB") this.edit.picking = undefined;
     this.refreshRefDim();
@@ -1756,7 +1760,24 @@ export class SketchTool implements Tool {
         break;
       case "mirror":
         items.push(
-          { type: "slot", label: "Mirror line", value: this.edit.mirrorLine ? "Line" : "Tap a line or axis", active: this.edit.picking === "mirror", filled: !!this.edit.mirrorLine, onClick: () => ((this.edit.picking = "mirror"), this.updatePanel()) },
+          { type: "slot", label: "Mirror line", value: this.edit.mirrorLine ? "Line" : "Tap a line or axis", active: this.edit.picking === "mirror", filled: !!this.edit.mirrorLine, onClick: () => ((this.edit.picking = "mirror"), (this.edit.mirrorFrom = undefined), this.updatePanel()) },
+          // No line to mirror over yet: drawn here, with two taps (each snaps as a drawn point does). It is the
+          // mirror's own line, not a curve of the sketch.
+          {
+            type: "slot",
+            label: "Draw mirror line",
+            value: this.edit.picking === "mirrorDraw" ? (this.edit.mirrorFrom ? "Tap its end" : "Tap its start") : "Two taps",
+            active: this.edit.picking === "mirrorDraw",
+            filled: false,
+            onClick: () => {
+              this.edit.picking = "mirrorDraw";
+              this.edit.mirrorFrom = undefined;
+              this.edit.mirrorLine = undefined;
+              this.updatePanel();
+              this.refreshPreview();
+              this.setHint("Tap where the mirror line starts, then where it ends. Each tap snaps to the grid and to points.");
+            },
+          },
           { type: "toggle", label: "Copy", value: this.edit.mirrorCopy, onChange: (v) => ((this.edit.mirrorCopy = v), this.updatePanel()) },
           apply(`Apply (${selCount})`, () => this.applyTransform()),
         );
@@ -4355,7 +4376,17 @@ export class SketchTool implements Tool {
     // Mirror: the axis (picked, or the line under the pointer) with a mirror mark on it.
     if (this.kind === "mirror" && this.selected.size) {
       let axis = this.edit.mirrorLine ?? null;
-      if (!axis && p) {
+      // Its line being drawn: from the first tap to the pointer, with what that would make.
+      const from = this.edit.picking === "mirrorDraw" ? this.edit.mirrorFrom : undefined;
+      if (!axis && from) {
+        this.drawCentreMark(from);
+        const to = this.cursor?.uv;
+        if (to && Math.hypot(to[0] - from[0], to[1] - from[1]) > 1e-9) {
+          axis = [from, to];
+          this.drawGhosts(this.entities.filter((y) => this.selected.has(y.id)).map((x: SketchEntity) => transformEntity(x, mirrorXf(from, to), false)));
+        }
+      }
+      if (!axis && p && this.edit.picking !== "mirrorDraw") {
         const c = this.curveAt(p);
         const e = c && [...this.entities, ...this.boundary].find((x) => x.id === c.id);
         if (e?.kind === "line") {
@@ -5386,7 +5417,22 @@ export class SketchTool implements Tool {
       this.refreshPreview();
       return;
     }
-    if (this.edit.picking === "pivot") {
+    if (this.edit.picking === "mirrorDraw") {
+      const s = this.snap(p);
+      if (!s) return;
+      const from = this.edit.mirrorFrom;
+      if (!from) {
+        this.edit.mirrorFrom = s.uv;
+        this.setHint("Now tap where the mirror line ends.");
+        this.updatePanel();
+        this.refreshPreview(p);
+        return;
+      }
+      if (Math.hypot(s.uv[0] - from[0], s.uv[1] - from[1]) < 1e-9) return this.app.ui.toast("Tap a point away from the first one");
+      this.edit.mirrorLine = [from, s.uv];
+      this.edit.mirrorFrom = undefined;
+      this.setHint("Apply mirrors what is picked over that line.");
+    } else if (this.edit.picking === "pivot") {
       const s = this.snap(p);
       if (s) this.edit.pivot = s.uv;
     } else if (this.edit.picking === "mirror") {
