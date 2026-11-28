@@ -246,12 +246,21 @@ export class App implements AppContext {
       vrBtn.addEventListener("click", () => (document.getElementById("more-menu")!.hidden = true));
       document.getElementById("more-menu")!.prepend(vrBtn);
     }
-    const checkVR = () => void vrSupported(handheld).then((ok) => (vrBtn.hidden = !isHeadset && !(handheld && ok)));
+    // An iPhone or iPad: no AR in the page there, but the system's own AR viewer opens a USDZ file (quickLookAR).
+    const appleAR = handheld && (() => {
+      try {
+        return document.createElement("a").relList.supports("ar");
+      } catch {
+        return false;
+      }
+    })();
+    const checkVR = () => void vrSupported(handheld).then((ok) => (vrBtn.hidden = !isHeadset && !(handheld && (ok || appleAR))));
     if (isTouchDevice) {
       checkVR();
       (navigator as Navigator & { xr?: EventTarget }).xr?.addEventListener("devicechange", checkVR);
     } else vrBtn.remove();
     vrBtn.addEventListener("click", async () => {
+      if (appleAR && !(await vrSupported(handheld))) return void this.quickLookAR();
       if (!(await vrSupported(handheld))) return this.ui.toast(handheld ? "This browser can't show AR - try Chrome" : "This browser can't open VR here - open superGeometry.app in the headset's own browser");
       vr.enter().catch((e: unknown) => this.ui.toast(`${handheld ? "AR" : "VR"} didn't start: ${e instanceof Error ? e.message : e}`));
     });
@@ -2108,6 +2117,7 @@ export class App implements AppContext {
     item("m-step", () => void this.export("step"));
     item("m-3mf", () => void this.export3mf());
     item("m-glb", () => void this.exportGLB());
+    item("m-usdz", () => void this.exportUSDZ());
     item("m-each", () => {
       // Which format each body is saved in: a menu where the File menu was.
       const r = document.getElementById("file-btn")!.getBoundingClientRect();
@@ -2127,6 +2137,7 @@ export class App implements AppContext {
         ["m-step", "step", () => void this.export("step", "share")],
         ["m-3mf", "3mf", () => void this.export3mf("share")],
         ["m-glb", "glb", () => void this.exportGLB("share")],
+        ["m-usdz", "usdz", () => void this.exportUSDZ("share")],
         ["m-dxf", "dxf", () => this.exportDXF("share")],
         ["m-svg", "svg", () => this.exportDXF("share", "svg")],
       ];
@@ -2572,6 +2583,55 @@ export class App implements AppContext {
     });
   }
 
+  /** The bodies as a USDZ file (io/usdz.ts, fetched when first asked for); null: nothing to show. */
+  private async usdzFile(): Promise<Blob | null> {
+    const ids = chosenBodies(this);
+    const bodies = (this.result?.bodies ?? []).filter((b) => (ids.length ? ids.includes(b.id) : !this.view.isHidden(b.id)));
+    if (!bodies.length) return null;
+    const { usdz } = await import("./io/usdz");
+    const out = await usdz(await this.fineMeshes(bodies.map((b) => b.id)));
+    return new Blob([out as BlobPart], { type: "model/vnd.usdz+zip" });
+  }
+
+  /** USDZ: for AR on an iPhone or iPad (it opens there at a tap), and for 3D viewers. */
+  private async exportUSDZ(how: Delivery = "download"): Promise<void> {
+    try {
+      this.ui.setStatus("Exporting USDZ…");
+      const blob = await this.usdzFile();
+      if (!blob) return this.ui.toast("Nothing to export");
+      await this.deliver(blob, `${this.store.doc.name}.usdz`, how);
+    } catch (err) {
+      this.ui.toast(`Export failed: ${(err as Error).message}`, "error");
+    } finally {
+      this.ui.setStatus(null);
+    }
+  }
+
+  /**
+   * AR on an iPhone or iPad: Safari there has no AR of its own in a page, but opens a USDZ file in the room at a
+   * tap on a link marked for it (AR Quick Look). The model is made such a file and that link is tapped for them.
+   */
+  private async quickLookAR(): Promise<void> {
+    try {
+      this.ui.setStatus("Getting the model ready for AR…");
+      const blob = await this.usdzFile();
+      if (!blob) return this.ui.toast("Nothing to show: the project has no bodies on show");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.rel = "ar";
+      a.href = url;
+      a.download = `${this.store.doc.name}.usdz`;
+      // (The viewer opens only for a link that holds a picture.)
+      a.append(document.createElement("img"));
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 120_000);
+    } catch (err) {
+      this.ui.toast(`AR didn't start: ${(err as Error).message}`, "error");
+    } finally {
+      this.ui.setStatus(null);
+    }
+  }
+
   /** GLB (one-file glTF): for the web, AR and renderers - the bodies' meshes and colours. */
   private async exportGLB(how: Delivery = "download"): Promise<void> {
     const ids = chosenBodies(this);
@@ -2681,6 +2741,7 @@ const MIME: Record<string, string> = {
   step: "model/step",
   "3mf": "model/3mf",
   glb: "model/gltf-binary",
+  usdz: "model/vnd.usdz+zip",
   dxf: "image/vnd.dxf",
   svg: "image/svg+xml",
   super: "application/json",

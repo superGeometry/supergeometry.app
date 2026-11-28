@@ -19,6 +19,7 @@ export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
     added: [
+      "AR on an iPhone or iPad: More > Enter AR now works there too. The model opens in the device's own AR viewer, standing in your room at its true size. File > Export USDZ saves the same file, for AR and 3D viewers.",
       "Import file reads four more kinds. FreeCAD documents (.FCStd): the bodies on show come in as the exact solids FreeCAD last built, each by its name, without their history. BRep files (.brep, .brp): one such shape. glTF (.glb) and IFC building models: as a mesh, in millimetres. Nothing new to tap - pick the file in File > Import file as before.",
       "Sketch: pick a line that has no length set and its length shows in a box right beside it. Type the length there and press Enter; no trip down to the Length field. It becomes the line's dimension, shown on the sketch from then on.",
       "Sketch, Arc by 3 points: with an end placed on the end of a line, the bend that runs smoothly on from that line shows as a dashed yellow arc while the third point is being placed, and the pointer snaps to it (Tangent). The arc placed there stays tangent to the line; where one bend suits both lines, to both.",
