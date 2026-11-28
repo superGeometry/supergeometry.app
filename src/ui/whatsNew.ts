@@ -19,6 +19,7 @@ export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
     added: [
+      "Sketch: pick a line that has no length set and its length shows in a box right beside it. Type the length there and press Enter; no trip down to the Length field. It becomes the line's dimension, shown on the sketch from then on.",
       "Sketch, Arc by 3 points: with an end placed on the end of a line, the bend that runs smoothly on from that line shows as a dashed yellow arc while the third point is being placed, and the pointer snaps to it (Tangent). The arc placed there stays tangent to the line; where one bend suits both lines, to both.",
       "A project inserted into another (More > Insert > Project) is kept together: its steps are one group in History and its bodies, sketches and planes one folder in Items, both named after the file. Its own folders are inside that folder, and its names, colours, hidden sketches and variables come along. One Undo takes it all out again.",
       "History has a Play button (the triangle beside its title): the model is built again before your eyes, one step at a time. Each step's name is shown, and the view goes round to where the change can be seen. It ends with one slow turn round the finished model. While it plays the button is Pause; paused, it is Reset, which brings the model back as it is. Nothing in the project is changed by it.",

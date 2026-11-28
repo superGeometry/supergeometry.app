@@ -107,7 +107,7 @@ const CENTRE_HINT = {
 };
 
 const HINTS: Record<Kind, string> = {
-  select: "Tap a line to set its size. Tap a second to tie them together. Double-tap picks a whole shape.",
+  select: "Tap a line to set its size: type it in the box beside the line. Tap a second to tie them together. Double-tap picks a whole shape.",
   line: "Tap to place points. Closing a shape ends the line; a double tap ends it sooner.",
   arc: isCoarse ? "Drag from one end of the arc to the other, then drag to bend it." : "Click where the arc starts and ends, then a third point to bend it.",
   spline: "Tap points for the curve to pass through. Tap the first point to close it, or double-tap to stop.",
@@ -622,6 +622,7 @@ export class SketchTool implements Tool {
 
   exit(): void {
     this.clearQuick();
+    this.closePickBox();
     this.dropOffsetGrip();
     this.regionArrow?.handle.dispose();
     this.regionArrow = null;
@@ -1461,7 +1462,68 @@ export class SketchTool implements Tool {
 
   // ---------------------------------------------------------------- panel
 
+  /**
+   * A line picked that has no length set: its length in a box beside it, to type right there (the Length field is
+   * down on the tool's line, a long way from the line on a big screen). Typed and entered, it becomes the line's
+   * length - a driving dimension, shown on the sketch from then on (and typed into there). A line that has its
+   * length already shows that dimension, which takes typing the same way.
+   */
+  private pickBox: { id: string; widget: DimWidget; typed: { v: number; text: string } | null } | null = null;
+  private closePickBox(): void {
+    this.pickBox?.widget.dispose();
+    this.pickBox = null;
+  }
+  private refreshPickBox(): void {
+    const id = this.kind === "select" && this.phase === "draw" && this.plane && this.selected.size === 1 && !this.selPts.length ? [...this.selected][0] : null;
+    const l = id && !id.startsWith(LINKED) ? this.entities.find((e) => e.id === id) : null;
+    if (!id || l?.kind !== "line" || dimOf(this.constraints, id, "length")) return this.closePickBox();
+    const len = Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1]);
+    if (len < 1e-9) return this.closePickBox();
+    if (this.pickBox?.id !== id) {
+      this.closePickBox();
+      const box: NonNullable<SketchTool["pickBox"]> = {
+        id,
+        typed: null,
+        widget: new DimWidget(this.app.view, {
+          value: len,
+          boxAt: "side",
+          noLine: true,
+          onInput: (v, text) => {
+            if (v > 0) box.typed = { v, text };
+          },
+          onCommit: () => this.applyPickBox(),
+        }),
+      };
+      this.pickBox = box;
+    }
+    const w = (q: Vec2) => sketchToWorld(this.plane!, q, 0.02).toArray() as Vec3;
+    // Beside the line a quarter of the way along it: its middle is where the arrows to move it are.
+    this.pickBox.widget.set(w(l.a), w([(l.a[0] + l.b[0]) / 2, (l.a[1] + l.b[1]) / 2]));
+    if (!this.pickBox.typed) this.pickBox.widget.setValue(len);
+  }
+  private applyPickBox(): void {
+    const b = this.pickBox;
+    if (!b?.typed) return;
+    const { v, text } = b.typed;
+    b.typed = null;
+    const base = this.constraints;
+    const next = setDim(base, b.id, "length", v, isExpression(text) ? text.trim() : null);
+    const added = next.filter((c) => !base.includes(c));
+    // (As the Length field does it: the end joined to another line stays, and what the line has nothing to do with.)
+    const from = this.lengthFromHeldEnd(b.id, v);
+    const res = sizeStrict(from, next.filter((c) => base.includes(c)), added, [b.id]);
+    if (!res.ok) {
+      this.refreshPickBox();
+      return this.refused();
+    }
+    this.opLabel = "Line length";
+    this.commit(res.result.entities, res.constraints);
+    // (It has its length now: the box goes, the dimension on the sketch is there in its place.)
+    this.refreshPickBox();
+  }
+
   private updatePanel(): void {
+    this.refreshPickBox();
     const ui = this.app.ui;
     this.sizeDim?.dispose();
     this.sizeDim = null;
