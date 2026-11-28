@@ -1123,6 +1123,25 @@ export function applicable(type: ConstraintType, pts: PointRef[], curves: Sketch
  * together. A new constraint that contradicts existing ones is refused
  * (nothing already there is taken away).
  */
+/**
+ * A line given a new length, one end of it tied to something (the end of another line, a lock) and the other
+ * free: the tied end stays where it is and the free one takes all of the change. Left to the solver, both ends
+ * moved half each, and the line on the tied end was dragged along. The entities to solve from, the free end
+ * already where it goes. (Both ends tied, or neither: as they are - the solver shares it out.)
+ */
+export function lengthFromHeldEnd(entities: SketchEntity[], constraints: SketchConstraint[], id: string, v: number): SketchEntity[] {
+  const e = entities.find((x) => x.id === id);
+  if (!e || e.kind !== "line" || !(v > 0)) return entities;
+  const held = (p: "a" | "b") => constraints.some((c) => c.type !== "dim" && !!c.pts?.some((q) => q.e === id && q.p === p));
+  const [ha, hb] = [held("a"), held("b")];
+  if (ha === hb) return entities;
+  const [fix, free] = ha ? [e.a, e.b] : [e.b, e.a];
+  const l = Math.hypot(free[0] - fix[0], free[1] - fix[1]);
+  if (l < 1e-12) return entities;
+  const moved: [number, number] = [fix[0] + ((free[0] - fix[0]) / l) * v, fix[1] + ((free[1] - fix[1]) / l) * v];
+  return entities.map((x) => (x.id === id ? ({ ...x, ...(ha ? { b: moved } : { a: moved }) } as SketchEntity) : x));
+}
+
 export function addStrict(
   entities: SketchEntity[],
   existing: SketchConstraint[],

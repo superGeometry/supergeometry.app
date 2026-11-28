@@ -5,7 +5,7 @@ import { simplifyStroke } from "../sketch/freehand";
 import { Box3, BufferGeometry, DoubleSide, Line, LineBasicMaterial, LineDashedMaterial, Mesh, MeshBasicMaterial, Points, PointsMaterial, ShapeUtils, Vector2, Vector3 } from "three";
 import type { EdgeLink, ExtrudeSource, FaceRef, OutlineOffset, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, SketchFill, SketchRef, SketchRepeat, Vec2, Vec3 } from "../doc/types";
 import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, patternSpacing, planeY, roundSig, scale as scale3, startSize, sub as sub3, toPlane } from "../geom";
-import { addForUser, addStrict, constraintError, constraintName, copiedConstraints, LINKED, pointOf, pointsOf, refsOf, setValueStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
+import { addForUser, addStrict, constraintError, constraintName, copiedConstraints, LINKED, pointOf, pointsOf, refsOf, lengthFromHeldEnd, setValueStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { caretToEnd, selectAll, textField, type TextField } from "../ui/textField";
 import { nearestSnap } from "../sketch/snapPick";
@@ -1134,11 +1134,17 @@ export class SketchTool implements Tool {
 
   private pendingExpr: string | null = null;
 
+  private lengthFromHeldEnd(id: string, v: number): SketchEntity[] {
+    return lengthFromHeldEnd(this.entities, this.constraints, id, v);
+  }
+
   private setConstraintValue(id: string, v: number): void {
     const expr = this.pendingExpr;
     this.pendingExpr = null;
+    const c = this.constraints.find((x) => x.id === id);
+    const from = c?.type === "dim" && c.prop === "length" && c.curves?.length === 1 ? this.lengthFromHeldEnd(c.curves[0], v) : this.entities;
     // Strict, like a new constraint: a value the sketch can't take isn't taken.
-    const res = setValueStrict(this.entities, this.constraints, id, v, expr ?? undefined);
+    const res = setValueStrict(from, this.constraints, id, v, expr ?? undefined);
     if (!res) return this.refused();
     this.commit(res.result.entities, res.constraints);
   }
@@ -6161,9 +6167,10 @@ export class SketchTool implements Tool {
             if (ra.removed.length) this.app.ui.toast(`Replaced ${[...new Set(ra.removed.map(constraintName))].join(", ")}`);
             return;
           }
-          const res = addStrict(this.entities, next.filter((c) => base.includes(c)), added);
+          const from = prop === "length" ? this.lengthFromHeldEnd(id, v) : this.entities;
+          const res = addStrict(from, next.filter((c) => base.includes(c)), added);
           if (!res.ok) return this.refused();
-          this.commit(this.entities, res.constraints);
+          this.commit(from, res.constraints);
           if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
         },
       };
