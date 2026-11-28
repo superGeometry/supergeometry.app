@@ -1955,6 +1955,55 @@ body.tut-on #hint .hint-x {
 .history-head .icon-btn {
   background: none;
 }
+/* Play: beside the title, the other buttons to the right. */
+.history-head > span {
+  margin-right: auto;
+}
+#history-play {
+  margin: 0 2px 0 6px;
+}
+#history-play.on {
+  color: var(--accent);
+}
+/* While playing: the step on show lit, the ones still to come dimmed. */
+.history-item.play-now {
+  background: var(--accent-soft);
+}
+.history-item.play-now .history-name {
+  color: var(--accent);
+}
+.history-item.play-later {
+  opacity: 0.38;
+}
+.play-caption {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 15px;
+  font-weight: 600;
+  pointer-events: none;
+  max-width: calc(100vw - 32px);
+  white-space: nowrap;
+}
+.play-caption .play-count {
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.play-caption .play-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 #history-list {
   list-style: none;
   margin: 0;

@@ -353,6 +353,41 @@ export class UI {
     document.addEventListener("contextmenu", (e) => (e.target as HTMLElement).closest?.(".tool, button") && e.preventDefault());
   }
 
+  /** History's Play button: what it does next (Play, Pause while playing, Reset while paused). */
+  playButton(state: "idle" | "playing" | "paused", press?: () => void): void {
+    const b = $<HTMLButtonElement>("#history-play");
+    if (press) b.addEventListener("click", press);
+    b.innerHTML = icons[state === "idle" ? "play" : state === "playing" ? "pause" : "reset"];
+    b.title = state === "idle" ? "Play: watch the model being built, step by step" : state === "playing" ? "Pause" : "Reset: back to the model as it is";
+    b.classList.toggle("on", state !== "idle");
+    document.body.classList.toggle("playing-history", state !== "idle");
+  }
+
+  /** The step Play is showing: its row lit, the ones after it dimmed, and its name over the view. */
+  private playCaption: HTMLElement | null = null;
+  playStep(at: { id: string; index: number; of: number; name: string } | null): void {
+    let seen = !at;
+    for (const li of this.historyList.querySelectorAll<HTMLElement>("li[data-step]")) {
+      const now = !!at && li.dataset.step === at.id;
+      li.classList.toggle("play-now", now);
+      li.classList.toggle("play-later", !!at && seen && !now);
+      if (now) {
+        seen = true;
+        li.scrollIntoView({ block: "nearest" });
+      }
+    }
+    if (!at) {
+      this.playCaption?.remove();
+      this.playCaption = null;
+      return;
+    }
+    if (!this.playCaption) {
+      this.playCaption = el("div", "play-caption");
+      document.body.append(this.playCaption);
+    }
+    this.playCaption.replaceChildren(el("span", "play-count", `${at.index + 1} / ${at.of}`), el("span", "play-name", at.name));
+  }
+
   toggleHistory(open?: boolean): void {
     const on = this.historyEl.classList.toggle("open", open);
     // Phones and narrow tablets (an iPad mini upright): one panel at a time (History or Items).
@@ -1765,6 +1800,7 @@ export class UI {
       }
       if (g && this.closedGroups.has(g.id)) continue;
       const li = el("li", `history-item${g ? " in-group" : ""}${this.historyChecked.has(f.id) ? " checked" : ""}`);
+      li.dataset.step = f.id;
       if (this.historyPicking) {
         const box = document.createElement("input");
         box.type = "checkbox";

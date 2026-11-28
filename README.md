@@ -439,6 +439,12 @@ a group and **Ungroup** (beside Group) takes just them out, in their own place
 in the timeline - a group they were in the middle of splits around them. If a step
 can't be rebuilt after a change, it's marked and the reason is shown.
 
+**Play** (the triangle beside the panel's title) builds the model again before
+your eyes, one step at a time: each step's name is shown, what it added lights
+up, and the view goes to where the change is when it is out of sight. The
+button is *Pause* while it plays; paused, it is *Reset*, which brings the model
+back as it is (Esc does too). Nothing in the project is changed by it.
+
 ---
 
 ## Saving, opening, exporting, printing

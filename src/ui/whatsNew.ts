@@ -18,6 +18,9 @@ interface Update {
 export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
+    added: [
+      "History has a Play button (the triangle beside its title): the model is built again before your eyes, one step at a time. Each step's name is shown, what it added lights up, and the view goes to where the change is when it is out of sight. While it plays the button is Pause; paused, it is Reset, which brings the model back as it is. Nothing in the project is changed by it.",
+    ],
     fixed: [
       "Sketch: changing a size moves only what it has to. In a sketch that nothing locks in place, giving a corner's round a new radius shifted the whole shape a little; now only the round and the two lines it joins change, and the rest stays exactly where it is.",
       "Sketch: a line joined to another line at one end, given a new length, grows or shrinks at its free end. The joined end stays where it is, and the other line is no longer dragged along.",

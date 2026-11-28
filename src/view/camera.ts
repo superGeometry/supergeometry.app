@@ -22,7 +22,7 @@ export class CameraController {
   /** A chosen point to orbit around (else the view turns about its target). Zoom to fit clears it. */
   pivot: Vector3 | null = null;
   private aspect = 1;
-  private animation: { from: ViewState; to: ViewState; t0: number } | null = null;
+  private animation: { from: ViewState; to: ViewState; t0: number; ms: number } | null = null;
 
   constructor(aspect: number) {
     this.persp = new PerspectiveCamera(FOV, aspect, 0.1, 1e7);
@@ -309,8 +309,8 @@ export class CameraController {
   /** Advance animations; returns true while animating. */
   tick(now: number): boolean {
     if (!this.animation) return false;
-    const { from, to, t0 } = this.animation;
-    const t = Math.min(1, (now - t0) / 380);
+    const { from, to, t0, ms } = this.animation;
+    const t = Math.min(1, (now - t0) / ms);
     const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
     let dAz = to.azimuth - from.azimuth;
     dAz = Math.atan2(Math.sin(dAz), Math.cos(dAz));
@@ -352,7 +352,12 @@ export class CameraController {
       this.applyState(to);
       return;
     }
-    this.animation = { from: this.state(), to, t0: performance.now() };
+    this.animation = { from: this.state(), to, t0: performance.now(), ms: 380 };
+  }
+
+  /** The move under way takes this long (History's Play: slow enough to see where the view is going). */
+  pace(ms: number): void {
+    if (this.animation) this.animation.ms = ms;
   }
 
   private applyState(s: ViewState): void {

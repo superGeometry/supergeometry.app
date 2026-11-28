@@ -53,6 +53,7 @@ import { bodiesOf, edgeRefOf, edgesOfFace, faceRefOf, sameSel, sourceFrame, sour
 import { setupRightColumn } from "./ui/panels";
 import type { ToolItem } from "./ui/ui";
 import { el, UI } from "./ui/ui";
+import { Timelapse } from "./ui/timelapse";
 import { Sentence } from "./ui/sentence";
 import { Ghost } from "./tools/ghost";
 import { arrangement, drawnRegions, materialRegions } from "./sketch/regions";
@@ -324,7 +325,12 @@ export class App implements AppContext {
     // (A phone on its side is wider than 720 px but only ~375 tall: Items would cover a third of it.)
     if (screenClass() !== "phone") this.items.toggle(true);
 
-    this.store.onChange(() => this.docChanged());
+    this.store.onChange(() => (this.timelapse.exit(), this.docChanged()));
+    this.ui.playButton("idle", () => {
+      if (this.timelapse.state === "idle") this.setTool(null);
+      this.timelapse.press();
+    });
+    window.addEventListener("keydown", (e) => e.key === "Escape" && this.timelapse.exit());
     window.addEventListener("keydown", (e) => this.onKey(e));
     this.view.canvas.addEventListener("pointermove", (e) => {
       const r = this.view.canvas.getBoundingClientRect();
@@ -499,6 +505,8 @@ export class App implements AppContext {
     const leavingOp = this.tool !== this.selectTool;
     // A sketch left right after a shape was closed in it: that shape is what comes next (see below).
     const closed = next === this.selectTool && this.tool instanceof SketchTool ? this.tool.justClosed : null;
+    // A tool picked while History is playing: the playing ends (the project is shown again as it is).
+    if (tool) this.timelapse.exit();
     this.tool.exit?.();
     this.tool = next;
     this.input.handler = next;
@@ -805,6 +813,26 @@ export class App implements AppContext {
     void this.regenerate();
   }
 
+  /** History's Play: the model built again step by step (ui/timelapse.ts). The sketch it is showing, hidden or not. */
+  private playSketch: string | null = null;
+  readonly timelapse: Timelapse = new Timelapse({
+    view: () => this.view,
+    steps: () => this.store.doc.features,
+    build: (fs) => this.kernel.regenerate(fs),
+    show: (r, fs, sketch) => {
+      this.playSketch = sketch;
+      this.apply(r, fs);
+    },
+    flash: (lit) => (lit.length ? this.view.setHighlights(lit, null) : this.refreshHighlights()),
+    restore: () => {
+      this.playSketch = null;
+      this.madeFor = "";
+      void this.regenerate();
+    },
+    state: (s) => this.ui.playButton(s),
+    mark: (at) => this.ui.playStep(at),
+  });
+
   /** The steps (and variables) the model on the screen was asked for, as text; and how many askings are under way. */
   private madeFor = "";
   private made: RegenResult | null = null;
@@ -865,6 +893,9 @@ export class App implements AppContext {
     } finally {
       this.regenerating--;
     }
+    // (Asked for before History's Play began, answered during it: not shown over the stage on show. Play ends by
+    // asking again.)
+    if (r && this.timelapse.state !== "idle") r = null;
     if (r) {
       this.made = r;
       this.apply(r, features);
@@ -1046,7 +1077,7 @@ export class App implements AppContext {
     this.wasHidden = hidden;
     const iso = this.isolatedWithSketches();
     const sketches = features
-      .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && !f.rolledBack && ((!hidden.has(f.id) && (!iso || iso.includes(f.id))) || f.id === this.tool.activeSketch))
+      .filter((f): f is SketchFeature => f.type === "sketch" && !f.suppressed && !f.rolledBack && ((!hidden.has(f.id) && (!iso || iso.includes(f.id))) || f.id === this.tool.activeSketch || f.id === this.playSketch))
       .map((s) => ({ ...s, entities: this.solved.get(s) ?? s.entities, plane: this.result?.sketchPlanes[s.id] ?? s.plane, boundary: this.result?.sketchBoundaries[s.id] }))
       .map((s) => (s.id === this.tool.activeSketch ? { ...s, defined: this.definedOf(s) } : s));
     // Drawn but not made into anything yet: shown through bodies, and a tap on it finds it there
