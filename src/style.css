@@ -4173,11 +4173,6 @@ html[data-screen="tablet"] #more-menu {
   font-size: 17px;
   font-weight: 600;
 }
-.support-card-text {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
-}
 .support-card-go {
   align-self: stretch;
   justify-content: center;

@@ -16,8 +16,8 @@ export interface SupportWay {
   mark: string;
   /** A tag on the button's right (MakerWorld's Boost, with its rocket). */
   tag?: { icon: string; text: string };
-  /** Said on a card of the app's own before its page opens (Ko-fi): what the support is for. Without it the page opens at once. */
-  card?: string;
+  /** Said on a card of the app's own before its page opens (Ko-fi): its name and one button on to it. Without it the page opens at once. */
+  card?: boolean;
 }
 
 const svg = (body: string) =>
@@ -43,7 +43,7 @@ export const SUPPORT: SupportWay[] = [
     sub: "Buy me a coffee",
     url: "https://ko-fi.com/supergeometry",
     logo: "",
-    card: "superGeometry.app is free and stays free: no ads, no account, no paid tier. If it saves you time, a coffee helps me keep building it. One time or monthly, any amount, by card or PayPal.",
+    card: true,
     // (A cup with a heart on it.)
     mark: svg('<path d="M4 8h12v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z"/><path d="M16 9.5h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M10 15.2 7.9 13a1.4 1.4 0 0 1 2.1-1.9A1.4 1.4 0 0 1 12.1 13z" fill="currentColor"/>'),
   },
@@ -81,17 +81,14 @@ export function showSupport(w: SupportWay): void {
   const big = document.createElement("div");
   big.className = "support-card-title";
   big.textContent = w.sub;
-  const text = document.createElement("div");
-  text.className = "support-card-text";
-  text.textContent = w.card ?? "";
   const out = document.createElement("button");
   out.type = "button";
   out.className = "text-btn primary support-card-go";
   out.textContent = `Continue to ${w.name} ↗`;
   const note = document.createElement("div");
   note.className = "dialog-note support-note";
-  note.textContent = `Opens ${new URL(w.url).host} in a new tab. Paying is between you and ${w.name}: this app sees none of it.`;
-  card.append(mark, big, text, out);
+  note.textContent = `Opens ${new URL(w.url).host} in a new tab. Paying is between you and ${w.name}.`;
+  card.append(mark, big, out);
   box.append(head, card, note);
   const close = () => {
     window.removeEventListener("keydown", onKey, true);

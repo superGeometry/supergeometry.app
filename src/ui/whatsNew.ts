@@ -19,7 +19,7 @@ export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
     added: [
-      "Ko-fi, for anyone who wants to buy me a coffee: in More > Support and on the Welcome window. A small card says what it is for, and one button goes on to Ko-fi in a new tab.",
+      "Ko-fi, for anyone who wants to buy me a coffee: in More > Support and on the Welcome window. A small card with one button goes on to Ko-fi in a new tab.",
       "Create has a second row, Enclosure, with what a printed case needs. Lip: tap the rim of a hollow body and a band along it is raised; on the other half choose Groove for the matching cut, with a clearance. Boss: a post for a screw by the screw's size (M2 to M8), with the hole for a self-tapping screw or a heat-set insert and up to eight ribs round its foot. Snap Fit: a springy hook, and the slot in a wall it clicks into. Rib: lines of a sketch made a thin wall, which rises from the face they are drawn on (or goes down to the body from a plane above it) and runs on to the walls.",
       "Overhang check, for printing: in Shaders, under the analyses. Faces that lean out too far to print without support turn red, ones close to the limit yellow, with the model printed upright as it stands. A slider sets how far your printer can go (45 degrees to begin with).",
       "STEP files keep colours: a body's colour is written into the STEP file with it, and a STEP file's own colours come in with its bodies. (A body with no colour was marked red in the file, and showed red in other programs: it is the app's grey now.)",
