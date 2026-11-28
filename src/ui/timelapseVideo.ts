@@ -75,6 +75,7 @@ export class TimelapseVideo {
   private open = false;
   private done = false;
   private ticker = 0;
+  private began = 0;
   private push: () => void = () => {};
   private pushed = 0;
   start(): void {
@@ -124,6 +125,7 @@ export class TimelapseVideo {
         requestAnimationFrame(() => {
           if (this.rec.state !== "inactive" || this.done) return;
           this.rec.start(1000);
+          this.began = performance.now();
           this.view.requestRender();
         }),
       );
@@ -201,11 +203,22 @@ export class TimelapseVideo {
     this.done = true;
     if (!this.begun || this.rec.state === "inactive") clearInterval(this.ticker);
     if (!this.begun || this.rec.state === "inactive") return null;
+    const ms = performance.now() - this.began;
     this.rec.stop();
     await this.stopped;
     clearInterval(this.ticker);
     this.out.width = this.out.height = 0;
     if (!keep || !this.parts.length) return null;
-    return new Blob(this.parts, { type: this.rec.mimeType.split(";")[0] || `video/${this.ext}` });
+    const type = this.rec.mimeType.split(";")[0] || `video/${this.ext}`;
+    const blob = new Blob(this.parts, { type });
+    if (this.ext !== "webm") return blob;
+    // A WebM as recorded says nothing of how long it is (players then show no length and can't jump about in
+    // it): written in now.
+    try {
+      const { withDuration } = await import("../io/webmDuration");
+      return new Blob([withDuration(new Uint8Array(await blob.arrayBuffer()), ms) as BlobPart], { type });
+    } catch {
+      return blob;
+    }
   }
 }
