@@ -160,6 +160,8 @@ export interface HistoryHandlers {
   /** Shown in the view, or hidden (a sketch, plane or axis: its eye hides it, never switches it off). */
   isHidden?(id: string): boolean;
   toggleHidden?(id: string): void;
+  /** A mirror or a pattern of features: its sides kept alike from here on, or not (see TransformFeature.unlinked). */
+  relink?(id: string): void;
   remove(id: string): void;
   /** History groups (runs of steps under one name), and changing them. */
   groups: HistoryGroup[];
@@ -1903,7 +1905,14 @@ export class UI {
         });
         li.append(caret);
       }
-      li.append(name, eye, del);
+      // A mirror or a pattern of features: whether its sides are kept alike. Linked, what is made on one of them
+      // afterwards is made on the others; a tap unlinks it (and links it again).
+      const sides = f.type === "transform" && !!f.steps?.length && !!h.relink;
+      const chain = sides
+        ? iconButton(f.type === "transform" && f.unlinked ? "unlink" : "link", f.type === "transform" && f.unlinked ? "Unlinked: each side is changed by itself. Tap to link them again" : "Linked: a change to one side is made on the others too. Tap to unlink", () => h.relink!(f.id))
+        : null;
+      if (chain && f.type === "transform" && f.unlinked) chain.classList.add("off");
+      li.append(name, ...(chain ? [chain] : []), eye, del);
       // Right-click (or a long press where the browser gives one): the step's commands.
       li.addEventListener("contextmenu", (e) => {
         e.preventDefault();

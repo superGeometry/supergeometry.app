@@ -910,7 +910,7 @@ export class SelectTool implements Tool {
       // The face's body moved, copied round or mirrored, without picking the body first.
       // (A hole's round wall: the pattern repeats the hole in its body - it copied the whole body, and there was no
       // way to repeat a hole.)
-      { id: "patl", label: "Pattern – Linear", icon: "patternLinear", ...(holeRef ? { sub: "repeats this hole" } : feature ? { sub: "repeats this feature" } : {}), run: () => app.setTool(new TransformOp(app, "linear", holeRef || feature ? [s.body] : bodies, undefined, undefined, false, holeRef, holeRef ? info?.round?.r : undefined, holeRef ? undefined : feature)) },
+      { id: "patl", label: "Pattern – Linear", icon: "patternLinear", ...(holeRef ? { sub: "repeats this hole" } : feature ? { sub: "repeats this feature" } : {}), run: () => app.setTool(new TransformOp(app, "linear", holeRef || feature ? [s.body] : bodies, undefined, undefined, false, holeRef, holeRef ? info?.round?.r : feature && info ? Math.sqrt(info.area) / 2 : undefined, holeRef ? undefined : feature)) },
       { id: "patc", label: "Pattern – Circular", icon: "patternCircular", ...(holeRef ? { sub: "repeats this hole" } : feature ? { sub: "repeats this feature" } : {}), run: () => app.setTool(new TransformOp(app, "circular", holeRef || feature ? [s.body] : bodies, undefined, undefined, false, holeRef, undefined, holeRef ? undefined : feature)) },
       { id: "translate", label: "Translate", icon: "translate", shortcut: "N", run: () => app.setTool(new TransformOp(app, "translate", bodies)) },
       { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: () => app.setTool(new TransformOp(app, "rotate", bodies)) },

@@ -305,7 +305,10 @@ sketch. A sketch stays in view until every region of it is used.
   The feature is built again on the other side, in the same body, with
   everything that was made on it: the hole drilled in it, the fillet round
   its foot. It stays tied to the original, so changing the boss changes its
-  mirror image. Pattern - Linear and Pattern - Circular repeat a feature the
+  mirror image. The sides stay alike afterwards too: what you make on the
+  feature or on its mirror image is made on the other as well. The chain
+  button on the step's line in History, before the eye, unlinks them (each
+  side by itself from then on); tap it again to link them. Pattern - Linear and Pattern - Circular repeat a feature the
   same way. With the whole body picked (double-tap), Mirror and the patterns
   work on the body, as before.
 - A body that stands at an angle: in Move/Rotate, drag the gimbal's middle

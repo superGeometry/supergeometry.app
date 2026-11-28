@@ -46,3 +46,32 @@ export function featureFamily(features: readonly Feature[], seeds: string[]): st
   }
   return features.filter((f) => family.has(f.id)).map((f) => f.id);
 }
+
+/** A step made after a mirror or a pattern of features, on one of its sides. */
+export interface SideOf {
+  /** The mirror or pattern step. */
+  repeat: string;
+  /** Built on the feature itself, or on one of the copies that step made. */
+  side: "original" | "copy";
+}
+
+/**
+ * The steps that come after a mirror or a pattern of features and are built on it - on the feature it repeats, or
+ * on a copy it made - each with which. What such a step does on its side is done on the others too: the two sides
+ * of a mirror stay alike, whichever is changed. (A step built on both sides at once is left as it is.)
+ */
+export function featureLinks(features: readonly Feature[]): Map<string, SideOf[]> {
+  const out = new Map<string, SideOf[]>();
+  features.forEach((m, at) => {
+    if (m.type !== "transform" || !m.steps?.length || m.unlinked || m.suppressed || m.rolledBack) return;
+    const later = new Set(features.slice(at + 1).map((f) => f.id));
+    const seeds = new Set(m.steps);
+    const original = new Set(featureFamily(features, m.steps).filter((id) => later.has(id) && !seeds.has(id)));
+    const copy = new Set(featureFamily(features, [m.id]).filter((id) => later.has(id) && id !== m.id));
+    for (const id of new Set([...original, ...copy])) {
+      if (original.has(id) && copy.has(id)) continue;
+      out.set(id, [...(out.get(id) ?? []), { repeat: m.id, side: original.has(id) ? "original" : "copy" }]);
+    }
+  });
+  return out;
+}

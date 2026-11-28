@@ -1728,7 +1728,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
         : kind === "mirror"
           ? { kind: "mirror", plane: { origin: [0, 0, 0], xDir: [0, 1, 0], normal: [1, 0, 0] } }
           : kind === "linear"
-            ? { kind: "linear", dir: [1, 0, 0], spacing: hole && holeR ? Math.max(1, Math.round(holeR * 3 * 100) / 100) : patternSpacing(bodyExtent(app, bodies, [1, 0, 0]), 20), count: 3 }
+            ? { kind: "linear", dir: [1, 0, 0], spacing: (hole || steps?.length) && holeR ? Math.max(1, Math.round(holeR * 3 * 100) / 100) : patternSpacing(bodyExtent(app, bodies, [1, 0, 0]), 20), count: 3 }
             : kind === "circular"
               ? { kind: "circular", axis: { origin: [0, 0, 0], dir: [0, 0, 1] }, count: 6, angle: 360 }
               : { kind: "move", translate: [0, 0, 0], rotate: { origin: center, axis: [0, 0, 1], angle: 0 } };

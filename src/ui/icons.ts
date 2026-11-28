@@ -184,6 +184,7 @@ export const icons = {
   oneSide: svg('<path d="M7 4v16"/><path d="M7 12h12"/><path d="M15 8l4 4-4 4"/>'),
   symmetric: svg('<path d="M12 4v16" stroke-dasharray="2 2"/><path d="M4 12h16"/><path d="M7 9l-3 3 3 3M17 9l3 3-3 3"/>'),
   auto: svg('<path d="M6 19l6-14 6 14"/><path d="M8.6 13h6.8"/>'),
+  unlink: svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/><path d="M4 4l16 16"/>'),
   link: svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'),
   selectAll: svg('<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3 2.5"/><path d="M9 8l7 5-3 .6 1.4 3.4-1.4.7-1.4-3.4L9 16z"/>'),
   unitMm: glyph("mm"),

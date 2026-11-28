@@ -443,6 +443,11 @@ export interface TransformFeature extends FeatureBase {
    * from it, is added or cut again at each place - the body itself is not copied. `bodies` is that one body.
    */
   steps?: string[];
+  /**
+   * Of a mirror or a pattern of features: its sides no longer kept alike. (Linked, a later step on the feature
+   * or on a copy is done on the others too; unlinked, each side is worked on by itself from here on.)
+   */
+  unlinked?: boolean;
   op:
     | { kind: "move"; translate: Vec3; rotate?: { origin: Vec3; axis: Vec3; angle: number } }
     /** `ref`: scaled by reference - the two points picked (center is the first), the distance typed between them. */

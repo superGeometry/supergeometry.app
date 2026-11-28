@@ -1210,7 +1210,7 @@ export class App implements AppContext {
     // preview rebuilt the whole list - 5 ms for 200 steps, far more on a phone).
     const doc = this.store.doc;
     const shown = JSON.stringify([
-      doc.features.map((f) => [f.id, f.name, f.type, f.suppressed ? 1 : 0, f.rolledBack ? 1 : 0, f.type === "sketch" ? (f.log ?? 0) : 0]),
+      doc.features.map((f) => [f.id, f.name, f.type, f.suppressed ? 1 : 0, f.rolledBack ? 1 : 0, f.type === "sketch" ? (f.log ?? 0) : 0, f.type === "transform" && f.steps?.length ? (f.unlinked ? 2 : 1) : 0]),
       this.result?.errors ?? [],
       this.tool.editingId ?? this.tool.activeSketch ?? null,
       [...warnings],
@@ -1227,6 +1227,12 @@ export class App implements AppContext {
       toggle: (id) => {
         const f = this.store.find(id);
         if (f) this.store.update(id, { suppressed: !f.suppressed });
+      },
+      relink: (id) => {
+        const f = this.store.find(id);
+        if (f?.type !== "transform") return;
+        this.store.update(id, { unlinked: f.unlinked ? undefined : true });
+        this.ui.toast(f.unlinked ? "Linked: what is made on one side from now on is made on the others too" : "Unlinked: each side is changed by itself from now on");
       },
       isHidden: (id) => this.store.doc.hidden.includes(id),
       toggleHidden: (id) => this.store.commit((d) => (d.hidden = d.hidden.includes(id) ? d.hidden.filter((x) => x !== id) : [...d.hidden, id])),

@@ -81,4 +81,31 @@ const mirror = (steps: string[], plane = mid) => rep(steps, { kind: "mirror", pl
   check("a mirror of the boss is not one of its family (mirrored again, it is not repeated twice)", JSON.stringify(featureFamily([...steps, mirror(family)], ["K"])) === JSON.stringify(["K", "Hh"]));
   check("a step that is not there: no family", featureFamily(steps, ["nope"]).length === 0);
 }
+{
+  // The two sides stay alike whichever is worked on afterwards.
+  const base = [...tray, boss(), mirror(["K"])];
+  const rb: any = await regenerate(base);
+  const tops = rb.bodies[0].faces.filter((f: any) => f.normal[2] > 0.99 && near(f.center[2], 12, 1e-6));
+  const topAt = (x: number) => faceRef("B", tops.find((f: any) => near(f.center[0], x, 1e-6)));
+  const drillAt = (x: number): Feature => ({ id: "Hh", name: "Hh", type: "hole", face: topAt(x), at: [x, 10, 12], size: "M3", diameter: 2, through: false, depth: 6, head: "none", headDiameter: 4, headDepth: 1 }) as Feature;
+  const both = V + 2 * (POST - PI * 6);
+  const a = await after([...base, drillAt(12)], "B");
+  check("a hole drilled into the original after it was mirrored: in its mirror image too", !a.err && near(volume(a.body), both, 1e-5) && health(a.body!).healthy, `${volume(a.body) - V} ${both - V} ${a.errors}`);
+  const b = await after([...base, drillAt(48)], "B");
+  check("a hole drilled into the mirror image: in the original too", !b.err && near(volume(b.body), both, 1e-5) && health(b.body!).healthy, `${volume(b.body) - V} ${both - V} ${b.errors}`);
+  check("... one hole wall each side", b.r.bodies[0].faces.filter((f: any) => f.round?.hole).length === 2, b.r.bodies[0].faces.filter((f: any) => f.round?.hole).length);
+  // A row of four: a hole drilled into the third is drilled into all four.
+  const row = [...tray, boss(), rep(["K"], { kind: "linear", dir: [1, 0, 0], spacing: 12, count: 4 })];
+  const rr: any = await regenerate(row);
+  const third = faceRef("B", rr.bodies[0].faces.find((f: any) => f.normal[2] > 0.99 && near(f.center[2], 12, 1e-6) && near(f.center[0], 36, 1e-6)));
+  const c = await after([...row, { id: "Hh", name: "Hh", type: "hole", face: third, at: [36, 10, 12], size: "M3", diameter: 2, through: false, depth: 6, head: "none", headDiameter: 4, headDepth: 1 } as Feature], "B");
+  check("a row of four, a hole drilled into the third: all four have it", !c.err && near(volume(c.body), V + 4 * (POST - PI * 6), 1e-5) && health(c.body!).healthy, `${volume(c.body) - V} ${4 * (POST - PI * 6)} ${c.errors}`);
+  // Unlinked (its switch in History): each side by itself from then on.
+  const loose = [...tray, boss(), { ...mirror(["K"]), unlinked: true } as Feature];
+  const e = await after([...loose, drillAt(48)], "B");
+  check("unlinked: a hole drilled into the mirror image stays there alone", !e.err && near(volume(e.body), V + 2 * POST - PI * 6, 1e-5), `${volume(e.body) - V} ${e.errors}`);
+  // Something made elsewhere on the body is nobody's side: left alone.
+  const d = await after([...base, ps, pocket], "B");
+  check("a pocket cut elsewhere in the tray afterwards: only there", !d.err && near(volume(d.body), V + 2 * POST - 24, 1e-5), `${volume(d.body) - V} ${d.errors}`);
+}
 done();

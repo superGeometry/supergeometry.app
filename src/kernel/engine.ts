@@ -89,6 +89,7 @@ import { anchorOf, freeformFaces, meshViews, viewEdge } from "./viewLines";
 import { entitiesWire, pathOf, regionFaces, regionHoleWires, regionWire, withFittedSplines } from "./sketchGeom";
 import { stretchShape } from "./stretch";
 import { imprint, onFace as linesOnFace, seenFrom, wrapOnto } from "./wrap";
+import { featureLinks } from "../doc/featureFamily";
 import type { BodyHealth, BodyMesh, BodyProps, ProjectedView, ViewBody, ViewEdge, ViewSpec, ConstructionInfo, EdgeInfo, ExportFormat, FaceInfo, FeatureError, RegenResult } from "./protocol";
 
 type Bodies = Map<string, Shape3D>;
@@ -119,6 +120,11 @@ interface Ctx {
    * it. A mirror or a pattern of a feature repeats the difference.
    */
   made: Map<string, { body: string; before: Shape3D; after: Shape3D }[]>;
+  /**
+   * The mirrors and patterns of features (by step): the body, and the maps that take the feature to each copy.
+   * `at`: about where the feature is. A later step on one side is done on the others through them (matchSides).
+   */
+  repeats: Map<string, { body: string; maps: Affine[]; at: Vec3 }>;
 }
 
 /**
@@ -134,7 +140,7 @@ interface Reads {
   written: Set<string>;
 }
 let reading: Reads | null = null;
-const KINDS = ["bodies", "sketches", "planes", "axes", "freeforms", "sweeps", "links", "made"] as const;
+const KINDS = ["bodies", "sketches", "planes", "axes", "freeforms", "sweeps", "links", "made", "repeats"] as const;
 const rawGet = <V>(m: Map<string, V>, k: string): V | undefined => Map.prototype.get.call(m, k) as V | undefined;
 const rawHas = (m: Map<string, unknown>, k: string): boolean => Map.prototype.has.call(m, k) as boolean;
 const rawEntries = <V>(m: Map<string, V>): [string, V][] => [...(Map.prototype.entries.call(m) as IterableIterator<[string, V]>)];
@@ -208,6 +214,7 @@ function fork(ctx: Ctx): Ctx {
     sweeps: new Noted("sweeps", ctx.sweeps),
     links: new Noted("links", ctx.links),
     made: new Noted("made", ctx.made),
+    repeats: new Noted("repeats", ctx.repeats),
   };
 }
 /** How many steps the last rebuild ran, took as they were (nothing before them changed), or put back (nothing they read changed). */
@@ -903,7 +910,9 @@ async function run(features: Feature[], saved = false) {
   editable = new Set(features.filter((f) => (f.type === "freeform" || f.type === "faceFreeform") && !f.suppressed).map((f) => f.id));
   const errors: FeatureError[] = [];
   const notes: FeatureError[] = [];
-  let ctx: Ctx = fork({ bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map(), links: new Map(), made: new Map() });
+  let ctx: Ctx = fork({ bodies: new Map(), sketches: new Map(), planes: new Map(), axes: new Map(), freeforms: new Map(), sweeps: new Map(), links: new Map(), made: new Map(), repeats: new Map() });
+  // The steps built on one side of a mirror or a pattern of features (what they do is matched on the other sides).
+  const sides = featureLinks(features);
   switchedOff = new Set(features.filter((f) => f.suppressed).map((f) => f.id));
   const off = [...switchedOff].sort().join();
   // The steps as last rebuilt (by step, wherever in the list they are now).
@@ -1040,6 +1049,16 @@ async function run(features: Feature[], saved = false) {
               // Cut away to dust: the body is gone.
               if (kept) out.bodies.set(id, kept);
               else out.bodies.delete(id);
+            }
+          }
+          // Built on one side of a mirror or a pattern of features: the same on its other sides.
+          const linked = sides.get(f.id);
+          if (linked?.length) {
+            reading = reads;
+            try {
+              matchSides(ctx, out, linked);
+            } finally {
+              reading = null;
             }
           }
           // Which step made each face: kept from what it was made from, this step's own otherwise.
@@ -4596,20 +4615,24 @@ function featureRepeat(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): vo
     if (part.add || part.cut) parts.push(part);
   }
   if (!parts.length) throw new Error("That step changed nothing in the body that could be repeated");
-  const places: ((s: Shape3D) => Shape3D)[] = [];
-  if (op.kind === "mirror") places.push((s) => s.clone().mirror(op.plane.normal, op.plane.origin) as Shape3D);
-  else if (op.kind === "linear") {
+  // The map to each copy's place.
+  const maps: Affine[] = [];
+  if (op.kind === "mirror") {
+    const n = norm(op.plane.normal);
+    maps.push(affineFrom((p) => sub(p, scale(n, 2 * dot(sub(p, op.plane.origin), n)))));
+  } else if (op.kind === "linear") {
     patternCount(op.count);
     if (Math.abs(op.spacing) < 1e-9 || len(op.dir) < 1e-12) throw new Error("The spacing is zero: the copies would all sit in one place");
-    for (let k = 1; k < op.count; k++) places.push((s) => s.clone().translate(scale(norm(op.dir), op.spacing * k)) as Shape3D);
+    for (let k = 1; k < op.count; k++) maps.push(affineFrom((p) => add(p, scale(norm(op.dir), op.spacing * k))));
   } else {
     patternCount(op.count);
     if (Math.abs(op.angle) < 1e-9) throw new Error("The angle is zero: the copies would all sit in one place");
     const ax = resolveAxis(op.axis, ctx);
     const full = Math.abs(Math.abs(op.angle) - 360) < 1e-6;
     const turn = op.angle / (full ? op.count : Math.max(1, op.count - 1));
-    for (let k = 1; k < op.count; k++) places.push((s) => s.clone().rotate(turn * k, ax.origin, ax.dir) as Shape3D);
+    for (let k = 1; k < op.count; k++) maps.push(affineFrom((p) => rotateAbout(p, ax.origin, ax.dir, turn * k)));
   }
+  const places = maps.map((m) => (s: Shape3D) => shapeThrough(s, m));
   let out = body;
   let missed = 0;
   for (const place of places) {
@@ -4629,6 +4652,64 @@ function featureRepeat(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): vo
   if (!kept) throw new Error("That would cut the whole body away");
   ctx.bodies.set(id, kept);
   ctx.freeforms.delete(id);
+  ctx.repeats.set(f.id, { body: id, maps, at: middleOf(parts[0].add ?? parts[0].cut!) });
+}
+
+const middleOf = (s: Shape3D): Vec3 => {
+  const [lo, hi] = s.boundingBox.bounds as [Vec3, Vec3];
+  return scale(add(lo, hi), 0.5);
+};
+
+/**
+ * A step built on one side of a mirror or a pattern of features has changed the body: what it added or cut there
+ * is added or cut on the other sides too, so that they stay alike whichever of them is worked on. Where that
+ * cannot be done (nothing to cut into there, a piece that would hang loose) the step is left as it is, with a note.
+ */
+function matchSides(ctx: Ctx, out: Ctx, linked: { repeat: string; side: "original" | "copy" }[]): void {
+  for (const { repeat, side } of linked) {
+    const rep = out.repeats.get(repeat);
+    if (!rep) continue;
+    const before = ctx.bodies.get(rep.body);
+    const after = out.bodies.get(rep.body);
+    if (!before || !after || before === after) continue;
+    try {
+      const tiny = Math.abs(quickVolume(after)) * 1e-9;
+      const more = after.cut(before) as Shape3D;
+      const less = before.cut(after) as Shape3D;
+      const add = !isEmpty(more) && quickVolume(more) > tiny ? more : null;
+      const cut = !isEmpty(less) && quickVolume(less) > tiny ? less : null;
+      if (!add && !cut) continue;
+      // Which of them it was made on - the feature itself or one of its copies: the one whose place is nearest to
+      // the change. (Not told from the faces it names: a copy's flat top is on the same plane as the feature's,
+      // and is put down to the same step.) From there back to the feature, and on to every other.
+      const all = [AFFINE_ID, ...rep.maps];
+      const c = middleOf(add ?? cut!);
+      let j = 0;
+      all.forEach((m, i) => {
+        if (dist(applyAffine(m, rep.at), c) < dist(applyAffine(all[j], rep.at), c)) j = i;
+      });
+      const back = affineInverse(all[j]);
+      if (!back) continue;
+      const maps = all.filter((_, i) => i !== j).map((m) => affineThen(back, m));
+      void side;
+      let body = after;
+      let done = 0;
+      for (const m of maps) {
+        const was = body;
+        if (add) body = body.fuse(shapeThrough(add, m)) as Shape3D;
+        if (cut) body = body.cut(shapeThrough(cut, m)) as Shape3D;
+        if (Math.abs(quickVolume(body) - quickVolume(was)) > Math.abs(quickVolume(was)) * 1e-9) done++;
+      }
+      // (Alike already: a change made right across the mirror plane is its own mirror image.)
+      if (!done) continue;
+      if (isEmpty(body) || subShapes(body, "SOLID").length > subShapes(after, "SOLID").length) throw new Error("loose");
+      const kept = guardEdit(after, body, true);
+      if (kept) out.bodies.set(rep.body, kept);
+    } catch (err) {
+      if (isFault(err)) throw err;
+      editNotes.push("This change could not be made on the other side as well: the two sides are no longer alike here.");
+    }
+  }
 }
 
 function transform(f: Extract<Feature, { type: "transform" }>, ctx: Ctx): void {

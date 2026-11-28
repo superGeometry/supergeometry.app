@@ -8083,3 +8083,8 @@ body.tut-on .numpad {
   margin: 8px 4px;
   background: var(--line);
 }
+
+/* A switch shown as an icon, off (a feature mirror unlinked, in History). */
+.icon-btn.off {
+  opacity: 0.5;
+}
