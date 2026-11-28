@@ -47,7 +47,9 @@ class Numpad {
   private target: HTMLInputElement | null = null;
   /** Open on this box. */
   typingInto(input: HTMLInputElement): boolean {
-    return this.target === input && !this.el.hidden;
+    // (Open on the box but nothing keyed in yet: the box is still the tool's to write - a line's length as the
+    // pointer moves. The pad opens by a value box of its own accord, and from then on the length stood still.)
+    return this.target === input && !this.el.hidden && !this.fresh;
   }
 
   /** Put away if it's open on this box. */
