@@ -325,9 +325,20 @@ export class Viewport {
   /** Called right after each frame is drawn, while the picture is still there to copy (a recording). */
   afterDraw: (() => void) | null = null;
 
+  /**
+   * No grid for now (a recording: scaled to the video's size, its fine lines turn to a shimmer that the video's
+   * compression then smears - on a big screen the whole picture crawled).
+   */
+  private plain = false;
+  plainGround(on: boolean): void {
+    this.plain = on;
+    this.applySettings();
+    this.dirty = true;
+  }
+
   private applySettings(): void {
     const s = settings.value;
-    this.grid.mesh.visible = s.showGrid;
+    this.grid.mesh.visible = s.showGrid && !this.plain;
     this.grid.locked = s.gridLocked;
     this.grid.lockedStep = s.gridStep;
     this.axesGroup.visible = s.showAxes;

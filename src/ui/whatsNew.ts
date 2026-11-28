@@ -20,7 +20,7 @@ export const UPDATES: Update[] = [
     date: "2026-11-28",
     added: [
       "History has a Play button (the triangle beside its title): the model is built again before your eyes, one step at a time. Each step's name is shown, and the view goes to where the change is when it is out of sight. While it plays the button is Pause; paused, it is Reset, which brings the model back as it is. Nothing in the project is changed by it.",
-      "The timelapse can be saved as a video: the dot beside Play in History (tap it twice: the first tap lights it, the second records), or File > Export MP4 timelapse. It plays from the first step and saves the model with each step's name, without the panels, the app's name in the corner, 1280 x 720 (upright on a phone held upright). The time a step takes to build is left out. A browser that can't record MP4 saves a WebM instead. Keep the app on screen while it records.",
+      "The timelapse can be saved as a video: the dot beside Play in History (tap it twice: the first tap lights it, the second records), or File > Export MP4 timelapse. It plays from the first step and saves the model with each step's name, without the panels or the grid, the app's name in the corner, 1280 x 720 (upright on a phone held upright). The time a step takes to build is left out. A browser that can't record MP4 saves a WebM instead. Keep the app on screen while it records.",
     ],
     fixed: [
       "Sketch: changing a size moves only what it has to. In a sketch that nothing locks in place, giving a corner's round a new radius shifted the whole shape a little; now only the round and the two lines it joins change, and the rest stays exactly where it is.",

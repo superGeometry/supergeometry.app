@@ -824,6 +824,7 @@ export class App implements AppContext {
     show: (r, fs, sketch) => {
       this.playSketch = sketch;
       this.apply(r, fs);
+      this.recording?.start();
     },
     restore: () => {
       this.playSketch = null;

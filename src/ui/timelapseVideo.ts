@@ -43,15 +43,28 @@ export class TimelapseVideo {
     this.out.width = wide ? 1280 : 720;
     this.out.height = wide ? 720 : 1280;
     this.g = this.out.getContext("2d", { alpha: false })!;
-    this.rec = new MediaRecorder(this.out.captureStream(30), { mimeType: mime, videoBitsPerSecond: 4_000_000 });
+    this.rec = new MediaRecorder(this.out.captureStream(30), { mimeType: mime, videoBitsPerSecond: 6_000_000 });
     this.rec.ondataavailable = (e) => e.data.size && this.parts.push(e.data);
     this.stopped = new Promise((done) => (this.rec.onstop = () => done()));
     const mark = new Image();
     mark.onload = () => ((this.mark = mark), this.view.requestRender());
     mark.src = "icon.svg";
+    view.plainGround(true);
     view.afterDraw = () => this.draw();
-    this.draw();
-    this.rec.start(1000);
+    view.requestRender();
+  }
+
+  /**
+   * Recording begins with the first frame drawn once the playing has cleared the view (begun before any frame, the
+   * video opened on a black picture; before the view was cleared, on a flash of the finished model).
+   */
+  private begun = false;
+  private open = false;
+  private done = false;
+  start(): void {
+    if (this.open) return;
+    this.open = true;
+    this.view.requestRender();
   }
 
   /** The part of the 3D view that goes into the video: the biggest of the video's shape, in its middle. */
@@ -72,10 +85,28 @@ export class TimelapseVideo {
   }
 
   private draw(): void {
+    // (Nothing is copied before the playing has cleared the view: the recorder's first picture is whatever was
+    // last put on this canvas, and that was the finished model.)
+    if (!this.open) return;
     const { x, y, w, h } = this.crop();
     const [W, H] = [this.out.width, this.out.height];
-    this.g.drawImage(this.view.canvas, x, y, w, h, 0, 0, W, H);
     const g = this.g;
+    // (A big screen's picture is made much smaller: smoothly, or its thin lines break up.)
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(this.view.canvas, x, y, w, h, 0, 0, W, H);
+    if (!this.begun) {
+      // The recorder starts once this first picture is out (two frames on), so it is the one it opens with.
+      this.begun = true;
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (this.rec.state !== "inactive" || this.done) return;
+          this.rec.start(1000);
+          if (this.waits.size) this.rec.pause();
+          this.view.requestRender();
+        }),
+      );
+    }
     const size = Math.round(Math.min(W, H) * 0.036);
     const sans = `system-ui, -apple-system, "Segoe UI", sans-serif`;
     // The app's mark and name, bottom right.
@@ -143,11 +174,12 @@ export class TimelapseVideo {
   /** The end: the video (null: thrown away, or nothing was recorded). */
   async finish(keep: boolean): Promise<Blob | null> {
     this.view.afterDraw = null;
-    if (this.rec.state !== "inactive") {
-      if (this.rec.state === "paused") this.rec.resume();
-      this.rec.stop();
-      await this.stopped;
-    }
+    this.view.plainGround(false);
+    this.done = true;
+    if (!this.begun || this.rec.state === "inactive") return null;
+    if (this.rec.state === "paused") this.rec.resume();
+    this.rec.stop();
+    await this.stopped;
     this.out.width = this.out.height = 0;
     if (!keep || !this.parts.length) return null;
     return new Blob(this.parts, { type: this.rec.mimeType.split(";")[0] || `video/${this.ext}` });

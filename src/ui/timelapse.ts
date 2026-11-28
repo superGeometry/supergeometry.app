@@ -194,7 +194,8 @@ export class Timelapse {
       const w = from.clone().addScaledVector(side, 0.5).addScaledVector(over, 0.45).normalize();
       // Never from straight above or from far below: the part's sides give it its shape.
       const flat = Math.hypot(w.x, w.y);
-      const z = Math.max(-0.35, Math.min(0.72, w.z));
+      // (From below only for a sketch drawn under the part: a body seen from underneath reads as upside down.)
+      const z = Math.max(normal ? -0.35 : 0.12, Math.min(0.72, w.z));
       if (z !== w.z && flat > 1e-6) {
         const k = Math.sqrt(1 - z * z) / flat;
         w.set(w.x * k, w.y * k, z);
@@ -202,7 +203,7 @@ export class Timelapse {
       cam.lookAlong(w.toArray() as Vec3);
     }
     // What to have in the picture: the change with room round it; most of the model, if the change is most of it.
-    const focus = own > size * 0.55 ? model.clone().expandByScalar(size * 0.16) : box.clone().expandByScalar(Math.max(own * 0.6, size * 0.22));
+    const focus = own > size * 0.55 ? model.clone().expandByScalar(size * 0.08) : box.clone().expandByScalar(Math.max(own * 0.6, size * 0.2));
     if (!from && this.inSight(box, focus)) return;
     cam.fit(focus, true, this.free());
     cam.pace(from ? TURN : MOVE);
@@ -232,7 +233,7 @@ export class Timelapse {
     // Too far off to see what changed, or so near that there is no telling where on the model it is.
     const f = span(focus);
     const share = f ? Math.max((f.bx - f.ax) / (x1 - x0), (f.by - f.ay) / (y1 - y0)) : 2;
-    return share > 0.33 && share < 1.6;
+    return share > 0.5 && share < 1.6;
   }
 }
 
