@@ -54,6 +54,7 @@ import { setupRightColumn } from "./ui/panels";
 import type { ToolItem } from "./ui/ui";
 import { el, UI } from "./ui/ui";
 import { Timelapse } from "./ui/timelapse";
+import { fileFreshBodies } from "./doc/insertProject";
 import { Sentence } from "./ui/sentence";
 import { Ghost } from "./tools/ghost";
 import { arrangement, drawnRegions, materialRegions } from "./sketch/regions";
@@ -1028,6 +1029,12 @@ export class App implements AppContext {
         });
         features = this.store.doc.features;
       }
+    }
+    // Bodies of a project just inserted that its folder was waiting for (see doc/insertProject.ts): in they go.
+    if (features === this.store.doc.features && this.store.doc.folders?.some((f) => f.fresh?.length)) {
+      const built = r.bodies.map((b) => b.id);
+      this.store.adopt((d) => void fileFreshBodies(d, built));
+      features = this.store.doc.features;
     }
     // Which patterns a step used whole, as it was made: kept with it (they stay whole when a count changes).
     if (r.whole && features === this.store.doc.features) {

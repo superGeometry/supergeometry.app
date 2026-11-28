@@ -1138,6 +1138,11 @@ export interface ItemFolder {
   items: string[];
   /** A subfolder: the folder it sits in (missing: at the top). */
   parent?: string;
+  /**
+   * Steps (of a project just inserted) whose bodies belong here: those not built yet when the folder was made -
+   * a step's second body, a pattern's copies - are put in when they first appear, and this goes.
+   */
+  fresh?: string[];
 }
 
 export function emptyDoc(): ProjectDoc {

@@ -1,7 +1,8 @@
 // Insert menu: files (STEP/STL/OBJ/DXF/projects), images, variables.
 
 import { newId, parseProject } from "../doc/store";
-import type { Feature, ImageFeature, PlaneDef, SketchEntity, SketchFeature } from "../doc/types";
+import { insertProjectInto, type Inserted } from "../doc/insertProject";
+import type { ImageFeature, PlaneDef, ProjectDoc, SketchEntity, SketchFeature } from "../doc/types";
 import { GROUND } from "../geom";
 import { uid } from "../sketch/edit";
 import type { AppContext } from "../tools/tool";
@@ -131,10 +132,11 @@ export async function insertFile(app: AppContext): Promise<void> {
     }
     if (ext === "super" || ext === "tessel") {
       // (Not a mesh in it far over what can be brought in: see MESH_MAX.)
-      const parts = parseProject(await file.text()).features;
+      const theirs = parseProject(await file.text());
+      const parts = theirs.features;
       const big = parts.filter((f) => f.type === "import" && f.format === "stl" && (f.data.length * 0.75) / 50 > MESH_MAX * 1.5);
       if (big.length) app.ui.toast(`Left out of ${file.name}: ${big.map((f) => (f.type === "import" && f.fileName) || f.name).join(", ")} has more triangles than can be brought in (up to ${many(MESH_MAX)})`, "error");
-      insertProject(app, parts.filter((f) => !big.includes(f)), file.name);
+      insertProject(app, { ...theirs, features: parts.filter((f) => !big.includes(f)) }, file.name);
       return;
     }
     // (Any file can be picked on an iPad: see acceptFor.)
@@ -167,14 +169,21 @@ export async function insertFile(app: AppContext): Promise<void> {
   }
 }
 
-/** Append another project's history (ids are renamed so nothing collides). */
-function insertProject(app: AppContext, features: Feature[], name: string): void {
-  const map = new Map(features.map((f) => [f.id, newId(f.type)]));
-  let json = JSON.stringify(features);
-  for (const [from, to] of map) json = json.split(`"${from}"`).join(`"${to}"`);
-  const renamed = JSON.parse(json) as Feature[];
-  app.store.commit((d) => d.features.push(...renamed));
-  app.ui.toast(`Inserted ${renamed.length} steps from ${name}`);
+/**
+ * Another project's steps, after this one's (under new ids): one group in History and one folder in Items, both
+ * named after the file - see doc/insertProject.ts.
+ */
+function insertProject(app: AppContext, theirs: ProjectDoc, name: string): void {
+  if (!theirs.features.length) return app.ui.toast(`${name} has no steps to insert`);
+  let done: Inserted | null = null;
+  app.store.commit((d) => (done = insertProjectInto(d, theirs, name, newId)));
+  const made = done as Inserted | null;
+  if (!made) return;
+  const title = name.replace(/\.(super|tessel)$/i, "");
+  app.ui.toast(
+    `Inserted ${made.steps.length} step${made.steps.length === 1 ? "" : "s"} from ${name}: one group in History and one folder in Items, both named ${title}` +
+      (made.clashes.length ? `. This project's own value is used for ${made.clashes.join(", ")}` : ""),
+  );
 }
 
 export async function insertImage(app: AppContext, plane: PlaneDef = GROUND): Promise<ImageFeature | null> {

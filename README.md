@@ -491,6 +491,11 @@ records, the guide text says what the buttons do.
 - **More → Insert** brings in files (STEP, STL, OBJ, 3MF, DXF, SVG), another
   project's parts (**Project**), and pictures to trace over (**Image on
   plane**: on the floor, front or side, its middle at the X / Y you type).
+- An inserted **project** is kept together: its steps are one group in History
+  and its bodies, sketches and planes one folder in Items, both named after the
+  file. Its own folders are inside that folder, and its names, colours, hidden
+  sketches and variables come along (a variable this project already has keeps
+  this project's value). One Undo takes it all out again.
 - A mesh (**STL**, OBJ, the meshes in a 3MF) comes in as a solid with real
   faces, so it can be worked on: every flat side is one face, whichever way
   it leans, and the round parts are truly round - a hole, a boss, a pin, a
