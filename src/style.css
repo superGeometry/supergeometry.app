@@ -1965,6 +1965,19 @@ body.tut-on #hint .hint-x {
 #history-play.on {
   color: var(--accent);
 }
+#history-record {
+  margin: 0 2px 0 0;
+}
+#history-record.recording {
+  color: #ff5a52;
+  animation: recording-blink 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes recording-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
 /* While playing: the step on show lit, the ones still to come dimmed. */
 .history-item.play-now {
   background: var(--accent-soft);

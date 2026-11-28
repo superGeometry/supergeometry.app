@@ -363,6 +363,15 @@ export class UI {
     document.body.classList.toggle("playing-history", state !== "idle");
   }
 
+  /** History's Record button (beside Play); `on`: a recording is under way. */
+  recordButton(on: boolean, press?: () => void): void {
+    const b = $<HTMLButtonElement>("#history-record");
+    if (press) b.addEventListener("click", press);
+    b.innerHTML = icons.record;
+    b.title = on ? "Recording - Pause, then Reset, throws it away" : "Record: play it and save it as a video";
+    b.classList.toggle("recording", on);
+  }
+
   /** The step Play is showing: its row lit, the ones after it dimmed, and its name over the view. */
   private playCaption: HTMLElement | null = null;
   playStep(at: { id: string; index: number; of: number; name: string } | null): void {

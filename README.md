@@ -445,6 +445,13 @@ up, and the view goes to where the change is when it is out of sight. The
 button is *Pause* while it plays; paused, it is *Reset*, which brings the model
 back as it is (Esc does too). Nothing in the project is changed by it.
 
+**Record** (the dot beside Play, or **File → Export MP4 timelapse**) plays it
+from the first step and saves it as a video: the model and each step's name,
+without the panels, 1280 × 720 (upright on a phone held upright). The time a
+step takes to build is left out. The file is an MP4; a browser that can't
+record MP4 saves a WebM instead. Keep the app on screen while it records.
+Pause then Reset stops it and saves nothing.
+
 ---
 
 ## Saving, opening, exporting, printing

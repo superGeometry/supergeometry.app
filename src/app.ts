@@ -330,6 +330,7 @@ export class App implements AppContext {
       if (this.timelapse.state === "idle") this.setTool(null);
       this.timelapse.press();
     });
+    this.ui.recordButton(false, () => void this.recordTimelapse());
     window.addEventListener("keydown", (e) => e.key === "Escape" && this.timelapse.exit());
     window.addEventListener("keydown", (e) => this.onKey(e));
     this.view.canvas.addEventListener("pointermove", (e) => {
@@ -818,7 +819,15 @@ export class App implements AppContext {
   readonly timelapse: Timelapse = new Timelapse({
     view: () => this.view,
     steps: () => this.store.doc.features,
-    build: (fs) => this.kernel.regenerate(fs),
+    build: async (fs) => {
+      // (A recording leaves out the time a step takes to build.)
+      this.recording?.hold("build", true);
+      try {
+        return await this.kernel.regenerate(fs);
+      } finally {
+        this.recording?.hold("build", false);
+      }
+    },
     show: (r, fs, sketch) => {
       this.playSketch = sketch;
       this.apply(r, fs);
@@ -829,9 +838,41 @@ export class App implements AppContext {
       this.madeFor = "";
       void this.regenerate();
     },
-    state: (s) => this.ui.playButton(s),
-    mark: (at) => this.ui.playStep(at),
+    state: (s) => {
+      this.ui.playButton(s);
+      this.recording?.hold("paused", s === "paused");
+    },
+    mark: (at) => {
+      this.ui.playStep(at);
+      this.recording?.caption(at);
+    },
   });
+
+  /** History's Play being recorded (ui/timelapseVideo.ts, loaded when first asked for). */
+  private recording: import("./ui/timelapseVideo").TimelapseVideo | null = null;
+
+  /** History played from the first step to the last and saved as a video: MP4, or WebM where the browser records no MP4. */
+  private async recordTimelapse(): Promise<void> {
+    if (this.timelapse.state !== "idle" || this.recording) return;
+    if (!this.store.doc.features.some((f) => !f.suppressed && !f.rolledBack)) return this.ui.toast("Nothing to play yet: the project has no steps");
+    const { TimelapseVideo } = await import("./ui/timelapseVideo");
+    if (!TimelapseVideo.supported()) return this.ui.toast("This browser can't record video", "error");
+    this.setTool(null);
+    const rec = (this.recording = new TimelapseVideo(this.view));
+    this.ui.recordButton(true);
+    let blob: Blob | null = null;
+    try {
+      const whole = await this.timelapse.play(() => rec.insets());
+      blob = await rec.finish(whole);
+      if (!whole) this.ui.toast("Recording stopped - nothing was saved");
+    } finally {
+      this.recording = null;
+      this.ui.recordButton(false);
+    }
+    if (!blob) return;
+    if (rec.ext !== "mp4") this.ui.toast("This browser records WebM, not MP4: saved as .webm");
+    await this.deliver(blob, `${this.store.doc.name} timelapse.${rec.ext}`, "download");
+  }
 
   /** The steps (and variables) the model on the screen was asked for, as text; and how many askings are under way. */
   private madeFor = "";
@@ -2063,6 +2104,7 @@ export class App implements AppContext {
     });
     item("m-dxf", () => this.exportDXF());
     item("m-svg", () => this.exportDXF("download", "svg"));
+    item("m-timelapse", () => void this.recordTimelapse());
     // A share button at the right of each export (and Save): straight to the share sheet.
     // Only for the file types this browser will really share (Chrome on Android,
     // for one, refuses 3D and CAD files: a button there would only download).

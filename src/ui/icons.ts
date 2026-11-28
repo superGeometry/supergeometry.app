@@ -135,6 +135,7 @@ export const icons = {
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   play: svg('<path d="M8 5.5v13l10.5-6.5z" fill="currentColor" fill-opacity=".25"/>'),
   pause: svg('<path d="M9 5.5v13M15 5.5v13"/>'),
+  record: svg('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>'),
   reset: svg('<path d="M4.5 12a7.5 7.5 0 1 0 2.4-5.5"/><path d="M4 4.5v4.2h4.2"/>'),
   exit: svg('<path d="M14 4h5v16h-5"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/>'),
   normal: svg('<rect x="5" y="5" width="14" height="14"/><circle cx="12" cy="12" r="2"/>'),

@@ -319,7 +319,11 @@ export class Viewport {
     }
     this.frameHooks.forEach((f) => f());
     this.renderer.render(this.scene, cam);
+    this.afterDraw?.();
   }
+
+  /** Called right after each frame is drawn, while the picture is still there to copy (a recording). */
+  afterDraw: (() => void) | null = null;
 
   private applySettings(): void {
     const s = settings.value;

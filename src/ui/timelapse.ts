@@ -4,6 +4,7 @@
 import { Box3, Vector3 } from "three";
 import type { Feature, PlaneDef, SketchEntity, Vec3 } from "../doc/types";
 import type { BodyMesh, RegenResult } from "../kernel/protocol";
+import type { Insets } from "../view/camera";
 import type { Highlight, Viewport } from "../view/viewport";
 
 export type PlayState = "idle" | "playing" | "paused";
@@ -40,6 +41,11 @@ export class Timelapse {
   state: PlayState = "idle";
   private token = 0;
   private wake: (() => void) | null = null;
+  /** The part of the view to keep the model in (a recording: the part that is in the video); else what the panels leave free. */
+  private within: (() => Insets) | null = null;
+  private free(): Insets {
+    return this.within?.() ?? this.h.view().coveredInsets();
+  }
 
   constructor(private h: TimelapseHost) {}
 
@@ -79,10 +85,14 @@ export class Timelapse {
     }
   }
 
-  private async play(): Promise<void> {
+  /** Played from the start; true if it ran to its end. `within`: see above. */
+  async play(within: (() => Insets) | null = null): Promise<boolean> {
+    if (this.state !== "idle") return false;
     const all = this.h.steps();
     const on = all.filter((f) => !f.suppressed && !f.rolledBack);
-    if (!on.length) return;
+    if (!on.length) return false;
+    this.within = within;
+    let whole = false;
     const t = ++this.token;
     this.set("playing");
     // The first k steps: the rest switched off, the way a breakpoint does it.
@@ -131,18 +141,21 @@ export class Timelapse {
       }
       // All of it, to end on.
       this.h.mark(null);
-      this.h.view().fitAll();
+      this.h.view().cam.fit(this.h.view().bounds(), true, this.free());
       this.h.view().cam.pace(MOVE);
-      await this.sleep(MOVE + 500, t);
+      await this.sleep(MOVE + 900, t);
+      whole = true;
     } catch (e) {
       if (e !== STOP) throw e;
     } finally {
       this.wake = null;
       this.h.flash([]);
       this.h.mark(null);
+      this.within = null;
       this.set("idle");
       this.h.restore();
     }
+    return whole;
   }
 
   /**
@@ -176,7 +189,7 @@ export class Timelapse {
     // What to have in the picture: the change with room round it; most of the model, if the change is most of it.
     const focus = own > size * 0.55 ? model.clone().expandByScalar(size * 0.16) : box.clone().expandByScalar(Math.max(own * 0.5, size * 0.3));
     if (!from && this.inSight(box, focus)) return;
-    cam.fit(focus, true, view.coveredInsets());
+    cam.fit(focus, true, this.free());
     cam.pace(from ? TURN : MOVE);
     const end = performance.now() + (from ? TURN : MOVE) + 400;
     while (cam.animating && performance.now() < end) await this.sleep(40, t);
@@ -188,7 +201,7 @@ export class Timelapse {
     const view = this.h.view();
     const c = view.cam.camera;
     c.updateMatrixWorld();
-    const free = view.coveredInsets();
+    const free = this.free();
     const [x0, x1, y0, y1] = [free.left * 2 - 1, 1 - free.right * 2, free.bottom * 2 - 1, 1 - free.top * 2];
     const span = (b: Box3) => {
       let [ax, bx, ay, by] = [Infinity, -Infinity, Infinity, -Infinity];
