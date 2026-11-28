@@ -1,6 +1,7 @@
 import { uniqueEnds } from "./corners";
 import { isHeadset } from "../device";
 import {
+  GreaterDepth,
   CanvasTexture,
   AmbientLight,
   BackSide,
@@ -227,6 +228,10 @@ export class Viewport {
   private capPlaneGeo = new PlaneGeometry(1, 1);
   private edgeMat: LineBasicMaterial;
   private hiddenMat: LineDashedMaterial;
+  /** Hidden edges on a dark body: light, where the dark ones could not be seen. */
+  private hiddenLightMat: LineDashedMaterial;
+  /** The zoom the hidden edges' dashes were last sized for (they keep their size on screen). */
+  private hiddenWpp = 0;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     // (The drawing buffer isn't kept between frames: the browser shows each one the
@@ -263,7 +268,12 @@ export class Viewport {
         }),
     );
     this.edgeMat = new LineBasicMaterial({ color: COLORS.edge });
-    this.hiddenMat = new LineDashedMaterial({ color: 0x6b7280, dashSize: 2, gapSize: 2, depthTest: false, transparent: true, opacity: 0.7 });
+    // Hidden edges: dashed, and only where an edge really is behind something (drawn where the depth already
+    // there is nearer). They were drawn over every edge, the ones in plain sight too, in a grey close to the
+    // body's own - on a lit face they could not be seen, and the edges in front looked broken.
+    const hiddenOf = (color: number) => new LineDashedMaterial({ color, dashSize: 2, gapSize: 2, depthTest: true, depthFunc: GreaterDepth, depthWrite: false, transparent: true, opacity: 0.85 });
+    this.hiddenMat = hiddenOf(0x14161a);
+    this.hiddenLightMat = hiddenOf(0xf2f4f8);
 
     this.axesGroup = makeAxes();
     this.scene.add(this.grid.mesh, this.axesGroup, this.imageGroup, this.bodiesGroup, this.capGroup, this.constructionGroup, this.sketchGroup, this.highlightGroup, this.overlay);
@@ -313,6 +323,17 @@ export class Viewport {
     this.light.target.position.copy(this.cam.target);
     this.grid.update(this.cam.worldPerPixel(this.height), this.cam.target, this.cam.distance, this.cam.camera.position);
     this.layoutOriginPlanes();
+    // Hidden edges' dashes keep their size on screen (they were 2 mm whatever the zoom: dots far out, bars close up).
+    if (settings.value.showHiddenEdges) {
+      const wpp = this.cam.worldPerPixel(this.height);
+      if (Math.abs(wpp - this.hiddenWpp) > this.hiddenWpp * 0.03) {
+        this.hiddenWpp = wpp;
+        for (const m of [this.hiddenMat, this.hiddenLightMat]) {
+          m.dashSize = wpp * 6;
+          m.gapSize = wpp * 4;
+        }
+      }
+    }
     if (this.anaMat && settings.value.analysis !== "none") {
       this.anaMat.uniforms.uOrtho.value = this.cam.ortho;
       this.anaMat.uniforms.uViewDir.value.copy(this.cam.viewDir());
@@ -426,6 +447,14 @@ export class Viewport {
   private bodyColors: Record<string, string> = {};
   private bodyOpacity: Record<string, number> = {};
 
+  /** The hidden-edge lines for a body: dark on a light body, light on a dark one. */
+  private hiddenFor(id: string): LineDashedMaterial {
+    const hex = bodyColor(this.bodyColors[id]);
+    if (!hex) return this.hiddenMat;
+    const c = new Color(hex);
+    return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b < 0.18 ? this.hiddenLightMat : this.hiddenMat;
+  }
+
   private matsFor(id: string): { body: MeshStandardMaterial; cap: MeshBasicMaterial } {
     const hex = bodyColor(this.bodyColors[id]);
     const o = this.bodyOpacity[id] ?? 1;
@@ -466,6 +495,7 @@ export class Viewport {
       const m = this.matsFor(id);
       b.mesh.material = m.body;
       b.cap.material = m.cap;
+      b.hidden.material = this.hiddenFor(id);
     }
     this.applyClip();
     this.applySettings();
@@ -524,7 +554,7 @@ export class Viewport {
       const eg = new BufferGeometry();
       eg.setAttribute("position", new BufferAttribute(data.edgePositions, 3));
       const edges = new LineSegments(eg, this.edgeMat);
-      const hidden = new LineSegments(eg, this.hiddenMat);
+      const hidden = new LineSegments(eg, this.hiddenFor(data.id));
       hidden.computeLineDistances();
       hidden.renderOrder = 5;
       this.bodiesGroup.add(mesh, edges, hidden);
@@ -788,7 +818,7 @@ export class Viewport {
   private applyClip(): void {
     const planes = this.clip ? [this.clip] : [];
     // (The caps lie on the cut itself: never clipped.)
-    for (const m of [this.bodyMat, this.edgeMat, this.hiddenMat, ...this.stencilMats, ...[...this.colorMats.values()].map((c) => c.body)]) {
+    for (const m of [this.bodyMat, this.edgeMat, this.hiddenMat, this.hiddenLightMat, ...this.stencilMats, ...[...this.colorMats.values()].map((c) => c.body)]) {
       m.clippingPlanes = planes;
       m.needsUpdate = true;
     }
