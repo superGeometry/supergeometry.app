@@ -1206,8 +1206,88 @@ export function farFrom(entities: SketchEntity[], constraints: SketchConstraint[
   return new Set(entities.map((e) => e.id).filter((id) => !near.has(id)));
 }
 
+/**
+ * A corner's round (an arc joined to two lines at its ends, tangent to both) given a new radius: the entities to
+ * solve from, with the round already where that radius puts it - each line still on its own line and its far end
+ * where it was, only the ends at the round moved along the lines. Left to the solver, the new radius was met by
+ * moving all three a little: two lines that nothing told to move slid sideways. Not such a round, or a radius the
+ * corner has no room for: the entities as they are.
+ */
+export function roundAtCorner(entities: SketchEntity[], constraints: SketchConstraint[], arcId: string, r: number): SketchEntity[] {
+  const arc = entities.find((e) => e.id === arcId);
+  if (!arc || arc.kind !== "arc" || !(r > 0)) return entities;
+  type End = { line: Extract<SketchEntity, { kind: "line" }>; at: "a" | "b"; arcEnd: "a" | "b" };
+  const ends: End[] = [];
+  for (const c of constraints) {
+    if (c.type !== "coincident" || c.pts?.length !== 2) continue;
+    const mine = c.pts.find((q) => q.e === arcId && (q.p === "a" || q.p === "b"));
+    const other = c.pts.find((q) => q.e !== arcId);
+    if (!mine || !other || (other.p !== "a" && other.p !== "b")) continue;
+    const line = entities.find((e) => e.id === other.e);
+    if (line?.kind !== "line") continue;
+    // (Tangent to it too: a line that only ends at the arc is not one the round runs into.)
+    if (!constraints.some((t) => t.type === "tangent" && t.curves?.includes(arcId) && t.curves.includes(line.id))) continue;
+    ends.push({ line, at: other.p, arcEnd: mine.p as "a" | "b" });
+  }
+  if (ends.length !== 2 || ends[0].arcEnd === ends[1].arcEnd || ends[0].line.id === ends[1].line.id) return entities;
+  const far = ends.map((e) => (e.at === "a" ? e.line.b : e.line.a));
+  const near = ends.map((e) => (e.at === "a" ? e.line.a : e.line.b));
+  // Each line's direction, from its far end to the round.
+  const dir = ends.map((_, i) => {
+    const d = [near[i][0] - far[i][0], near[i][1] - far[i][1]];
+    const l = Math.hypot(d[0], d[1]);
+    return l > 1e-12 ? [d[0] / l, d[1] / l] : null;
+  });
+  if (!dir[0] || !dir[1]) return entities;
+  // The corner: where the two lines, carried on, meet.
+  const det = dir[0][0] * dir[1][1] - dir[0][1] * dir[1][0];
+  if (Math.abs(det) < 1e-9) return entities;
+  const dx = far[1][0] - far[0][0];
+  const dy = far[1][1] - far[0][1];
+  const t0 = (dx * dir[1][1] - dy * dir[1][0]) / det;
+  const corner = [far[0][0] + dir[0][0] * t0, far[0][1] + dir[0][1] * t0];
+  // From the corner back along each line, and the angle between them.
+  const back = far.map((f) => {
+    const d = [f[0] - corner[0], f[1] - corner[1]];
+    const l = Math.hypot(d[0], d[1]);
+    return { v: [d[0] / l, d[1] / l], len: l };
+  });
+  if (!(back[0].len > 1e-9) || !(back[1].len > 1e-9)) return entities;
+  const cos = Math.max(-1, Math.min(1, back[0].v[0] * back[1].v[0] + back[0].v[1] * back[1].v[1]));
+  const phi = Math.acos(cos);
+  if (phi < 1e-6 || phi > Math.PI - 1e-6) return entities;
+  // Only a round that is one now: its ends as far from the corner as each other, its middle on the corner's
+  // bisector where a round of that size has it. (An arc that bulges the other way, or one the sketch has left
+  // askew, is the solver's to deal with: put straight here, it would jump.)
+  const bisNow = [back[0].v[0] + back[1].v[0], back[0].v[1] + back[1].v[1]];
+  const bisLen = Math.hypot(bisNow[0], bisNow[1]);
+  const d0 = Math.hypot(near[0][0] - corner[0], near[0][1] - corner[1]);
+  const d1 = Math.hypot(near[1][0] - corner[0], near[1][1] - corner[1]);
+  const slack = Math.max(d0, d1, 1e-9) * 1e-6;
+  const r0 = d0 * Math.tan(phi / 2);
+  const reach0 = r0 / Math.sin(phi / 2) - r0;
+  const mid0 = [corner[0] + (bisNow[0] / bisLen) * reach0, corner[1] + (bisNow[1] / bisLen) * reach0];
+  const onLine = (i: number) => Math.abs((near[i][0] - corner[0]) * back[i].v[0] + (near[i][1] - corner[1]) * back[i].v[1] - (i ? d1 : d0)) < slack;
+  if (Math.abs(d0 - d1) > slack || !onLine(0) || !onLine(1) || Math.hypot(arc.m[0] - mid0[0], arc.m[1] - mid0[1]) > Math.max(slack, r0 * 1e-4)) return entities;
+  const d = r / Math.tan(phi / 2);
+  // (No room on a line for a round that big: left to the solver, which says so.)
+  if (d >= back[0].len - 1e-9 || d >= back[1].len - 1e-9) return entities;
+  const touch = back.map((b) => [corner[0] + b.v[0] * d, corner[1] + b.v[1] * d] as [number, number]);
+  const bis = [back[0].v[0] + back[1].v[0], back[0].v[1] + back[1].v[1]];
+  const bl = Math.hypot(bis[0], bis[1]);
+  const reach = r / Math.sin(phi / 2) - r;
+  const mid: [number, number] = [corner[0] + (bis[0] / bl) * reach, corner[1] + (bis[1] / bl) * reach];
+  return entities.map((e) => {
+    if (e.id === arcId) return { ...e, [ends[0].arcEnd]: touch[0], [ends[1].arcEnd]: touch[1], m: mid } as SketchEntity;
+    const i = ends.findIndex((x) => x.line.id === e.id);
+    return i < 0 ? e : ({ ...e, [ends[i].at]: touch[i] } as SketchEntity);
+  });
+}
+
 /** addStrict for a size of `ids`: what is far from them held still if that can be (see farFrom), else free to move. */
 export function sizeStrict(entities: SketchEntity[], existing: SketchConstraint[], added: SketchConstraint[], ids: string[], opts: SolveOptions = {}): ReturnType<typeof addStrict> {
+  // A corner's round given a radius: put where that radius has it first, so the lines it joins stay on their lines.
+  for (const c of added) if (c.type === "dim" && c.prop === "radius" && c.curves?.length === 1 && typeof c.value === "number") entities = roundAtCorner(entities, [...existing, ...added], c.curves[0], c.value);
   const far = farFrom(entities, [...existing, ...added], ids);
   if (far.size) {
     const held = addStrict(entities, existing, added, { ...opts, fixed: new Set([...(opts.fixed ?? []), ...far]) });
