@@ -2017,7 +2017,7 @@ export class UI {
 }
 
 /** The tools kept on screen at the left edge, top to bottom. */
-const LEFT = ["isolate", "measure", "section"];
+const LEFT = ["isolate", "section", "measure"];
 
 /** Does the text use a variable (a name that isn't a unit suffix)? */
 export function isExpression(text: string): boolean {
