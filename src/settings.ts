@@ -232,6 +232,9 @@ class SettingsStore {
       // Unavailable storage just means defaults.
     }
     this.value = { ...DEFAULTS, ...saved, snap: { ...DEFAULTS.snap, ...(saved.snap ?? {}) } };
+    // The overhang check is a look at the model before printing, not a way of working: off each time the app is
+    // opened, whatever it was left as. (Left on, the next visit began with every model in red and grey.)
+    if (this.value.analysis === "overhang") this.value.analysis = "none";
     // v2: orthographic view and the sketch constraint column are on by default -
     // also for anyone whose saved preferences still hold the old defaults.
     if ((saved.version ?? 1) < 2) this.value = { ...this.value, ortho: true, showConstraints: true, version: 2 };
