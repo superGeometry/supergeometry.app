@@ -4142,25 +4142,50 @@ html[data-screen="tablet"] #more-menu {
   }
 }
 
-/* A way to support shown in a window here: the site's own panel in a frame (Ko-fi's is drawn for a light page). */
+/* A way to support, on a card of the app's own before its page opens (Ko-fi). */
 .dialog.support-panel {
-  width: min(420px, calc(100vw - 24px));
+  width: min(360px, calc(100vw - 24px));
 }
-.support-frame {
-  border: 0;
-  width: 100%;
-  height: min(600px, calc(100dvh - 190px));
-  border-radius: 8px;
-  background: #f9f9f9;
+.support-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 14px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: center;
 }
-.support-out {
-  background: none;
-  border: 0;
-  padding: 0;
+.support-card-mark {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-soft);
   color: var(--accent);
-  font: inherit;
-  cursor: pointer;
-  text-decoration: underline;
+}
+.support-card-mark svg {
+  width: 30px;
+  height: 30px;
+}
+.support-card-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+.support-card-text {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.support-card-go {
+  align-self: stretch;
+  justify-content: center;
+  margin-top: 4px;
+  min-height: 40px;
+}
+.support-note {
+  text-align: center;
 }
 /* More → Boost / Donate / Support: the ways, indented under it. */
 .menu-sub {

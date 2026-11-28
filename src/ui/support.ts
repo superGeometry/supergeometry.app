@@ -16,11 +16,8 @@ export interface SupportWay {
   mark: string;
   /** A tag on the button's right (MakerWorld's Boost, with its rocket). */
   tag?: { icon: string; text: string };
-  /**
-   * The site's own panel, shown in a window here and not in a new tab (Ko-fi's donation panel). It is the site's
-   * page in a frame: fetched only when the window is opened, and apart from the app - it sees nothing of it.
-   */
-  panel?: string;
+  /** Said on a card of the app's own before its page opens (Ko-fi): what the support is for. Without it the page opens at once. */
+  card?: string;
 }
 
 const svg = (body: string) =>
@@ -46,7 +43,7 @@ export const SUPPORT: SupportWay[] = [
     sub: "Buy me a coffee",
     url: "https://ko-fi.com/supergeometry",
     logo: "",
-    panel: "https://ko-fi.com/supergeometry/?hidefeed=true&widget=true&embed=true&preview=true",
+    card: "superGeometry.app is free and stays free: no ads, no account, no paid tier. If it saves you time, a coffee helps me keep building it. One time or monthly, any amount, by card or PayPal.",
     // (A cup with a heart on it.)
     mark: svg('<path d="M4 8h12v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z"/><path d="M16 9.5h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M10 15.2 7.9 13a1.4 1.4 0 0 1 2.1-1.9A1.4 1.4 0 0 1 12.1 13z" fill="currentColor"/>'),
   },
@@ -57,9 +54,9 @@ export function openSupport(url: string): void {
   window.open(url, "_blank", "noopener");
 }
 
-/** A way to support, opened: its own panel in a window here if it has one (and the device is online), else its page in a new tab. */
+/** A way to support, opened: the app's card for it first if it has one, else its page in a new tab. */
 export function showSupport(w: SupportWay): void {
-  if (!w.panel || navigator.onLine === false) return openSupport(w.url);
+  if (!w.card) return openSupport(w.url);
   const back = document.createElement("div");
   back.className = "dialog-back";
   const box = document.createElement("div");
@@ -75,19 +72,27 @@ export function showSupport(w: SupportWay): void {
   closeBtn.title = "Close";
   closeBtn.innerHTML = svg('<path d="M6 6l12 12M18 6 6 18"/>');
   head.append(title, closeBtn);
-  const frame = document.createElement("iframe");
-  frame.className = "support-frame";
-  frame.title = `${w.name}: support superGeometry`;
-  frame.src = w.panel;
-  const note = document.createElement("div");
-  note.className = "dialog-note support-note";
-  note.append(`This is ${w.name}'s own page: what you enter goes to ${w.name}, not to this app. `);
+  // The app's own card, in its own look: what it is for, and one button on to the site (nothing of the site is loaded here).
+  const card = document.createElement("div");
+  card.className = "support-card";
+  const mark = document.createElement("div");
+  mark.className = "support-card-mark";
+  mark.innerHTML = w.mark;
+  const big = document.createElement("div");
+  big.className = "support-card-title";
+  big.textContent = w.sub;
+  const text = document.createElement("div");
+  text.className = "support-card-text";
+  text.textContent = w.card ?? "";
   const out = document.createElement("button");
   out.type = "button";
-  out.className = "support-out";
-  out.textContent = "Open it in a new tab";
-  note.append(out);
-  box.append(head, frame, note);
+  out.className = "text-btn primary support-card-go";
+  out.textContent = `Continue to ${w.name} ↗`;
+  const note = document.createElement("div");
+  note.className = "dialog-note support-note";
+  note.textContent = `Opens ${new URL(w.url).host} in a new tab. Paying is between you and ${w.name}: this app sees none of it.`;
+  card.append(mark, big, text, out);
+  box.append(head, card, note);
   const close = () => {
     window.removeEventListener("keydown", onKey, true);
     back.remove();
