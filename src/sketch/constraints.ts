@@ -1263,12 +1263,14 @@ export function roundAtCorner(entities: SketchEntity[], constraints: SketchConst
   const bisLen = Math.hypot(bisNow[0], bisNow[1]);
   const d0 = Math.hypot(near[0][0] - corner[0], near[0][1] - corner[1]);
   const d1 = Math.hypot(near[1][0] - corner[0], near[1][1] - corner[1]);
-  const slack = Math.max(d0, d1, 1e-9) * 1e-6;
+  // (As near as a solved sketch is: its sizes are met to about a ten-thousandth, not exactly - a round of 20 that
+  // the solver left 19.9992 from the corner on one line and 19.9993 on the other is a round all the same.)
+  const slack = Math.max(d0, d1, 1e-9) * 2e-3;
   const r0 = d0 * Math.tan(phi / 2);
   const reach0 = r0 / Math.sin(phi / 2) - r0;
   const mid0 = [corner[0] + (bisNow[0] / bisLen) * reach0, corner[1] + (bisNow[1] / bisLen) * reach0];
   const onLine = (i: number) => Math.abs((near[i][0] - corner[0]) * back[i].v[0] + (near[i][1] - corner[1]) * back[i].v[1] - (i ? d1 : d0)) < slack;
-  if (Math.abs(d0 - d1) > slack || !onLine(0) || !onLine(1) || Math.hypot(arc.m[0] - mid0[0], arc.m[1] - mid0[1]) > Math.max(slack, r0 * 1e-4)) return entities;
+  if (Math.abs(d0 - d1) > slack || !onLine(0) || !onLine(1) || Math.hypot(arc.m[0] - mid0[0], arc.m[1] - mid0[1]) > slack) return entities;
   const d = r / Math.tan(phi / 2);
   // (No room on a line for a round that big: left to the solver, which says so.)
   if (d >= back[0].len - 1e-9 || d >= back[1].len - 1e-9) return entities;

@@ -49,6 +49,31 @@ for (const r of [16, 30, 4, 12.5]) {
   check(`radius ${r}: the round is ${r}, and meets the lines ${r} from the corner`, ok && Math.abs(radiusOf(round) - r) < 1e-5 && far(up.b, [50, 10 + r]) < 1e-5 && far(level.a, [50 + r, 10]) < 1e-5, ok ? `${radiusOf(round)} at ${up.b} and ${level.a}` : "refused");
 }
 
+// As a sketch really is after the solver has been at it: sizes met to about a ten-thousandth, not exactly (the
+// round's ends 19.9992 and 19.9993 from the corner). It is a round all the same, and its lines stay put.
+{
+  const es2 = [
+    { id: "up", kind: "line", a: [210.999489489, 140.000000042], b: [210.999489489, 31.399369229] },
+    { id: "level", kind: "line", a: [230.998759578, 11.400188237], b: [375.000000008, 11.400188237] },
+    { id: "round", kind: "arc", a: [210.99948949776908, 31.39936922902165], m: [216.85738535825135, 17.25802110535692], b: [230.99875957815513, 11.400188243318954] },
+  ] as unknown as SketchEntity[];
+  const cs2 = cs.map((c) => (c.id === "r" ? { ...c, value: 20 } : c));
+  let cur = es2;
+  let worst = 0;
+  let all = true;
+  for (const r of [25, 12, 30, 20]) {
+    const res = setValueStrict(cur, cs2, "r", r);
+    if (!res) {
+      all = false;
+      break;
+    }
+    cur = res.result.entities;
+    const [up, level] = [get(cur, "up"), get(cur, "level")];
+    worst = Math.max(worst, Math.abs(up.a[0] - 210.999489489), Math.abs(up.b[0] - 210.999489489), Math.abs(up.a[1] - 140.000000042), Math.abs(level.a[1] - 11.400188237), Math.abs(level.b[1] - 11.400188237), Math.abs(level.b[0] - 375.000000008));
+  }
+  check("a round the solver left a hair off exact, its radius changed four times over: the lines never move", all && worst < 1e-6, `moved ${worst}`);
+}
+
 // A corner that isn't square: 60 degrees between the lines.
 {
   const c60 = Math.cos(Math.PI / 3);
