@@ -445,12 +445,15 @@ where the change is when it is out of sight. The
 button is *Pause* while it plays; paused, it is *Reset*, which brings the model
 back as it is (Esc does too). Nothing in the project is changed by it.
 
-**Record** (the dot beside Play, tapped twice like the bins, or **File → Export MP4 timelapse**) plays it
+**Record** (the dot beside Play, or **File → Export MP4 timelapse**) plays it
 from the first step and saves it as a video: the model and each step's name,
 without the panels, the app's name in the corner, 1280 × 720 (upright on a phone held upright). The time a
 step takes to build is left out. The file is an MP4; a browser that can't
 record MP4 saves a WebM instead. Keep the app on screen while it records.
-Pause then Reset stops it and saves nothing.
+Pause then Reset stops it and saves nothing. The dot takes two taps, like the
+bins: the first turns it red and the guide text says to tap again, the second
+starts the recording; a tap anywhere else calls it off. While it plays or
+records, the guide text says what the buttons do.
 
 ---
 
@@ -480,6 +483,8 @@ Pause then Reset stops it and saves nothing.
 - **File → Export DXF (sketch)** saves a sketch's curves as a 2D drawing for
   laser cutters, CNC and drawing programs: open **Items**, tap the sketch, then
   File → Export DXF. Construction lines go on their own layer.
+- **File → Export MP4 timelapse** plays History from the first step to the last
+  and saves it as a video (see [History](#history-change-anything-later)).
 - **File → New project** starts an empty one; the open project stays in the
   gallery.
 - **More → Insert** brings in files (STEP, STL, OBJ, 3MF, DXF, SVG), another

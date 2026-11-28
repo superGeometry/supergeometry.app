@@ -367,7 +367,11 @@ export class UI {
   recordButton(on: boolean, press?: () => void): void {
     const b = $<HTMLButtonElement>("#history-record");
     // Two taps, like the bins: the first lights it, the second records (a slip of the finger beside Play records nothing).
-    if (press) twoTap(b, "history-record", press, "Tap again to start recording");
+    if (press)
+      twoTap(b, "history-record", press, "Tap again to start recording", {
+        on: () => this.passingHint("Tap again to start recording. The model is built again from its first step and saved as a video."),
+        off: () => this.passingHint(null),
+      });
     b.innerHTML = icons.record;
     b.title = on ? "Recording - Pause, then Reset, throws it away" : "Record: play it and save it as a video (two taps)";
     b.classList.toggle("recording", on);
@@ -732,7 +736,31 @@ export class UI {
 
   // ------------------------------------------------------- hint/status/toast
 
+  /**
+   * Guide text for a while, over whatever is there: a button waiting for its second tap, History playing. Null
+   * puts back what was there (or what a tool has said since).
+   */
+  private hintUnder: string | null | undefined;
+  passingHint(text: string | null): void {
+    if (text) {
+      if (this.hintUnder === undefined) this.hintUnder = this.hintText;
+      const under = this.hintUnder;
+      this.hintUnder = undefined;
+      this.setHint(text);
+      this.hintUnder = under;
+    } else if (this.hintUnder !== undefined) {
+      const under = this.hintUnder;
+      this.hintUnder = undefined;
+      this.setHint(under);
+    }
+  }
+
   setHint(text: string | null): void {
+    // (Something passing is on show: this is kept for when it goes.)
+    if (this.hintUnder !== undefined) {
+      this.hintUnder = text;
+      return;
+    }
     // The words, and a small × to put the guide text away for good (More → Guide text brings it back).
     // The switch in More was not found. (Only the × takes a tap: the words let
     // taps through to the model under them.)
@@ -2083,12 +2111,16 @@ const ARM_MS = 3000;
 function disarm(): void {
   clearTimeout(armTimer);
   armed = null;
+  armedOff?.();
+  armedOff = null;
   for (const b of document.querySelectorAll<HTMLElement>(".armed[data-arm-key]")) {
     b.classList.remove("armed");
     if (b.dataset.armTitle !== undefined) b.title = b.dataset.armTitle;
   }
 }
-export function twoTap(b: HTMLElement, key: string, run: () => void, again = "Tap again to delete"): void {
+/** What to do when the armed button is let go of or used (its guide text put away). */
+let armedOff: (() => void) | null = null;
+export function twoTap(b: HTMLElement, key: string, run: () => void, again = "Tap again to delete", arm?: { on(): void; off(): void }): void {
   b.dataset.armKey = key;
   const isArmed = () => !!armed && armed.key === key && Date.now() < armed.until;
   const show = () => {
@@ -2107,6 +2139,7 @@ export function twoTap(b: HTMLElement, key: string, run: () => void, again = "Ta
     disarm();
     armed = { key, until: Date.now() + ARM_MS };
     show();
+    if (arm) (arm.on(), (armedOff = arm.off));
     armTimer = window.setTimeout(disarm, ARM_MS);
   });
 }

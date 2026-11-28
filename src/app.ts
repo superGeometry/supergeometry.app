@@ -833,6 +833,18 @@ export class App implements AppContext {
     state: (s) => {
       this.ui.playButton(s);
       this.recording?.hold("paused", s === "paused");
+      const rec = !!this.recording;
+      this.ui.passingHint(
+        s === "idle"
+          ? null
+          : s === "playing"
+            ? rec
+              ? "Recording: keep the app on screen until it ends, then the video is saved. Pause, then Reset, stops it and saves nothing."
+              : "Playing how the model was built. Pause (in History) holds it; Esc brings the model back as it is."
+            : rec
+              ? "Recording paused. Reset (in History) stops it and saves nothing."
+              : "Paused. Reset (in History) brings the model back as it is.",
+      );
     },
     mark: (at) => {
       this.ui.playStep(at);
