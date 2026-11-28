@@ -5,7 +5,7 @@ import { Box3, Vector3 } from "three";
 import type { Feature, PlaneDef, SketchEntity, Vec3 } from "../doc/types";
 import type { BodyMesh, RegenResult } from "../kernel/protocol";
 import type { Insets } from "../view/camera";
-import type { Highlight, Viewport } from "../view/viewport";
+import type { Viewport } from "../view/viewport";
 
 export type PlayState = "idle" | "playing" | "paused";
 
@@ -19,8 +19,6 @@ export interface TimelapseHost {
   waiting(on: boolean): void;
   /** Show that model; `sketch`: the sketch to show with it, hidden or not. */
   show(r: RegenResult, features: Feature[], sketch: string | null): void;
-  /** Light up these bodies and faces (none: nothing lit). */
-  flash(what: Highlight[]): void;
   /** The project as it is, shown again. */
   restore(): void;
   state(s: PlayState): void;
@@ -36,7 +34,6 @@ const TURN = 1200; // ...and turning to another side on the way
 const SETTLE = 250; // after the view arrives, before the step appears
 const SKETCH = 1300; // a sketch on show
 const SOLID = 1800; // a step that changed a body
-const LIT = 900; // of which the changed body stays lit
 const QUIET = 700; // a step that shows nothing new (a plane, a variable)
 
 export class Timelapse {
@@ -145,12 +142,8 @@ export class Timelapse {
         had = new Map(r.bodies.map((b) => [b.id, b.key]));
         was = corners(r.bodies);
         if (isSketch) await this.sleep(SKETCH, t);
-        else if (changed.length) {
-          this.h.flash(fresh!.lit);
-          await this.sleep(LIT, t);
-          this.h.flash([]);
-          await this.sleep(SOLID - LIT, t);
-        } else await this.sleep(QUIET, t);
+        // (Nothing is lit: what a step added was shown in the blue of a picked face, and read as a selection.)
+        else await this.sleep(changed.length ? SOLID : QUIET, t);
       }
       // All of it, to end on.
       this.h.mark(null);
@@ -162,7 +155,6 @@ export class Timelapse {
       if (e !== STOP) throw e;
     } finally {
       this.wake = null;
-      this.h.flash([]);
       this.h.mark(null);
       this.within = null;
       this.set("idle");
@@ -244,12 +236,11 @@ function corners(bodies: BodyMesh[]): Set<string> {
 
 /**
  * What a step added to the bodies it changed: the box of their corners that were not there before (a hole cut in a
- * block is the hole, not the block), and what to light - the faces with such corners, or the whole body when it is
- * all new. Nothing new in a body that changed (something was only taken away): the body.
+ * block is the hole, not the block). Nothing new in a body that changed (something was only taken away), or all of
+ * it new: the body.
  */
-function freshParts(changed: BodyMesh[], was: Set<string>): { box: Box3; lit: Highlight[] } {
+function freshParts(changed: BodyMesh[], was: Set<string>): { box: Box3 } {
   const box = new Box3();
-  const lit: Highlight[] = [];
   const p = new Vector3();
   for (const b of changed) {
     const isNew = new Uint8Array(b.positions.length / 3);
@@ -257,21 +248,11 @@ function freshParts(changed: BodyMesh[], was: Set<string>): { box: Box3; lit: Hi
     for (let v = 0; v < isNew.length; v++) if (!was.has(cornerKey(b.positions, v * 3))) (isNew[v] = 1), n++;
     if (!n || n === isNew.length) {
       box.union(meshBox([b]));
-      lit.push({ kind: "body", body: b.id });
       continue;
     }
     for (let v = 0; v < isNew.length; v++) if (isNew[v]) box.expandByPoint(p.set(b.positions[v * 3], b.positions[v * 3 + 1], b.positions[v * 3 + 2]));
-    const faces = new Set<number>();
-    for (const g of b.faceGroups) {
-      // (A face that only lost a piece keeps most of its corners: lit when a fair share of them is new.)
-      let fresh = 0;
-      for (let i = g.start; i < g.start + g.count; i++) fresh += isNew[b.indices[i]];
-      if (fresh > g.count * 0.34) faces.add(g.face);
-    }
-    if (!faces.size || faces.size === new Set(b.faceGroups.map((g) => g.face)).size) lit.push({ kind: "body", body: b.id });
-    else for (const face of faces) lit.push({ kind: "face", body: b.id, face });
   }
-  return { box, lit };
+  return { box };
 }
 
 function meshBox(bodies: BodyMesh[]): Box3 {

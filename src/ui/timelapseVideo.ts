@@ -32,6 +32,8 @@ export class TimelapseVideo {
   private text: { count: string; name: string } | null = null;
   private waits = new Set<string>();
   private stopped: Promise<void>;
+  /** The app's mark, drawn with its name in the bottom right corner (there once it has loaded). */
+  private mark: HTMLImageElement | null = null;
 
   constructor(private view: Viewport) {
     const [mime, ext] = kind()!;
@@ -44,6 +46,9 @@ export class TimelapseVideo {
     this.rec = new MediaRecorder(this.out.captureStream(30), { mimeType: mime, videoBitsPerSecond: 4_000_000 });
     this.rec.ondataavailable = (e) => e.data.size && this.parts.push(e.data);
     this.stopped = new Promise((done) => (this.rec.onstop = () => done()));
+    const mark = new Image();
+    mark.onload = () => ((this.mark = mark), this.view.requestRender());
+    mark.src = "icon.svg";
     view.afterDraw = () => this.draw();
     this.draw();
     this.rec.start(1000);
@@ -70,19 +75,44 @@ export class TimelapseVideo {
     const { x, y, w, h } = this.crop();
     const [W, H] = [this.out.width, this.out.height];
     this.g.drawImage(this.view.canvas, x, y, w, h, 0, 0, W, H);
-    if (!this.text) return;
-    // The step's number and name, as on the screen: a dark pill at the bottom.
     const g = this.g;
     const size = Math.round(Math.min(W, H) * 0.036);
+    const sans = `system-ui, -apple-system, "Segoe UI", sans-serif`;
+    // The app's mark and name, bottom right.
+    const edge = size * 1.1;
+    const ls = Math.round(size * 0.95);
+    g.textBaseline = "middle";
+    g.font = `750 ${ls}px ${sans}`;
+    const n1 = g.measureText("superGeometry").width;
+    g.font = `600 ${ls}px ${sans}`;
+    const n2 = g.measureText(".app").width;
+    const icon = ls * 1.35;
+    const lw = icon + ls * 0.35 + n1 + n2;
+    const [lx, ly] = [W - edge - lw, H - edge - icon / 2];
+    g.save();
+    g.shadowColor = "rgba(0, 0, 0, 0.55)";
+    g.shadowBlur = ls * 0.4;
+    if (this.mark) g.drawImage(this.mark, lx, ly - icon / 2, icon, icon);
+    g.font = `750 ${ls}px ${sans}`;
+    g.fillStyle = "#f1f3f6";
+    g.fillText("superGeometry", lx + icon + ls * 0.35, ly);
+    g.font = `600 ${ls}px ${sans}`;
+    g.fillStyle = "#3d8bff";
+    g.fillText(".app", lx + icon + ls * 0.35 + n1, ly);
+    g.restore();
+    if (!this.text) return;
+    // The step's number and name, as on the screen: a dark pill at the bottom - in the middle where there is room
+    // beside the name (a lying video), above it where there isn't (an upright one).
+    const beside = W > H;
     g.font = `500 ${size}px system-ui, -apple-system, "Segoe UI", sans-serif`;
     const cw = g.measureText(this.text.count).width;
     g.font = `600 ${size}px system-ui, -apple-system, "Segoe UI", sans-serif`;
     let name = this.text.name;
-    const room = W * 0.8 - cw - size * 2.4;
+    const room = (beside ? W - 2 * (lw + edge * 2) : W * 0.86) - cw - size * 2.4;
     while (name.length > 4 && g.measureText(name).width > room) name = `${name.slice(0, -2).trimEnd()}…`;
     const nw = g.measureText(name).width;
     const [bw, bh] = [cw + nw + size * 2.4, size * 2.1];
-    const [bx, by] = [(W - bw) / 2, H - bh - size * 1.1];
+    const [bx, by] = [(W - bw) / 2, beside ? H - edge - icon / 2 - bh / 2 : H - edge - icon - size * 0.7 - bh];
     g.fillStyle = "rgba(24, 26, 30, 0.88)";
     g.beginPath();
     g.roundRect(bx, by, bw, bh, bh * 0.32);

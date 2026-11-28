@@ -825,7 +825,6 @@ export class App implements AppContext {
       this.playSketch = sketch;
       this.apply(r, fs);
     },
-    flash: (lit) => (lit.length ? this.view.setHighlights(lit, null) : this.refreshHighlights()),
     restore: () => {
       this.playSketch = null;
       this.madeFor = "";

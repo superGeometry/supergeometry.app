@@ -440,14 +440,14 @@ in the timeline - a group they were in the middle of splits around them. If a st
 can't be rebuilt after a change, it's marked and the reason is shown.
 
 **Play** (the triangle beside the panel's title) builds the model again before
-your eyes, one step at a time: each step's name is shown, what it added lights
-up, and the view goes to where the change is when it is out of sight. The
+your eyes, one step at a time: each step's name is shown, and the view goes to
+where the change is when it is out of sight. The
 button is *Pause* while it plays; paused, it is *Reset*, which brings the model
 back as it is (Esc does too). Nothing in the project is changed by it.
 
 **Record** (the dot beside Play, or **File → Export MP4 timelapse**) plays it
 from the first step and saves it as a video: the model and each step's name,
-without the panels, 1280 × 720 (upright on a phone held upright). The time a
+without the panels, the app's name in the corner, 1280 × 720 (upright on a phone held upright). The time a
 step takes to build is left out. The file is an MP4; a browser that can't
 record MP4 saves a WebM instead. Keep the app on screen while it records.
 Pause then Reset stops it and saves nothing.
