@@ -53,8 +53,16 @@ const DOUBLE_TAP_MS = 350;
 const FINGER_TAP_MS = 350;
 /** Two fingers move this far (px) before they move the view: under it they may be a tap, and the view stays still. */
 const PINCH_SLOP = 8;
-/** Two fingers turn this far (rad, 12°) before the view rolls with them: fingers that pinch or slide turn a little too. */
-const TWIST_START = 0.21;
+/**
+ * Two fingers turn this far (rad, 20°) before the view rolls with them: fingers that pinch or slide turn a little
+ * too. (It was 12°: one finger moved a little rolled the view.)
+ */
+const TWIST_START = 0.35;
+/**
+ * ...and each has gone at least this far (px) round the point between them. An angle alone says little when the
+ * fingers are close together: 20° of two fingers a thumb's width apart is a few millimetres of one of them.
+ */
+const TWIST_REACH = 32;
 
 interface Tracked {
   id: number;
@@ -319,9 +327,10 @@ export class InputRouter {
           let da = s.a - this.lastPinch.a;
           da = Math.atan2(Math.sin(da), Math.cos(da));
           m.turned += da;
-          if (!m.rolling && Math.abs(m.turned) > TWIST_START) {
+          if (!m.rolling && Math.abs(m.turned) > TWIST_START && Math.abs(m.turned) * (s.d / 2) > TWIST_REACH) {
             m.rolling = true;
-            da = m.turned - Math.sign(m.turned) * TWIST_START;
+            // (From here on: it does not jump to catch up with what was turned before it was taken for a twist.)
+            da = 0;
           }
           if (m.rolling && da) this.view.cam.twist(da, s.cx - this.view.width / 2, s.cy - this.view.height / 2, this.view.height);
         }
