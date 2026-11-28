@@ -195,7 +195,7 @@ straight-on view (Front, Top…) Sketch goes on the face you're looking at.
 Sketches on a face measure X / Y from the model's origin.
 
 **Drawing tools:** Line (keeps going from the last point; tap the first point
-to close, which ends the line), Arc (two ends, then the bend - or by centre), Spline (smooth curve through points;
+to close, which ends the line), Arc (two ends, then the bend - or by centre; an end placed on a line's end shows, dashed, the bend that runs smoothly on from that line, and the third point snaps to it), Spline (smooth curve through points;
 *Fit* or *Control* points, or *Draw*: press and drag freehand like a pencil - the stroke
 is cleaned up into a few lines, arcs and smooth curves, corners kept, so an extrusion
 gets a handful of faces, not hundreds; end where you began to close it), Rectangle (diagonal / centre / 3 points), Circle

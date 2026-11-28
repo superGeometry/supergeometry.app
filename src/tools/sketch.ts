@@ -254,12 +254,14 @@ interface Snap {
   dir?: { type: "parallel" | "perpendicular"; curve: string };
   /** A point of the model (a corner, a round end's centre): drawing there stays there. */
   model?: boolean;
+  /** The arc being bent runs smoothly on from these lines (kept tangent to them). */
+  tan?: string[];
 }
 
 /** Something the cursor can slide along: a line (through p, along d) or a circle. */
 type Locus =
   | { kind: "line"; p: Vec2; d: Vec2; label: string; guide?: Vec2; seg?: [Vec2, Vec2]; on?: string; dir?: Snap["dir"]; show?: [Vec2, Vec2]; axis?: 0 | 1 }
-  | { kind: "circle"; c: Vec2; r: number; label: string; on?: string };
+  | { kind: "circle"; c: Vec2; r: number; label: string; on?: string; tan?: { curve: string; ok(q: Vec2): boolean }; show?: [Vec2, Vec2] };
 
 function nearestOnLocus(L: Locus, q: Vec2): Vec2 {
   if (L.kind === "circle") {
@@ -3198,6 +3200,8 @@ export class SketchTool implements Tool {
       }
     }
     if (s.guidePoints) loci.push(...this.curveLoci());
+    // An arc's bend being placed, an end of it on a line's end: the bend that runs smoothly on from that line.
+    for (const t of this.arcTangents()) loci.push({ kind: "circle", c: t.c, r: t.r, label: "Tangent", tan: { curve: t.curve, ok: t.ok }, show: t.show });
     // A line being drawn: parallel or square to another line.
     const from = this.kind === "line" && this.pts.length ? this.pts[this.pts.length - 1] : null;
     if (from && s.guideLines) {
@@ -3222,6 +3226,8 @@ export class SketchTool implements Tool {
       if (d >= lt) continue;
       // On (or past the end of) a line the new line runs alongside: not a place to land.
       if (L.kind === "line" && L.seg && alongside(L.seg[0], L.seg[1], q)) continue;
+      // (The other half of a tangent circle is the arc doubling back along its line.)
+      if (L.kind === "circle" && L.tan && !L.tan.ok(q)) continue;
       let label = L.label;
       let ext: Vec2 | undefined;
       if (L.kind === "line" && L.seg) {
@@ -3242,7 +3248,7 @@ export class SketchTool implements Tool {
       near.push({ L, q, d, label, ext });
     }
     // Curves and extensions win a tie over the straight-across guides (they're what you aimed at).
-    const rank = (n: (typeof near)[number]) => n.d - (n.L.kind === "circle" || (n.L.kind === "line" && n.L.seg) ? 2 : 0);
+    const rank = (n: (typeof near)[number]) => n.d - (n.L.kind === "circle" && n.L.tan ? 4 : n.L.kind === "circle" || (n.L.kind === "line" && n.L.seg) ? 2 : 0);
     near.sort((a, b) => rank(a) - rank(b));
 
     const out: Snap = { uv: raw, guides: [] };
@@ -3265,6 +3271,14 @@ export class SketchTool implements Tool {
         out.uv = bestX.x;
       }
     }
+    // Landed on a tangent bend that is the other line's tangent bend too (both ends as far from the corner: a
+    // true round): tangent to both.
+    if (used.some((n) => n.L.kind === "circle" && n.L.tan))
+      for (const n of near) {
+        const L = n.L;
+        if (used.includes(n) || L.kind !== "circle" || !L.tan) continue;
+        if (Math.abs(Math.hypot(out.uv[0] - L.c[0], out.uv[1] - L.c[1]) - L.r) < L.r * 1e-6 && L.tan.ok(out.uv)) used.push(n);
+      }
     // Grid along a straight-across guide (and everywhere when there's none).
     if (s.grid && used.length < 2) {
       // The grid's own squares, as they are drawn (the smallest at least a fingertip's 8 px wide): what is seen is
@@ -3286,6 +3300,63 @@ export class SketchTool implements Tool {
       if (n.ext) out.guides!.push([n.ext, out.uv]);
       if (L.kind === "line" && L.show) out.guides!.push(L.show);
       if (L.kind === "line" && L.dir) out.dir = L.dir;
+      if (L.kind === "circle" && L.show) out.guides!.push(L.show);
+      if (L.kind === "circle" && L.tan) out.tan = [...(out.tan ?? []), L.tan.curve];
+    }
+    return out;
+  }
+
+  /**
+   * A three-point arc with both ends placed, an end of it on the end of a line: the one bend that runs smoothly on
+   * from that line (the circle through both ends that touches the line there). Its centre and radius, the middle
+   * of the arc, a stretch of the line carried on (to show what it is tangent to), and whether a point of the
+   * circle is on the arc's side of it (the other side would double back along the line).
+   */
+  private arcTangents(): { curve: string; c: Vec2; r: number; m: Vec2; show: [Vec2, Vec2]; ok(q: Vec2): boolean }[] {
+    if (this.kind !== "arc" || memory.arc !== "3pt" || this.pts.length !== 2) return [];
+    const out: ReturnType<SketchTool["arcTangents"]> = [];
+    const ends: [PointRef | null, Vec2, Vec2][] = [
+      [this.startRef, this.pts[0], this.pts[1]],
+      [this.secondRef, this.pts[1], this.pts[0]],
+    ];
+    for (const [ref, P, Q] of ends) {
+      if (!ref || (ref.p !== "a" && ref.p !== "b")) continue;
+      const line = this.entities.find((e) => e.id === ref.e);
+      if (line?.kind !== "line") continue;
+      const far = ref.p === "a" ? line.b : line.a;
+      const len = Math.hypot(P[0] - far[0], P[1] - far[1]);
+      if (len < 1e-9) continue;
+      // The line's direction, on through its end.
+      const d: Vec2 = [(P[0] - far[0]) / len, (P[1] - far[1]) / len];
+      const n: Vec2 = [-d[1], d[0]];
+      const w: Vec2 = [Q[0] - P[0], Q[1] - P[1]];
+      const chord = Math.hypot(w[0], w[1]);
+      const across = w[0] * n[0] + w[1] * n[1];
+      // (The other end straight ahead on the line: no arc, a straight line.)
+      if (chord < 1e-9 || Math.abs(across) < chord * 1e-6) continue;
+      const t = (chord * chord) / (2 * across);
+      const c: Vec2 = [P[0] + n[0] * t, P[1] + n[1] * t];
+      const r = Math.abs(t);
+      // Which way round the arc goes: leaving P along the line's direction.
+      const turn = Math.sign((P[0] - c[0]) * d[1] - (P[1] - c[1]) * d[0]) || 1;
+      const aP = Math.atan2(P[1] - c[1], P[0] - c[0]);
+      const swept = (q: Vec2) => {
+        const a = (Math.atan2(q[1] - c[1], q[0] - c[0]) - aP) * turn;
+        return ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      };
+      const whole = swept(Q);
+      const am = aP + (turn * whole) / 2;
+      out.push({
+        curve: line.id,
+        c,
+        r,
+        m: [c[0] + r * Math.cos(am), c[1] + r * Math.sin(am)],
+        show: [P, [P[0] + d[0] * chord * 0.6, P[1] + d[1] * chord * 0.6]],
+        ok: (q) => {
+          const a = swept(q);
+          return a > whole * 0.02 && a < whole * 0.98;
+        },
+      });
     }
     return out;
   }
@@ -3677,6 +3748,8 @@ export class SketchTool implements Tool {
           if (e.kind === "arc" && memory.arc === "3pt" && settings.value.autoConstrain) {
             if (this.startRef) cs.push({ id: uid(), type: "coincident", pts: [{ e: e.id, p: "a" }, this.startRef] });
             if (this.secondRef) cs.push({ id: uid(), type: "coincident", pts: [{ e: e.id, p: "b" }, this.secondRef] });
+            // Bent to run smoothly on from a line (the Tangent snap): it stays that way.
+            for (const curve of new Set(this.cursor?.tan ?? [])) cs.push({ id: uid(), type: "tangent", curves: [curve, e.id] });
           }
           this.secondRef = null;
         }
@@ -4039,6 +4112,12 @@ export class SketchTool implements Tool {
       const pts = this.kind === "line" ? [this.pts[this.pts.length - 1], c] : [...this.pts, c];
       const e = this.buildShape(pts);
       const yellow = 0xffc23d;
+      // Arc, both ends placed: the bends that run smoothly on from the lines it ends on, dashed - where to aim.
+      if (this.kind === "arc" && this.pts.length === 2) {
+        const [a, b] = this.pts;
+        const tangents = this.arcTangents().map((t, i): SketchEntity => ({ id: `arc-tangent-${i}`, kind: "arc", a, m: t.m, b }));
+        if (tangents.length) this.drawGhosts(tangents, yellow, true);
+      }
       // Arc by its centre: the centre shows from the first tap on.
       if (this.kind === "arc" && memory.arc === "center") this.drawCentreMark(this.pts[0]);
       // Arc, both ends placed and nothing to aim with (touch, or being bent): the bend so far.
