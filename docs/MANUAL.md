@@ -153,7 +153,12 @@ runs between, a row or a ring of copies for a pattern.
 **Quick buttons** - round buttons beside a pick with its next two likeliest
 tools (a flat face Sketch and Move, a round face Thread and Fillet, an edge
 Chamfer and Move, a body Fillet and Mirror), then **Delete**, then **More**,
-which opens every other tool that pick has. In a sketch: Construction and
+which opens every other tool that pick has. Under More the tools keep the
+same order whatever is picked (Extrude, Offset, Plane, Split, Shell, Scale,
+Fillet, Chamfer and so on; one the pick cannot use is left out), the two
+patterns are one **Pattern** button, and the tools you start most from these
+buttons are lit a little (counted on this device only). On a computer the
+list shows everything without scrolling. In a sketch: Construction and
 Delete. On a phone they are smaller, their names the same size.
 **Settings → Quick buttons** switches them off, for working from the
 line at the bottom alone: every one of those tools is on it too.
@@ -294,6 +299,10 @@ sketch. A sketch stays in view until every region of it is used.
   gimbal; the faces around it tilt to follow (Fillet / Chamfer are in the
   list). Every edit is checked: one that would tear the body open stops with a
   message instead.
+- A body that stands at an angle: in Move/Rotate, drag the gimbal's middle
+  dot onto a straight edge, a corner or a flat face of it and the gimbal turns
+  to point that part's way - its arrows then move the body along that edge or
+  square to that face, its rings turn it about them.
 - **Transform** - Move/Rotate (gimbal, with a Copy switch: after a drag the
   panel stays for exact values; copies are independent bodies, **Link** keeps a
   freeform copy following its original), Scale (its three ways are on its line: Uniform,
