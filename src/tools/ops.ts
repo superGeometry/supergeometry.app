@@ -1834,6 +1834,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       case "move":
         return "Drag an arrow to move it or an arc to turn it, or type. The middle dot is the point it turns about.";
       case "mirror":
+        if (this.mirrorDraw) return this.mirrorDraw.from ? "Now tap where the mirror line ends. The mirror stands upright on it." : "Tap where the mirror line starts, on the floor. It catches on the grid, and on corners and edge ends.";
         return this.feature.steps?.length
           ? "Tap the plane to mirror across: the feature is built again on the other side, with everything made on it. It follows the original when that changes."
           : "The body is flipped across the plane. A copy is made unless you turn Copy off.";
@@ -1924,7 +1925,25 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       case "scale":
         return [this.num("Factor", "op.factor", "number", { min: 0.0001 }), ...copy];
       case "mirror":
-        return [...copy];
+        return [
+          // No plane or face where the mirror should be: its line drawn on the floor, with two taps. The mirror
+          // stands upright on that line.
+          {
+            type: "slot",
+            label: "Draw mirror line",
+            value: this.mirrorDraw ? (this.mirrorDraw.from ? "Tap its end" : "Tap its start") : "Two taps on the floor",
+            active: !!this.mirrorDraw,
+            filled: false,
+            onClick: () => {
+              this.mirrorDraw = this.mirrorDraw ? null : { from: null };
+              this.mirrorGhost?.dispose();
+              this.mirrorGhost = null;
+              this.render();
+              this.setHint();
+            },
+          },
+          ...copy,
+        ];
       case "linear":
         return [
           this.num("Count", "op.count", "int", { min: 2 }),
@@ -1953,7 +1972,78 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     this.dropPatternGrip();
     this.patGhost?.dispose();
     this.patGhost = null;
+    this.mirrorGhost?.dispose();
+    this.mirrorGhost = null;
     super.exit();
+  }
+
+  // ------------------------------------------------------------ mirror: its line drawn on the floor
+
+  /** Mirror, its line being drawn: the first of its two points once that is tapped. */
+  private mirrorDraw: { from: Vec3 | null } | null = null;
+  private mirrorGhost: Ghost | null = null;
+
+  /**
+   * Where a tap is on the floor (the XY plane), for the mirror's line: a corner of a body, or the end or middle of
+   * an edge, where the tap is on one (that point, straight down onto the floor); anywhere else, the grid.
+   */
+  private floorPoint(p: ToolPointer): Vec3 | null {
+    const view = this.app.view;
+    const hit = view.pick(p.x, p.y, { edgeTolPx: Math.max(10, p.tol), profiles: false, planes: false, axes: false });
+    let at: Vec3 | null = null;
+    if (hit?.kind === "vertex") at = view.vertexOf(hit.body, hit.vertex) ?? hit.point;
+    else if (hit?.kind === "edge") {
+      const e = view.body(hit.body)?.edges[hit.edge];
+      const near = (q: Vec3) => {
+        const s = view.toScreen(q);
+        return !!s && Math.hypot(s[0] - p.x, s[1] - p.y) < 16;
+      };
+      at = (e && [e.start, e.end, e.mid].find(near)) ?? hit.point;
+    }
+    if (at) return [at[0], at[1], 0];
+    const g = view.rayToPlane(p.x, p.y, { origin: [0, 0, 0], normal: [0, 0, 1], xDir: [1, 0, 0] });
+    if (!g) return null;
+    const step = view.grid.step || 1;
+    return [Math.round(g[0] / step) * step, Math.round(g[1] / step) * step, 0];
+  }
+
+  /** (While its line is being drawn, the guide says how - not that a plane is still to be picked.) */
+  protected setHint(): void {
+    if (this.mirrorDraw) return void this.app.ui.setHint(this.hint());
+    super.setHint();
+  }
+
+  /** The line so far, dashed, from its first point to `to`. */
+  private showMirrorLine(to: Vec3 | null): void {
+    this.mirrorGhost?.dispose();
+    this.mirrorGhost = null;
+    const from = this.mirrorDraw?.from;
+    if (from && to && len(sub(to, from)) > 1e-9) this.mirrorGhost = new Ghost(this.app.view, [...from, ...to]);
+  }
+
+  tap(p: ToolPointer): void {
+    const dr = this.mirrorDraw;
+    const o = this.feature.op;
+    if (!dr || o.kind !== "mirror") return super.tap(p);
+    const q = this.floorPoint(p);
+    if (!q) return void this.app.ui.toast("Tap where the floor is in view");
+    if (!dr.from) {
+      dr.from = q;
+      this.render();
+      this.setHint();
+      return;
+    }
+    if (len(sub(q, dr.from)) < 1e-9) return void this.app.ui.toast("Tap a point away from the first one");
+    // Upright on the line: the line runs in it, and so does straight up.
+    const along = norm(sub(q, dr.from));
+    const plane: PlaneDef = { origin: dr.from, xDir: along, normal: norm(cross(along, [0, 0, 1])) };
+    this.plane = plane;
+    o.plane = plane;
+    this.mirrorDraw = null;
+    this.showMirrorLine(null);
+    this.render();
+    this.update();
+    this.setHint();
   }
 
   // A pattern's size is dragged where the copies are: an arrow on the first copy of a row (how far apart), a dot on
@@ -2058,6 +2148,10 @@ export class TransformOp extends FeatureOp<TransformFeature> {
   }
 
   hover(p: ToolPointer | null): void {
+    if (this.mirrorDraw) {
+      this.app.setHover(null);
+      return this.showMirrorLine(p ? this.floorPoint(p) : null);
+    }
     this.lookAhead(p);
     if (this.patHandle) {
       const on = !!p && (!!this.patDrag || this.patHandle.hit(p));

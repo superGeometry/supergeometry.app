@@ -307,6 +307,10 @@ sketch. A sketch stays in view until every region of it is used.
   gimbal; the faces around it tilt to follow (Fillet / Chamfer are in the
   list). Every edit is checked: one that would tear the body open stops with a
   message instead.
+- **Mirror** asks for its plane: a face, one of your planes, XY, XZ or YZ - or
+  **Draw mirror line**: two taps on the floor (they catch on the grid, corners
+  and edge ends), and the mirror stands upright on the line between them. It
+  works for a whole body and for a feature alike.
 - **Mirror or pattern a feature**, not the whole body: tap a face of the
   feature (a boss, a pocket, a rib - anything a later step made on the body),
   then Transform, Mirror (it says "mirrors this feature") and tap the plane.
