@@ -19,6 +19,7 @@ export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
     added: [
+      "STEP files keep colours: a body's colour is written into the STEP file with it, and a STEP file's own colours come in with its bodies. (A body with no colour was marked red in the file, and showed red in other programs: it is the app's grey now.)",
       "AR on an iPhone or iPad: More > Enter AR now works there too. The model opens in the device's own AR viewer, standing in your room at its true size. File > Export USDZ saves the same file, for AR and 3D viewers.",
       "Import file reads four more kinds. FreeCAD documents (.FCStd): the bodies on show come in as the exact solids FreeCAD last built, each by its name, without their history. BRep files (.brep, .brp): one such shape. glTF (.glb) and IFC building models: as a mesh, in millimetres. Nothing new to tap - pick the file in File > Import file as before.",
       "Sketch: pick a line that has no length set and its length shows in a box right beside it. Type the length there and press Enter; no trip down to the Length field. It becomes the line's dimension, shown on the sketch from then on.",

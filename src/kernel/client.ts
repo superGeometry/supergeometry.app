@@ -336,9 +336,10 @@ export class KernelClient {
     throw new Error(r.type === "error" ? r.message : "Could not check the bodies");
   }
 
-  async export(features: Feature[], format: ExportFormat, bodies?: string[]): Promise<Blob> {
+  /** `colors`: the bodies' colours ("#rrggbb" by body id), written into a STEP file. */
+  async export(features: Feature[], format: ExportFormat, bodies?: string[], colors?: Record<string, string>): Promise<Blob> {
     await this.ready;
-    const r = await this.call({ type: "export", features: lean(features), format, bodies });
+    const r = await this.call({ type: "export", features: lean(features), format, bodies, colors });
     if (r.type === "exported") return r.blob;
     throw new Error(r.type === "error" ? r.message : "Export failed");
   }

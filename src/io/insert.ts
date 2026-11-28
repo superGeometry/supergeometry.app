@@ -12,6 +12,7 @@ import { nameProblem, renameVariable } from "../doc/renameVariable";
 import { DIALOG_ACTION } from "../ui/dialogAction";
 import { read3mf } from "./formats";
 import { parseSVG } from "./svg";
+import { stepColours } from "./stepColours";
 
 /**
  * What a file picker is told to offer. On an iPad or iPhone, nothing: told a list of endings (".stl,.step,.super"),
@@ -200,7 +201,15 @@ export async function insertFile(app: AppContext): Promise<void> {
     app.ui.setStatus(`Importing ${file.name}…`);
     // (A mesh: its flat faces made whole and its round parts round - see kernel/meshRound.ts.)
     const step = { ...app.store.newIdentity("import"), type: "import" as const, format, fileName: file.name, data: toBase64(bytes), apart: true, ...(format === "stl" ? { round: true } : {}) };
-    app.store.add(step);
+    // A STEP file's own colours go to the bodies it makes (the first has the step's id, the others "<id>:1", "<id>:2"…).
+    const colours = format === "step" ? stepColours(new TextDecoder().decode(bytes)) : [];
+    if (colours.some((c) => c)) {
+      app.store.commit((d) => {
+        d.features.push(step);
+        d.colors = { ...d.colors };
+        colours.forEach((c, i) => c && (d.colors![i ? `${step.id}:${i}` : step.id] = c));
+      });
+    } else app.store.add(step);
     if (format === "stl") sayRounds(app, step.id, file.name);
     app.ui.setStatus(null);
   } catch (err) {

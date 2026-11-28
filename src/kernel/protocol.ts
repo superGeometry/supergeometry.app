@@ -179,7 +179,7 @@ export type ExportFormat = "stl" | "step" | "mesh";
 export type Request =
   | { type: "init" }
   | { type: "regenerate"; features: Feature[]; saved?: boolean }
-  | { type: "export"; features: Feature[]; format: ExportFormat; bodies?: string[] }
+  | { type: "export"; features: Feature[]; format: ExportFormat; bodies?: string[]; colors?: Record<string, string> }
   | { type: "properties"; features: Feature[] }
   | { type: "health"; features: Feature[] }
   | { type: "drawing"; features: Feature[]; views: ViewSpec[]; bodies?: string[] }

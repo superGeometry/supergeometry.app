@@ -783,7 +783,10 @@ function edgeSamples(e: Edge): { pts: [number, number][]; kind: "line" | "circle
   }
 }
 
-export async function exportBodies(features: Feature[], format: ExportFormat, only?: string[]): Promise<Blob> {
+/** The colour of a body that has none of its own, as the view shows it (view/viewport.ts COLORS.body). */
+const STEP_GREY = "#b9bec7";
+
+export async function exportBodies(features: Feature[], format: ExportFormat, only?: string[], colors?: Record<string, string>): Promise<Blob> {
   const { ctx, numbers } = await run(features);
   const shapes = [...ctx.bodies.entries()].filter(([id]) => !only || only.includes(id));
   if (shapes.length === 0) throw new Error("Nothing to export");
@@ -796,7 +799,23 @@ export async function exportBodies(features: Feature[], format: ExportFormat, on
     });
     return new Blob([JSON.stringify(out)], { type: "application/json" });
   }
-  if (format === "step") return exportSTEP(shapes.map(([id, shape]) => ({ shape, name: names.get(id)! })));
+  // A body's colour goes into the STEP file with it, as it does into a 3MF: other programs show it. One with no
+  // colour of its own is written in the app's own grey (left to the writer, every such body was marked red).
+  // (The writer takes the colour's numbers for light as it is, not as a screen shows it, and writes them the
+  // other way: given the colour as it is on screen, the file said a brighter one. It is given the light.)
+  if (format === "step") {
+    const light = (hex: string) =>
+      "#" +
+      [1, 3, 5]
+        .map((i) => {
+          const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+          const l = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+          return Math.round(l * 255).toString(16).padStart(2, "0");
+        })
+        .join("");
+    const ofBody = (id: string) => (colors?.[id] && /^#[0-9a-f]{6}$/i.test(colors[id]) ? colors[id] : STEP_GREY);
+    return exportSTEP(shapes.map(([id, shape]) => ({ shape, name: names.get(id)!, color: light(ofBody(id)) })));
+  }
   // (Written here from the bodies' own meshes: OpenCascade's writer meshes them
   // all as one shape first - gigabytes for a body of thousands of faces.)
   return new Blob([binarySTL(shapes.map(([, s]) => printMesh(s))) as BlobPart], { type: "application/sla" });

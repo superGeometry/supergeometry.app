@@ -1258,7 +1258,7 @@ export class App implements AppContext {
     const made: Feature[] = [];
     const renamed = new Map<string, string>();
     for (const b of bodies) {
-      const blob = await this.kernel.export(features, "step", [b.id]);
+      const blob = await this.kernel.export(features, "step", [b.id], this.store.doc.colors);
       const bytes = new Uint8Array(await blob.arrayBuffer());
       let bin = "";
       for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -2670,8 +2670,8 @@ export class App implements AppContext {
         if (format === "glb") blob = new Blob([glb(await this.fineMeshes([b.id]), names[b.id] ?? b.name) as BlobPart]);
         else if (format === "3mf") {
           const [m] = await this.fineMeshes([b.id]);
-          blob = await exportThreeMF([m], m.name, await this.kernel.export(this.store.doc.features, "step", [b.id]));
-        } else blob = await this.kernel.export(this.store.doc.features, format, [b.id]);
+          blob = await exportThreeMF([m], m.name, await this.kernel.export(this.store.doc.features, "step", [b.id], this.store.doc.colors));
+        } else blob = await this.kernel.export(this.store.doc.features, format, [b.id], this.store.doc.colors);
         files.push({ name: fileName(b.id, b.name), data: new Uint8Array(await blob.arrayBuffer()) });
       }
       const out = await zip(files);
@@ -2691,7 +2691,7 @@ export class App implements AppContext {
     if (!bodies.length) return this.ui.toast("Nothing to export");
     try {
       this.ui.setStatus("Exporting 3MF…");
-      const step = await this.kernel.export(this.store.doc.features, "step", bodies.map((b) => b.id));
+      const step = await this.kernel.export(this.store.doc.features, "step", bodies.map((b) => b.id), this.store.doc.colors);
       // A fine mesh, as for STL (the view's is coarse: round faces came out faceted in the slicer).
       const fine = JSON.parse(await (await this.kernel.export(this.store.doc.features, "mesh", bodies.map((b) => b.id))).text()) as { id: string; positions: number[]; indices: number[] }[];
       const names = this.store.doc.names ?? {};
@@ -2717,7 +2717,7 @@ export class App implements AppContext {
     const bodies = picked.length ? picked : (this.isolated ?? []).filter((id) => this.result?.bodies.some((b) => b.id === id));
     try {
       this.ui.setStatus(`Exporting ${bodies.length ? `${bodies.length} bod${bodies.length > 1 ? "ies" : "y"} as ` : ""}${format.toUpperCase()}…`);
-      const blob = await this.kernel.export(this.store.doc.features, format, bodies.length ? bodies : undefined);
+      const blob = await this.kernel.export(this.store.doc.features, format, bodies.length ? bodies : undefined, this.store.doc.colors);
       await this.deliver(blob, `${this.store.doc.name}.${format === "step" ? "step" : "stl"}`, how);
     } catch (err) {
       this.ui.toast(`Export failed: ${(err as Error).message}`, "error");

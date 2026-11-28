@@ -77,7 +77,7 @@ async function handle(e: MessageEvent<Envelope<Request>>): Promise<void> {
         break;
       }
       case "export":
-        reply({ type: "exported", blob: await withFreshKernel(load, () => exportBodies(msg.features, msg.format, msg.bodies)) });
+        reply({ type: "exported", blob: await withFreshKernel(load, () => exportBodies(msg.features, msg.format, msg.bodies, msg.colors)) });
         break;
       case "drawing":
         reply({ type: "drawing", views: await withFreshKernel(load, () => projectViews(msg.features, msg.views, msg.bodies)) });
