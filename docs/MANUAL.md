@@ -453,6 +453,8 @@ steps fold out from the ▸ next to it. Tap one of them: a Move, Rotate, Scale,
 Mirror or Pattern done in the sketch opens again as it was, its tool on with
 the same curves picked and the same values, to change and apply (Undo puts it
 back as it was); any other step opens the sketch with its curves picked. A
+pattern's step stands for what it was made from: the steps that only drew
+or changed that element leave the list when it is patterned. A
 step that something done later rests on opens that second way too. Select several steps (Ctrl/Shift+click)
 to **group** them: fold, rename, switch all off or on, ungroup. Tick steps in
 a group and **Ungroup** (beside Group) takes just them out, in their own place

@@ -4768,6 +4768,18 @@ export class SketchTool implements Tool {
         ...(repeat ? { repeat } : {}),
       };
       const entry = { op, n: 1, ids: keep(touched), redo };
+      // A pattern stands for what it was made from: the lines that only drew or changed those curves (Circle,
+      // Line length...) go from the list, and the pattern's line is the one for them - opened again, it has them
+      // picked. (A line that is also about other curves stays.)
+      if (redoing.kind === "patternLinear" || redoing.kind === "patternCircular") {
+        const src = new Set(redoing.src);
+        for (let k = log.length - 1; k >= 0; k--) {
+          const ids = log[k].ids;
+          if (!ids?.length || !ids.every((id) => src.has(id))) continue;
+          log.splice(k, 1);
+          if (this.reopenedAt !== null && k < this.reopenedAt) this.reopenedAt--;
+        }
+      }
       // (Opened again from History and applied: back in its place in the list.)
       if (this.reopenedAt !== null && this.reopenedAt <= log.length) log.splice(this.reopenedAt, 0, entry);
       else log.push(entry);
