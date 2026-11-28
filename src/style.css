@@ -2280,13 +2280,78 @@ body.items-open #bottom-left {
   right: calc(60px + var(--safe-r));
   bottom: calc(10px + var(--safe-b));
   width: 280px;
-  max-height: 50vh;
-  overflow-y: auto;
+  /* (As tall as what is picked needs; only the pinned list scrolls.) */
+  max-height: calc(100dvh - 20px);
+  display: flex;
+  flex-direction: column;
   background: var(--chrome-solid);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 8px;
   z-index: 15;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+/* Its top bar: the window is moved by it. */
+.measure-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px -4px 4px;
+  padding: 2px 2px 2px 6px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.measure-bar:active {
+  cursor: grabbing;
+}
+.measure-bar .panel-title {
+  margin-right: auto;
+}
+.measure-bar .icon-btn {
+  background: none;
+  width: 30px;
+  height: 30px;
+}
+.measure-pins-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding: 6px 6px 2px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.measure-pins-head .text-btn {
+  padding: 2px 8px;
+  font-size: 11.5px;
+}
+/* The pinned ones: three lines of them in view, the rest a scroll away. */
+.measure-pins {
+  flex: 0 1 auto;
+  min-height: 34px;
+  max-height: 104px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.measure-pin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 2px 2px 6px;
+  border-radius: 6px;
+}
+.measure-pin:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.measure-pin .icon-btn {
+  background: none;
+  width: 28px;
+  height: 28px;
+  flex: none;
 }
 .measure-toggle {
   display: flex;

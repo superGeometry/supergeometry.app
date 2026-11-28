@@ -19,6 +19,7 @@ export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
     added: [
+      "Measure opens in a window of its own: drag it by its top bar to wherever it is out of the way, and close it with its X. It stays short. The pinned measurements are listed in it, each with its own X to unpin, and only that list scrolls when there are many.",
       "Mirror a body (or a feature) across a line you draw: Draw mirror line, beside Mirror plane on the bottom line. Two taps on the floor set the line, catching on the grid, corners and edge ends, and the mirror stands upright on it. No plane has to be made first.",
       "Sketch: lines lying on one another are shown. Where two or more lines share a stretch (one drawn over another, or lapping part of the way), that stretch is dashed in orange, right on the line; the same circle drawn twice is dashed the same way. A note says so when a new line lands on another. Helper (construction) lines are not marked.",
       "Sketch: a line begun on the end of another line shows, dashed in yellow, where that line would carry on. Aim along it and the pointer snaps onto it (In line), and the two lines stay running the same way afterwards. It follows the Guide lines switch in Settings > Snapping.",

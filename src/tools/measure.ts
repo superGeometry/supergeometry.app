@@ -2,6 +2,7 @@ import type { PinDef, Vec3 } from "../doc/types";
 import { settings } from "../settings";
 import { cross, dist, dot, len, sub } from "../geom";
 import type { BodyMesh } from "../kernel/protocol";
+import { icons } from "../ui/icons";
 import { el } from "../ui/ui";
 import { fmtLen, trim, UNIT_MM, UNIT_LABEL, units } from "../units";
 import type { ToolPointer } from "../view/input";
@@ -20,9 +21,15 @@ interface Row {
   b?: Vec3;
 }
 
+/** Where the Measure window was moved to (its top left corner, on the page): it opens there again. */
+let placed: { x: number; y: number } | null = null;
+
 /**
- * Measure: tap faces, edges or bodies; a card lists what can be measured
+ * Measure: tap faces, edges or bodies; a window lists what can be measured
  * about them (and between two of them). Pin any value to keep it visible.
+ *
+ * The window is moved by its top bar and closed by its X. It stays short: the values of what is picked, and under
+ * them the pinned ones in a list of their own that scrolls - many pins do not make the window any taller.
  */
 export class MeasureTool implements Tool {
   readonly id = "measure";
@@ -39,10 +46,33 @@ export class MeasureTool implements Tool {
     this.app.ui.setHint("Tap faces, edges or points to see their sizes. Double-tap for a whole body.");
     this.card = el("div", "measure-card");
     document.body.append(this.card);
+    if (placed) this.moveTo(placed.x, placed.y);
+    // (The page made smaller, the phone turned: back inside it.)
+    window.addEventListener("resize", this.keepIn);
     this.render();
   }
 
+  private keepIn = (): void => {
+    if (placed) this.moveTo(placed.x, placed.y);
+  };
+
+  /** The window with its top left corner there - as near as the page lets it be (it never leaves it). */
+  private moveTo(x: number, y: number): void {
+    const c = this.card;
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    const nx = Math.max(4, Math.min(window.innerWidth - r.width - 4, x));
+    const ny = Math.max(4, Math.min(window.innerHeight - Math.min(r.height, 80) - 4, y));
+    c.style.width = `${r.width}px`;
+    c.style.left = `${nx}px`;
+    c.style.top = `${ny}px`;
+    c.style.right = "auto";
+    c.style.bottom = "auto";
+    placed = { x: nx, y: ny };
+  }
+
   exit(): void {
+    window.removeEventListener("resize", this.keepIn);
     this.card?.remove();
     this.app.ui.setHint(null);
     this.app.setSelection([]);
@@ -83,7 +113,35 @@ export class MeasureTool implements Tool {
 
   private render(): void {
     if (!this.card) return;
+    // (Where its pinned list was scrolled to stays, as the rest is drawn again.)
+    const scrolled = this.card.querySelector(".measure-pins")?.scrollTop ?? 0;
     this.card.innerHTML = "";
+    // Its top bar: the window is moved by it; the X closes Measure.
+    const bar = el("div", "measure-bar");
+    bar.append(el("div", "panel-title", "Measure"));
+    const close = el("button", "icon-btn");
+    close.type = "button";
+    close.title = "Close Measure";
+    close.innerHTML = icons.close;
+    close.addEventListener("pointerdown", (e) => e.stopPropagation());
+    close.addEventListener("click", () => this.app.setTool(null));
+    bar.append(close);
+    let grab: { id: number; dx: number; dy: number } | null = null;
+    bar.addEventListener("pointerdown", (e) => {
+      const r = this.card!.getBoundingClientRect();
+      grab = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top };
+      bar.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    bar.addEventListener("pointermove", (e) => {
+      if (grab && e.pointerId === grab.id) this.moveTo(e.clientX - grab.dx, e.clientY - grab.dy);
+    });
+    const drop = (e: PointerEvent) => {
+      if (grab && e.pointerId === grab.id) grab = null;
+    };
+    bar.addEventListener("pointerup", drop);
+    bar.addEventListener("pointercancel", drop);
+    this.card.append(bar);
     const rows = this.measurements();
     const head = el("label", "measure-toggle");
     const box = document.createElement("input");
@@ -108,11 +166,31 @@ export class MeasureTool implements Tool {
       row.append(pin);
       this.card.append(row);
     }
-    if (this.app.pins.length) {
-      const clear = el("button", "text-btn", `Clear ${this.app.pins.length} pinned`);
+    // The pinned ones: a list of their own, a few lines tall, that scrolls - however many there are.
+    const pins = this.app.pins;
+    if (pins.length) {
+      const head = el("div", "measure-pins-head");
+      head.append(el("span", "", `Pinned (${pins.length})`));
+      const clear = el("button", "text-btn", "Clear all");
       clear.addEventListener("click", () => (this.app.setPins([]), this.render()));
-      this.card.append(clear);
+      head.append(clear);
+      const list = el("div", "measure-pins");
+      pins.forEach((p, i) => {
+        const row = el("div", "measure-pin");
+        row.append(el("div", "measure-value", p.text));
+        const off = el("button", "icon-btn");
+        off.type = "button";
+        off.title = "Unpin";
+        off.innerHTML = icons.close;
+        off.addEventListener("click", () => (this.app.setPins(this.app.pins.filter((_, k) => k !== i)), this.render()));
+        row.append(off);
+        list.append(row);
+      });
+      this.card.append(head, list);
+      list.scrollTop = scrolled;
     }
+    // (Drawn again taller or shorter: still inside the page.)
+    if (placed) this.moveTo(placed.x, placed.y);
   }
 
   private measurements(): Row[] {
