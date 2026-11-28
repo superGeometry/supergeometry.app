@@ -19,6 +19,7 @@ export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
     added: [
+      "Move/Rotate a body that stands at an angle: drag the gimbal's middle dot onto a straight edge, a corner or a flat face and the gimbal turns to point that part's way. The arrows then move the body along that edge or square to that face, and the rings turn it about them. On a body built square to X, Y and Z nothing changes.",
       "Quick buttons, More: the tools are always in the same order, most used first (Extrude, Offset, Plane, Split, Shell, Scale, Fillet, Chamfer and so on), whatever is picked; one the pick cannot use is left out and the rest move up. The two patterns are one Pattern button that opens Linear and Circular. On a computer the list is as tall as it needs to be and shows everything without scrolling. The tools you start most from these buttons are lit a little, the most used the most (counted on this device only).",
       "A new plane is drawn where it belongs, at a size that fits. Offset from a face, it sits in front of that face and is half as big again as the face; a midplane sits between its two faces; a plane through three points sits round them; one across or through an edge sits on that edge. Planes were all drawn as big as the whole model, round the model's middle. Planes offset from a face in older projects are drawn the new way too.",
       "Ko-fi, for anyone who wants to buy me a coffee: in More > Support and on the Welcome window. It opens my Ko-fi page in a new tab.",

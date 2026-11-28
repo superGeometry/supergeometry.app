@@ -22,6 +22,7 @@ import { arrangement, drawnRegions, regionRef } from "../sketch/regions";
 import { DimWidget } from "./annotate";
 import { Ghost, ringGhost, rowGhost } from "./ghost";
 import { Gimbal, GIMBAL_AXES, IN_PLANE, SCALE_PARTS, type GimbalPart } from "./gimbal";
+import type { PickHit } from "../view/viewport";
 import { DragTyping, type DragTypingTarget } from "./dragTyping";
 import { isTouchDevice } from "../device";
 import { CopyToggle, copyMode, linkMode } from "./copyToggle";
@@ -1755,8 +1756,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     if ((kind === "linear" || kind === "circular") && !existing && linkMode.on) this.feature.link = true;
     if (kind === "move") {
       this.gimbal = new Gimbal(app.view);
-      const g = this.gimbal;
-      this.copyToggle = new CopyToggle(app.view, () => g.origin, (on) => ((this.feature.copy = on), (this.feature.link = on && linkMode.on ? true : undefined), this.render(), this.update()));
+      this.copyToggle = new CopyToggle(app.view, () => this.gimbal!.origin, (on) => ((this.feature.copy = on), (this.feature.link = on && linkMode.on ? true : undefined), this.render(), this.update()));
     }
   }
 
@@ -2061,6 +2061,28 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     else super.hover(p);
   }
 
+  /**
+   * The ways its gimbal points: X, Y, Z - or, once its middle dot has been put on an edge, a corner or a flat face
+   * of a body that does not stand square to them, that part's own ways (along the edge, square to the face).
+   */
+  private axes: Vec3[] = GIMBAL_AXES;
+  /** What the middle dot is over while it is dragged (it turns the gimbal when let go). */
+  private pivotOn: PickHit | null = null;
+
+  /** The gimbal turned to what its middle dot was put on (left as it is where that has no ways of its own). */
+  private turnTo(hit: PickHit | null, at: Vec3): void {
+    const frame = hit ? frameAt(this.app, hit, at) : null;
+    if (!frame || !this.gimbal) return;
+    const same = frame.every((a, i) => dot(a, this.axes[i]) > 1 - 1e-9);
+    if (same) return;
+    this.axes = frame;
+    const c = this.gimbal.origin;
+    this.gimbal.dispose();
+    this.gimbal = new Gimbal(this.app.view, { axes: frame });
+    this.gimbal.setCenter(c);
+    this.app.ui.toast(frame === GIMBAL_AXES ? "The arrows point along X, Y and Z again" : "The arrows now point the way that part does");
+  }
+
   /** Started by dragging the body itself: the press that opened this slides it over the floor (seen from the side: across the screen). */
   private grabbed = false;
   /** The gimbal's middle dot is being moved (the point it turns about), not the body. */
@@ -2090,7 +2112,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       return true;
     }
     // A different rotation axis than the one already used: start from the current angle 0 on that axis.
-    if (part.kind === "ring" && o.rotate && o.rotate.angle && axisIndex(o.rotate.axis) !== part.i) {
+    if (part.kind === "ring" && o.rotate && o.rotate.angle && !(Math.abs(dot(norm(o.rotate.axis), this.axes[part.i])) > 1 - 1e-9)) {
       this.app.ui.toast("One rotation axis per move - press Done, then rotate around the next axis");
       return true;
     }
@@ -2138,6 +2160,7 @@ export class TransformOp extends FeatureOp<TransformFeature> {
         hit?.kind === "vertex" ? (view.vertexOf(hit.body, hit.vertex) ?? hit.point) : hit?.kind === "edge" || hit?.kind === "face" ? hit.point : view.rayToPlane(p.x, p.y, { origin: now, normal: n, xDir: xDirFor(n) });
       if (!at) return;
       this.app.setHover(hit?.kind === "vertex" ? { kind: "vertex", body: hit.body, vertex: hit.vertex } : hit?.kind === "edge" ? { kind: "edge", body: hit.body, edge: hit.edge } : null);
+      this.pivotOn = hit && (hit.kind === "vertex" || hit.kind === "edge" || hit.kind === "face") ? hit : null;
       // (Where the dot is shown is the centre moved with the body so far.)
       this.center = sub(at, o.translate);
       if (o.rotate) o.rotate.origin = this.center;
@@ -2155,22 +2178,23 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     const snap = (v: number) => (p.shift ? v : Math.round(v / step) * step);
     const part = dr.part;
     if (part.kind === "axis") {
-      const dir = GIMBAL_AXES[part.i];
+      const dir = this.axes[part.i];
       const d = snap(axisDrag(view, dr.center, dir, dr.from, p));
       o.translate = add(dr.t0, scale(dir, d));
       this.boxAt(p, fmtLen(d));
     } else if (part.kind === "plane" || part.kind === "center") {
       // Move in the plane of the square (or the screen plane for the centre).
-      const n: Vec3 = part.kind === "plane" ? GIMBAL_AXES[part.i] : (view.cam.viewDir().toArray() as Vec3);
+      const n: Vec3 = part.kind === "plane" ? this.axes[part.i] : (view.cam.viewDir().toArray() as Vec3);
       const plane = { origin: dr.center, normal: n, xDir: xDirFor(n) };
       const a = view.rayToPlane(dr.from.x, dr.from.y, plane);
       const b = view.rayToPlane(p.x, p.y, plane);
       if (!a || !b) return;
       const d = sub(b, a);
-      o.translate = add(dr.t0, [snap(d[0]), snap(d[1]), snap(d[2])]);
+      // (In steps along the gimbal's own ways: along X, Y and Z when it points along them.)
+      o.translate = this.axes.reduce((t, ax) => add(t, scale(ax, snap(dot(d, ax)))), [...dr.t0] as Vec3);
       this.boxAt(p, fmtLen(len(sub(o.translate, dr.t0))));
     } else {
-      const axis = GIMBAL_AXES[part.i];
+      const axis = this.axes[part.i];
       const c = view.toScreen(dr.center);
       if (!c) return;
       const ang = (q: { x: number; y: number }) => Math.atan2(q.y - c[1], q.x - c[0]);
@@ -2199,6 +2223,9 @@ export class TransformOp extends FeatureOp<TransformFeature> {
       this.app.setHover(null);
       this.app.ui.setLabel(0, 0, null);
       this.gimbal?.setHot(null);
+      // Put on an edge, a corner or a flat face: the arrows turn to point its way.
+      if (this.gimbal) this.turnTo(this.pivotOn, this.gimbal.origin);
+      this.pivotOn = null;
       return;
     }
     const dragged = !!this.dragging;
@@ -2230,8 +2257,8 @@ export class TransformOp extends FeatureOp<TransformFeature> {
     return {
       kind: part.kind === "ring" ? "angle" : "length",
       apply: (v) => {
-        if (part.kind === "ring") o.rotate = { origin: this.center, axis: GIMBAL_AXES[part.i], angle: dr.a0 + v };
-        else if (part.kind === "axis") o.translate = add(dr.t0, scale(GIMBAL_AXES[part.i], v));
+        if (part.kind === "ring") o.rotate = { origin: this.center, axis: this.axes[part.i], angle: dr.a0 + v };
+        else if (part.kind === "axis") o.translate = add(dr.t0, scale(this.axes[part.i], v));
         else if (len(dragDir) > 0.5) o.translate = add(dr.t0, scale(dragDir, v));
         refresh();
       },
@@ -2855,8 +2882,78 @@ function axisIndex(a: Vec3): number {
   return a.findIndex((v) => Math.abs(v) > 0.99);
 }
 
+/** "X", "Y" or "Z" - or nothing for a line that is none of them (a gimbal turned to a tilted part). */
 function axisName(a?: Vec3): string {
-  return ["X", "Y", "Z"][a ? Math.max(0, axisIndex(a)) : 2];
+  if (!a) return "Z";
+  const i = axisIndex(norm(a));
+  return i < 0 ? "" : ["X", "Y", "Z"][i];
+}
+
+/**
+ * The ways a part of a body points, as three lines square to one another for a gimbal put on it:
+ *  - a flat face: across it both ways, and square to it;
+ *  - a straight edge: along it, and by a flat face it lies on;
+ *  - a corner: along two straight edges that meet there (else by a flat face it is on).
+ * X, Y and Z themselves when the part stands square to them (so nothing changes for a body built on them); null
+ * when the part has no ways of its own (a curved edge on no flat face).
+ */
+function frameAt(app: AppContext, hit: PickHit, at: Vec3): Vec3[] | null {
+  if (hit.kind !== "face" && hit.kind !== "edge" && hit.kind !== "vertex") return null;
+  const body = app.view.body(hit.body);
+  if (!body) return null;
+  const size = Math.max(1e-9, ...body.edges.map((e) => e.length));
+  const tol = size * 1e-5;
+  const flatOn = (p: Vec3, along?: Vec3) => body.faces.filter((f) => f.plane && Math.abs(dot(sub(p, f.plane.origin), norm(f.plane.normal))) < tol && (!along || Math.abs(dot(norm(f.plane.normal), along)) < 1e-6));
+  let x: Vec3 | null = null;
+  let z: Vec3 | null = null;
+  if (hit.kind === "face") {
+    const pl = body.faces[hit.face]?.plane;
+    if (!pl) return null;
+    x = norm(pl.xDir);
+    z = norm(pl.normal);
+    // (Along its longest straight edge, where it has one: a face's own "across" is the kernel's choice.)
+    const own = body.edges.filter((e) => e.type === "LINE" && e.length > tol && Math.abs(dot(norm(e.dir), z!)) < 1e-6 && Math.abs(dot(sub(e.mid, pl.origin), z!)) < tol).sort((a, b) => b.length - a.length)[0];
+    if (own) x = norm(own.dir);
+  } else if (hit.kind === "edge") {
+    const e = body.edges[hit.edge];
+    if (!e) return null;
+    if (e.type === "LINE" && e.length > tol) {
+      x = norm(sub(e.end, e.start));
+      const f = flatOn(e.mid, x)[0];
+      z = f?.plane ? norm(f.plane.normal) : norm(cross(x, xDirFor(x)));
+    } else {
+      const f = flatOn(e.start).find((g) => Math.abs(dot(sub(e.mid, g.plane!.origin), norm(g.plane!.normal))) < tol);
+      if (!f?.plane) return null;
+      x = norm(f.plane.xDir);
+      z = norm(f.plane.normal);
+    }
+  } else {
+    const v = app.view.vertexOf(hit.body, hit.vertex) ?? at;
+    const from = body.edges.filter((e) => e.type === "LINE" && e.length > tol && (len(sub(e.start, v)) < tol || len(sub(e.end, v)) < tol)).map((e) => norm(sub(e.end, e.start)));
+    const second = from.find((d) => len(cross(from[0], d)) > 1e-3);
+    if (from[0] && second) {
+      x = from[0];
+      z = norm(cross(x, second));
+    } else {
+      const f = flatOn(v)[0];
+      if (!f?.plane) return null;
+      z = norm(f.plane.normal);
+      x = from[0] && Math.abs(dot(from[0], z)) < 1e-6 ? from[0] : norm(f.plane.xDir);
+    }
+  }
+  if (!x || !z || !(len(x) > 0.5) || !(len(z) > 0.5)) return null;
+  // Each arrow keeps the colour of the way it is nearest to: the one that points most upward is the blue one (Z),
+  // of the other two the one most along X the red one - a part tilted a little has its arrows where they were.
+  const three = [x, norm(cross(z, x)), z];
+  const up = three.reduce((m, a) => (Math.abs(a[2]) > Math.abs(m[2]) + 1e-9 ? a : m));
+  const zz = up[2] < 0 ? scale(up, -1) : up;
+  const rest = three.filter((a) => a !== up);
+  const along = Math.abs(rest[0][0]) >= Math.abs(rest[1][0]) - 1e-9 ? rest[0] : rest[1];
+  const xx = along[0] < 0 ? scale(along, -1) : along;
+  const frame = [xx, norm(cross(zz, xx)), zz];
+  // (Square to X, Y and Z, whichever way round: theirs, as it was.)
+  const world = frame.every((a) => a.some((c) => Math.abs(Math.abs(c) - 1) < 1e-9));
+  return world ? GIMBAL_AXES : frame;
 }
 
 /** How far the bodies reach along a direction (their size that way). */
