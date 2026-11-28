@@ -153,7 +153,7 @@ export interface ValuePanel {
 }
 
 export interface HistoryHandlers {
-  edit(id: string, pick?: string[]): void;
+  edit(id: string, pick?: string[], step?: number): void;
   /** Pointer over a step (null: left it): show what it works on. */
   hover?(id: string | null): void;
   toggle(id: string): void;
@@ -1931,8 +1931,14 @@ export class UI {
           // (What the step made or changed that is still in the sketch: picked when its line is tapped.)
           const still = (s.ids ?? []).filter((id) => f.entities.some((e) => e.id === id));
           const row = el("button", "history-step", `${s.op}${s.n > 1 ? ` ×${s.n}` : ""}`);
-          row.title = still.length ? `Open the sketch with ${still.length === 1 ? "this curve" : `these ${still.length} curves`} picked, to change ${still.length === 1 ? "it" : "them"}` : "Open the sketch";
-          row.addEventListener("click", () => h.edit(f.id, still));
+          row.title = s.redo
+            ? "Open this step again, with its values as they were, to change it"
+            : still.length
+              ? `Open the sketch with ${still.length === 1 ? "this curve" : `these ${still.length} curves`} picked, to change ${still.length === 1 ? "it" : "them"}`
+              : "Open the sketch";
+          // (Which of the sketch's steps it is: one that can be opened again is, with its tool and its values.)
+          const index = steps.indexOf(s);
+          row.addEventListener("click", () => h.edit(f.id, still, index));
           sub.append(row);
         }
         this.historyList.append(sub);

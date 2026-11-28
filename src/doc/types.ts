@@ -188,7 +188,7 @@ export interface SketchFeature extends FeatureBase {
   links?: EdgeLink[];
 
   /** What was done in the sketch, in order (shown under it in History); repeats are counted. */
-  log?: { op: string; n: number; ids?: string[] }[];
+  log?: { op: string; n: number; ids?: string[]; redo?: SketchRedo }[];
   /**
    * Fill patterns: closed shapes of the sketch filled with lines or small shapes (see sketch/fill.ts). Each one's
    * curves are among `entities`, named "fp-<fill id>-<n>", and are made again when the sketch's curves change.
@@ -512,6 +512,26 @@ export interface ImportFeature extends FeatureBase {
    * (files put in before): as they were - what was built on their strips stays.
    */
   round?: boolean;
+}
+
+/**
+ * What it takes to open a step of a sketch again with its options (its Move, Rotate, Scale, Mirror and patterns):
+ * the tool and its values as they were, what was picked, and what the step did - so that it can be taken back
+ * and done again with other values.
+ */
+export interface SketchRedo {
+  kind: string;
+  values: Record<string, unknown>;
+  /** The curves that were picked. */
+  src: string[];
+  /** The curves it made, and those it changed or took away - as they were before it. */
+  made: string[];
+  was: SketchEntity[];
+  /** The constraints it added, and those it took away - as they were. */
+  consMade: string[];
+  consWas: SketchConstraint[];
+  /** A pattern that follows a count: which of the sketch's `repeats` it is. */
+  repeat?: string;
 }
 
 /** A reference image placed on a plane (for tracing). */

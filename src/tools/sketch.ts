@@ -3,13 +3,13 @@ import { QuickActions } from "./quickActions";
 import { isTouchDevice } from "../device";
 import { simplifyStroke } from "../sketch/freehand";
 import { Box3, BufferGeometry, DoubleSide, Line, LineBasicMaterial, LineDashedMaterial, Mesh, MeshBasicMaterial, Points, PointsMaterial, ShapeUtils, Vector2, Vector3 } from "three";
-import type { EdgeLink, ExtrudeSource, FaceRef, OutlineOffset, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, SketchFill, SketchRef, SketchRepeat, Vec2, Vec3 } from "../doc/types";
+import type { EdgeLink, ExtrudeSource, FaceRef, OutlineOffset, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, SketchFill, SketchRedo, SketchRef, SketchRepeat, Vec2, Vec3 } from "../doc/types";
 import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, patternSpacing, planeY, roundSig, scale as scale3, startSize, sub as sub3, toPlane } from "../geom";
 import { addForUser, addStrict, constraintError, constraintName, copiedConstraints, LINKED, pointOf, pointsOf, refsOf, lengthFromHeldEnd, setValueStrict, sizeStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { caretToEnd, selectAll, textField, type TextField } from "../ui/textField";
 import { nearestSnap } from "../sketch/snapPick";
-import { arrangement, type Region } from "../sketch/regions";
+import { arrangement, closestOnEntity, type Region } from "../sketch/regions";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, CONSTRAINT_BUTTONS, constraintGlyph, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
 import { settings } from "../settings";
@@ -1407,6 +1407,12 @@ export class SketchTool implements Tool {
     this.showSelection();
     this.updateMenu();
     this.updatePanel();
+    // A linear pattern of what is picked already: its arrows, its copies and its value box are there at once (they
+    // came with the next move of the pointer - on a touch screen, with a second tap on the line).
+    if (kind === "patternLinear" && this.selected.size && this.phase === "draw" && this.plane) {
+      this.refreshPreview();
+      this.showPatternBox();
+    }
     this.setHint(kind === "project" && this.projectOut.length ? "Now tap a flat face or plane, parallel to this sketch, to copy them onto (or tap more lines)" : this.wantsCentre ? CENTRE_HINT[kind as "rotate" | "patternCircular"] : alignHint);
     if (kind === "align" && this.edit.alignFrom) this.app.setSelection([{ kind: "curve", sketch: this.sketchId ?? "", entity: this.edit.alignFrom }]);
   }
@@ -4256,6 +4262,36 @@ export class SketchTool implements Tool {
         ], 0x9fb4d6, true);
       }
     }
+    // A circular pattern (or a turn) still waiting for its centre: an arrow from the nearest point of what is picked
+    // to where the centre would go, and how far that is - how far out the copies will stand.
+    let note: string | null = null;
+    if (this.wantsCentre && this.cursor && p) {
+      const at = this.cursor.uv;
+      let best: { d: number; pt: Vec2 } | null = null;
+      for (const e of this.entities) {
+        if (!this.selected.has(e.id)) continue;
+        const near = closestOnEntity(e, at);
+        if (!best || near.d < best.d) best = { d: near.d, pt: near.pt };
+      }
+      const wpp = this.app.view.cam.worldPerPixel(this.app.view.height);
+      if (best && best.d > wpp * 6) {
+        const from = best.pt;
+        const L = best.d;
+        const u: Vec2 = [(at[0] - from[0]) / L, (at[1] - from[1]) / L];
+        const h = Math.min(L * 0.4, wpp * 12);
+        const wing = (s: number): Vec2 => [at[0] - u[0] * h - s * u[1] * h * 0.45, at[1] - u[1] * h + s * u[0] * h * 0.45];
+        this.drawGhosts(
+          [
+            { id: "centre-arrow", kind: "line", a: from, b: at },
+            { id: "centre-arrow-l", kind: "line", a: at, b: wing(1) },
+            { id: "centre-arrow-r", kind: "line", a: at, b: wing(-1) },
+          ],
+          0x4fd18b,
+        );
+        this.drawCentreMark(from);
+        note = `${fmtLen(L)} from the centre`;
+      }
+    }
     this.drawGhosts(ghosts);
     // Mirror: the axis (picked, or the line under the pointer) with a mirror mark on it.
     if (this.kind === "mirror" && this.selected.size) {
@@ -4294,7 +4330,7 @@ export class SketchTool implements Tool {
     if (p) {
       const hint = settings.value.showSnapHints && this.cursor?.label ? this.cursor.label : null;
       // While a shape is being drawn its size can be typed.
-      const text = [label, hint].filter(Boolean).join("  ·  ");
+      const text = [label, note, hint].filter(Boolean).join("  ·  ");
       this.app.ui.setLabel(p.x, p.y, text ? (label ? `${text}  · type a value` : text) : null);
     }
     this.app.view.requestRender();
@@ -4656,7 +4692,29 @@ export class SketchTool implements Tool {
     const had = new Set(this.constraints.map((c) => c.id));
     for (const c of cs) if (!had.has(c.id)) touched.push(...refsOf(c));
     const keep = (ids: string[]) => [...new Set(ids)].filter((id) => entities.some((e) => e.id === id)).slice(-80);
-    if (last?.op === op) {
+    // (A step that can be opened again is a line of its own, with what it takes to take it back: see SketchRedo.)
+    const redoing = this.pendingRedo;
+    this.pendingRedo = null;
+    if (redoing) {
+      const now = new Map(entities.map((e) => [e.id, e]));
+      const nowCons = new Set(cs.map((c) => c.id));
+      const hadRepeats = new Set((this.sketch?.repeats ?? []).map((r) => r.id));
+      const repeat = (repeats ?? []).find((r) => !hadRepeats.has(r.id))?.id;
+      const redo: SketchRedo = {
+        ...redoing,
+        made,
+        was: this.entities.filter((e) => !now.has(e.id) || JSON.stringify(now.get(e.id)) !== JSON.stringify(e)),
+        consMade: cs.filter((c) => !had.has(c.id)).map((c) => c.id),
+        consWas: this.constraints.filter((c) => !nowCons.has(c.id)),
+        ...(repeat ? { repeat } : {}),
+      };
+      const entry = { op, n: 1, ids: keep(touched), redo };
+      // (Opened again from History and applied: back in its place in the list.)
+      if (this.reopenedAt !== null && this.reopenedAt <= log.length) log.splice(this.reopenedAt, 0, entry);
+      else log.push(entry);
+      this.reopenedAt = null;
+      this.lastMade = made;
+    } else if (last?.op === op && !last.redo) {
       log[log.length - 1] = { op, n: last.n + 1, ids: keep([...(last.ids ?? []), ...touched]) };
       this.lastMade = [...this.lastMade, ...made];
     } else {
@@ -5330,10 +5388,73 @@ export class SketchTool implements Tool {
     });
   }
 
+  /** The step being applied, as History will open it again: its tool, its values, what was picked (see SketchRedo). */
+  private pendingRedo: { kind: string; values: Record<string, unknown>; src: string[] } | null = null;
+  /** A step opened again from History: where its line was in the sketch's list (its new one goes there). */
+  private reopenedAt: number | null = null;
+
+  /**
+   * A step of the sketch opened again from History - a move, a turn, a scale, a mirror, a pattern: what it did is
+   * taken back, and its tool is on with the same curves picked and its values as they were, to change and apply.
+   * False: not such a step, or something done since rests on it (then the sketch opens with its curves picked).
+   */
+  reopenStep(i: number): boolean {
+    const sk = this.sketch;
+    const s = sk?.log?.[i];
+    const r = s?.redo;
+    if (!sk || !r || !this.sketchId || !this.plane) return false;
+    const mine = new Set([...r.made, ...r.was.map((e) => e.id)]);
+    const have = new Set(this.entities.map((e) => e.id));
+    const since = sk.log!.slice(i + 1).some((x) => (x.ids ?? []).some((id) => mine.has(id)) || (x.redo?.src ?? []).some((id) => mine.has(id)));
+    if (since || !r.made.every((id) => have.has(id))) {
+      this.app.ui.toast("Something done since rests on that step: its curves are picked instead");
+      return false;
+    }
+    // As it was before the step.
+    const made = new Set(r.made);
+    const was = new Map(r.was.map((e) => [e.id, e]));
+    const entities = this.entities.filter((e) => !made.has(e.id)).map((e) => was.get(e.id) ?? e);
+    for (const e of r.was) if (!entities.some((x) => x.id === e.id)) entities.push(e);
+    const added = new Set(r.consMade);
+    const constraints = [...this.constraints.filter((c) => !added.has(c.id)), ...r.consWas.filter((c) => !this.constraints.some((x) => x.id === c.id))];
+    const repeats = (sk.repeats ?? []).filter((x) => x.id !== r.repeat);
+    const log = sk.log!.filter((_, k) => k !== i);
+    const src = r.src.filter((id) => entities.some((e) => e.id === id));
+    if (!src.length) return false;
+    this.app.store.update(this.sketchId, { entities: refill(entities, sk.fills), constraints: constraints.length ? constraints : undefined, log, repeats: repeats.length ? repeats : undefined });
+    this.stopDrawing();
+    this.selected = new Set(src);
+    this.selPts = [];
+    this.setKind(r.kind as Kind);
+    // (After the tool is on: starting it sets some of them afresh - a pattern's spacing, a turn's centre.)
+    Object.assign(this.edit, r.values);
+    this.reopenedAt = i;
+    this.showSelection();
+    this.updatePanel();
+    this.refreshPreview();
+    if (this.kind === "patternLinear") this.showPatternBox();
+    this.app.ui.toast(`${s!.op} is open again: change it, then Apply. Undo puts it back as it was.`);
+    return true;
+  }
+
   private applyTransform(): void {
     if (!this.selected.size) return this.app.ui.toast("Select curves first");
     if (this.kind === "patternCircular" && !this.edit.pivot) return this.app.ui.toast("Tap the centre of the pattern first");
     if (this.kind === "mirror" && !this.edit.mirrorLine) return this.app.ui.toast("Pick the mirror line");
+    const e0 = this.edit;
+    this.pendingRedo = {
+      kind: this.kind,
+      values: structuredClone({ dx: e0.dx, dy: e0.dy, moveRot: e0.moveRot, angle: e0.angle, patAngle: e0.patAngle, count: e0.count, countExpr: e0.countExpr, factor: e0.factor, copy: e0.copy, mirrorCopy: e0.mirrorCopy, pivot: e0.pivot, mirrorLine: e0.mirrorLine, refA: e0.refA, refB: e0.refB }),
+      src: [...this.selected],
+    };
+    try {
+      this.applyTransformNow();
+    } finally {
+      this.pendingRedo = null;
+    }
+  }
+
+  private applyTransformNow(): void {
     let results = this.transformed(false);
     // (Each curve picked and what was made of it, in that order: a copy takes its original's constraints.)
     const from = this.entities.filter((e) => this.selected.has(e.id));

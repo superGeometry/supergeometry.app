@@ -1222,7 +1222,7 @@ export class App implements AppContext {
     // The rows are rebuilt: a hover on an old row is over.
     this.view.setStepHover(null);
     this.ui.renderHistory(this.store.doc.features, this.result?.errors ?? [], this.tool.editingId ?? this.tool.activeSketch ?? null, {
-      edit: (id, pick) => this.editFeature(id, pick),
+      edit: (id, pick, step) => this.editFeature(id, pick, step),
       hover: (id) => this.view.setStepHover(id ? this.stepTargets(id) : null),
       toggle: (id) => {
         const f = this.store.find(id);
@@ -1370,7 +1370,7 @@ export class App implements AppContext {
     this.editFeature(id);
   }
 
-  private editFeature(id: string, pick?: string[]): void {
+  private editFeature(id: string, pick?: string[], step?: number): void {
     const f = this.store.find(id);
     if (!f) return;
     this.setSelection([]);
@@ -1389,6 +1389,8 @@ export class App implements AppContext {
         // (From one of its steps in History: open with what that step made picked, ready to change.)
         const tool = new SketchTool(this, { sketchId: f.id });
         this.setTool(tool);
+        // (A step that can be opened again - a move, a mirror, a pattern: its tool, with its values as they were.)
+        if (step !== undefined && tool.reopenStep(step)) return;
         if (pick?.length) {
           tool.stopDrawing();
           tool.preselect(pick);
