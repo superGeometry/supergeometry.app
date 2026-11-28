@@ -157,7 +157,7 @@ export class HelpPanel {
       }
       body.append(list);
     }
-    body.append(el("p", "help-intro", "More: the README on GitHub (More → About) walks through a first project step by step."));
+    body.append(el("p", "help-intro", "More: the manual on GitHub (linked from More → About) walks through a first project step by step."));
     this.el.append(head, body);
     // Clicks inside don't reach the model.
     this.el.addEventListener("pointerdown", (e) => e.stopPropagation());
