@@ -1009,6 +1009,28 @@ body.panel-open .tool.active::before,
   background: var(--accent-soft);
   color: #b9d4ff;
 }
+/* One that is on and matters (a section cutting the model, bodies isolated, Measure at work): a ring grows and
+   fades round it, as round a tool whose window is open. (They were marked to pulse, and nothing drew it.) */
+.right-btn.pulse {
+  position: relative;
+  color: #fff;
+}
+.right-btn.pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  opacity: 0;
+  animation: tool-pulse 1.4s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .right-btn.pulse::before {
+    animation: none;
+    opacity: 1;
+  }
+}
 /* (Lit while its window is open, as the three at the left edge are while they are on.) */
 .right-btn.pop-open .right-label {
   color: #b9d4ff;
