@@ -29,11 +29,11 @@ export interface TimelapseHost {
 const STOP = Symbol("stop");
 
 // How long each thing takes (ms). Slow on purpose: a step has to be seen, not flashed past.
-const MOVE = 900; // the view going somewhere else
-const TURN = 1200; // ...and turning to another side on the way
-const SETTLE = 250; // after the view arrives, before the step appears
-const SKETCH = 1300; // a sketch on show
-const SOLID = 1800; // a step that changed a body
+const STEP = 2500; // from one step to the next, all told: the view going to it, and the step on show
+const SHOWN = 900; // ...of which the step is on show at least this long, however long the view took
+const MOVE = 700; // the view going somewhere else
+const TURN = 900; // ...and turning to another side on the way
+const SETTLE = 120; // after the view arrives, before the step appears
 const QUIET = 700; // a step that shows nothing new (a plane, a variable)
 const ORBIT = 10000; // once round the finished model, at the end
 
@@ -128,6 +128,7 @@ export class Timelapse {
         const f = on[k];
         const fs = upTo(k + 1);
         const at = { id: f.id, index: k, of: on.length, name: f.name };
+        const began = performance.now();
         this.h.mark(at);
         this.h.waiting(true);
         let r: RegenResult | null;
@@ -152,9 +153,10 @@ export class Timelapse {
         this.h.mark(at);
         had = new Map(r.bodies.map((b) => [b.id, b.key]));
         was = corners(r.bodies);
-        if (isSketch) await this.sleep(SKETCH, t);
         // (Nothing is lit: what a step added was shown in the blue of a picked face, and read as a selection.)
-        else await this.sleep(changed.length ? SOLID : QUIET, t);
+        // Steps follow each other at an even pace: what the view's move took comes off the time on show.
+        if (!isSketch && !changed.length) await this.sleep(QUIET, t);
+        else await this.sleep(Math.max(SHOWN, STEP - (performance.now() - began)), t);
       }
       // All of it, to end on.
       this.h.mark(null);
