@@ -485,6 +485,14 @@ records, the guide text says what the buttons do.
   as a file or deleted. They live in the
   browser's storage for this site: **More → Update** keeps them, but
   clearing the site's data in the browser's settings deletes them.
+- **File → Save as web file (to share)** saves the project as a small web
+  page (`.html`). Send that file to anyone: opening it opens their browser,
+  and its button opens the app with the project in it, as one of their own
+  projects. They need no account and nothing installed, and nothing is
+  uploaded: the project goes from the page straight to the app in their
+  browser.
+- With the app **installed** (Chrome or Edge on a computer), a `.super` file
+  opens in it when it is double-clicked.
 - **File → Save project** downloads a `.super` file (keep it as a backup or
   move it to another device).
 - **On Android**, Save project and the exports open the device's own *Save to* window where the
