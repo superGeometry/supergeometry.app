@@ -637,6 +637,8 @@ export class SketchTool implements Tool {
     this.scaleGimbal = null;
     this.patGimbal?.dispose();
     this.patGimbal = null;
+    this.patGimbalBack?.dispose();
+    this.patGimbalBack = null;
     this.patBox?.dispose();
     this.patBox = null;
     this.sizeDim?.dispose();
@@ -1971,9 +1973,9 @@ export class SketchTool implements Tool {
     // Drawing: the plain arrow, whatever Select's arrows left (a hand).
     if (this.kind !== "select" && this.app.view.canvas.style.cursor) this.app.view.canvas.style.cursor = "";
     if (this.kind === "patternLinear" && this.patGimbal) {
-      const g = this.patGimbal.hit(p);
-      this.patGimbal.setHot(g ?? (this.patDrag ? ({ kind: "axis", i: this.patDrag.axis as 0 | 1 }) : null));
-      if (g) return this.app.setHover(null);
+      const k = this.patArrowAt(p);
+      this.lightPatArrow(k ?? (this.patDrag ? this.patDrag.axis : null));
+      if (k !== null) return this.app.setHover(null);
     }
     if (this.kind === "select") {
       const onArrow = !!this.regionArrow?.handle.hit(p);
@@ -2906,6 +2908,12 @@ export class SketchTool implements Tool {
       if (Math.abs(d.x * n[0] + d.y * n[1] + d.z * n[2]) < 0.999) this.app.view.cam.lookAlong(n, this.plane.xDir);
     }
     if (this.edit.picking) return this.pickForEdit(p);
+    // A linear pattern's arrow, tapped: the copies run that way. (No drag needed - and tapped again on another
+    // arrow, they run that way instead: the tap used to apply the pattern as it stood.)
+    if (this.kind === "patternLinear" && this.selected.size) {
+      const k = this.patArrowAt(p);
+      if (k !== null) return this.pointPattern(k);
+    }
     // A tap on empty space finishes what's waiting for Apply (like elsewhere).
     // (Not while a turn still needs its centre: that tap is the centre.)
     const needsCentre = (this.kind === "rotate" || this.kind === "patternCircular") && !this.edit.pivot;
@@ -4059,7 +4067,7 @@ export class SketchTool implements Tool {
 
   /** Arrows showing which way a linear pattern runs: drag one to set direction and spacing. */
   private patGimbal: Gimbal | null = null;
-  private patDrag: { axis: number; from: ToolPointer; center: Vec2 } | null = null;
+  private patDrag: { axis: number; from: ToolPointer; center: Vec2; moved?: boolean } | null = null;
   private patBox: PatternBox | null = null;
   private patMeasure: "between" | "total" = "between";
 
@@ -4073,31 +4081,72 @@ export class SketchTool implements Tool {
     if (!c) {
       this.patGimbal?.dispose();
       this.patGimbal = null;
+      this.patGimbalBack?.dispose();
+      this.patGimbalBack = null;
       this.patBox?.dispose();
       this.patBox = null;
       return;
     }
     const plane = this.plane!;
-    // Turned so its first arrow points the way the pattern runs.
-    const ang = Math.hypot(this.edit.dx, this.edit.dy) > 1e-12 ? Math.atan2(this.edit.dy, this.edit.dx) : 0;
+    // Four arrows - right, up, left, down - and the pattern runs the way of the one tapped (or dragged, for the
+    // spacing too). They stand still while the pattern runs along one of them: only a way typed at an angle
+    // turns them, so that one of them points along it.
+    const way = Math.hypot(this.edit.dx, this.edit.dy) > 1e-12 ? Math.atan2(this.edit.dy, this.edit.dx) : this.patAng;
+    const quarter = (way - this.patAng) / (Math.PI / 2);
+    const ang = Math.abs(quarter - Math.round(quarter)) < 1e-9 ? this.patAng : way;
     const u = sketchToWorld({ ...plane, origin: [0, 0, 0] }, [Math.cos(ang), Math.sin(ang)]).toArray() as Vec3;
     const v = sketchToWorld({ ...plane, origin: [0, 0, 0] }, [-Math.sin(ang), Math.cos(ang)]).toArray() as Vec3;
-    if (!this.patGimbal || this.patAng !== ang) {
+    if (!this.patGimbal || !this.patGimbalBack || this.patAng !== ang) {
       this.patGimbal?.dispose();
-      this.patGimbal = new Gimbal(this.app.view, { axes: [u, v, plane.normal], parts: (q) => q.kind === "axis" && q.i < 2 });
+      this.patGimbalBack?.dispose();
+      const parts = (q: GimbalPart) => q.kind === "axis" && q.i < 2;
+      this.patGimbal = new Gimbal(this.app.view, { axes: [u, v, plane.normal], parts });
+      this.patGimbalBack = new Gimbal(this.app.view, { axes: [scale3(u, -1), scale3(v, -1), plane.normal], parts });
       this.patAng = ang;
     }
-    this.patGimbal.setCenter(sketchToWorld(plane, c).toArray() as Vec3);
+    const at = sketchToWorld(plane, c).toArray() as Vec3;
+    this.patGimbal.setCenter(at);
+    this.patGimbalBack.setCenter(at);
+  }
+  private patGimbalBack: Gimbal | null = null;
+
+  /** Which of the pattern's four arrows is under the pointer: 0 right, 1 up, 2 left, 3 down (as they stand); null: none. */
+  private patArrowAt(p: ToolPointer): number | null {
+    const a = this.patGimbal?.hit(p);
+    if (a?.kind === "axis" && a.i < 2) return a.i;
+    const b = this.patGimbalBack?.hit(p);
+    return b?.kind === "axis" && b.i < 2 ? b.i + 2 : null;
+  }
+
+  private lightPatArrow(k: number | null): void {
+    this.patGimbal?.setHot(k !== null && k < 2 ? { kind: "axis", i: k as 0 | 1 } : null);
+    this.patGimbalBack?.setHot(k !== null && k >= 2 ? { kind: "axis", i: (k - 2) as 0 | 1 } : null);
+  }
+
+  /** An arrow tapped: the pattern runs that way, as far apart as it was (or just clear of what is picked, while that was never set). */
+  private pointPattern(k: number): void {
+    const a = this.patAng + (k * Math.PI) / 2;
+    const L = Math.hypot(this.edit.dx, this.edit.dy);
+    const auto = this.patAuto !== null && Math.abs(L - this.patAuto) < 1e-9;
+    const keep = L > 1e-12 ? L : 10;
+    this.edit.dx = Math.cos(a) * keep;
+    this.edit.dy = Math.sin(a) * keep;
+    if (auto || !(L > 1e-12)) this.autoPatternSpacing();
+    this.patDirDeg = null;
+    this.refreshPreview();
+    this.updatePanel();
+    this.showPatternBox();
+    this.setHint("The copies run that way. Tap another arrow to change it, drag one to space them, or type the count and the spacing.");
   }
   private patAng = 0;
   /** The pattern direction typed (kept while the spacing is 0). */
   private patDirDeg: number | null = null;
 
   private startPatternDrag(p: ToolPointer): boolean {
-    const part = this.patGimbal?.hit(p);
+    const k = this.patArrowAt(p);
     const c = this.selectionCentre();
-    if (!part || part.kind !== "axis" || !c) return false;
-    this.patDrag = { axis: part.i, from: p, center: c };
+    if (k === null || !c) return false;
+    this.patDrag = { axis: k, from: p, center: c };
     this.patBox?.dispose();
     this.patBox = null;
     return true;
@@ -4106,8 +4155,11 @@ export class SketchTool implements Tool {
   private dragPattern(p: ToolPointer): void {
     const dr = this.patDrag!;
     const plane = this.plane!;
+    // (A press that has not moved is a tap on the arrow: which way, not how far.)
+    if (!dr.moved && Math.hypot(p.x - dr.from.x, p.y - dr.from.y) < 5) return;
+    dr.moved = true;
     // The arrow's direction in the sketch.
-    const a = this.patAng + (dr.axis === 1 ? Math.PI / 2 : 0);
+    const a = this.patAng + (dr.axis * Math.PI) / 2;
     const dir2: Vec2 = [Math.cos(a), Math.sin(a)];
     const dirW = sketchToWorld({ ...plane, origin: [0, 0, 0] }, dir2).toArray() as Vec3;
     const view = this.app.view;
@@ -4125,9 +4177,16 @@ export class SketchTool implements Tool {
   }
 
   private endPatternDrag(): void {
+    // An arrow pressed and let go where it was: the copies run that way (a press on an arrow starts as a drag).
+    const tapped = this.patDrag && !this.patDrag.moved ? this.patDrag.axis : null;
     this.patDrag = null;
+    if (tapped !== null) {
+      this.app.ui.setLabel(0, 0, null);
+      this.lightPatArrow(null);
+      return this.pointPattern(tapped);
+    }
     this.app.ui.setLabel(0, 0, null);
-    this.patGimbal?.setHot(null);
+    this.lightPatArrow(null);
     this.refreshPatternGimbal();
     this.updatePanel();
     this.showPatternBox();

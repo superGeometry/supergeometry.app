@@ -995,6 +995,10 @@ export class Sentence {
           // (already let go)
         }
         this.changed();
+        // The drag is over, and the number is what it came to. (It stayed "being dragged" whenever no click came
+        // after it - let go off the word, or the word drawn again meanwhile: the pointer merely passing over it
+        // afterwards went on sliding the number, from where the old drag began.)
+        down = null;
       }
     };
     d.addEventListener("pointerup", up);
