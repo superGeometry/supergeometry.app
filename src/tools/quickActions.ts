@@ -81,6 +81,42 @@ const MORE_ORDER: string[][] = [
 ];
 const MORE_PLACE = new Map(MORE_ORDER.flatMap((ids, i) => ids.map((id) => [id, i] as const)));
 
+/**
+ * How often each tool has been started from these buttons, kept on this device only: the ones used most are
+ * lit a little under More, the most used the most - a hint of where to look, nothing more.
+ */
+const USE_KEY = "sg-quick-use";
+let uses: Record<string, number> | null = null;
+function useCounts(): Record<string, number> {
+  if (uses) return uses;
+  uses = {};
+  try {
+    const kept = JSON.parse(localStorage.getItem(USE_KEY) ?? "{}");
+    if (kept && typeof kept === "object") for (const [k, v] of Object.entries(kept)) if (typeof v === "number" && v > 0) uses[k] = v;
+  } catch {
+    // (No storage here, or not ours: counted for this visit only.)
+  }
+  return uses;
+}
+function countUse(id: string): void {
+  const u = useCounts();
+  u[id] = (u[id] ?? 0) + 1;
+  // (What was used long ago fades beside what is used now.)
+  if (u[id] > 200) for (const k of Object.keys(u)) u[k] = Math.floor(u[k] / 2);
+  try {
+    localStorage.setItem(USE_KEY, JSON.stringify(u));
+  } catch {
+    // (Not kept: nothing lost but the hint.)
+  }
+}
+/** How much a tool is used beside the most used one, 0 to 1 (a button that opens kinds: its kinds together). Used once: not yet. */
+function usedShare(it: ToolItem): number {
+  const u = useCounts();
+  const most = Math.max(0, ...Object.values(u));
+  const n = it.run ? (u[it.id] ?? 0) : (it.children ?? []).reduce((s, k) => s + (u[k.id] ?? 0), 0);
+  return most >= 2 && n >= 2 ? Math.min(1, n / most) : 0;
+}
+
 /** At most this many: only the important things (the rest is under More at the row's end). */
 const MOST = 2;
 /**
@@ -187,14 +223,27 @@ export class QuickActions {
         if (!it.run && it.children?.length) {
           if (chosen === it.id && !grid.hidden && !rest.some((r) => r.id === it.id)) return close();
           choose(it);
-        } else it.run?.();
+        } else {
+          if (it.run && !it.swatch) countUse(it.id);
+          it.run?.();
+        }
       });
+      return b;
+    };
+    /** A button under More: lit a little by how much its tool is used. */
+    const restButton = (it: ToolItem) => {
+      const b = button(it);
+      const share = usedShare(it);
+      if (share > 0) {
+        b.classList.add("used");
+        b.style.setProperty("--used", share.toFixed(2));
+      }
       return b;
     };
     let chosen: string | null = null;
     const close = () => {
       chosen = null;
-      if (rest.length) grid.replaceChildren(...rest.map(button));
+      if (rest.length) grid.replaceChildren(...rest.map(restButton));
       else grid.hidden = true;
       fitNames(grid);
       this.layout();
@@ -240,13 +289,13 @@ export class QuickActions {
       more.title = "Every other tool for this";
       more.setAttribute("aria-label", "More tools for this");
       more.innerHTML = `${icons.more ?? ""}<span>More</span>`;
-      for (const it of rest) grid.append(button(it));
+      for (const it of rest) grid.append(restButton(it));
       more.addEventListener("click", (e) => {
         e.stopPropagation();
         // (Opened again after a list of choices was up in it - Color's: the tools again, as More says.)
         if (grid.hidden && chosen) {
           chosen = null;
-          grid.replaceChildren(...rest.map(button));
+          grid.replaceChildren(...rest.map(restButton));
         }
         grid.hidden = !grid.hidden;
         more.classList.toggle("on", !grid.hidden);

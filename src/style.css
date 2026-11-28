@@ -7473,12 +7473,21 @@ html[data-screen="phone"] body.sentence-ui #toast {
   overflow-y: auto;
   touch-action: pan-y;
 }
-/* A computer's screen: all of them in view at once, six across (four across ran to a scroll for a face's tools). */
+/* A computer's screen: all of them in view at once - four across as everywhere, as tall as it takes (it ran to a scroll). */
 @media (pointer: fine) and (min-width: 900px) and (min-height: 640px) {
   .quick-rest {
-    grid-template-columns: repeat(6, 52px);
-    max-height: min(72vh, 480px);
+    max-height: calc(100vh - 150px);
   }
+}
+/* A tool used a lot (quickActions.ts counts): its rim and ground a little towards blue, the most used the most. */
+.quick-rest .quick-action.used {
+  border-color: color-mix(in srgb, rgba(120, 165, 255, 0.85) calc(var(--used, 0) * 100%), rgba(255, 255, 255, 0.18));
+  background: color-mix(in srgb, rgba(52, 92, 168, 0.55) calc(var(--used, 0) * 100%), rgba(31, 33, 37, 0.95));
+}
+.quick-rest .quick-action.used:hover,
+.quick-rest .quick-action.used:active {
+  background: #2a57a3;
+  border-color: #8fbcff;
 }
 .quick-rest[hidden] {
   display: none;
