@@ -362,8 +362,9 @@ export class Viewport {
 
   private applyAnalysis(): void {
     const s = settings.value;
-    // A 2D section's lines are light (on the dark background), a 3D model's dark (on its grey faces).
-    this.edgeMat.color.set(this.sectionStyle === "flat" && this.clip ? 0xd8dbe2 : COLORS.edge);
+    // A 2D section's lines are light (on the dark background), a 3D model's dark (on its grey faces). Wireframe
+    // has no faces: its lines are light too (dark on the dark background, only the dashes over them showed).
+    this.edgeMat.color.set((this.sectionStyle === "flat" && this.clip) || s.shader === "wireframe" ? 0xd8dbe2 : COLORS.edge);
     if (this.sectionStyle === "flat" && this.clip) {
       const m = (this.flatMat ??= new MeshBasicMaterial({ color: (this.scene.background as Color).clone(), polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
       m.clippingPlanes = [this.clip];
@@ -589,7 +590,8 @@ export class Viewport {
       for (const sm of b.capStencil) sm.visible = b.cap.visible;
       if (b.outline) b.outline.visible = vis && !!this.clip;
       b.edges.visible = vis && !only && (settings.value.showEdges || settings.value.shader === "wireframe" || this.sectionStyle === "flat");
-      b.hidden.visible = vis && !only && (settings.value.showHiddenEdges || settings.value.shader === "wireframe");
+      // (Wireframe: every edge is in plain sight, drawn whole; dashes over the same lines only broke them up.)
+      b.hidden.visible = vis && !only && settings.value.showHiddenEdges && settings.value.shader !== "wireframe";
     }
     this.dirty = true;
   }
