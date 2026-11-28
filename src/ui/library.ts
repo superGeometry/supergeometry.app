@@ -5,7 +5,7 @@
 
 import type { LibraryEntry } from "../doc/library";
 import { icons } from "./icons";
-import { SUPPORT, openSupport } from "./support";
+import { SUPPORT, showSupport } from "./support";
 import { el, twoTap } from "./ui";
 
 export interface LibraryActions {
@@ -42,7 +42,7 @@ function supportBox(): HTMLElement {
     el(
       "div",
       "library-support-text",
-      "This app is free, with no ads and no account, and one person makes it. If it's useful to you, a free MakerWorld Boost or a follow is very useful to me. Thank you!",
+      "This app is free, with no ads and no account, and one person makes it. If it's useful to you, a free MakerWorld Boost or a follow is very useful to me, and so is a coffee on Ko-fi. Thank you!",
     ),
   );
   const row = el("div", "library-support-row");
@@ -70,8 +70,8 @@ function supportBox(): HTMLElement {
       b.append(tag);
     }
     if (w.url) {
-      b.title = `${w.name} - opens in a new tab`;
-      b.addEventListener("click", () => openSupport(w.url));
+      b.title = w.panel ? `${w.name} - opens here` : `${w.name} - opens in a new tab`;
+      b.addEventListener("click", () => showSupport(w));
     } else b.disabled = true;
     row.append(b);
   }

@@ -4142,6 +4142,26 @@ html[data-screen="tablet"] #more-menu {
   }
 }
 
+/* A way to support shown in a window here: the site's own panel in a frame (Ko-fi's is drawn for a light page). */
+.dialog.support-panel {
+  width: min(420px, calc(100vw - 24px));
+}
+.support-frame {
+  border: 0;
+  width: 100%;
+  height: min(600px, calc(100dvh - 190px));
+  border-radius: 8px;
+  background: #f9f9f9;
+}
+.support-out {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
 /* More → Boost / Donate / Support: the ways, indented under it. */
 .menu-sub {
   display: flex;

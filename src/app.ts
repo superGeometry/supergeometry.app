@@ -4,7 +4,7 @@ import { CurvePointPlaneOp, EdgeAnglePlaneOp, FacePointPlaneOp, ThreePointPlaneO
 import { PlanesAxisOp, TwoPointAxisOp, surfaceAxis } from "./tools/axisOps";
 import { ImprintOp, WrapOp } from "./tools/wrapOps";
 import { DocStore, parseProject } from "./doc/store";
-import { SUPPORT, openSupport } from "./ui/support";
+import { SUPPORT, openSupport, showSupport } from "./ui/support";
 import { currentProjectId, forgetProject, keepProject, libraryEntries, newProjectId, projectText, renameProject, setCurrentProject } from "./doc/library";
 import { showLibrary } from "./ui/library";
 import { showAbout } from "./ui/about";
@@ -2132,14 +2132,15 @@ export class App implements AppContext {
       donateList.hidden = !donateList.hidden;
       document.getElementById("m-donate-arrow")!.textContent = donateList.hidden ? "▸" : "▾";
     });
-    for (const { id, url } of SUPPORT) {
+    for (const way of SUPPORT) {
+      const { id, url } = way;
       const b = document.getElementById(`m-support-${id}`);
       if (!b) continue;
       if (!url) {
         b.querySelector(".menu-soon")!.textContent = "soon";
         b.classList.add("disabled");
       }
-      moreItem(`m-support-${id}`, () => (url ? openSupport(url) : this.ui.toast("Coming soon")));
+      moreItem(`m-support-${id}`, () => (url ? showSupport(way) : this.ui.toast("Coming soon")));
     }
     document.addEventListener("pointerdown", (e) => {
       if (!(e.target as HTMLElement).closest("#file-menu, #file-btn")) menu.hidden = true;

@@ -16,6 +16,11 @@ export interface SupportWay {
   mark: string;
   /** A tag on the button's right (MakerWorld's Boost, with its rocket). */
   tag?: { icon: string; text: string };
+  /**
+   * The site's own panel, shown in a window here and not in a new tab (Ko-fi's donation panel). It is the site's
+   * page in a frame: fetched only when the window is opened, and apart from the app - it sees nothing of it.
+   */
+  panel?: string;
 }
 
 const svg = (body: string) =>
@@ -35,9 +40,66 @@ export const SUPPORT: SupportWay[] = [
     },
     mark: svg('<path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/>'),
   },
+  {
+    id: "kofi",
+    name: "Ko-fi",
+    sub: "Buy me a coffee",
+    url: "https://ko-fi.com/supergeometry",
+    logo: "",
+    panel: "https://ko-fi.com/supergeometry/?hidefeed=true&widget=true&embed=true&preview=true",
+    // (A cup with a heart on it.)
+    mark: svg('<path d="M4 8h12v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z"/><path d="M16 9.5h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M10 15.2 7.9 13a1.4 1.4 0 0 1 2.1-1.9A1.4 1.4 0 0 1 12.1 13z" fill="currentColor"/>'),
+  },
 ];
 
 /** Opens in a new tab, with no way back into this page. */
 export function openSupport(url: string): void {
   window.open(url, "_blank", "noopener");
+}
+
+/** A way to support, opened: its own panel in a window here if it has one (and the device is online), else its page in a new tab. */
+export function showSupport(w: SupportWay): void {
+  if (!w.panel || navigator.onLine === false) return openSupport(w.url);
+  const back = document.createElement("div");
+  back.className = "dialog-back";
+  const box = document.createElement("div");
+  box.className = "dialog support-panel";
+  const head = document.createElement("div");
+  head.className = "library-head";
+  const title = document.createElement("div");
+  title.className = "panel-title";
+  title.textContent = `Support on ${w.name}`;
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "icon-btn library-close";
+  closeBtn.title = "Close";
+  closeBtn.innerHTML = svg('<path d="M6 6l12 12M18 6 6 18"/>');
+  head.append(title, closeBtn);
+  const frame = document.createElement("iframe");
+  frame.className = "support-frame";
+  frame.title = `${w.name}: support superGeometry`;
+  frame.src = w.panel;
+  const note = document.createElement("div");
+  note.className = "dialog-note support-note";
+  note.append(`This is ${w.name}'s own page: what you enter goes to ${w.name}, not to this app. `);
+  const out = document.createElement("button");
+  out.type = "button";
+  out.className = "support-out";
+  out.textContent = "Open it in a new tab";
+  note.append(out);
+  box.append(head, frame, note);
+  const close = () => {
+    window.removeEventListener("keydown", onKey, true);
+    back.remove();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") (e.preventDefault(), close());
+    e.stopPropagation();
+  };
+  out.addEventListener("click", () => (openSupport(w.url), close()));
+  closeBtn.addEventListener("click", close);
+  back.addEventListener("pointerdown", (ev) => ev.target === back && close());
+  window.addEventListener("keydown", onKey, true);
+  back.append(box);
+  document.body.append(back);
 }
