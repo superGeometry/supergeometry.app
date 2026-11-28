@@ -3309,7 +3309,9 @@ export class SketchTool implements Tool {
         // Level and upright are already there (straight across from the last point).
         if (Math.abs(d[0]) < 1e-6 || Math.abs(d[1]) < 1e-6) continue;
         const curve = own.has(e.id) ? e.id : "";
-        loci.push({ kind: "line", p: from, d, label: "Parallel", guide: from, show: [e.a, e.b], dir: curve ? { type: "parallel", curve } : undefined });
+        // (Started from that line's own end: carrying straight on from it.)
+        const joined = Math.hypot(e.a[0] - from[0], e.a[1] - from[1]) < 1e-9 || Math.hypot(e.b[0] - from[0], e.b[1] - from[1]) < 1e-9;
+        loci.push({ kind: "line", p: from, d, label: joined ? "In line" : "Parallel", guide: from, show: [e.a, e.b], dir: curve ? { type: "parallel", curve } : undefined });
         loci.push({ kind: "line", p: from, d: [-d[1], d[0]], label: "Perpendicular", guide: from, show: [e.a, e.b], dir: curve ? { type: "perpendicular", curve } : undefined });
       }
     }
@@ -3336,6 +3338,9 @@ export class SketchTool implements Tool {
           if (L.label !== "On line") continue;
           const end = t < 0 ? a : b;
           if (Math.hypot(q[0] - end[0], q[1] - end[1]) / wpp > 400) continue;
+          // (The line being drawn starts on that very end: it is "In line" with it - the guide from the point,
+          // which also keeps the two lines running the same way afterwards.)
+          if (from && s.guideLines && Math.hypot(end[0] - from[0], end[1] - from[1]) < 1e-9 && Math.abs(L.d[0]) > 1e-6 && Math.abs(L.d[1]) > 1e-6) continue;
           label = "Extension";
           ext = end;
         }
@@ -4254,6 +4259,9 @@ export class SketchTool implements Tool {
     let label: string | null = null;
     const c = this.lockedCursor();
     this.updateLiveValues(c);
+    // A line begun on the end of another line: where that line would carry on, dashed - the way to aim to run
+    // straight on from it (the pointer snaps onto it, as onto the other guide lines).
+    if (this.kind === "line" && this.pts.length && settings.value.snap.guideLines) this.drawGhosts(this.carriedOn(this.pts[this.pts.length - 1]), 0xffc23d, true);
     // A length box on the first side of a 3-point shape (or an arc's radius) stays up.
     let keepLineDim = false;
     if (["line", "arc", "rect", "circle", "polygon", "ellipse", "spline"].includes(this.kind) && this.pts.length && c) {
@@ -4650,6 +4658,24 @@ export class SketchTool implements Tool {
   }
 
   /** A point marker (an arc's centre while it's drawn). */
+  /** The lines that end at `from`, each carried on past that end (a stretch of it, to show the way). */
+  private carriedOn(from: Vec2): SketchEntity[] {
+    const wpp = this.app.view.cam.worldPerPixel(this.app.view.height);
+    const out: SketchEntity[] = [];
+    for (const e of [...this.entities, ...this.boundary]) {
+      if (e.kind !== "line") continue;
+      const atA = Math.hypot(e.a[0] - from[0], e.a[1] - from[1]) < 1e-9;
+      const atB = Math.hypot(e.b[0] - from[0], e.b[1] - from[1]) < 1e-9;
+      if (atA === atB) continue;
+      const other = atA ? e.b : e.a;
+      const L = Math.hypot(from[0] - other[0], from[1] - other[1]);
+      if (L < 1e-9) continue;
+      const far = Math.max(L, wpp * 260);
+      out.push({ id: `carried-${e.id}`, kind: "line", a: from, b: [from[0] + ((from[0] - other[0]) / L) * far, from[1] + ((from[1] - other[1]) / L) * far] });
+    }
+    return out;
+  }
+
   private drawCentreMark(q: Vec2): void {
     const m = new Points(new BufferGeometry().setFromPoints([sketchToWorld(this.plane!, q, 0.02)]), dotMaterial({ color: 0xffc23d, size: 9 }));
     m.renderOrder = 10;

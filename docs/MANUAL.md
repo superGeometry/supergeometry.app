@@ -235,6 +235,10 @@ and Draw, Modify, Transform, Delete and Exit are on the line again.
 shape. Drag points or curves, or use the gimbal. Tap an arc or circle to type
 its radius. The panel's **Select last** picks what your last step made.
 
+A line begun on the end of another line shows, dashed in yellow, where that
+line would carry on: aim along it and the pointer snaps onto it (**In line**),
+and the two lines stay running the same way.
+
 **Construction lines** are helpers: they guide the drawing but don't make
 regions. The Construction / Regular button switches the selection (or new
 lines).
