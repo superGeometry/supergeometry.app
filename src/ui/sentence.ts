@@ -153,6 +153,11 @@ interface Built {
   grouped?: boolean;
   /** Whose sentence it is: a new subject brings every word in afresh. */
   about: string;
+  /**
+   * Nothing to say: the line is not shown at all. (Measure: its window has its own X, and its button at the left
+   * edge puts it down too - the line held its name and an X, and nothing else.)
+   */
+  bare?: boolean;
   /** Tools this pick has no use for, each with what it needs instead (said under everything it does offer). */
   others?: string[];
 }
@@ -664,6 +669,7 @@ export class Sentence {
       // (A way out named Done beside the tick would be the tick twice.)
       cancel: cancel && !(panel?.done && name === "Done") ? { label: name, run: cancel } : undefined,
       about: `tool:${title}`,
+      bare: !panel && !words.length && title === "Measure",
     };
   }
 
@@ -737,6 +743,7 @@ export class Sentence {
 
   private render(): void {
     const b = (this.built = this.build());
+    this.root.style.display = b.bare ? "none" : "";
     const fresh = b.about !== this.about;
     this.about = b.about;
     // The pick, then its tool: the sentence goes on from the word it started with.
