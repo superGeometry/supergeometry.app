@@ -1190,11 +1190,37 @@ export function solveFine(entities: SketchEntity[], constraints: SketchConstrain
 }
 
 /** A dimension's new value, strictly: refused (null) if the sketch can't take it. */
+/**
+ * The curves a size's change has no need to move: all but the ones it is of and the ones tied straight to those.
+ * A sketch nothing holds in place (no lock) can meet a new size in endless ways, and the solver's - the least
+ * change summed over every point - moved the whole shape a little: a corner's round made 10 for 5 shifted the two
+ * 100 mm sides it has nothing to do with. Solved first with these held still (sizeStrict), only the round and
+ * the two lines it joins change.
+ */
+export function farFrom(entities: SketchEntity[], constraints: SketchConstraint[], ids: string[]): Set<string> {
+  const near = new Set(ids);
+  for (const c of constraints) {
+    const refs = refsOf(c);
+    if (refs.some((id) => ids.includes(id))) for (const id of refs) near.add(id);
+  }
+  return new Set(entities.map((e) => e.id).filter((id) => !near.has(id)));
+}
+
+/** addStrict for a size of `ids`: what is far from them held still if that can be (see farFrom), else free to move. */
+export function sizeStrict(entities: SketchEntity[], existing: SketchConstraint[], added: SketchConstraint[], ids: string[], opts: SolveOptions = {}): ReturnType<typeof addStrict> {
+  const far = farFrom(entities, [...existing, ...added], ids);
+  if (far.size) {
+    const held = addStrict(entities, existing, added, { ...opts, fixed: new Set([...(opts.fixed ?? []), ...far]) });
+    if (held.ok) return held;
+  }
+  return addStrict(entities, existing, added, opts);
+}
+
 export function setValueStrict(entities: SketchEntity[], constraints: SketchConstraint[], id: string, value: number, expr?: string): { constraints: SketchConstraint[]; result: SolveResult } | null {
   const c = constraints.find((x) => x.id === id);
   if (!c) return null;
   const next = { ...c, value, expr };
-  const r = addStrict(entities, constraints.filter((x) => x !== c), [next]);
+  const r = sizeStrict(entities, constraints.filter((x) => x !== c), [next], refsOf(next));
   if (!r.ok) return null;
   // Keep the constraint where it was in the list.
   return { constraints: constraints.map((x) => (x === c ? next : x)), result: r.result };

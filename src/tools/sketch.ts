@@ -5,7 +5,7 @@ import { simplifyStroke } from "../sketch/freehand";
 import { Box3, BufferGeometry, DoubleSide, Line, LineBasicMaterial, LineDashedMaterial, Mesh, MeshBasicMaterial, Points, PointsMaterial, ShapeUtils, Vector2, Vector3 } from "three";
 import type { EdgeLink, ExtrudeSource, FaceRef, OutlineOffset, PlaneDef, PointRef, SketchConstraint, SketchEntity, SketchFeature, SketchFill, SketchRef, SketchRepeat, Vec2, Vec3 } from "../doc/types";
 import { add as add3, dot, GROUND, niceStep as niceStepOf, originOnPlane, patternSpacing, planeY, roundSig, scale as scale3, startSize, sub as sub3, toPlane } from "../geom";
-import { addForUser, addStrict, constraintError, constraintName, copiedConstraints, LINKED, pointOf, pointsOf, refsOf, lengthFromHeldEnd, setValueStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
+import { addForUser, addStrict, constraintError, constraintName, copiedConstraints, LINKED, pointOf, pointsOf, refsOf, lengthFromHeldEnd, setValueStrict, sizeStrict, sizeOf as sizeOfFn, solve, touchingEnds } from "../sketch/constraints";
 import { isExpression } from "../ui/ui";
 import { caretToEnd, selectAll, textField, type TextField } from "../ui/textField";
 import { nearestSnap } from "../sketch/snapPick";
@@ -6168,9 +6168,10 @@ export class SketchTool implements Tool {
             return;
           }
           const from = prop === "length" ? this.lengthFromHeldEnd(id, v) : this.entities;
-          const res = addStrict(from, next.filter((c) => base.includes(c)), added);
+          // (What the size has nothing to do with stays where it is, if the sketch can take it that way.)
+          const res = sizeStrict(from, next.filter((c) => base.includes(c)), added, [id]);
           if (!res.ok) return this.refused();
-          this.commit(from, res.constraints);
+          this.commit(res.result.entities, res.constraints);
           if (this.app.store.problems.length) this.app.ui.toast(this.app.store.problems[0], "error");
         },
       };
