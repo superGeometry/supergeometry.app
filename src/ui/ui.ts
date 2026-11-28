@@ -366,9 +366,10 @@ export class UI {
   /** History's Record button (beside Play); `on`: a recording is under way. */
   recordButton(on: boolean, press?: () => void): void {
     const b = $<HTMLButtonElement>("#history-record");
-    if (press) b.addEventListener("click", press);
+    // Two taps, like the bins: the first lights it, the second records (a slip of the finger beside Play records nothing).
+    if (press) twoTap(b, "history-record", press, "Tap again to start recording");
     b.innerHTML = icons.record;
-    b.title = on ? "Recording - Pause, then Reset, throws it away" : "Record: play it and save it as a video";
+    b.title = on ? "Recording - Pause, then Reset, throws it away" : "Record: play it and save it as a video (two taps)";
     b.classList.toggle("recording", on);
   }
 
@@ -2087,13 +2088,13 @@ function disarm(): void {
     if (b.dataset.armTitle !== undefined) b.title = b.dataset.armTitle;
   }
 }
-export function twoTap(b: HTMLElement, key: string, run: () => void): void {
+export function twoTap(b: HTMLElement, key: string, run: () => void, again = "Tap again to delete"): void {
   b.dataset.armKey = key;
   const isArmed = () => !!armed && armed.key === key && Date.now() < armed.until;
   const show = () => {
     b.classList.add("armed");
     if (b.dataset.armTitle === undefined) b.dataset.armTitle = b.title;
-    b.title = "Tap again to delete";
+    b.title = again;
   };
   if (isArmed()) show();
   b.addEventListener("click", (e) => {
