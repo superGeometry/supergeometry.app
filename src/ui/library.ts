@@ -70,7 +70,7 @@ function supportBox(): HTMLElement {
       b.append(tag);
     }
     if (w.url) {
-      b.title = w.card ? w.name : `${w.name} - opens in a new tab`;
+      b.title = `${w.name} - opens in a new tab`;
       b.addEventListener("click", () => showSupport(w));
     } else b.disabled = true;
     row.append(b);
