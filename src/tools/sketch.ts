@@ -10,6 +10,7 @@ import { isExpression } from "../ui/ui";
 import { caretToEnd, selectAll, textField, type TextField } from "../ui/textField";
 import { nearestSnap } from "../sketch/snapPick";
 import { arrangement, closestOnEntity, type Region } from "../sketch/regions";
+import { overlaps, type Overlap } from "../sketch/overlaps";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, CONSTRAINT_BUTTONS, constraintGlyph, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
 import { settings } from "../settings";
@@ -623,6 +624,7 @@ export class SketchTool implements Tool {
   }
 
   exit(): void {
+    this.gone = true;
     this.clearQuick();
     this.closePickBox();
     this.dropOffsetGrip();
@@ -4676,6 +4678,20 @@ export class SketchTool implements Tool {
     return out;
   }
 
+  /** Where the sketch's curves lie on one another, found again only when the curves change (it is asked for at every move of the pointer). */
+  private overlapsFor: { of: SketchEntity[]; id: string | null; list: Overlap[] } | null = null;
+  private overlapsNow(): Overlap[] {
+    const es = this.entities;
+    if (!es.length) return [];
+    const was = this.overlapsFor;
+    if (was && was.of === es) return was.list;
+    const list = overlaps(es);
+    // (One more than there was, in the sketch being worked on: said once, as it happens.)
+    if (was && was.id === this.sketchId && list.length > was.list.length) this.app.ui.toast("That lies on another line: where they overlap is drawn doubled, in orange");
+    this.overlapsFor = { of: es, id: this.sketchId ?? null, list };
+    return list;
+  }
+
   private drawCentreMark(q: Vec2): void {
     const m = new Points(new BufferGeometry().setFromPoints([sketchToWorld(this.plane!, q, 0.02)]), dotMaterial({ color: 0xffc23d, size: 9 }));
     m.renderOrder = 10;
@@ -4687,6 +4703,26 @@ export class SketchTool implements Tool {
     this.app.view.overlay.add(o);
   }
 
+  /**
+   * Curves lying on one another - two lines one over the other look like one: that stretch drawn doubled, in
+   * orange, so that the second one can be seen to be there. (Drawn again whenever the sketch's own helper lines
+   * are: whatever tool is on.)
+   */
+  private overlapRails(): void {
+    const off = this.app.view.cam.worldPerPixel(this.app.view.height) * 3.5;
+    const rails: SketchEntity[] = [];
+    this.overlapsNow().forEach((o, i) => {
+      if (o.kind === "circle") {
+        rails.push({ id: `over-${i}-a`, kind: "circle", center: o.center, radius: o.radius + off }, { id: `over-${i}-b`, kind: "circle", center: o.center, radius: Math.max(off * 0.2, o.radius - off) });
+        return;
+      }
+      const L = Math.hypot(o.b[0] - o.a[0], o.b[1] - o.a[1]) || 1;
+      const n: Vec2 = [(-(o.b[1] - o.a[1]) / L) * off, ((o.b[0] - o.a[0]) / L) * off];
+      rails.push({ id: `over-${i}-a`, kind: "line", a: [o.a[0] + n[0], o.a[1] + n[1]], b: [o.b[0] + n[0], o.b[1] + n[1]] }, { id: `over-${i}-b`, kind: "line", a: [o.a[0] - n[0], o.a[1] - n[1]], b: [o.b[0] - n[0], o.b[1] - n[1]] });
+    });
+    if (rails.length) this.drawGhosts(rails, 0xff8a3d);
+  }
+
   private clearOverlays(): void {
     for (const o of this.overlays) {
       this.app.view.overlay.remove(o);
@@ -4694,7 +4730,10 @@ export class SketchTool implements Tool {
     }
     this.overlays = [];
     this.app.view.requestRender();
+    if (!this.gone && this.phase === "draw" && this.plane && this.sketchId) this.overlapRails();
   }
+  /** The tool has been put down: nothing more is drawn for it. */
+  private gone = false;
 
   private screenDist(a: Vec2, b: Vec2): number {
     const sa = this.app.view.toScreen(sketchToWorld(this.plane!, a));
