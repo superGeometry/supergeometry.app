@@ -70,6 +70,9 @@ export interface ConstructionInfo {
   plane: PlaneDef;
   /** A construction plane: how it was made (offset, midplane, 3 points…). */
   kind?: string;
+  /** A construction plane: where its square is drawn (a point; put onto the plane) and how big, from what it was made from. */
+  at?: Vec3;
+  size?: number;
 }
 
 export interface FeatureError {

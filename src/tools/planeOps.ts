@@ -7,7 +7,7 @@
 // The plane is worked out from the picks and kept (it can be redone from History).
 
 import { Vector3 } from "three";
-import type { PlaneDef, PlaneFeature, PlaneKind, Vec3 } from "../doc/types";
+import type { FaceRef, PlaneDef, PlaneFeature, PlaneKind, Vec3 } from "../doc/types";
 import { add, cross, dot, len, norm, scale, sub, xDirFor } from "../geom";
 import { entityWorldPolylines } from "../sketch/curves";
 import type { PanelItem } from "../ui/ui";
@@ -22,8 +22,12 @@ interface CurvePick {
   tangent: Vec3;
   /** Straight (a line / straight edge): its two ends. */
   line?: [Vec3, Vec3];
+  /** How long the curve is (a plane across it is drawn that big). */
+  length: number;
   sel: Sel;
 }
+
+const lengthOf = (pts: Vec3[]): number => pts.reduce((s, p, i) => (i ? s + len(sub(p, pts[i - 1])) : 0), 0);
 
 function nearestOnPolyline(pts: Vec3[], q: Vec3): { at: Vec3; tangent: Vec3 } | null {
   let best: { at: Vec3; tangent: Vec3; d: number } | null = null;
@@ -73,7 +77,7 @@ function curvePick(app: AppContext, hit: PickHit): CurvePick | null {
     if (!near) return null;
     // Straight when the middle lies on the line between the ends.
     const straight = len(sub(info.start, info.end)) > 1e-9 && Math.abs(len(sub(info.start, info.end)) - info.length) < info.length * 1e-4;
-    return { ...near, line: straight ? [info.start, info.end] : undefined, sel: { kind: "edge", body: hit.body, edge: hit.edge } };
+    return { ...near, line: straight ? [info.start, info.end] : undefined, length: info.length, sel: { kind: "edge", body: hit.body, edge: hit.edge } };
   }
   if (hit.kind === "curve") {
     const plane = app.sketchPlane(hit.sketch);
@@ -83,7 +87,7 @@ function curvePick(app: AppContext, hit: PickHit): CurvePick | null {
     // is square to it there - it was put on the curve's shadow, off the curve and askew to it.)
     for (const pts of entityWorldPolylines(e, plane)) {
       const near = nearestOnPolyline(pts, hit.point);
-      if (near) return { ...near, line: e.kind === "line" ? [pts[0], pts[pts.length - 1]] : undefined, sel: { kind: "curve", sketch: hit.sketch, entity: hit.entity } };
+      if (near) return { ...near, line: e.kind === "line" ? [pts[0], pts[pts.length - 1]] : undefined, length: lengthOf(pts), sel: { kind: "curve", sketch: hit.sketch, entity: hit.entity } };
     }
   }
   return null;
@@ -115,9 +119,16 @@ abstract class PlaneFromPicks extends FeatureOp<PlaneFeature> {
   }
   /** The plane the picks make (null: not yet / they don't make one). */
   protected abstract make(): PlaneDef | null;
+  /** Where its square is drawn and how big, from the picks (see PlaneFeature.shown). */
+  protected square(): PlaneFeature["shown"] {
+    return undefined;
+  }
   protected sync(): void {
     const p = this.make();
-    if (p) this.feature.plane = p;
+    if (p) {
+      this.feature.plane = p;
+      this.feature.shown = this.square();
+    }
   }
   protected ready(): boolean {
     return super.ready() && !!this.make();
@@ -140,6 +151,12 @@ export class ThreePointPlaneOp extends PlaneFromPicks {
     if (len(n) < 1e-9 * Math.max(1, len(sub(b, a)) * len(sub(c, a)))) return null;
     return { origin: a, normal: norm(n), xDir: norm(sub(b, a)) };
   }
+  /** Round the three points: over their middle, half as big again as they are apart. */
+  protected square(): PlaneFeature["shown"] {
+    const [a, b, c] = this.pts;
+    if (!a || !b || !c) return undefined;
+    return { at: scale(add(add(a, b), c), 1 / 3), size: 1.5 * Math.max(len(sub(a, b)), len(sub(b, c)), len(sub(c, a))) };
+  }
   protected hint(): string {
     return this.pts.every(Boolean) && !this.make() ? "⚠ The three points are on one line - pick another" : "Tap three points (corners, points on edges or in sketches): the plane goes through all three.";
   }
@@ -155,6 +172,10 @@ export class CurvePointPlaneOp extends PlaneFromPicks {
   }
   protected make(): PlaneDef | null {
     return this.c && { origin: this.c.at, normal: this.c.tangent, xDir: xDirFor(this.c.tangent) };
+  }
+  /** On the curve where it was tapped, as big as the curve is long. */
+  protected square(): PlaneFeature["shown"] {
+    return this.c ? { at: this.c.at, ...(this.c.length > 0 ? { size: this.c.length } : {}) } : undefined;
   }
   protected hint(): string {
     return this.edgesOnly ? "Tap an edge where the plane should cross it, square to it." : "Tap a line or edge where the plane should cross it, square to it.";
@@ -192,6 +213,12 @@ export class EdgeAnglePlaneOp extends PlaneFromPicks {
     // Centred on the edge (that's where it's drawn).
     return { origin: scale(add(a, b), 0.5), normal: n, xDir: d };
   }
+  /** On the edge it turns about, half as big again as the edge is long. */
+  protected square(): PlaneFeature["shown"] {
+    if (!this.c?.line) return undefined;
+    const [a, b] = this.c.line;
+    return { at: scale(add(a, b), 0.5), size: 1.5 * len(sub(b, a)) };
+  }
   protected items(): PanelItem[] {
     return [{ type: "number", label: "Angle", value: this.angle, kind: "angle", onInput: (v) => ((this.angle = v), this.sync(), this.update()) }];
   }
@@ -203,14 +230,20 @@ export class EdgeAnglePlaneOp extends PlaneFromPicks {
 /** A face's (or plane's) direction, moved to a point. */
 export class FacePointPlaneOp extends PlaneFromPicks {
   private ref: PlaneDef | null = null;
+  private face: FaceRef | undefined;
   private at: Vec3 | null = null;
   constructor(app: AppContext) {
     super(app, "Plane Parallel", "parallel");
-    this.slots = [planeSlot(app, "Parallel to", () => this.ref, (p) => ((this.ref = p), this.sync())), pointSlot(app, "Through point", () => this.at, (p) => ((this.at = p), this.sync()))];
+    this.slots = [planeSlot(app, "Parallel to", () => this.ref, (p, f) => ((this.ref = p), (this.face = f), this.sync())), pointSlot(app, "Through point", () => this.at, (p) => ((this.at = p), this.sync()))];
     this.finishWhenPicked = true;
   }
   protected make(): PlaneDef | null {
     return this.ref && this.at ? { ...this.ref, origin: this.at } : null;
+  }
+  /** At the point it goes through, by the size of the face it copies. */
+  protected square(): PlaneFeature["shown"] {
+    this.feature.near = this.face ? [this.face] : undefined;
+    return this.at ? { at: this.at } : undefined;
   }
   protected hint(): string {
     return "Tap a face or plane to copy its direction, then the point the new plane goes through.";

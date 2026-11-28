@@ -471,6 +471,16 @@ export interface PlaneFeature extends FeatureBase {
   face?: FaceRef;
   offset: number;
   kind?: PlaneKind;
+  /**
+   * The faces it was made from, beside `face` (a midplane's two, the face a parallel plane copies): its square is
+   * drawn by them - half as big again as they are, in front of them.
+   */
+  near?: FaceRef[];
+  /**
+   * Where its square is drawn and how big, when no face says (three points: round them; across an edge: on it).
+   * `at` alone: there, at the size its faces give. Missing altogether: by the model, as planes were drawn before.
+   */
+  shown?: { at?: Vec3; size?: number };
 }
 
 export interface AxisFeature extends FeatureBase {

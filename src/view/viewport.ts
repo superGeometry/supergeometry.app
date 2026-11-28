@@ -1039,6 +1039,8 @@ export class Viewport {
 
   private planeSizes = new Map<string, number>();
   private planeCentres = new Map<string, Vec3>();
+  /** Planes moved by hand: drawn where they were put, not where what they were made from says. */
+  private planePlaced = new Set<string>();
 
   /** History hover: what a step works on, as dashed lines seen through everything. */
   private stepGroup = new Group();
@@ -1098,14 +1100,22 @@ export class Viewport {
       // A construction plane keeps the size it was first shown at: it doesn't
       // grow and shrink while the model is edited.
       // Origin planes: big enough to hit easily (fingers, headsets), even with a body in front.
-      let size = m.userData.origin ? wpp * 120 : this.planeSizes.get(id);
-      let mid = m.userData.origin ? undefined : this.planeCentres.get(id);
+      // What it was made from says where its square is and how big (a face: in front of it, half as big again);
+      // one moved by hand is where it was put.
+      const info = m.userData.origin ? undefined : this.construction.planes.find((c) => c.id === id);
+      let size = m.userData.origin ? wpp * 120 : (info?.size ?? this.planeSizes.get(id));
+      let mid = m.userData.origin ? undefined : this.planePlaced.has(id) ? this.planeCentres.get(id) : (info?.at ?? this.planeCentres.get(id));
       if (size === undefined || (!m.userData.origin && mid === undefined)) {
+        // (Nothing says: by the model as it is now - and kept so.)
         const box = this.bounds();
-        size = Math.max(wpp * 160, box.getSize(new Vector3()).length() * 0.6);
-        this.planeSizes.set(id, size);
-        mid = box.isEmpty() ? p.origin : (box.getCenter(new Vector3()).toArray() as Vec3);
-        this.planeCentres.set(id, mid);
+        if (size === undefined) {
+          size = box.isEmpty() ? wpp * 160 : box.getSize(new Vector3()).length() * 0.6;
+          this.planeSizes.set(id, size);
+        }
+        if (mid === undefined) {
+          mid = box.isEmpty() ? p.origin : (box.getCenter(new Vector3()).toArray() as Vec3);
+          this.planeCentres.set(id, mid);
+        }
       }
       // Centred where the middle of the model (as it was) falls on the plane - a
       // plane 92 mm across through a lamp shade 150 mm up was drawn around the
@@ -1132,7 +1142,7 @@ export class Viewport {
   planeShownAt(id: string): Vec3 | undefined {
     const p = this.planeOf(id);
     if (!p) return undefined;
-    const mid = this.planeCentres.get(id);
+    const mid = this.planePlaced.has(id) ? this.planeCentres.get(id) : (this.construction.planes.find((c) => c.id === id)?.at ?? this.planeCentres.get(id));
     if (!mid || ORIGIN_PLANES[id]) return p.origin;
     const n = new Vector3(...p.normal).normalize();
     const c = new Vector3(...mid);
@@ -1142,9 +1152,15 @@ export class Viewport {
   /** A moved (or copied) plane's square goes with it - the size of the one it came from. */
   showPlaneAt(id: string, at: Vec3, like = id): void {
     this.planeCentres.set(id, at);
-    const s = this.planeSizes.get(like);
+    this.planePlaced.add(id);
+    const s = this.planeShownSize(like);
     if (s !== undefined) this.planeSizes.set(id, s);
     this.requestRender();
+  }
+
+  /** How big a construction plane's square is drawn. */
+  planeShownSize(id: string): number | undefined {
+    return this.construction.planes.find((c) => c.id === id)?.size ?? this.planeSizes.get(id);
   }
 
   axisOf(id: string): ConstructionInfo | undefined {

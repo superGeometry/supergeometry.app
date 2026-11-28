@@ -19,6 +19,7 @@ export const UPDATES: Update[] = [
   {
     date: "2026-11-28",
     added: [
+      "A new plane is drawn where it belongs, at a size that fits. Offset from a face, it sits in front of that face and is half as big again as the face; a midplane sits between its two faces; a plane through three points sits round them; one across or through an edge sits on that edge. Planes were all drawn as big as the whole model, round the model's middle. Planes offset from a face in older projects are drawn the new way too.",
       "Ko-fi, for anyone who wants to buy me a coffee: in More > Support and on the Welcome window. It opens my Ko-fi page in a new tab.",
       "Create has a second row, Enclosure, with what a printed case needs. Lip: tap the rim of a hollow body and a band along it is raised; on the other half choose Groove for the matching cut, with a clearance. Boss: a post for a screw by the screw's size (M2 to M8), with the hole for a self-tapping screw or a heat-set insert and up to eight ribs round its foot. Snap Fit: a springy hook, and the slot in a wall it clicks into. Rib: lines of a sketch made a thin wall, which rises from the face they are drawn on (or goes down to the body from a plane above it) and runs on to the walls.",
       "Overhang check, for printing: in Shaders, under the analyses. Faces that lean out too far to print without support turn red, ones close to the limit yellow, with the model printed upright as it stands. A slider sets how far your printer can go (45 degrees to begin with).",

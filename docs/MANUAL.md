@@ -368,6 +368,9 @@ sketch. A sketch stays in view until every region of it is used.
 - **Copy a sketch to another plane** - tap a region of a finished sketch →
   **Copy to Plane**: drag the blue arrow to a parallel plane, or type the
   distance (Copy off moves it instead).
+- A new plane is drawn by what it was made from: in front of the face it is
+  offset from and half as big again as that face, between a midplane's two
+  faces, round its three points, on the edge it crosses.
 - **Construct** - helper planes: offset (drag its arrow), midplane, through
   3 points, on a curve at a point, perpendicular to an edge at a point,
   through an edge at an angle, parallel to a face at a point. Each kind has

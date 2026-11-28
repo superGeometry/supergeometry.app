@@ -964,7 +964,7 @@ export class SelectTool implements Tool {
           if (ax) app.setTool(new AxisOp(app, ax.origin, ax.dir, undefined, info.type === "CIRCLE" ? "round" : "edge"));
         },
       },
-      { id: "planePerp", label: "Plane – Perp. to Edge", icon: "plane", run: () => info && app.setTool(new PlaneOp(app, { origin: info.mid, normal: info.dir, xDir: perpTo(info.dir) }, undefined)) },
+      { id: "planePerp", label: "Plane – Perp. to Edge", icon: "plane", run: () => info && app.setTool(new PlaneOp(app, { origin: info.mid, normal: info.dir, xDir: perpTo(info.dir) }, undefined, undefined, { at: info.mid, size: info.length })) },
       { id: "translate", label: "Translate", icon: "translate", shortcut: "N", run: () => app.setTool(new TransformOp(app, "translate", bodies)) },
       { id: "rotate", label: "Rotate Around Axis", icon: "rotateAxis", run: () => app.setTool(new TransformOp(app, "rotate", bodies)) },
       // Through a straight edge, turned about it from a face by an angle.

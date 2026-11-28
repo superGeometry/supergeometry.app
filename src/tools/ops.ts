@@ -3055,8 +3055,12 @@ export class PlaneMoveOp extends FeatureOp<PlaneFeature> {
       f.offset = o.offset + this.moved[2];
     } else {
       f.face = undefined;
+      f.near = undefined;
       f.offset = 0;
       f.plane = { origin: add(add(this.pivot, rot(sub(b.origin, this.pivot))), d), xDir: norm(rot(b.xDir)), normal: norm(rot(b.normal)) };
+      // (On its own now: its square where it is put, as big as it was.)
+      const size = this.app.view.planeShownSize(o.id);
+      f.shown = { at: add(this.pivot, d), ...(size ? { size } : {}) };
     }
     if (f.exprs?.offset) {
       delete f.exprs.offset;
@@ -3476,6 +3480,15 @@ export class ThreadOp extends FeatureOp<ThreadFeature> {
 
 // ------------------------------------------------------------ construction
 
+/** The square of the construction plane this one is taken from (a plane offset from a plane is drawn like it); none: an origin plane. */
+function squareOf(app: AppContext, base: PlaneDef): PlaneFeature["shown"] {
+  const from = app.view.construction.planes.find((c) => Math.abs(dot(sub(c.plane.origin, base.origin), norm(base.normal))) < 1e-6 && Math.abs(dot(norm(c.plane.normal), norm(base.normal))) > 1 - 1e-9);
+  if (!from) return undefined;
+  const at = app.view.planeShownAt(from.id);
+  const size = app.view.planeShownSize(from.id);
+  return at && size ? { at, size } : undefined;
+}
+
 /** What a plane is made from, by name: "XZ plane", "Plane 02", "Face of Body 1". */
 function baseName(app: AppContext, f: PlaneFeature): string | undefined {
   if (f.face) return faceOfName(app, f.face.body);
@@ -3492,8 +3505,9 @@ export class PlaneOp extends FeatureOp<PlaneFeature> {
   readonly id = "plane";
   private base: PlaneDef | null = null;
 
-  constructor(app: AppContext, base: PlaneDef | null, face: FaceRef | undefined, existing?: PlaneFeature) {
+  constructor(app: AppContext, base: PlaneDef | null, face: FaceRef | undefined, existing?: PlaneFeature, shown?: PlaneFeature["shown"]) {
     super(app, { ...app.store.newIdentity("plane"), type: "plane", kind: "offset", plane: base ?? { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, face, offset: 10 }, existing);
+    if (!existing && !face) this.feature.shown = shown ?? (base ? squareOf(app, base) : undefined);
     this.base = existing ? existing.plane : base;
     this.ownOffset = !existing;
     if (!existing) this.feature.offset = this.startOffset(face);
@@ -3504,7 +3518,7 @@ export class PlaneOp extends FeatureOp<PlaneFeature> {
       const k = app.store.doc.features.findIndex((x) => x.id === id);
       return at >= 0 && k >= at;
     };
-    this.slots = [planeSlot(app, "From", () => this.base, (p, f) => ((this.base = p), (this.feature.plane = p), (this.feature.face = f), this.ownOffset && (this.feature.offset = this.startOffset(f))), { named: existing ? baseName(app, existing) : undefined, skip })];
+    this.slots = [planeSlot(app, "From", () => this.base, (p, f) => ((this.base = p), (this.feature.plane = p), (this.feature.face = f), (this.feature.shown = f ? undefined : squareOf(app, p)), this.ownOffset && (this.feature.offset = this.startOffset(f))), { named: existing ? baseName(app, existing) : undefined, skip })];
   }
 
   /** The distance is still the one the tool chose (not typed or dragged yet). */
@@ -3625,14 +3639,18 @@ export class MidplaneOp extends FeatureOp<PlaneFeature> {
 
   constructor(app: AppContext) {
     super(app, { ...app.store.newIdentity("plane", "Midplane"), type: "plane", kind: "mid", plane: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] }, offset: 0 });
+    const faces: (FaceRef | undefined)[] = [undefined, undefined];
     const apply = () => {
       const m = this.a && this.b ? midplane(this.a, this.b) : null;
+      // (Drawn between the two faces, by their size.)
+      const near = faces.filter((x): x is FaceRef => !!x);
+      this.feature.near = near.length ? near : undefined;
       if (m) this.feature.plane = m;
       else if (this.a && this.b) this.app.ui.toast("The two planes must be parallel");
     };
     this.slots = [
-      planeSlot(app, "First", () => this.a, (p) => ((this.a = p), apply())),
-      planeSlot(app, "Second", () => this.b, (p) => ((this.b = p), apply())),
+      planeSlot(app, "First", () => this.a, (p, f) => ((this.a = p), (faces[0] = f), apply())),
+      planeSlot(app, "Second", () => this.b, (p, f) => ((this.b = p), (faces[1] = f), apply())),
     ];
   }
 

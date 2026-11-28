@@ -1791,11 +1791,23 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
 
     case "plane": {
       let plane = f.plane;
+      // The faces it was made from: its square is drawn by them.
+      const by: Face[] = [];
       if (f.face) {
         const body = bodies.get(f.face.body);
         if (body) {
-          const info = faceInfo(resolveFace(body, f.face));
+          const face = resolveFace(body, f.face);
+          by.push(face);
+          const info = faceInfo(face);
           if (info.plane) plane = { ...info.plane, xDir: dot(info.plane.normal, f.plane.normal) > 0.999 ? f.plane.xDir : info.plane.xDir };
+        }
+      }
+      for (const r of f.near ?? []) {
+        try {
+          const body = bodies.get(r.body);
+          if (body) by.push(resolveFace(body, r));
+        } catch {
+          // (A face it was made by is gone: drawn by the others, or as before.)
         }
       }
       plane = { ...plane, origin: add(plane.origin, scale(plane.normal, f.offset)) };
@@ -1803,7 +1815,32 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       if (!(Math.max(...plane.origin.map(Math.abs)) < MAX_REACH)) throw new Error("This would be more than 10 km from the origin - check its values (a typo?)");
       // (Older projects: how it was made, from its name.)
       const kind = f.kind ?? (/^Midplane/.test(f.name) ? "mid" : /3 Points/.test(f.name) ? "3pt" : /Perp/.test(f.name) ? "perp" : /on Curve/.test(f.name) ? "curve" : /Angle/.test(f.name) ? "angle" : /Parallel/.test(f.name) ? "parallel" : "offset");
-      ctx.planes.set(f.id, { id: f.id, name: f.name, plane, kind });
+      // Its square: half as big again as the faces it was made from, over their middle (as they are seen along the
+      // plane's normal) - or where and as big as the step itself says.
+      let at = f.shown?.at;
+      let size = f.shown?.size;
+      if (by.length) {
+        const u = norm(plane.xDir);
+        const v = cross(norm(plane.normal), u);
+        let [u0, u1, v0, v1] = [Infinity, -Infinity, Infinity, -Infinity];
+        for (const face of by) {
+          for (const e of face.edges) {
+            for (const k of [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1]) {
+              const q = sub(e.pointAt(k).toTuple() as Vec3, plane.origin);
+              const [a, b] = [dot(q, u), dot(q, v)];
+              u0 = Math.min(u0, a);
+              u1 = Math.max(u1, a);
+              v0 = Math.min(v0, b);
+              v1 = Math.max(v1, b);
+            }
+          }
+        }
+        if (u1 > u0 || v1 > v0) {
+          size = 1.5 * Math.max(u1 - u0, v1 - v0);
+          at ??= add(add(plane.origin, scale(u, (u0 + u1) / 2)), scale(v, (v0 + v1) / 2));
+        }
+      }
+      ctx.planes.set(f.id, { id: f.id, name: f.name, plane, kind, ...(at ? { at } : {}), ...(size && size > 0 ? { size } : {}) });
       return;
     }
 
