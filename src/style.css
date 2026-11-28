@@ -7473,6 +7473,13 @@ html[data-screen="phone"] body.sentence-ui #toast {
   overflow-y: auto;
   touch-action: pan-y;
 }
+/* A computer's screen: all of them in view at once, six across (four across ran to a scroll for a face's tools). */
+@media (pointer: fine) and (min-width: 900px) and (min-height: 640px) {
+  .quick-rest {
+    grid-template-columns: repeat(6, 52px);
+    max-height: min(72vh, 480px);
+  }
+}
 .quick-rest[hidden] {
   display: none;
 }

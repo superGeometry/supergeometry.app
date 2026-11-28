@@ -50,6 +50,37 @@ export interface QuickPlace {
   gap?: number;
 }
 
+/**
+ * Under More: the tools used most, each always in the same place whatever is picked - in this order, most used
+ * first. One the pick has no use for is left out and those after it move up; what is not named here comes after,
+ * as the pick lists it. (Each line: the ids one name goes by on a face, an edge, a body.)
+ */
+const MORE_ORDER: string[][] = [
+  ["extrude"],
+  ["offsetFace", "offsetEdge", "offsetFromEdge", "offset"],
+  ["plane", "planePerp", "planeEdge"],
+  ["split"],
+  ["shell"],
+  ["scale"],
+  ["fillet"],
+  ["chamfer"],
+  ["loft"],
+  ["revolve"],
+  ["sweep"],
+  ["faceFreeform", "editFreeform", "freeform"],
+  ["pattern"],
+  ["mirror"],
+  ["rotate"],
+  ["translate"],
+  ["replace"],
+  ["projs", "proje"],
+  ["hole"],
+  ["lip"],
+  ["boss"],
+  ["snap"],
+];
+const MORE_PLACE = new Map(MORE_ORDER.flatMap((ids, i) => ids.map((id) => [id, i] as const)));
+
 /** At most this many: only the important things (the rest is under More at the row's end). */
 const MOST = 2;
 /**
@@ -104,6 +135,16 @@ export class QuickActions {
       }
     };
     gather(items);
+    // The two patterns are one button, Pattern: its two kinds open in the card (one place in the list, not two).
+    const pats = rest.filter((r) => r.id === "patl" || r.id === "patc");
+    if (pats.length === 2) {
+      rest.splice(rest.indexOf(pats[0]), 1, { id: "pattern", label: "Pattern", icon: pats[0].icon, children: pats });
+      rest.splice(rest.indexOf(pats[1]), 1);
+    }
+    // Each in its place (a sort that keeps the order of those it has no place for).
+    const rankOf = (it: ToolItem) => MORE_PLACE.get(it.id === "patl" || it.id === "patc" ? "pattern" : it.id) ?? MORE_ORDER.length;
+    const sorted = rest.map((it, i) => ({ it, i })).sort((a, b) => rankOf(a.it) - rankOf(b.it) || a.i - b.i).map((x) => x.it);
+    rest.splice(0, rest.length, ...sorted);
     // (Just one more: it is a button of the row, before Delete - a More that opens a single button is a tap wasted.)
     if (rest.length === 1 && rest[0].run) {
       const one = rest.pop()!;
