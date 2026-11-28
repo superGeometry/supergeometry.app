@@ -54,6 +54,10 @@ export interface AppContext {
   startThread(): void;
   /** Hole on the flat face picked, where it was tapped. */
   startHole(): void;
+  /** A boss or a snap fit on the flat face picked, where it was tapped; a lip along the flat faces picked. */
+  startBoss(): void;
+  startSnap(): void;
+  startLip(): void;
   /** Open a step of the history to change it (as tapping it in History does). */
   editStep(id: string): void;
   setSelection(sel: Sel[]): void;

@@ -42,6 +42,8 @@ export interface ToolItem {
   glyph?: string;
   /** Its kinds stand in its parent's list on the bottom bar, not one tap further in, while that list stays short (Transform: Move/Rotate, Translate, Rotate Around Axis). */
   spread?: boolean;
+  /** In a row of its own under its group's first, with this name over it (Create's enclosure tools). */
+  row?: string;
   /** Small icons after the label (e.g. ⟲ + what a toggle switches to). */
   trailing?: IconName[];
   /**

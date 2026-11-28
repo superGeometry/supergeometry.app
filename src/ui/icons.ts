@@ -58,6 +58,10 @@ export const icons = {
   // A threaded rod seen side on: slanted crests between two edges.
   // A hole with the recess for a screw's head, seen from above.
   hole: svg('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/>'),
+  boss: svg('<path d="M3 20h18"/><path d="M8 20V6h8v14"/><path d="M11 6v8h2V6"/>'),
+  rib: svg('<path d="M5 4v16h15"/><path d="M5 9l10 11"/>'),
+  lip: svg('<path d="M3 20h18"/><path d="M6 20V11h5V5h4v15"/>'),
+  snap: svg('<path d="M3 20h18"/><path d="M8 20V5h3l5 4h-4v11"/>'),
   thread: svg('<path d="M8 3v18M16 3v18"/><path d="M8 6l8-2M8 10l8-2M8 14l8-2M8 18l8-2"/>'),
   sweep: svg('<circle cx="5" cy="17" r="2.5"/><path d="M7 15c4-8 8-10 13-9"/>'),
   loft: svg('<rect x="3" y="16" width="10" height="5"/><circle cx="16" cy="6" r="3.5"/><path d="M3 16l9.5-11M13 16l6-8"/>'),

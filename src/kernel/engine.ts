@@ -82,6 +82,7 @@ import { cylinderOf, deleteFace,
  deleteFaces as deleteBodyFaces, editNotes, freeformFace, sameSizesAgain, sheetFace, sheetFaces, hasBlends, inFlatFace, looseBox, offsetFace, onFace as pointOnFace, planeOf, replaceFacePlane, SIDES_MEET, sizeOf, unify } from "./faceEdit";
 import { threadDepth } from "./threads";
 import { faceMiddle, holeCutter, holeFault, roundCentre } from "./hole";
+import { bossFault, bossOn, lipFault, lipOn, ribFault, ribOn, snapFault, snapOn } from "./enclosure";
 import { meshFlatFaces, meshModel, meshParts, stlTriangles, type MeshModel, type MeshCylinder, type MeshFace, type MeshStandIn } from "./meshRound";
 import { holeFromLines } from "../doc/holeSizes";
 import { anchorOf, freeformFaces, meshViews, viewEdge } from "./viewLines";
@@ -1987,6 +1988,50 @@ async function apply(f: Feature, ctx: Ctx): Promise<void> {
       return;
     }
 
+    case "boss":
+    case "snap": {
+      const body = need(bodies, f.face.body);
+      const face = resolveFace(body, f.face, (g) => g.geomType === "PLANE");
+      const out = norm(face.normalAt().toTuple() as Vec3);
+      const fault = f.type === "boss" ? bossFault(f) : snapFault(f);
+      if (fault) throw new Error(fault);
+      const at = placedAt(body, face, out, f);
+      bodies.set(f.face.body, f.type === "boss" ? bossOn(body, f, at, out) : snapOn(body, f, at, out));
+      return;
+    }
+
+    case "lip": {
+      if (!f.faces.length) throw new Error("Tap the rim the lip goes along");
+      const fault = lipFault(f);
+      if (fault) throw new Error(fault);
+      const id = f.faces[0].body;
+      if (f.faces.some((x) => x.body !== id)) throw new Error("The rim's faces must be of one body");
+      const body = need(bodies, id);
+      bodies.set(id, lipOn(body, f.faces.map((x) => resolveFace(body, x, (g) => g.geomType === "PLANE")), f));
+      return;
+    }
+
+    case "rib": {
+      const fault = ribFault(f);
+      if (fault) throw new Error(fault);
+      if (f.path.kind !== "sketch") throw new Error("A rib is made from lines of a sketch");
+      const sketch = ctx.sketches.get(f.path.sketch);
+      if (!sketch) throw new Error("The rib's sketch was deleted");
+      const wire = pathWire(f.path, ctx);
+      // The body named, or the first one the lines are on or over.
+      const ids = f.target && bodies.has(f.target) ? [f.target] : [...bodies.keys()];
+      let why: Error | null = null;
+      for (const id of ids) {
+        try {
+          bodies.set(id, ribOn(bodies.get(id)!, wire, sketch.plane.normal, f));
+          return;
+        } catch (err) {
+          why ??= err as Error;
+        }
+      }
+      throw why ?? new Error("There is no body for the rib to stand on");
+    }
+
     case "thread": {
       const body = need(bodies, f.face.body);
       const face = threadTarget(body, f);
@@ -3360,6 +3405,35 @@ function insideAlong(s: Shape3D, from: Vec3[], to: Vec3[], sound = false): boole
     left.forEach((i, k) => (out[i] = slow[k]));
   }
   return out as boolean[];
+}
+
+/**
+ * Where a step put down on a flat face is now: the centre of the round edge it was put on, the face's middle, held
+ * from two straight edges, or the place itself - on the face's plane as it is now (as a hole is).
+ */
+function placedAt(body: Shape3D, face: Face, out: Vec3, f: { at: Vec3; around?: EdgeRef; centered?: boolean; from?: [{ edge: EdgeRef; d: number }, { edge: EdgeRef; d: number }] }): Vec3 {
+  const on = planeOf(face).origin;
+  let at = f.at;
+  if (f.around) {
+    try {
+      at = roundCentre(resolveEdge(body, f.around)) ?? at;
+    } catch {
+      // The edge is gone: where it was put.
+    }
+  } else if (f.centered) at = faceMiddle(face);
+  else if (f.from) {
+    try {
+      const lines = f.from.map((x) => {
+        const e = resolveEdge(body, x.edge);
+        if (e.geomType !== "LINE") throw new Error("not straight");
+        return { a: e.pointAt(0).toTuple() as Vec3, b: e.pointAt(1).toTuple() as Vec3, d: x.d };
+      });
+      at = holeFromLines(at, faceMiddle(face), out, lines[0], lines[1]) ?? at;
+    } catch {
+      // An edge is gone, or round now: where it was put.
+    }
+  }
+  return sub(at, scale(out, dot(sub(at, on), out)));
 }
 
 /**
@@ -5783,7 +5857,7 @@ function oneAfterAnother(body: Shape3D, runs: Edge[][], work: (body: Shape3D, ed
 }
 
 /** Edits that change a solid in place (their results are checked). */
-const GUARDED = new Set<string>(["extrude", "revolve", "sweep", "loft", "boolean", "fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom", "split", "connect", "hole"]);
+const GUARDED = new Set<string>(["extrude", "revolve", "sweep", "loft", "boolean", "fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom", "split", "connect", "hole", "boss", "snap", "lip", "rib"]);
 /** Edits that must not break a body into pieces (cuts and booleans may). */
 const NO_SPLIT = new Set<string>(["fillet", "chamfer", "shell", "moveFace", "scaleFace", "replaceFace", "deleteGeom"]);
 

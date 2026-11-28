@@ -661,6 +661,89 @@ export interface HoleFeature extends FeatureBase {
   headDepth: number;
 }
 
+/** Where a step stands on a flat face: put down and held the way a hole is. */
+export interface OnFace {
+  face: FaceRef;
+  at: Vec3;
+  around?: EdgeRef;
+  centered?: boolean;
+  from?: [HoleFrom, HoleFrom];
+}
+
+/**
+ * A boss: a post standing on a flat face for a screw to go into, a hole down its middle and ribs round its foot.
+ * The sizes come from the screw chosen (bossSizes.ts) and can each be typed over.
+ */
+export interface BossFeature extends FeatureBase, OnFace {
+  type: "boss";
+  /** The screw the sizes are for ("M3"); missing: none chosen (Other). */
+  size?: string;
+  /** What goes into the hole: a screw that cuts its own thread, or a brass insert pressed in hot. */
+  fit: "screw" | "insert";
+  /** Across the post. */
+  diameter: number;
+  height: number;
+  /** Across the hole (0: none), and how deep from the top. */
+  hole: number;
+  holeDepth: number;
+  /** Ribs round its foot: how many (0: none), how thick, how far out from the post. */
+  ribs: number;
+  ribThickness: number;
+  ribReach: number;
+  /** Which way the first rib points, in degrees round the post. */
+  ribAngle?: number;
+}
+
+/**
+ * A snap fit: a springy arm standing on a flat face with a hook at its end - or the slot in a wall that the hook
+ * springs into (the hook's size, a clearance all round).
+ */
+export interface SnapFeature extends FeatureBase, OnFace {
+  type: "snap";
+  kind: "hook" | "slot";
+  /** The arm: how long to the hook's underside, how wide, how thick. */
+  length: number;
+  width: number;
+  thickness: number;
+  /** The hook: how far it sticks out past the arm, how tall. */
+  overhang: number;
+  hookHeight: number;
+  /** Which way the hook faces (a slot: which way its long side runs), in degrees round the face. */
+  angle: number;
+  /** A slot: the gap left round the hook. */
+  clearance: number;
+  /** A slot: right through the wall. */
+  through?: boolean;
+}
+
+/**
+ * A lip along a rim (the flat face on top of a wall) - or the groove the other half's lip sits in: a band of the
+ * rim's shape on the side of the opening or the outside, raised (a lip) or cut in a clearance bigger (a groove).
+ */
+export interface LipFeature extends FeatureBase {
+  type: "lip";
+  faces: FaceRef[];
+  kind: "lip" | "groove";
+  side: "inside" | "outside";
+  width: number;
+  height: number;
+  clearance: number;
+}
+
+/**
+ * A rib: lines of a sketch made a thin wall. Drawn on a face of the body it rises by `height`; drawn above the
+ * body it goes down to it. Straight ends run on to the wall they point at.
+ */
+export interface RibFeature extends FeatureBase {
+  type: "rib";
+  path: PathRef;
+  thickness: number;
+  height: number;
+  extend: boolean;
+  /** The body it is joined to (missing: the one the lines are on or over). */
+  target?: string;
+}
+
 /**
  * Repair bodies: gaps sewn, missing flat faces filled, hair-thin faces
  * removed, faces fixed and merged, inside-out solids turned - the shape
@@ -764,6 +847,10 @@ export type Feature =
   | FillToPlaneFeature
   | ThreadFeature
   | HoleFeature
+  | BossFeature
+  | SnapFeature
+  | LipFeature
+  | RibFeature
   | RepairFeature
   | ScaleFaceFeature
   | ReplaceFaceFeature

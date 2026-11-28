@@ -622,6 +622,8 @@ export function sketchesUsed(f: Feature): string[] {
       return f.sections.flatMap(of);
     case "fill":
       return [...f.boundary, ...(f.guides ?? [])].flatMap((p) => (p.kind === "sketch" ? [p.sketch] : []));
+    case "rib":
+      return f.path.kind === "sketch" && f.path.sketch ? [f.path.sketch] : [];
     default:
       return [];
   }

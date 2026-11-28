@@ -60,6 +60,10 @@ const LABELS: Record<FeatureType, string> = {
   freeformEdit: "Edit Freeform",
   thread: "Thread",
   hole: "Hole",
+  boss: "Boss",
+  snap: "Snap Fit",
+  lip: "Lip",
+  rib: "Rib",
   imprint: "Project as Edge",
   wrap: "Wrap & Emboss",
 };

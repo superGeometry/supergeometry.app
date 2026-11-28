@@ -25,6 +25,7 @@ export const GROUP_OF: Record<string, string> = {
  */
 export const RANK = [
   "extrude", "revolve", "sweep", "loft", "hole",
+  "lip", "boss", "snap", "rib",
   "fillet", "chamfer", "shell", "offsetFace", "fix", "offsetEdge", "thread", "wrap",
   "subtract", "union", "intersect", "split",
   // (Move's three ways together: in Transform's own list now, not under Move.)

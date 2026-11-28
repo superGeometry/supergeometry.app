@@ -172,7 +172,9 @@ Delete. On a phone they are smaller, their names the same size.
 **Settings → Quick buttons** switches them off, for working from the
 line at the bottom alone: every one of those tools is on it too.
 
-**Right edge** - **Fit**, **Display** (shaded, wireframe, X-ray) and
+**Right edge** - **Fit**, **Display** (shaded, wireframe, X-ray; zebra
+stripes, a curvature map and, for printing, an **Overhang check** that turns
+the faces needing support red) and
 **Settings**: one sheet with Units & grid, Snapping, Appearance and (with a
 mouse) Mouse, each row saying how it is set now, then the two switches:
 Number pad on screen and Quick buttons.
@@ -330,6 +332,22 @@ sketch. A sketch stays in view until every region of it is used.
   sketch drawn on the face: the end of a line, where lines meet or cross, the
   centre of a circle. Lay the holes out as a sketch, then tap each one.
   It is one step in History, opened again like any other.
+- **Enclosure tools** - the second row of Create has what a printed case
+  needs beyond its walls. Each is one step in History.
+  - **Lip** - tap the rim (the flat face on top of the wall): a band along it
+    is raised, on the inside or the outside of the rim. On the other half
+    choose **Groove**: the same band cut in, with a clearance, so the two
+    halves sit in each other.
+  - **Boss** - a post for a screw, by the screw's size (M2 to M8), with the
+    hole for a screw that cuts its own thread or for a heat-set insert, and up
+    to eight ribs round its foot that stop at a wall they meet. Put down and
+    moved like a hole.
+  - **Snap Fit** - a springy **Hook** standing on a face, turned to face any
+    way, and the **Slot** in a wall it clicks into (the hook's size and a
+    clearance).
+  - **Rib** - lines of a sketch made a thin wall: drawn on a face it rises
+    from it, drawn above the body it goes down to it, and straight ends run
+    on to the walls they point at.
 - **Thread** - tap a round face or a hole's rim: a shank at the nominal size
   gets an outside thread, a hole at the tap-drill size an inside one. The
   pitch starts at the ISO coarse pitch (the line says what it makes, e.g.
@@ -477,7 +495,9 @@ records, the guide text says what the buttons do.
 - **File → Import file…** brings a STEP, STL, OBJ, 3MF, glTF, FreeCAD, BRep, IFC, DXF or SVG file into the project that is
   open (the same as More → Insert → File).
 - **File → Export STL** or **Export 3MF** for 3D printing (3MF keeps body
-  names and colours), **Export STEP** for other CAD programs. With bodies
+  names and colours), **Export STEP** for other CAD programs (colours go
+  with it, and a STEP file's own colours come in with its bodies),
+  **Export USDZ** for AR on an iPhone or iPad and for 3D viewers. With bodies
   selected (or isolated), only those are exported. On phones and tablets the
   **share mark** next to each export (and Save) sends the file straight to
   another app - mail, messages, a slicer…

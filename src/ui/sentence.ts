@@ -67,6 +67,8 @@ interface Word {
   peek?: () => number[];
   /** A group with something picked: its other tools - not for this pick as it is, each asks for its own as it starts - under the pick's own in its list. */
   rest?: Word[];
+  /** In a row of its own in the list it is in, under the first, with this name over it. */
+  row?: string;
   /** What its list's two rows are called, if not where it is and "Other ... tools". */
   kidsCap?: string;
   restCap?: string;
@@ -433,6 +435,7 @@ export class Sentence {
       on: it.active,
       pulse: it.pulse,
       kbd: it.shortcut,
+      row: it.row,
       run: it.run && !it.soon ? () => it.run!() : undefined,
       kids: kids.length ? kids : undefined,
       soon: it.soon,
@@ -1233,6 +1236,13 @@ export class Sentence {
       // (From inside More: "More › BIM" - where it is, as a list under a word of the line says.)
       blocks.push({ cap: w.kidsCap ?? (path.length > 1 ? path.map((x) => x.cap ?? x.label).join(" › ") : `${path.length ? "" : "More › "}${w.cap ?? w.label}`), words: w.kids });
       if (w.rest?.length) blocks.push({ cap: w.restCap ?? `Other ${(w.cap ?? w.label).toLowerCase()} tools (each asks for its own pick)`, words: w.rest });
+    }
+    // A list with tools that have a row of their own (Create's enclosure tools): that row under the first, its name over it.
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b0 = blocks[i];
+      const rows = [...new Set(b0.words.map((x) => x.row ?? ""))];
+      if (rows.length < 2) continue;
+      blocks.splice(i, 1, ...rows.map((r) => ({ cap: r || b0.cap, words: b0.words.filter((x) => (x.row ?? "") === r) })));
     }
     this.sheet.hidden = false;
     // (More is a list like any other on the line: a card over its button, as big as what is in it. It was the whole

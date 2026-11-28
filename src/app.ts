@@ -35,6 +35,7 @@ import { ItemsPanel } from "./ui/items";
 import { OffsetEdgeOp } from "./tools/offsetEdge";
 import { faceFreeformTool } from "./tools/faceFreeform";
 import { HoleOp } from "./tools/holeOp";
+import { BossOp, LipOp, RibOp, SnapOp } from "./tools/enclosureOps";
 import { bodyCenter, AxisOp, ConnectOp, EdgeOp, ExtrudeOp, FillOp, FillToPlaneOp, ThreadOp, ImageOp, LoftOp, MidplaneOp, MoveFaceOp, PlaneOp, ReplaceFaceOp, ScaleFaceOp, ScaleOp, ScaleRefOp, scaleWay, RevolveOp, ShellOp, SplitOp, SweepOp, TransformOp } from "./tools/ops";
 import { add, dist, scale, xDirFor } from "./geom";
 import { entityWorldPolylines } from "./sketch/curves";
@@ -633,15 +634,43 @@ export class App implements AppContext {
 
   /** Hole: a screw's hole in the flat face picked, where it was tapped (its middle when the tap is not known). */
   startHole(): void {
+    this.startOnFace("hole");
+  }
+
+  startBoss(): void {
+    this.startOnFace("boss");
+  }
+
+  startSnap(): void {
+    this.startOnFace("snap");
+  }
+
+  /** A hole, a boss or a snap fit: on the flat face picked, where it was tapped. */
+  private startOnFace(what: "hole" | "boss" | "snap"): void {
     const s = this.selection[0];
     const info = s?.kind === "face" ? this.view.body(s.body)?.faces[s.face] : undefined;
     const ref = s?.kind === "face" ? faceRefOf(this, s) : null;
-    if (s?.kind !== "face" || !info?.plane || !ref) return void this.ui.toast("Holes go into flat faces: tap one where the screw goes");
+    if (s?.kind !== "face" || !info?.plane || !ref) {
+      return void this.ui.toast(what === "hole" ? "Holes go into flat faces: tap one where the screw goes" : what === "boss" ? "A boss stands on a flat face: tap one where the screw goes" : "A snap fit goes on a flat face: tap one where it stands");
+    }
     const tap = this.selectTool.tapPoint;
     const hit = tap ? this.view.pick(tap.x, tap.y, { edgeTolPx: 0 }) : null;
     const at = hit?.kind === "face" && hit.body === s.body && hit.face === s.face ? hit.point : info.center;
     this.setSelection([s]);
-    this.setTool(new HoleOp(this, ref, at, tap?.tol));
+    this.setTool(what === "hole" ? new HoleOp(this, ref, at, tap?.tol) : what === "boss" ? new BossOp(this, ref, at, tap?.tol) : new SnapOp(this, ref, at, tap?.tol));
+  }
+
+  /** A lip (or its groove) along the flat faces picked: a rim. */
+  startLip(): void {
+    const faces = this.selection.flatMap((x) => (x.kind === "face" && this.view.body(x.body)?.faces[x.face]?.plane ? [faceRefOf(this, x)!] : [])).filter(Boolean);
+    this.setTool(new LipOp(this, faces.filter((f) => f.body === faces[0]?.body)));
+  }
+
+  /** A rib from the sketch lines picked (none: it asks for them). */
+  startRib(): void {
+    const curves = this.selection.flatMap((x) => (x.kind === "curve" ? [x] : []));
+    const mine = curves.filter((c) => c.sketch === curves[0]?.sketch);
+    this.setTool(new RibOp(this, mine.length ? { kind: "sketch", sketch: mine[0].sketch, entities: mine.map((c) => c.entity) } : null));
   }
 
   setSection(s: SectionState | null): void {
@@ -1393,6 +1422,14 @@ export class App implements AppContext {
         return this.setTool(new ThreadOp(this, f.face, f.round ?? { r: 5, hole: false }, f));
       case "hole":
         return this.setTool(new HoleOp(this, f.face, f.at, undefined, f));
+      case "boss":
+        return this.setTool(new BossOp(this, f.face, f.at, undefined, f));
+      case "snap":
+        return this.setTool(new SnapOp(this, f.face, f.at, undefined, f));
+      case "lip":
+        return this.setTool(new LipOp(this, f.faces, f));
+      case "rib":
+        return this.setTool(new RibOp(this, f.path, f));
       case "plane":
         return this.setTool(new PlaneOp(this, f.plane, f.face, f as PlaneFeature));
       case "transform": {
@@ -1486,6 +1523,11 @@ export class App implements AppContext {
           { id: "sweep", label: "Sweep", icon: "sweep", run: wait("Sweep", ["profile", "face"], () => src() && this.setTool(new SweepOp(this, src()!))) },
           { id: "loft", label: "Loft", icon: "loft", run: wait("Loft", ["profile", "face"], () => this.setTool(new LoftOp(this, sourcesOf(this, this.selection).flatMap((s): ExtrudeSource[] => (s.kind === "profile" ? s.regions.map((r) => ({ ...s, regions: [r] })) : [s])), this.selection))) },
           { id: "hole", label: "Hole", icon: "hole", run: wait("Hole (tap a flat face where the screw goes)", ["face"], () => this.startHole()) },
+          // What a printed case needs beyond its walls: in a row of their own under the first.
+          { id: "lip", label: "Lip", icon: "lip", row: "Enclosure", run: wait("Lip (tap the rim: the flat face on top of the wall)", ["face"], () => this.startLip()) },
+          { id: "boss", label: "Boss", icon: "boss", row: "Enclosure", run: wait("Boss (tap a flat face where the screw goes)", ["face"], () => this.startBoss()) },
+          { id: "snap", label: "Snap Fit", icon: "snap", row: "Enclosure", run: wait("Snap Fit (tap a flat face where the hook stands)", ["face"], () => this.startSnap()) },
+          { id: "rib", label: "Rib", icon: "rib", row: "Enclosure", run: () => this.startRib() },
         ],
       },
       {

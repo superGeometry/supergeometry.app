@@ -867,6 +867,9 @@ export class SelectTool implements Tool {
       // Scales just this face, within its plane; the sides tilt to follow.
       { id: "scale", label: "Scale Face", icon: "scale", ...needFlat, run: () => ref && info?.plane && app.setTool(new ScaleFaceOp(app, ref, info.plane)) },
       { id: "hole", label: "Hole", icon: "hole", ...needFlat, run: () => app.startHole() },
+      { id: "lip", label: "Lip", icon: "lip", row: "Enclosure", ...freeFaces, run: () => app.startLip() },
+      { id: "boss", label: "Boss", icon: "boss", row: "Enclosure", ...needFlat, run: () => app.startBoss() },
+      { id: "snap", label: "Snap Fit", icon: "snap", row: "Enclosure", ...needFlat, run: () => app.startSnap() },
       { id: "thread", label: "Thread", icon: "thread", disabled: !one || !info?.round, why: "Needs one round face (a shank or a hole)", run: () => app.startThread() },
       // Two faces, one on each of two bodies: the joint between the two (Assemblies opens with it made).
       (() => {
@@ -1607,7 +1610,7 @@ function cap(s: string): string {
 const GROUP: Record<string, string> = {
   deselect: "pick", editFreeform: "pick", connect: "pick", fillHole: "pick", thicken: "pick", wholePattern: "pick",
   move: "move", moveVertex: "move", moveBody: "move", scale: "move", translate: "move", rotate: "move", mirror: "move", patl: "move", patc: "move", copySketch: "move", align: "move",
-  sketch: "make", extrude: "make", revolve: "make", sweep: "make", loft: "make", shell: "make", split: "make", fillet: "make", chamfer: "make", thread: "make", hole: "make", meshFaces: "make", offsetFace: "make", offsetEdge: "make", offset: "make", replace: "make", fill: "make", fillToPlane: "make", text: "make", wrap: "make", proje: "make", projs: "make", total: "make",
+  sketch: "make", extrude: "make", revolve: "make", sweep: "make", loft: "make", shell: "make", split: "make", fillet: "make", chamfer: "make", thread: "make", hole: "make", lip: "make", boss: "make", snap: "make", rib: "make", meshFaces: "make", offsetFace: "make", offsetEdge: "make", offset: "make", replace: "make", fill: "make", fillToPlane: "make", text: "make", wrap: "make", proje: "make", projs: "make", total: "make",
   union: "combine", subtract: "combine", intersect: "combine",
   axis: "construct", plane: "construct", planePerp: "construct",
   color: "look", opacity: "look",
