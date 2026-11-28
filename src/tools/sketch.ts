@@ -11,6 +11,9 @@ import { caretToEnd, selectAll, textField, type TextField } from "../ui/textFiel
 import { nearestSnap } from "../sketch/snapPick";
 import { arrangement, closestOnEntity, type Region } from "../sketch/regions";
 import { overlaps, type Overlap } from "../sketch/overlaps";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import type { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { Gimbal, IN_PLANE, type GimbalPart } from "./gimbal";
 import { buildConstraints, CONSTRAINT_BUTTONS, constraintGlyph, ConstraintGlyphs, dimOf, distanceOf, existingConstraints, setDim } from "./sketchConstraints";
 import { settings } from "../settings";
@@ -625,6 +628,8 @@ export class SketchTool implements Tool {
 
   exit(): void {
     this.gone = true;
+    if (this.overlapMat) this.app.view.releaseLineMaterial(this.overlapMat);
+    this.overlapMat = null;
     this.clearQuick();
     this.closePickBox();
     this.dropOffsetGrip();
@@ -4700,7 +4705,7 @@ export class SketchTool implements Tool {
     if (was && was.of === es) return was.list;
     const list = overlaps(es);
     // (One more than there was, in the sketch being worked on: said once, as it happens.)
-    if (was && was.id === this.sketchId && list.length > was.list.length) this.app.ui.toast("That lies on another line: where they overlap is drawn doubled, in orange");
+    if (was && was.id === this.sketchId && list.length > was.list.length) this.app.ui.toast("That lies on another line: where they overlap is dashed in orange");
     this.overlapsFor = { of: es, id: this.sketchId ?? null, list };
     return list;
   }
@@ -4717,24 +4722,52 @@ export class SketchTool implements Tool {
   }
 
   /**
-   * Curves lying on one another - two lines one over the other look like one: that stretch drawn doubled, in
-   * orange, so that the second one can be seen to be there. (Drawn again whenever the sketch's own helper lines
-   * are: whatever tool is on.)
+   * Curves lying on one another - two lines one over the other look like one: that stretch is dashed in orange,
+   * right on the line (orange and the line's own colour by turns), so that the second one can be seen to be
+   * there. (Not beside it: thin lines either side read as a second line placed a little way off.) Drawn again
+   * whenever the sketch's own helper lines are, whatever tool is on.
    */
   private overlapRails(): void {
-    const off = this.app.view.cam.worldPerPixel(this.app.view.height) * 3.5;
-    const rails: SketchEntity[] = [];
-    this.overlapsNow().forEach((o, i) => {
-      if (o.kind === "circle") {
-        rails.push({ id: `over-${i}-a`, kind: "circle", center: o.center, radius: o.radius + off }, { id: `over-${i}-b`, kind: "circle", center: o.center, radius: Math.max(off * 0.2, o.radius - off) });
-        return;
+    const marks: SketchEntity[] = this.overlapsNow().map((o, i) =>
+      o.kind === "circle" ? { id: `over-${i}`, kind: "circle", center: o.center, radius: o.radius } : { id: `over-${i}`, kind: "line", a: o.a, b: o.b },
+    );
+    if (!marks.length || !this.plane) return;
+    // Thick dashes over the line (the sketch's own lines are thick: a thin dashed one on top of them does not show).
+    const wpp = this.app.view.cam.worldPerPixel(this.app.view.height);
+    const [dash, gap] = [wpp * 9, wpp * 8];
+    const at: number[] = [];
+    for (const e of marks) {
+      for (const poly of entityPolylines(e)) {
+        // Along the curve: a dash, a gap, a dash...
+        let left = dash;
+        let drawing = true;
+        for (let i = 0; i + 1 < poly.length; i++) {
+          let a = poly[i];
+          const b = poly[i + 1];
+          let L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+          while (L > 1e-12) {
+            const step = Math.min(left, L);
+            const q: Vec2 = [a[0] + ((b[0] - a[0]) / L) * step, a[1] + ((b[1] - a[1]) / L) * step];
+            if (drawing) at.push(...sketchToWorld(this.plane, a, 0.03).toArray(), ...sketchToWorld(this.plane, q, 0.03).toArray());
+            a = q;
+            L -= step;
+            left -= step;
+            if (left <= 1e-12) {
+              drawing = !drawing;
+              left = drawing ? dash : gap;
+            }
+          }
+        }
       }
-      const L = Math.hypot(o.b[0] - o.a[0], o.b[1] - o.a[1]) || 1;
-      const n: Vec2 = [(-(o.b[1] - o.a[1]) / L) * off, ((o.b[0] - o.a[0]) / L) * off];
-      rails.push({ id: `over-${i}-a`, kind: "line", a: [o.a[0] + n[0], o.a[1] + n[1]], b: [o.b[0] + n[0], o.b[1] + n[1]] }, { id: `over-${i}-b`, kind: "line", a: [o.a[0] - n[0], o.a[1] - n[1]], b: [o.b[0] - n[0], o.b[1] - n[1]] });
-    });
-    if (rails.length) this.drawGhosts(rails, 0xff8a3d);
+    }
+    if (!at.length) return;
+    this.overlapMat ??= this.app.view.lineMaterial(0xff8a3d, 3.4);
+    const line = new LineSegments2(new LineSegmentsGeometry().setPositions(at), this.overlapMat);
+    line.renderOrder = 9;
+    this.addOverlay(line);
+    this.app.view.requestRender();
   }
+  private overlapMat: LineMaterial | null = null;
 
   private clearOverlays(): void {
     for (const o of this.overlays) {
